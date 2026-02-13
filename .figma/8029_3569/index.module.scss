@@ -1,0 +1,46 @@
+* {
+  box-sizing: border-box;
+}
+
+.frame {
+  display: inline-flex;
+  align-items: center;
+  column-gap: 6px;
+  width: 168px;
+  height: 40px;
+
+  .frame313842 {
+    flex-shrink: 0;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+  }
+
+  .cMvfCil3 {
+    flex-shrink: 0;
+    line-height: 32px;
+    letter-spacing: -1.46px;
+    color: #000000;
+    font-family: Manrope, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", SimHei, Arial, Helvetica, sans-serif;
+    font-size: 29px;
+    font-weight: 600;
+
+    .cMvfCil {
+      line-height: 32px;
+      letter-spacing: -1.46px;
+      color: #02363c;
+      font-family: Manrope, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", SimHei, Arial, Helvetica, sans-serif;
+      font-size: 29px;
+      font-weight: 600;
+    }
+
+    .cMvfCil2 {
+      line-height: 32px;
+      letter-spacing: -1.46px;
+      color: var(--Prim-rio-Prim-rio---500, #0ab86d);
+      font-family: Manrope, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", SimHei, Arial, Helvetica, sans-serif;
+      font-size: 29px;
+      font-weight: 600;
+    }
+  }
+}

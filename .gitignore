@@ -1,0 +1,15 @@
+node_modules
+.next
+.next-dev
+.vercel
+.env
+.env.local
+.env.*.local
+.sbhome
+tsconfig.tsbuildinfo
+supabase/.temp
+
+
+.vercel
+
+.env*.local

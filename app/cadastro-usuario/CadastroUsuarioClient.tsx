@@ -1,0 +1,212 @@
+"use client";
+
+import { useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+
+export default function CadastroUsuarioClient() {
+  const router = useRouter();
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPassword2, setShowPassword2] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [cpf, setCpf] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [password, setPassword] = useState("");
+  const [password2, setPassword2] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (loading) return;
+    setError(null);
+    setSuccess(false);
+
+    if (!email.trim() || !password.trim()) {
+      setError("Preencha email e senha.");
+      return;
+    }
+    if (password !== password2) {
+      setError("As senhas não conferem.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/supabase-signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email,
+          password,
+          first_name: firstName,
+          last_name: lastName,
+          cpf,
+          whatsapp,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; details?: string } | null;
+      if (!res.ok || !data?.ok) {
+        setError(data?.details ?? data?.error ?? "Erro ao criar conta.");
+        return;
+      }
+      setSuccess(true);
+      router.replace("/login");
+    } catch {
+      setError("Erro ao criar conta.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <main className="cmv-signup">
+      <section className="cmv-signup-left">
+        <div className="cmv-signup-wrap">
+          <div className="cmv-signup-brand">
+            <img src="/cadastro/logo.svg" alt="CMV Fácil Logo" className="cmv-signup-logo-img" />
+            <p className="cmv-signup-brand-name">
+              <span>CMV&nbsp;</span>Fácil
+            </p>
+          </div>
+
+          <div className="cmv-signup-content">
+            <div className="cmv-signup-header">
+              <h1 className="cmv-signup-title">Cadastro do Responsável</h1>
+              <p className="cmv-signup-subtitle">Informe os dados do responsável nos campos abaixo.</p>
+            </div>
+
+            {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
+            {success ? <div className="cmv-alert cmv-alert-ok">Conta criada. Verifique seu email se necessário.</div> : null}
+
+            <form className="cmv-signup-form" onSubmit={onSubmit}>
+              <div className="cmv-signup-row2">
+                <div className="cmv-signup-field">
+                  <label className="cmv-signup-label">Nome</label>
+                  <div className="cmv-signup-input">
+                    <input
+                      className="cmv-signup-input-el"
+                      placeholder="Seu nome"
+                      autoComplete="given-name"
+                      value={firstName}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="cmv-signup-field">
+                  <label className="cmv-signup-label">Sobrenome</label>
+                  <div className="cmv-signup-input">
+                    <input
+                      className="cmv-signup-input-el"
+                      placeholder="Seu sobrenome"
+                      autoComplete="family-name"
+                      value={lastName}
+                      onChange={(e) => setLastName(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="cmv-signup-field">
+                <label className="cmv-signup-label">Email</label>
+                <div className="cmv-signup-input">
+                  <input
+                    className="cmv-signup-input-el"
+                    placeholder="Insira o email"
+                    autoComplete="email"
+                    inputMode="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="cmv-signup-row2">
+                <div className="cmv-signup-field">
+                  <label className="cmv-signup-label">CPF</label>
+                  <div className="cmv-signup-input">
+                    <input
+                      className="cmv-signup-input-el"
+                      placeholder="000.000.000-00"
+                      inputMode="numeric"
+                      value={cpf}
+                      onChange={(e) => setCpf(e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="cmv-signup-field">
+                  <label className="cmv-signup-label">Whatsapp</label>
+                  <div className="cmv-signup-prefix">
+                    <div className="cmv-signup-prefix-box">+55</div>
+                    <div className="cmv-signup-input cmv-signup-input--prefix">
+                      <input
+                        className="cmv-signup-input-el"
+                        placeholder="Seu número"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={whatsapp}
+                        onChange={(e) => setWhatsapp(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="cmv-signup-field">
+                <label className="cmv-signup-label">Senha</label>
+                <div className="cmv-signup-input cmv-signup-input--withIcon">
+                  <input
+                    className="cmv-signup-input-el"
+                    placeholder=" "
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                  />
+                  <button type="button" className="cmv-signup-eye" onClick={() => setShowPassword((v) => !v)} aria-label="Mostrar senha">
+                    <img src="/cadastro/eye.svg" alt="" width="20" height="20" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="cmv-signup-field">
+                <label className="cmv-signup-label">Repita a Senha</label>
+                <div className="cmv-signup-input cmv-signup-input--withIcon">
+                  <input
+                    className="cmv-signup-input-el"
+                    placeholder=" "
+                    type={showPassword2 ? "text" : "password"}
+                    autoComplete="new-password"
+                    value={password2}
+                    onChange={(e) => setPassword2(e.target.value)}
+                    required
+                  />
+                  <button type="button" className="cmv-signup-eye" onClick={() => setShowPassword2((v) => !v)} aria-label="Mostrar senha">
+                    <img src="/cadastro/eye.svg" alt="" width="20" height="20" />
+                  </button>
+                </div>
+              </div>
+
+              <button type="submit" className="cmv-signup-submit" disabled={loading}>
+                {loading ? "Criando…" : "Criar Conta"}
+              </button>
+
+              <p className="cmv-signup-footer">
+                <span>Já possui conta?</span> <Link className="cmv-signup-link" href="/login">Faça login</Link>.
+              </p>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section className="cmv-signup-right" aria-hidden />
+    </main>
+  );
+}
