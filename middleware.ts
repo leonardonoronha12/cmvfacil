@@ -109,6 +109,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/restaurar-senha/") ||
     pathname === "/dashboard" ||
     pathname.startsWith("/dashboard/") ||
+    pathname === "/insumos" ||
+    pathname.startsWith("/insumos/") ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     isPublicFile ||

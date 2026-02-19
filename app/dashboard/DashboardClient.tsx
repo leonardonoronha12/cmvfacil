@@ -173,9 +173,9 @@ export default function DashboardClient() {
 
           <div className={styles.group}>
             <p className={styles.groupTitle}>Cadastros</p>
-            <a className={styles.navItem} href="#">
+            <a className={styles.navItem} href="/insumos">
               <img src="/dashboard/ml7hdudz-f06j0dk.svg" className={styles.navIcon} alt="" />
-              Meus Itens
+              Insumos
             </a>
             <a className={styles.navItem} href="#">
               <img src="/dashboard/ml7hdudz-xapr7wq.svg" className={styles.navIcon} alt="" />
