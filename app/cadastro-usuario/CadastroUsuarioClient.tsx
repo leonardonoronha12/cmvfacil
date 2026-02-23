@@ -18,12 +18,15 @@ export default function CadastroUsuarioClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [emailConfirmationRequired, setEmailConfirmationRequired] = useState<boolean | null>(null);
+  const [resending, setResending] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
     setError(null);
     setSuccess(false);
+    setEmailConfirmationRequired(null);
 
     if (!email.trim() || !password.trim()) {
       setError("Preencha email e senha.");
@@ -48,17 +51,42 @@ export default function CadastroUsuarioClient() {
           whatsapp,
         }),
       });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; details?: string } | null;
+      const data = (await res.json().catch(() => null)) as
+        | { ok?: boolean; error?: string; details?: string; emailConfirmationRequired?: boolean }
+        | null;
       if (!res.ok || !data?.ok) {
         setError(data?.details ?? data?.error ?? "Erro ao criar conta.");
         return;
       }
       setSuccess(true);
-      router.replace("/login");
+      setEmailConfirmationRequired(typeof data.emailConfirmationRequired === "boolean" ? data.emailConfirmationRequired : null);
     } catch {
       setError("Erro ao criar conta.");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function resendConfirmation() {
+    if (!email.trim() || resending) return;
+    setResending(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/auth/supabase-resend-signup", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email }),
+      });
+      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; details?: string } | null;
+      if (!res.ok || !data?.ok) {
+        setError(data?.details ?? data?.error ?? "Erro ao reenviar email.");
+        return;
+      }
+      setSuccess(true);
+    } catch {
+      setError("Erro ao reenviar email.");
+    } finally {
+      setResending(false);
     }
   }
 
@@ -80,7 +108,21 @@ export default function CadastroUsuarioClient() {
             </div>
 
             {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
-            {success ? <div className="cmv-alert cmv-alert-ok">Conta criada. Verifique seu email se necessário.</div> : null}
+            {success ? (
+              <div className="cmv-alert cmv-alert-ok">
+                {emailConfirmationRequired === false
+                  ? "Conta criada. Você já pode fazer login."
+                  : "Conta criada. Verifique seu email para confirmar o cadastro."}
+                <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  <button type="button" className="cmv-button cmv-button-primary" onClick={() => router.replace("/login")}>
+                    Ir para Login
+                  </button>
+                  <button type="button" className="cmv-button" onClick={resendConfirmation} disabled={resending}>
+                    {resending ? "Reenviando…" : "Reenviar email"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
 
             <form className="cmv-signup-form" onSubmit={onSubmit}>
               <div className="cmv-signup-row2">

@@ -18,24 +18,15 @@ function requestOrigin(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let body: {
-    email?: string;
-    password?: string;
-    first_name?: string;
-    last_name?: string;
-    cpf?: string;
-    whatsapp?: string;
-  } = {};
-
+  let body: { email?: string } = {};
   try {
-    body = (await req.json()) as typeof body;
+    body = (await req.json()) as { email?: string };
   } catch {
     return json({ error: "invalid_json" }, { status: 400 });
   }
 
   const email = (body.email ?? "").trim();
-  const password = (body.password ?? "").trim();
-  if (!email || !password) return json({ error: "missing_fields" }, { status: 400 });
+  if (!email) return json({ error: "email_required" }, { status: 400 });
 
   let cfg;
   try {
@@ -52,24 +43,16 @@ export async function POST(req: NextRequest) {
   const siteUrl = requestOrigin(req) || baseSiteUrl;
   const emailRedirectTo = siteUrl ? `${siteUrl.replace(/\/+$/, "")}/login` : undefined;
 
-  const { data, error } = await supabase.auth.signUp({
+  const { error } = await supabase.auth.resend({
+    type: "signup",
     email,
-    password,
-    options: {
-      emailRedirectTo,
-      data: {
-        first_name: (body.first_name ?? "").trim() || null,
-        last_name: (body.last_name ?? "").trim() || null,
-        cpf: (body.cpf ?? "").trim() || null,
-        whatsapp: (body.whatsapp ?? "").trim() || null,
-      },
-    },
+    options: { emailRedirectTo },
   });
 
   if (error) {
-    return json({ error: "signup_failed", details: error.message }, { status: 400 });
+    return json({ error: "resend_failed", details: error.message }, { status: 400 });
   }
 
-  const emailConfirmationRequired = !data.session;
-  return json({ ok: true, emailConfirmationRequired }, { status: 200 });
+  return json({ ok: true }, { status: 200 });
 }
+

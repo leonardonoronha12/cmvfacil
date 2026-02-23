@@ -304,6 +304,14 @@ function IconTrash() {
   );
 }
 
+function IconCheck() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9.2 16.6 4.9 12.3l1.4-1.4 2.9 2.9 8.5-8.5 1.4 1.4-9.9 9.9Z" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function InsumosClient() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
@@ -327,8 +335,12 @@ export default function InsumosClient() {
   const [newInitialCost, setNewInitialCost] = useState("");
   const [categories, setCategories] = useState<string[]>(initialCategories);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
-  const [categoryDraft, setCategoryDraft] = useState("");
-  const [editingCategoryName, setEditingCategoryName] = useState<string | null>(null);
+  const [categoryNewDraft, setCategoryNewDraft] = useState("");
+  const [editingCategoryOriginal, setEditingCategoryOriginal] = useState<string | null>(null);
+  const [editingCategoryDraft, setEditingCategoryDraft] = useState("");
+  const [isDeleteCategoryOpen, setIsDeleteCategoryOpen] = useState(false);
+  const [deletingCategoryName, setDeletingCategoryName] = useState("");
+  const [deletingCategoryCount, setDeletingCategoryCount] = useState(0);
   const [sortKey, setSortKey] = useState<null | "item" | "medida" | "custoMedio" | "categoria" | "especificacao">(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [columnOrder, setColumnOrder] = useState<Array<"item" | "medida" | "custoMedio" | "categoria" | "especificacao">>([
@@ -542,26 +554,45 @@ export default function InsumosClient() {
   }, [categories]);
 
   function openCategories() {
-    setCategoryDraft("");
-    setEditingCategoryName(null);
+    setCategoryNewDraft("");
+    setEditingCategoryOriginal(null);
+    setEditingCategoryDraft("");
+    setIsDeleteCategoryOpen(false);
+    setDeletingCategoryName("");
+    setDeletingCategoryCount(0);
     setIsCategoriesOpen(true);
   }
 
-  function upsertCategory() {
-    const name = normalizeCategoryName(categoryDraft);
+  function addCategory() {
+    const name = normalizeCategoryName(categoryNewDraft);
     if (!name) return;
 
     const existsKey = name.toLowerCase();
-    if (!editingCategoryName) {
-      setCategories((prev) => {
-        if (prev.some((c) => c.toLowerCase() === existsKey)) return prev;
-        return [...prev, name];
-      });
-      setCategoryDraft("");
-      return;
-    }
+    setCategories((prev) => {
+      if (prev.some((c) => c.toLowerCase() === existsKey)) return prev;
+      return [...prev, name];
+    });
+    setCategoryNewDraft("");
+  }
 
-    const from = editingCategoryName;
+  function editCategory(name: string) {
+    setIsCategoriesOpen(true);
+    setEditingCategoryOriginal(name);
+    setEditingCategoryDraft(name);
+  }
+
+  function cancelEditCategory() {
+    setEditingCategoryOriginal(null);
+    setEditingCategoryDraft("");
+  }
+
+  function confirmEditCategory() {
+    const from = editingCategoryOriginal;
+    if (!from) return;
+    const name = normalizeCategoryName(editingCategoryDraft);
+    if (!name) return;
+
+    const existsKey = name.toLowerCase();
     const fromKey = from.toLowerCase();
     if (fromKey !== existsKey && categories.some((c) => c.toLowerCase() === existsKey)) {
       window.alert("Já existe uma categoria com esse nome.");
@@ -571,32 +602,30 @@ export default function InsumosClient() {
     setCategories((prev) => prev.map((c) => (c === from ? name : c)));
     setDataRows((prev) => prev.map((r) => (r.categoria === from ? { ...r, categoria: name } : r)));
     if (newCategory === from) setNewCategory(name);
-    setEditingCategoryName(null);
-    setCategoryDraft("");
+    cancelEditCategory();
   }
 
-  function editCategory(name: string) {
-    setEditingCategoryName(name);
-    setCategoryDraft(name);
-    setIsCategoriesOpen(true);
+  function openDeleteCategory(name: string) {
+    setDeletingCategoryName(name);
+    setDeletingCategoryCount(categoryCounts.get(name) ?? 0);
+    setIsDeleteCategoryOpen(true);
   }
 
-  function deleteCategory(name: string) {
-    const count = categoryCounts.get(name) ?? 0;
-    const ok = window.confirm(
-      count
-        ? `Existem ${count} itens nessa categoria. Excluir vai remover a categoria e deixar esses itens sem categoria. Continuar?`
-        : "Deseja excluir esta categoria?",
-    );
-    if (!ok) return;
+  function cancelDeleteCategory() {
+    setIsDeleteCategoryOpen(false);
+    setDeletingCategoryName("");
+    setDeletingCategoryCount(0);
+  }
 
+  function confirmDeleteCategory() {
+    const name = deletingCategoryName;
+    if (!name) return;
+    const count = deletingCategoryCount;
     setCategories((prev) => prev.filter((c) => c !== name));
     if (count) setDataRows((prev) => prev.map((r) => (r.categoria === name ? { ...r, categoria: "-" } : r)));
     if (newCategory === name) setNewCategory("");
-    if (editingCategoryName === name) {
-      setEditingCategoryName(null);
-      setCategoryDraft("");
-    }
+    if (editingCategoryOriginal === name) cancelEditCategory();
+    cancelDeleteCategory();
   }
 
   const selectedCount = selectedIds.size;
@@ -740,7 +769,7 @@ export default function InsumosClient() {
               <img src="/dashboard/ml7hdudz-f06j0dk.svg" className={dash.navIcon} alt="" />
               Insumos
             </a>
-            <a className={dash.navItem} href="#">
+            <a className={dash.navItem} href="/fornecedores">
               <img src="/dashboard/ml7hdudz-xapr7wq.svg" className={dash.navIcon} alt="" />
               Fornecedores
             </a>
@@ -847,16 +876,13 @@ export default function InsumosClient() {
             <div className={styles.kpiBody}>
               <div className={styles.kpiValueRow}>
                 <span className={styles.kpiValue}>{categories.length}</span>
-                <a
+                <button
+                  type="button"
                   className={styles.kpiLink}
-                  href="#"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    openCategories();
-                  }}
+                  onClick={openCategories}
                 >
                   Ver Categorias
-                </a>
+                </button>
               </div>
               <div className={styles.kpiLabel}>CATEGORIAS</div>
             </div>
@@ -1296,11 +1322,11 @@ export default function InsumosClient() {
                   <input
                     className={styles.categoriesInput}
                     placeholder="Ex: Proteínas"
-                    value={categoryDraft}
-                    onChange={(e) => setCategoryDraft(e.target.value)}
+                    value={categoryNewDraft}
+                    onChange={(e) => setCategoryNewDraft(e.target.value)}
                   />
-                  <button type="button" className={styles.categoriesAddBtn} onClick={upsertCategory} disabled={!normalizeCategoryName(categoryDraft)}>
-                    <IconPlus /> {editingCategoryName ? "Salvar" : "ADD"}
+                  <button type="button" className={styles.categoriesAddBtn} onClick={addCategory} disabled={!normalizeCategoryName(categoryNewDraft)}>
+                    <IconPlus /> ADD
                   </button>
                 </div>
                 <div className={styles.categoriesDivider} />
@@ -1308,19 +1334,85 @@ export default function InsumosClient() {
                 <div className={styles.categoriesList}>
                   {categoriesSorted.map((c) => (
                     <div key={c} className={styles.categoryItem}>
-                      <div className={styles.categoryName}>{c}</div>
-                      <div className={styles.categoryCount}>{categoryCounts.get(c) ?? 0}</div>
-                      <div className={styles.categoryActions}>
-                        <button type="button" className={styles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategory(c)}>
-                          <IconEdit />
-                        </button>
-                        <button type="button" className={styles.categoryIconBtn} aria-label="Excluir categoria" onClick={() => deleteCategory(c)}>
-                          <IconTrash />
-                        </button>
-                      </div>
+                      {editingCategoryOriginal === c ? (
+                        <>
+                          <input
+                            className={styles.categoryInlineInput}
+                            value={editingCategoryDraft}
+                            onChange={(e) => setEditingCategoryDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") confirmEditCategory();
+                              if (e.key === "Escape") cancelEditCategory();
+                            }}
+                            autoFocus
+                          />
+                          <div className={styles.categoryCount} />
+                          <div className={styles.categoryActions}>
+                            <button
+                              type="button"
+                              className={`${styles.categoryIconBtn} ${styles.categoryIconBtnConfirm}`}
+                              aria-label="Confirmar edição"
+                              onClick={confirmEditCategory}
+                              disabled={!normalizeCategoryName(editingCategoryDraft)}
+                            >
+                              <IconCheck />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className={styles.categoryName}>{c}</div>
+                          <div className={styles.categoryCount}>{categoryCounts.get(c) ?? 0}</div>
+                          <div className={styles.categoryActions}>
+                            <button type="button" className={styles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategory(c)}>
+                              <IconEdit />
+                            </button>
+                            <button type="button" className={styles.categoryIconBtn} aria-label="Excluir categoria" onClick={() => openDeleteCategory(c)}>
+                              <IconTrash />
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isDeleteCategoryOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={cancelDeleteCategory}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Excluir Categoria?</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={cancelDeleteCategory}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon}>
+                  <IconTrash />
+                </div>
+                <div className={styles.confirmText}>
+                  Caso exclua a categoria <strong>“{deletingCategoryName}”</strong> não poderá recuperá-la.
+                  {deletingCategoryCount ? (
+                    <>
+                      <br />
+                      Existem <strong>{deletingCategoryCount}</strong> itens nessa categoria; eles ficarão sem categoria.
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteCategory}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={cancelDeleteCategory}>
+                  Cancelar
+                </button>
               </div>
             </div>
           </div>

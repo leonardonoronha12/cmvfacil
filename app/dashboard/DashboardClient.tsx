@@ -177,7 +177,7 @@ export default function DashboardClient() {
               <img src="/dashboard/ml7hdudz-f06j0dk.svg" className={styles.navIcon} alt="" />
               Insumos
             </a>
-            <a className={styles.navItem} href="#">
+            <a className={styles.navItem} href="/fornecedores">
               <img src="/dashboard/ml7hdudz-xapr7wq.svg" className={styles.navIcon} alt="" />
               Fornecedores
             </a>
