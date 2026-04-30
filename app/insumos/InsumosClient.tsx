@@ -1,7 +1,9 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
+import AppSidebar from "../components/AppSidebar";
+import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -134,6 +136,12 @@ function toMoney(value: unknown) {
   }
   const raw = typeof value === "string" ? value.trim() : String(value ?? "").trim();
   if (!raw) return "";
+  const normalized = raw.replace(/\s/g, "").replace(/^R\$/i, "").trim();
+  const numeric = normalized.replace(/\./g, "").replace(",", ".");
+  const n = Number(numeric);
+  if (Number.isFinite(n)) {
+    return `R$${normalized}`;
+  }
   return raw;
 }
 
@@ -211,11 +219,11 @@ function parseRowsFromTable(table: unknown[][]) {
     const ocultar =
       typeof ocultarRaw === "boolean"
         ? ocultarRaw
-        : ["1", "true", "sim", "yes"].includes(String(ocultarRaw ?? "").trim().toLowerCase());
+        : ["1", "true", "sim", "yes", "y"].includes(String(ocultarRaw ?? "").trim().toLowerCase());
 
     out.push({
       id: String(out.length + 1),
-      ocultar,
+      ocultar: Boolean(ocultar),
       item,
       medida: String(row[getIndex("medida")] ?? "").trim() || "-",
       custoMedio: toMoney(row[getIndex("custoMedio")]) || "-",
@@ -232,6 +240,17 @@ function parseCurrencyToNumber(value: string) {
   const normalized = raw.replace(/\./g, "").replace(",", ".");
   const n = Number(normalized);
   return Number.isFinite(n) ? n : NaN;
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function SortIcon({ dir }: { dir: "asc" | "desc" }) {
@@ -322,6 +341,7 @@ export default function InsumosClient() {
   const [deletingItemName, setDeletingItemName] = useState<string>("");
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
@@ -336,6 +356,58 @@ export default function InsumosClient() {
   const [categories, setCategories] = useState<string[]>(initialCategories);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
+
+  useEffect(() => {
+    const stored = readInsumosFromStore();
+    if (!stored.length) return;
+    setDataRows((prev) => {
+      const keepMetaByItem = new Map(prev.map((r) => [r.item.toLowerCase(), r]));
+      return stored.map((s, idx) => {
+        const meta = keepMetaByItem.get(s.item.toLowerCase());
+        return {
+          id: String(idx + 1),
+          ocultar: meta?.ocultar ?? false,
+          item: s.item,
+          medida: s.medida,
+          custoMedio: meta?.custoMedio ?? "-",
+          categoria: meta?.categoria ?? "-",
+          especificacao: meta?.especificacao ?? "-",
+        };
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    writeInsumosToStore(
+      dataRows.map((r) => ({
+        id: r.id,
+        item: r.item,
+        medida: r.medida,
+        custoMedio: r.custoMedio,
+        categoria: r.categoria,
+        especificacao: r.especificacao,
+        ocultar: r.ocultar,
+      })),
+    );
+  }, [dataRows]);
+
+  useEffect(() => {
+    const fromRows = getUniqueCategoriesFromRows(dataRows);
+    if (!fromRows.length) return;
+    setCategories((prev) => {
+      const seen = new Set(prev.map((c) => c.toLowerCase()));
+      const next = [...prev];
+      for (const c of fromRows) {
+        const key = c.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        next.push(c);
+      }
+      return next;
+    });
+  }, [dataRows]);
   const [editingCategoryOriginal, setEditingCategoryOriginal] = useState<string | null>(null);
   const [editingCategoryDraft, setEditingCategoryDraft] = useState("");
   const [isDeleteCategoryOpen, setIsDeleteCategoryOpen] = useState(false);
@@ -406,6 +478,35 @@ export default function InsumosClient() {
     } finally {
       setImporting(false);
     }
+  }
+
+  function downloadTemplateCsv() {
+    const sep = ";";
+    const rows = [
+      ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
+      ["Álcool", "L", "4,39", "Limpeza", "-", "false"],
+      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", "false"],
+    ];
+    const csv = "\uFEFF" + rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(sep)).join("\n");
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-importacao-insumos.csv");
+  }
+
+  async function downloadTemplateXlsx() {
+    const XLSX = await import("xlsx");
+    const rows = [
+      ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
+      ["Álcool", "L", "4,39", "Limpeza", "-", false],
+      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", false],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Insumos");
+    (ws as any)["!dataValidation"] = [
+      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ['"Und,Kg,g,L,ml,PC,CX"'] },
+      { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"true,false"'] },
+    ];
+    const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-importacao-insumos.xlsx");
   }
 
   function openNewItem() {
@@ -550,7 +651,7 @@ export default function InsumosClient() {
 
   const categoriesSorted = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
-    return [...categories].sort((a, b) => collator.compare(a, b));
+    return [...categories].filter((c) => normalizeCategoryName(c).toLowerCase() !== "todas").sort((a, b) => collator.compare(a, b));
   }, [categories]);
 
   function openCategories() {
@@ -666,6 +767,19 @@ export default function InsumosClient() {
     setBulkDeleteMode(false);
   }
 
+  function openBulkDeleteConfirm() {
+    setIsBulkDeleteOpen(true);
+  }
+
+  function confirmBulkDelete() {
+    deleteSelected();
+    setIsBulkDeleteOpen(false);
+  }
+
+  useEffect(() => {
+    if (!bulkDeleteMode) setIsBulkDeleteOpen(false);
+  }, [bulkDeleteMode]);
+
   function toggleSort(key: "item" | "medida" | "custoMedio" | "categoria" | "especificacao") {
     if (sortKey !== key) {
       setSortKey(key);
@@ -695,8 +809,19 @@ export default function InsumosClient() {
   }
 
   const visibleRows = useMemo(() => {
-    if (!sortKey) return dataRows;
-    const decorated = dataRows.map((r, i) => ({ r, i }));
+    const q = searchQuery.trim().toLowerCase();
+    const filteredByQuery = q
+      ? dataRows.filter((r) => `${r.item} ${r.categoria} ${r.especificacao}`.toLowerCase().includes(q))
+      : dataRows;
+
+    const cat = normalizeCategoryName(categoryFilter);
+    const filtered =
+      cat && cat.toLowerCase() !== "todas"
+        ? filteredByQuery.filter((r) => normalizeCategoryName(r.categoria ?? "").toLowerCase() === cat.toLowerCase())
+        : filteredByQuery;
+
+    if (!sortKey) return filtered;
+    const decorated = filtered.map((r, i) => ({ r, i }));
     const dir = sortDir === "asc" ? 1 : -1;
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
     decorated.sort((a, b) => {
@@ -719,7 +844,7 @@ export default function InsumosClient() {
       return cmp * dir;
     });
     return decorated.map((d) => d.r);
-  }, [dataRows, sortDir, sortKey]);
+  }, [categoryFilter, dataRows, searchQuery, sortDir, sortKey]);
 
   const gridTemplateColumns = useMemo(() => {
     const widths: Record<"ocultar" | "item" | "medida" | "custoMedio" | "categoria" | "especificacao" | "acoes", string> = {
@@ -736,95 +861,7 @@ export default function InsumosClient() {
 
   return (
     <div className={dash.dashboard}>
-      <aside className={dash.menuLateral}>
-        <div className={dash.menuTop}>
-          <div className={dash.brand}>
-            <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
-          </div>
-
-          <div className={dash.companyCard}>
-            <div className={dash.companyAvatar} aria-hidden />
-            <div className={dash.companyMeta}>
-              <p className={dash.companyName}>Nome da Empresa</p>
-              <p className={dash.companyPlan}>PRO</p>
-            </div>
-          </div>
-
-          <button type="button" className={dash.primaryBtn}>
-            <img src="/dashboard/ml7hdudz-6qw4osi.svg" className={dash.primaryBtnIcon} alt="" />
-            Nova Contagem
-          </button>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Relatório</p>
-            <a className={dash.navItem} href="/dashboard">
-              <img src="/dashboard/ml7hdudz-z2dzc40.svg" className={dash.navIcon} alt="" />
-              CMV Real
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Cadastros</p>
-            <a className={`${dash.navItem} ${dash.navItemActive}`} href="/insumos">
-              <img src="/dashboard/ml7hdudz-f06j0dk.svg" className={dash.navIcon} alt="" />
-              Insumos
-            </a>
-            <a className={dash.navItem} href="/fornecedores">
-              <img src="/dashboard/ml7hdudz-xapr7wq.svg" className={dash.navIcon} alt="" />
-              Fornecedores
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Rotina</p>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-ul1u5or.svg" className={dash.navIcon} alt="" />
-              Entradas
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-q3mw2yd.svg" className={dash.navIcon} alt="" />
-              Inventário
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-8091yrv.svg" className={dash.navIcon} alt="" />
-              Listas de Compras
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Ajuda</p>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-csojjx2.svg" className={dash.navIcon} alt="" />
-              Ajustes
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-osfwhe6.svg" className={dash.navIcon} alt="" />
-              Suporte
-            </a>
-          </div>
-        </div>
-
-        <div className={dash.menuBottom}>
-          <div className={dash.usersActiveCard}>
-            <div className={dash.usersActiveRow}>
-              <img src="/dashboard/ml7hdudz-j3gj37b.svg" className={dash.usersActiveIcon} alt="" />
-              <p className={dash.usersActiveText}>Usuários Ativos (3 de 5)</p>
-            </div>
-            <div className={dash.progress}>
-              <div className={dash.progressOn} />
-              <div className={dash.progressOff} />
-            </div>
-          </div>
-
-          <button type="button" className={dash.userDropdown}>
-            <div className={dash.userLeft}>
-              <div className={dash.userAvatar} aria-hidden />
-              <p className={dash.userHello}>Olá, Ramon</p>
-            </div>
-            <img src="/dashboard/ml7hdudz-89hevuh.svg" className={dash.userChevron} alt="" />
-          </button>
-        </div>
-      </aside>
+      <AppSidebar active="insumos" />
 
       <main className={dash.content}>
         <section className={styles.header}>
@@ -894,14 +931,21 @@ export default function InsumosClient() {
             <span className={styles.searchIcon}>
               <IconSearch />
             </span>
-            <input className={styles.searchInput} placeholder="Pesquise por itens..." />
+            <input
+              className={styles.searchInput}
+              placeholder="Pesquise por itens..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
           </div>
 
-          <select className={styles.select} defaultValue="">
-            <option value="" disabled>
-              Categorias
-            </option>
-            <option value="todas">Todas</option>
+          <select className={styles.select} value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="Todas">Todas</option>
+            {categoriesSorted.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
           </select>
 
           <div className={styles.actions}>
@@ -924,16 +968,21 @@ export default function InsumosClient() {
             </button>
             <button
               type="button"
-              className={bulkDeleteMode ? styles.bulkBtnActive : styles.bulkBtn}
-              onClick={toggleBulkMode}
+              className={styles.bulkDeleteBtn}
+              onClick={() => {
+                if (!bulkDeleteMode) {
+                  toggleBulkMode();
+                  return;
+                }
+                if (!selectedCount) {
+                  toggleBulkMode();
+                  return;
+                }
+                openBulkDeleteConfirm();
+              }}
             >
-              Excluir vários
+              {bulkDeleteMode ? (selectedCount ? `Excluir (${selectedCount})` : "Cancelar") : "Excluir vários"}
             </button>
-            {bulkDeleteMode ? (
-              <button type="button" className={styles.bulkDeleteBtn} onClick={deleteSelected} disabled={!selectedCount}>
-                Excluir ({selectedCount})
-              </button>
-            ) : null}
           </div>
         </section>
 
@@ -1081,6 +1130,38 @@ export default function InsumosClient() {
           </div>
         ) : null}
 
+        {isBulkDeleteOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBulkDeleteOpen(false)}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Excluir Itens?</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsBulkDeleteOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon}>
+                  <IconTrash />
+                </div>
+                <div className={styles.confirmText}>
+                  Caso exclua {selectedCount === 1 ? <>o item selecionado</> : <>{selectedCount} itens selecionados</>} não poderá recuperá-
+                  {selectedCount === 1 ? "lo" : "los"}.
+                </div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {isImportOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
@@ -1098,6 +1179,15 @@ export default function InsumosClient() {
                     • Informe apenas categorias já cadastradas e unidades de medida válidas (Und, Kg, g, L).
                     <br />• Atenção ao uso correto de letras maiúsculas e minúsculas e espaços para evitar erros na importação.
                   </div>
+                </div>
+
+                <div className={styles.templateRow}>
+                  <button type="button" className={styles.templateBtn} onClick={downloadTemplateXlsx}>
+                    Baixar planilha modelo (.xlsx)
+                  </button>
+                  <button type="button" className={styles.templateBtn} onClick={downloadTemplateCsv}>
+                    Baixar modelo (.csv)
+                  </button>
                 </div>
 
                 <input

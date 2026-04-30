@@ -1,0 +1,2028 @@
+"use client";
+
+import { useEffect, useMemo, useRef, useState } from "react";
+import dash from "../dashboard/dashboard.module.css";
+import AppSidebar from "../components/AppSidebar";
+import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
+import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
+import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
+import styles from "./pre-preparo.module.css";
+
+type PrePreparoRow = {
+  id: string;
+  categoria: string;
+  receita: string;
+  custoTotal: string;
+  rendimento: string;
+  custoUnitario: string;
+  validadeDias?: number;
+  ingredientes?: IngredienteRow[];
+  modoPreparo?: string;
+};
+
+type IngredienteRow = {
+  id: string;
+  item: string;
+  quantidade: string;
+  unidade: string;
+  custoCents: number;
+};
+
+const initialRows: PrePreparoRow[] = [
+  {
+    id: "1",
+    categoria: "FARINHA",
+    receita: "Risoto de Salmão",
+    custoTotal: "R$100,00",
+    rendimento: "9Kg",
+    custoUnitario: "R$1.011,11 / Kg",
+    validadeDias: 7,
+    modoPreparo: "",
+    ingredientes: [
+      {
+        id: "1",
+        item: "Farinha de milho",
+        quantidade: "100",
+        unidade: "Kg",
+        custoCents: 10000,
+      },
+    ],
+  },
+];
+
+function IconPrep() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M7 4h10v2H7V4Zm-2 4h14v2H5V8Zm1 4h12l-1 8H7l-1-8Zm3-7h6v1H9V9Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconSearch() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M10.5 3a7.5 7.5 0 1 1 4.6 13.4l4.3 4.3-1.4 1.4-4.3-4.3A7.5 7.5 0 0 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconLabel() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M3 12V6.5A2.5 2.5 0 0 1 5.5 4H14l7 7-9.5 9.5a2 2 0 0 1-2.8 0L3 14.8V12Zm4.8-4.3a1.3 1.3 0 1 0 0 2.6 1.3 1.3 0 0 0 0-2.6Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconPlus() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M11 5h2v14h-2V5Z" fill="currentColor" />
+      <path d="M5 11h14v2H5v-2Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconDots() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 10.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm6 0a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z" fill="currentColor" />
+    </svg>
+  );
+}
+
+function IconCube() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 2 3.5 6.75v10.5L12 22l8.5-4.75V6.75L12 2Zm0 2.3 6.2 3.45L12 11.2 5.8 7.75 12 4.3Zm-6.7 5.1L11 12.6v7.1l-5.7-3.2V9.4Zm13.4 0v7.1L13 19.7v-7.1l5.7-3.2Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconCubeOutline() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 2 3.5 6.75v10.5L12 22l8.5-4.75V6.75L12 2Z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M12 22V11.2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3.5 6.75 12 11.2l8.5-4.45" fill="none" stroke="currentColor" strokeWidth="1.6" />
+    </svg>
+  );
+}
+
+function IconEdit() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M4 17.3V20h2.7l9.9-9.9-2.7-2.7L4 17.3Zm16.8-10.8a.75.75 0 0 0 0-1.1l-2.2-2.2a.75.75 0 0 0-1.1 0l-1.7 1.7 3.3 3.3 1.7-1.7Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+function IconEtiqueta() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M7 9V7h2M17 7h-2M17 17v-2M7 17h2"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+      />
+      <path d="M9 12h6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeDasharray="2 3" />
+    </svg>
+  );
+}
+
+function IconPdf() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3v6h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <text x="8.2" y="17.2" fontSize="6.5" fontWeight="800" fill="currentColor">
+        PDF
+      </text>
+    </svg>
+  );
+}
+
+function IconTrashOutline() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M6 8h12l-1 13H7L6 8Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M10 11v7M14 11v7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function toTitleCase(value: string) {
+  const s = value.trim().toLowerCase();
+  if (!s) return "";
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function formatCurrencyBRLFromCents(valueCents: number) {
+  const value = valueCents / 100;
+  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function parseCurrencyBRLToCents(value: string) {
+  const s = value.replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const neg = s.includes("-");
+  const cleaned = s.replace(/-/g, "");
+  const parts = cleaned.split(",");
+  const intPart = parts[0].replace(/\./g, "").replace(/[^\d]/g, "") || "0";
+  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "").padEnd(2, "0").slice(0, 2);
+  const cents = Number.parseInt(intPart, 10) * 100 + Number.parseInt(decPart || "0", 10);
+  return neg ? -cents : clampNonNegativeInt(cents);
+}
+
+function parsePtNumber(value: string) {
+  const raw = value.trim();
+  if (!raw) return 0;
+  const normalized = raw.replace(/\./g, "").replace(",", ".");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatBRLValueFromCents(valueCents: number) {
+  const v = Math.abs(valueCents);
+  const intPart = Math.floor(v / 100);
+  const dec = String(v % 100).padStart(2, "0");
+  const intLabel = String(intPart).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${valueCents < 0 ? "-" : ""}${intLabel},${dec}`;
+}
+
+function parseQtyLabel(input: string) {
+  const raw = input.trim();
+  if (!raw) return { qty: 0, unit: "" };
+  const m = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
+  if (!m) return { qty: parsePtNumber(raw), unit: "" };
+  const qty = parsePtNumber(m[1] ?? "");
+  const unit = String(m[2] ?? "").trim();
+  return { qty, unit };
+}
+
+function normalizeUnit(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeNameKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function convertQty(qty: number, fromUnit: string, toUnit: string) {
+  const from = normalizeUnit(fromUnit);
+  const to = normalizeUnit(toUnit);
+  if (!from || !to || from === to) return qty;
+  if (from === "g" && to === "kg") return qty / 1000;
+  if (from === "kg" && to === "g") return qty * 1000;
+  if (from === "ml" && to === "l") return qty / 1000;
+  if (from === "l" && to === "ml") return qty * 1000;
+  return NaN;
+}
+
+function formatPtQty(value: number) {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (Math.abs(value - Math.round(value)) < 1e-9) return String(Math.round(value));
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+function clampNonNegativeInt(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.trunc(value));
+}
+
+function formatDateLabel(d: Date) {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "");
+  const year = d.getFullYear();
+  return `${day} ${month}, ${year}`;
+}
+
+function formatDateNumeric(d: Date) {
+  const day = String(d.getDate()).padStart(2, "0");
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+function parseDateLabelLoose(value: string) {
+  const raw = value.trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})[,\s]+(\d{4})$/);
+  if (!m) return null;
+  const day = Number.parseInt(m[1], 10);
+  const monRaw = m[2].toLowerCase().replace(".", "");
+  const year = Number.parseInt(m[3], 10);
+  const monthMap: Record<string, number> = {
+    jan: 0,
+    janeiro: 0,
+    fev: 1,
+    fevereiro: 1,
+    feb: 1,
+    mar: 2,
+    março: 2,
+    marco: 2,
+    abr: 3,
+    abril: 3,
+    apr: 3,
+    mai: 4,
+    maio: 4,
+    may: 4,
+    jun: 5,
+    junho: 5,
+    jul: 6,
+    julho: 6,
+    ago: 7,
+    agosto: 7,
+    aug: 7,
+    set: 8,
+    setembro: 8,
+    sep: 8,
+    out: 9,
+    outubro: 9,
+    oct: 9,
+    nov: 10,
+    novembro: 10,
+    dez: 11,
+    dezembro: 11,
+    dec: 11,
+  };
+  const month = monthMap[monRaw];
+  if (month === undefined) return null;
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return d;
+}
+
+function startOfMonth(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+function addMonths(d: Date, delta: number) {
+  return new Date(d.getFullYear(), d.getMonth() + delta, 1);
+}
+
+function IconPlusCircle() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M12 8v8M8 12h8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconTrashSmall() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M6 8h12l-1 13H7L6 8Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M10 11v7M14 11v7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconChevronDownDouble() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M7 7.5 12 12.5l5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7 12 12 17l5-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+export default function PrePreparoClient() {
+  const [query, setQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
+  const [rows, setRows] = useState<PrePreparoRow[]>(initialRows);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
+  const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+
+  const [customCategories, setCustomCategories] = useState<string[]>([]);
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+  const [addCategoryTarget, setAddCategoryTarget] = useState<"edit" | "newRecipe">("newRecipe");
+  const [addCategoryName, setAddCategoryName] = useState("");
+
+  const [isNewRecipeOpen, setIsNewRecipeOpen] = useState(false);
+  const [newRecipeStep, setNewRecipeStep] = useState<1 | 2 | 3>(1);
+  const [newRecipeName, setNewRecipeName] = useState("");
+  const [newRecipeSpec, setNewRecipeSpec] = useState("");
+  const [newRecipeCategory, setNewRecipeCategory] = useState("");
+  const [newRecipeUnit, setNewRecipeUnit] = useState("");
+  const [newRecipeValidity, setNewRecipeValidity] = useState("7");
+  const [newRecipeValidityUnit, setNewRecipeValidityUnit] = useState("Dia(s)");
+  const newRecipeFileRef = useRef<HTMLInputElement | null>(null);
+  const [newRecipeIngredients, setNewRecipeIngredients] = useState<IngredienteRow[]>([]);
+  const [ingredientQuery, setIngredientQuery] = useState("");
+  const [ingredientQty, setIngredientQty] = useState("0,000");
+  const [ingredientUnit, setIngredientUnit] = useState("Und");
+  const [ingredientCost, setIngredientCost] = useState("0,00");
+  const [newRecipeYield, setNewRecipeYield] = useState("0,000");
+  const [newRecipeYieldUnit, setNewRecipeYieldUnit] = useState("Kg");
+
+  const [isEditOpen, setIsEditOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState("");
+  const [draftCategory, setDraftCategory] = useState("");
+  const [draftSpec, setDraftSpec] = useState("");
+  const [draftUnit, setDraftUnit] = useState("Kg");
+  const [draftValidity, setDraftValidity] = useState("7");
+  const [draftValidityUnit, setDraftValidityUnit] = useState("Dia(s)");
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [isEtiquetaOpen, setIsEtiquetaOpen] = useState(false);
+  const [etiquetaRecipeId, setEtiquetaRecipeId] = useState<string | null>(null);
+  const [etiquetaRecipeQuery, setEtiquetaRecipeQuery] = useState("");
+  const [isRecipeOpen, setIsRecipeOpen] = useState(false);
+  const recipeWrapRef = useRef<HTMLDivElement | null>(null);
+  const [etiquetaResponsavel, setEtiquetaResponsavel] = useState("RANGEL SOUZA");
+  const [etiquetaQtd, setEtiquetaQtd] = useState("1,000");
+  const [etiquetaUnidade, setEtiquetaUnidade] = useState("Kg");
+  const [etiquetaDataProd, setEtiquetaDataProd] = useState(() => formatDateLabel(new Date()));
+  const [etiquetaDataVal, setEtiquetaDataVal] = useState(() => formatDateLabel(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
+  const [openEtiquetaCalendar, setOpenEtiquetaCalendar] = useState<"prod" | "val" | null>(null);
+  const [etiquetaMonth, setEtiquetaMonth] = useState(() => startOfMonth(new Date()));
+  const etiquetaProdWrapRef = useRef<HTMLDivElement | null>(null);
+  const etiquetaValWrapRef = useRef<HTMLDivElement | null>(null);
+
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deletingName, setDeletingName] = useState("");
+  const [isIngredientMenuOpen, setIsIngredientMenuOpen] = useState(false);
+  const ingredientWrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (newRecipeValidityUnit !== "Dia(s)") setNewRecipeValidityUnit("Dia(s)");
+  }, [newRecipeValidityUnit]);
+
+  useEffect(() => {
+    if (draftValidityUnit !== "Dia(s)") setDraftValidityUnit("Dia(s)");
+  }, [draftValidityUnit]);
+
+  useEffect(() => {
+    setInsumosStore(readInsumosFromStore());
+    return subscribeInsumos((rows) => setInsumosStore(rows));
+  }, []);
+
+  useEffect(() => {
+    const stored = readPrePreparoFromStore(initialRows as any);
+    if (stored[0]) setRows(stored as any);
+  }, []);
+
+  useEffect(() => {
+    writePrePreparoToStore(rows as any);
+  }, [rows]);
+
+  useEffect(() => {
+    setEntradasRows(readEntradasFromStore());
+    return subscribeEntradas((rows) => setEntradasRows(rows));
+  }, []);
+
+  useEffect(() => {
+    setEquivalenciasMap(readFornecedorEquivalenciasMap());
+    return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+  }, []);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    function onDown(e: MouseEvent) {
+      const el = menuWrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setOpenMenuId(null);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [openMenuId]);
+
+  useEffect(() => {
+    if (!isRecipeOpen) return;
+    function onDown(e: MouseEvent) {
+      const el = recipeWrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setIsRecipeOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [isRecipeOpen]);
+
+  useEffect(() => {
+    if (!openEtiquetaCalendar) return;
+    function onDown(e: MouseEvent) {
+      const p = etiquetaProdWrapRef.current;
+      const v = etiquetaValWrapRef.current;
+      if (!p && !v) return;
+      if (e.target instanceof Node && ((p && p.contains(e.target)) || (v && v.contains(e.target)))) return;
+      setOpenEtiquetaCalendar(null);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [openEtiquetaCalendar]);
+
+  useEffect(() => {
+    if (!isIngredientMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      const el = ingredientWrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      setIsIngredientMenuOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [isIngredientMenuOpen]);
+
+  const insumosByName = useMemo(() => {
+    const map = new Map<string, InsumoStoreItem>();
+    for (const i of insumosStore) map.set(i.item.toLowerCase(), i);
+    return map;
+  }, [insumosStore]);
+
+  const insumosByKey = useMemo(() => {
+    const map = new Map<string, InsumoStoreItem>();
+    const dup = new Set<string>();
+    for (const i of insumosStore) {
+      const key = normalizeNameKey(i.item);
+      if (!key) continue;
+      if (map.has(key)) dup.add(key);
+      else map.set(key, i);
+    }
+    for (const k of dup) map.delete(k);
+    return map;
+  }, [insumosStore]);
+
+  const resolveInsumoFromQuery = useMemo(() => {
+    const items = insumosStore.map((i) => i);
+    return (q: string) => {
+      const raw = q.trim();
+      if (!raw) return null;
+      const direct = insumosByName.get(raw.toLowerCase());
+      if (direct) return direct;
+      const key = normalizeNameKey(raw);
+      if (key) {
+        const byKey = insumosByKey.get(key);
+        if (byKey) return byKey;
+        if (key.length >= 4) {
+          const candidates = items.filter((i) => normalizeNameKey(i.item).includes(key));
+          if (candidates.length === 1) return candidates[0];
+        }
+      }
+      return null;
+    };
+  }, [insumosByKey, insumosByName, insumosStore]);
+
+  const averageCostByInsumo = useMemo(() => {
+    const acc = new Map<string, { sumCents: number; sumQty: number; unit: string }>();
+    for (const e of entradasRows) {
+      const fornecedorKey = String(e.fornecedor ?? "").trim().toUpperCase();
+      for (const it of e.itensNota ?? []) {
+        const { qty, unit } = parseQtyLabel(it.quantidadeLabel);
+        if (!qty) continue;
+        const subtotalCents = parseCurrencyBRLToCents(it.subtotalLabel);
+        if (!subtotalCents) continue;
+        const map = equivalenciasMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === it.nome.toLowerCase()) ?? null;
+        if (map) {
+          const eqName = String(map.insumoEquivalente ?? "").trim();
+          if (!eqName) continue;
+          const ins = insumosByName.get(eqName.toLowerCase()) ?? insumosByKey.get(normalizeNameKey(eqName));
+          const baseUnit = String(map.equivalenteUnidade ?? ins?.medida ?? "").trim();
+          const fromOk = !unit || normalizeUnit(unit) === normalizeUnit(String(map.unidadeNaNota ?? ""));
+          if (!fromOk) continue;
+          const factor = parsePtNumber(String(map.equivalenteQuantidade ?? ""));
+          if (!factor) continue;
+          const qtyEq = qty * factor;
+          const targetUnit = String(ins?.medida ?? baseUnit).trim();
+          const qtyInTarget = baseUnit && targetUnit ? convertQty(qtyEq, baseUnit, targetUnit) : qtyEq;
+          if (!Number.isFinite(qtyInTarget) || qtyInTarget <= 0) continue;
+          const key = eqName.toLowerCase();
+          const cur = acc.get(key) ?? { sumCents: 0, sumQty: 0, unit: targetUnit || baseUnit || "Und" };
+          acc.set(key, { sumCents: cur.sumCents + subtotalCents, sumQty: cur.sumQty + qtyInTarget, unit: cur.unit });
+          continue;
+        }
+
+        const ins = insumosByName.get(it.nome.toLowerCase()) ?? insumosByKey.get(normalizeNameKey(it.nome));
+        if (!ins) continue;
+        const targetUnit = String(ins.medida ?? "Und").trim();
+        const qtyInTarget = unit ? convertQty(qty, unit, targetUnit) : qty;
+        if (!Number.isFinite(qtyInTarget) || qtyInTarget <= 0) continue;
+        const key = ins.item.toLowerCase();
+        const cur = acc.get(key) ?? { sumCents: 0, sumQty: 0, unit: targetUnit };
+        acc.set(key, { sumCents: cur.sumCents + subtotalCents, sumQty: cur.sumQty + qtyInTarget, unit: cur.unit });
+      }
+    }
+    return acc;
+  }, [entradasRows, equivalenciasMap, insumosByKey, insumosByName]);
+
+  useEffect(() => {
+    const resolved = resolveInsumoFromQuery(ingredientQuery);
+    if (resolved) {
+      const targetUnit = String(resolved.medida ?? "Und").trim() || "Und";
+      if (ingredientUnit !== targetUnit) setIngredientUnit(targetUnit);
+    }
+
+    const ins = resolved;
+    if (!ins) {
+      setIngredientCost("0,00");
+      return;
+    }
+    const qty = parsePtNumber(ingredientQty);
+    if (!qty) {
+      setIngredientCost("0,00");
+      return;
+    }
+    const insUnitCostCents = clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
+    if (insUnitCostCents > 0) {
+      const baseUnit = String(ins.medida ?? "Und").trim() || "Und";
+      const qtyInBase = ingredientUnit ? convertQty(qty, ingredientUnit, baseUnit) : qty;
+      if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
+        setIngredientCost("0,00");
+        return;
+      }
+      const cents = clampNonNegativeInt(Math.round(insUnitCostCents * qtyInBase));
+      setIngredientCost(formatBRLValueFromCents(cents));
+      return;
+    }
+
+    const stats = averageCostByInsumo.get(ins.item.toLowerCase());
+    if (!stats || stats.sumQty <= 0 || stats.sumCents <= 0) {
+      setIngredientCost("0,00");
+      return;
+    }
+    const qtyInTarget = ingredientUnit ? convertQty(qty, ingredientUnit, stats.unit) : qty;
+    if (!Number.isFinite(qtyInTarget) || qtyInTarget <= 0) {
+      setIngredientCost("0,00");
+      return;
+    }
+    const cents = clampNonNegativeInt(Math.round((stats.sumCents * qtyInTarget) / stats.sumQty));
+    setIngredientCost(formatBRLValueFromCents(cents));
+  }, [averageCostByInsumo, ingredientQty, ingredientQuery, ingredientUnit, resolveInsumoFromQuery]);
+
+  const ingredientSuggestions = useMemo(() => {
+    const list = insumosStore.map((i) => i.item);
+    const q = ingredientQuery.trim().toLowerCase();
+    const filtered = q ? list.filter((n) => n.toLowerCase().includes(q)) : list;
+    return filtered.slice(0, 10);
+  }, [ingredientQuery, insumosStore]);
+
+  function openAddCategoryModal(target: "edit" | "newRecipe") {
+    setAddCategoryTarget(target);
+    setAddCategoryName("");
+    setIsAddCategoryOpen(true);
+  }
+
+  function confirmAddCategory() {
+    const name = toTitleCase(addCategoryName);
+    if (!name) return;
+    setCustomCategories((prev) => {
+      const k = name.toLowerCase();
+      const has = prev.some((c) => c.toLowerCase() === k);
+      return has ? prev : [...prev, name];
+    });
+    if (addCategoryTarget === "edit") setDraftCategory(name);
+    if (addCategoryTarget === "newRecipe") setNewRecipeCategory(name);
+    setIsAddCategoryOpen(false);
+  }
+
+  function openEditModal(row: PrePreparoRow) {
+    setEditingId(row.id);
+    setDraftName(row.receita);
+    setDraftCategory(toTitleCase(row.categoria));
+    setDraftSpec("");
+    setDraftUnit("Kg");
+    setDraftValidity("7");
+    setDraftValidityUnit("Dia(s)");
+    setIsEditOpen(true);
+  }
+
+  function openNewRecipeModal() {
+    setNewRecipeStep(1);
+    setNewRecipeName("");
+    setNewRecipeSpec("");
+    setNewRecipeCategory("");
+    setNewRecipeUnit("");
+    setNewRecipeValidity("7");
+    setNewRecipeValidityUnit("Dia(s)");
+    setNewRecipeIngredients([
+      {
+        id: "1",
+        item: "Farinha de milho",
+        quantidade: "1000",
+        unidade: "Kg",
+        custoCents: 9100000,
+      },
+    ]);
+    setIngredientQuery("");
+    setIngredientQty("0,000");
+    setIngredientUnit("Und");
+    setIngredientCost("0,00");
+    setNewRecipeYield("0,000");
+    setNewRecipeYieldUnit("Kg");
+    setIsNewRecipeOpen(true);
+    if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+  }
+
+  function openEtiquetaModal(row?: PrePreparoRow | null) {
+    const base = new Date(2026, 2, 1);
+    setEtiquetaResponsavel("RANGEL SOUZA");
+    setEtiquetaQtd("1,000");
+    setEtiquetaDataProd(formatDateLabel(base));
+    setOpenEtiquetaCalendar(null);
+    setEtiquetaMonth(startOfMonth(base));
+    if (row) {
+      setEtiquetaRecipeId(row.id);
+      setEtiquetaRecipeQuery(row.receita);
+      setEtiquetaUnidade("Kg");
+      setEtiquetaDataVal(formatDateLabel(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)));
+    } else {
+      setEtiquetaRecipeId(null);
+      setEtiquetaRecipeQuery("");
+      setEtiquetaUnidade("Und");
+      setEtiquetaDataVal(formatDateLabel(base));
+    }
+    setIsEtiquetaOpen(true);
+    setIsRecipeOpen(false);
+  }
+
+  function openDeleteModal(row: PrePreparoRow) {
+    setDeletingId(row.id);
+    setDeletingName(row.receita);
+    setIsDeleteOpen(true);
+  }
+
+  function confirmDelete() {
+    const id = deletingId;
+    if (!id) return;
+    setRows((prev) => prev.filter((r) => r.id !== id));
+    setIsDeleteOpen(false);
+    setDeletingId(null);
+    setDeletingName("");
+    setOpenMenuId(null);
+  }
+
+  const categories = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const r of rows) {
+      const key = r.categoria.trim();
+      if (!key) continue;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(key);
+    }
+    return out;
+  }, [rows]);
+
+  const categoriesPretty = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const c of categories) {
+      const name = toTitleCase(c);
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(name);
+    }
+    for (const c of customCategories) {
+      const name = toTitleCase(c);
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(name);
+    }
+    return out;
+  }, [categories, customCategories]);
+
+  const visible = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    let filtered = rows;
+    if (selectedCategory !== "Categorias") filtered = filtered.filter((r) => r.categoria === selectedCategory);
+    if (!q) return filtered;
+    return filtered.filter((r) => `${r.categoria} ${r.receita}`.toLowerCase().includes(q));
+  }, [query, rows, selectedCategory]);
+
+  const etiquetaRecipeOptions = useMemo(() => {
+    const q = etiquetaRecipeQuery.trim().toLowerCase();
+    const base = rows;
+    if (!q) return base;
+    return base.filter((r) => r.receita.toLowerCase().includes(q));
+  }, [etiquetaRecipeQuery, rows]);
+
+  const etiquetaSelectedRecipe = useMemo(() => {
+    if (!etiquetaRecipeId) return null;
+    return rows.find((r) => r.id === etiquetaRecipeId) ?? null;
+  }, [etiquetaRecipeId, rows]);
+
+  const etiquetaValidityDays = useMemo(() => (etiquetaRecipeId ? 7 : 0), [etiquetaRecipeId]);
+
+  const recipeTotalCents = useMemo(() => {
+    return newRecipeIngredients.reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
+  }, [newRecipeIngredients]);
+
+  const recipeYieldValue = useMemo(() => parsePtNumber(newRecipeYield), [newRecipeYield]);
+
+  const recipeUnitCost = useMemo(() => {
+    if (!recipeYieldValue) return 0;
+    return recipeTotalCents / 100 / recipeYieldValue;
+  }, [recipeTotalCents, recipeYieldValue]);
+
+  const canGoNextRecipe = useMemo(() => {
+    if (newRecipeStep !== 1) return true;
+    return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeValidity.trim());
+  }, [newRecipeCategory, newRecipeName, newRecipeSpec, newRecipeStep, newRecipeUnit, newRecipeValidity]);
+
+  const canGoNextRecipeStep2 = useMemo(() => {
+    if (newRecipeStep !== 2) return false;
+    const yieldValue = parsePtNumber(newRecipeYield);
+    return Boolean(newRecipeIngredients.length && Number.isFinite(yieldValue) && yieldValue > 0);
+  }, [newRecipeIngredients.length, newRecipeStep, newRecipeYield]);
+
+  const canSaveRecipe = useMemo(() => {
+    return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
+  }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeSpec, newRecipeUnit, recipeYieldValue]);
+
+  async function downloadFichaTecnica(row: PrePreparoRow) {
+    const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+
+    const doc = await PDFDocument.create();
+    const page = doc.addPage([595.28, 841.89]);
+    const { width, height } = page.getSize();
+
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    const marginX = 40;
+    const now = new Date();
+    const updated = `Última Atualização: ${formatDateNumeric(now)} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+
+    const title = row.receita;
+    const validade = row.validadeDias ?? 7;
+    const categoria = toTitleCase(row.categoria);
+    const totalCents = row.ingredientes?.length ? row.ingredientes.reduce((s, i) => s + clampNonNegativeInt(i.custoCents), 0) : parseCurrencyBRLToCents(row.custoTotal);
+    const totalStr = formatCurrencyBRLFromCents(totalCents);
+    const rendimentoNum = parsePtNumber(row.rendimento);
+    const rendeStr = `${formatPtQty(rendimentoNum || 0)} porções`;
+    const unitCents = rendimentoNum ? Math.round(totalCents / rendimentoNum) : 0;
+    const unitStr = `${formatCurrencyBRLFromCents(unitCents)} /porção`;
+
+    const ingredientes = (row.ingredientes && row.ingredientes[0] ? row.ingredientes : [
+      { id: "1", item: "-", quantidade: "-", unidade: "-", custoCents: totalCents },
+    ]) as IngredienteRow[];
+
+    page.drawCircle({
+      x: marginX + 10,
+      y: height - 54,
+      size: 18,
+      color: rgb(0.02, 0.62, 0.36),
+    });
+    page.drawText("cmvfácil", { x: marginX + 34, y: height - 60, size: 20, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+    page.drawText(updated, {
+      x: width / 2 - font.widthOfTextAtSize(updated, 10) / 2,
+      y: height - 50,
+      size: 10,
+      font,
+      color: rgb(0.2, 0.2, 0.2),
+    });
+
+    page.drawRectangle({
+      x: marginX,
+      y: height - 140,
+      width: 360,
+      height: 44,
+      color: rgb(0.93, 0.94, 0.94),
+      borderRadius: 10,
+    } as any);
+    page.drawText(title, { x: marginX + 14, y: height - 126, size: 14, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+
+    page.drawRectangle({ x: width - marginX - 150, y: height - 220, width: 150, height: 160, color: rgb(0.95, 0.95, 0.95), borderRadius: 12 } as any);
+    page.drawRectangle({ x: width - marginX - 104, y: height - 178, width: 20, height: 92, color: rgb(1, 0.26, 0.35), borderRadius: 8 } as any);
+    page.drawRectangle({ x: width - marginX - 78, y: height - 192, width: 26, height: 120, color: rgb(1, 0.55, 0.5), borderRadius: 10 } as any);
+    page.drawRectangle({ x: width - marginX - 48, y: height - 212, width: 32, height: 156, color: rgb(1, 0.18, 0.33), borderRadius: 12 } as any);
+
+    const infoX = marginX;
+    let infoY = height - 182;
+    const lineGap = 16;
+    function drawInfo(label: string, value: string) {
+      page.drawText(label, { x: infoX, y: infoY, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+      page.drawText(value, { x: infoX + 78, y: infoY, size: 10, font, color: rgb(0.01, 0.01, 0.01) });
+      infoY -= lineGap;
+    }
+
+    drawInfo("Validade:", `${validade} Dia(s)`);
+    drawInfo("Categoria:", categoria || "-");
+    drawInfo("Custo Total:", totalStr);
+    drawInfo("Custo Unitário:", unitStr);
+
+    page.drawLine({ start: { x: marginX, y: height - 300 }, end: { x: width - marginX, y: height - 300 }, thickness: 1.5, color: rgb(0.35, 0.35, 0.35) });
+
+    page.drawText("Modo de Preparo:", { x: marginX, y: height - 340, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+
+    page.drawText(`Ingredientes (Rende: ${rendeStr}):`, { x: marginX, y: height - 400, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+
+    const tableX = marginX;
+    const tableY = height - 430;
+    const tableW = width - marginX * 2;
+    const colItem = tableW * 0.45;
+    const colQtd = tableW * 0.27;
+    const colCost = tableW - colItem - colQtd;
+    const rowH = 28;
+
+    page.drawRectangle({ x: tableX, y: tableY, width: tableW, height: rowH, color: rgb(0.95, 0.95, 0.95), borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 1 });
+    page.drawText("Item", { x: tableX + 10, y: tableY + 9, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+    page.drawText("Qtd", { x: tableX + colItem + 10, y: tableY + 9, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+    page.drawText("Custo", { x: tableX + colItem + colQtd + 10, y: tableY + 9, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+
+    let y = tableY - rowH;
+    for (const ing of ingredientes.slice(0, 10)) {
+      page.drawRectangle({ x: tableX, y, width: tableW, height: rowH, borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 1, color: rgb(1, 1, 1) });
+      page.drawLine({ start: { x: tableX + colItem, y }, end: { x: tableX + colItem, y: y + rowH }, thickness: 1, color: rgb(0.35, 0.35, 0.35) });
+      page.drawLine({ start: { x: tableX + colItem + colQtd, y }, end: { x: tableX + colItem + colQtd, y: y + rowH }, thickness: 1, color: rgb(0.35, 0.35, 0.35) });
+
+      page.drawText(ing.item, { x: tableX + 10, y: y + 9, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+      page.drawText(`${ing.quantidade} ${ing.unidade}`, { x: tableX + colItem + 10, y: y + 9, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+      page.drawText(formatCurrencyBRLFromCents(ing.custoCents), { x: tableX + colItem + colQtd + 10, y: y + 9, size: 10, font, color: rgb(0.2, 0.2, 0.2) });
+      y -= rowH;
+    }
+
+    const bytes = await doc.save();
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ficha-tecnica-${row.receita.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/(^-|-$)/g, "")}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <div className={dash.dashboard}>
+      <AppSidebar active="pre-preparo" />
+
+      <main className={dash.content}>
+        <section className={styles.header}>
+          <div className={styles.headerIcon}>
+            <IconPrep />
+          </div>
+          <div className={styles.headerText}>
+            <h1 className={styles.title}>Pré-preparo</h1>
+            <p className={styles.subtitle}>Acompanhe com precisão o custo de cada receita usando fichas de ingredientes detalhadas.</p>
+          </div>
+        </section>
+
+        <section className={styles.toolbar}>
+          <div className={styles.filters}>
+            <div className={styles.search}>
+              <span className={styles.searchIcon}>
+                <IconSearch />
+              </span>
+              <input className={styles.searchInput} placeholder="Pesquise por receitas..." value={query} onChange={(e) => setQuery(e.target.value)} />
+            </div>
+            <select className={styles.select} value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+              <option value="Categorias">Categorias</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className={styles.actions}>
+            <button
+              type="button"
+              className={styles.secondaryBtn}
+              onClick={() => {
+                openEtiquetaModal(null);
+              }}
+            >
+              <IconLabel />
+              Nova Etiqueta
+            </button>
+            <button type="button" className={styles.primaryBtn} onClick={openNewRecipeModal}>
+              <IconPlus />
+              Nova Receita
+            </button>
+          </div>
+        </section>
+
+        <section className={styles.board}>
+          {visible[0] ? (
+            visible.map((r) => (
+              <div key={r.id} className={styles.recipeCard}>
+                <div className={styles.recipeTop}>
+                  <div className={styles.recipeLeft}>
+                    <div className={styles.recipeIcon} aria-hidden>
+                      <IconCubeOutline />
+                    </div>
+                    <div className={styles.recipeMeta}>
+                      <div className={styles.recipeCategory}>{r.categoria}</div>
+                      <div className={styles.recipeName}>{r.receita}</div>
+                      <div className={styles.recipeDash}>-</div>
+                    </div>
+                  </div>
+                  <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined}>
+                    <button
+                      type="button"
+                      className={styles.dotsBtn}
+                      aria-label="Opções"
+                      onClick={() => setOpenMenuId((prev) => (prev === r.id ? null : r.id))}
+                    >
+                      <IconDots />
+                    </button>
+                    {openMenuId === r.id ? (
+                      <div className={styles.menu} role="menu" aria-label="Opções da receita">
+                        <button
+                          type="button"
+                          className={styles.menuItem}
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            openEditModal(r);
+                          }}
+                        >
+                          <span className={styles.menuIcon} aria-hidden>
+                            <IconEdit />
+                          </span>
+                          Editar
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.menuItem}
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            openEtiquetaModal(r);
+                          }}
+                        >
+                          <span className={styles.menuIcon} aria-hidden>
+                            <IconEtiqueta />
+                          </span>
+                          Nova Etiqueta
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.menuItem}
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            void downloadFichaTecnica(r);
+                          }}
+                        >
+                          <span className={styles.menuIcon} aria-hidden>
+                            <IconPdf />
+                          </span>
+                          Ficha Técnica
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.menuItem}
+                          role="menuitem"
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            openDeleteModal(r);
+                          }}
+                        >
+                          <span className={styles.menuIcon} aria-hidden>
+                            <IconTrashOutline />
+                          </span>
+                          Excluir
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className={styles.recipeStats}>
+                  <div className={styles.statRow}>
+                    <div className={styles.statLabel}>Custo Total:</div>
+                    <div className={styles.statValue}>{r.custoTotal}</div>
+                  </div>
+                  <div className={styles.statRow}>
+                    <div className={styles.statLabel}>Rendimento:</div>
+                    <div className={styles.statValue}>{r.rendimento}</div>
+                  </div>
+                  <div className={styles.statRow}>
+                    <div className={styles.statLabel}>Custo Unitário:</div>
+                    <div className={styles.statValue}>{r.custoUnitario}</div>
+                  </div>
+                </div>
+              </div>
+            ))
+          ) : (
+            <div className={styles.emptyBoard}>Sem receitas cadastradas</div>
+          )}
+        </section>
+
+        <section className={styles.footer}>
+          <div>{`${visible.length} resultado(s) encontrado(s)`}</div>
+          <div className={styles.pagination}>
+            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+              «
+            </button>
+            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+              ‹
+            </button>
+            <div className={styles.pageInfo}>1 de 1</div>
+            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+              ›
+            </button>
+            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+              »
+            </button>
+          </div>
+        </section>
+
+        {isEditOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEditOpen(false)}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Editar Item</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsEditOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.modalBody}>
+                <div className={styles.imageRow}>
+                  <div className={styles.imageBox} onClick={() => fileInputRef.current?.click()} role="button" tabIndex={0}>
+                    Enviar Imagem
+                  </div>
+                  <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    className={styles.fileInput}
+                    onChange={() => {
+                      if (fileInputRef.current) fileInputRef.current.value = "";
+                    }}
+                  />
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Nome do Item</div>
+                  <input className={styles.formInput} value={draftName} onChange={(e) => setDraftName(e.target.value)} />
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabelRow}>
+                    <div className={styles.formLabel}>Categoria</div>
+                    <button
+                      type="button"
+                      className={styles.addCategoryBtn}
+                      onClick={() => {
+                        openAddCategoryModal("edit");
+                      }}
+                    >
+                      ADD Categoria
+                    </button>
+                  </div>
+                  <select className={styles.formSelect} value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
+                    {categoriesPretty.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Especificação</div>
+                  <input className={styles.formInput} placeholder="Escreva algo..." value={draftSpec} onChange={(e) => setDraftSpec(e.target.value)} />
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Unidade de Medida</div>
+                  <select className={styles.formSelect} value={draftUnit} onChange={(e) => setDraftUnit(e.target.value)}>
+                    <option value="Kg">Kg</option>
+                    <option value="g">g</option>
+                    <option value="L">L</option>
+                    <option value="ml">ml</option>
+                    <option value="Un">Un</option>
+                  </select>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>
+                    Prazo de Validade <span className={styles.optional}>(opcional)</span>
+                  </div>
+                  <div className={styles.validityRow}>
+                    <input className={styles.validityInput} inputMode="numeric" value={draftValidity} onChange={(e) => setDraftValidity(e.target.value)} />
+                    <select className={styles.validitySelect} value={draftValidityUnit} onChange={() => {}} disabled>
+                      <option value="Dia(s)">Dia(s)</option>
+                    </select>
+                  </div>
+                  <div className={styles.helper}>Esse prazo será considerado para todos os futuros registros deste item.</div>
+                </div>
+              </div>
+
+              <div className={styles.modalFooter}>
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  onClick={() => {
+                    if (!editingId) return;
+                    const name = draftName.trim();
+                    if (!name) return;
+                    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, receita: name, categoria: draftCategory.toUpperCase() } : r)));
+                    setIsEditOpen(false);
+                    setEditingId(null);
+                  }}
+                >
+                  Salvar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isEtiquetaOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEtiquetaOpen(false)}>
+            <div className={`${styles.modal} ${styles.etiquetaModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Nova Etiqueta</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsEtiquetaOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.etiquetaBody}>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Receita</div>
+                  <div className={styles.recipeSelectWrap} ref={recipeWrapRef}>
+                    <div
+                      className={styles.recipeSelect}
+                      onClick={() => setIsRecipeOpen((p) => !p)}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") setIsRecipeOpen((p) => !p);
+                      }}
+                    >
+                      <span className={styles.recipeSelectIcon} aria-hidden>
+                        <IconSearch />
+                      </span>
+                      <input
+                        className={styles.recipeSelectInput}
+                        placeholder="Pesquise por itens..."
+                        value={etiquetaRecipeQuery}
+                        onChange={(e) => {
+                          setEtiquetaRecipeQuery(e.target.value);
+                          setIsRecipeOpen(true);
+                        }}
+                        onFocus={() => setIsRecipeOpen(true)}
+                      />
+                      <span className={styles.recipeSelectChevron} aria-hidden>
+                        ▾
+                      </span>
+                    </div>
+                    {isRecipeOpen ? (
+                      <div className={styles.recipeDropdown} role="listbox" aria-label="Receitas">
+                        {etiquetaRecipeOptions.map((r) => (
+                          <button
+                            key={r.id}
+                            type="button"
+                            className={styles.recipeOption}
+                            onClick={() => {
+                              setEtiquetaRecipeId(r.id);
+                              setEtiquetaRecipeQuery(r.receita);
+                              setEtiquetaUnidade("Kg");
+                              const base = new Date(2026, 2, 1);
+                              setEtiquetaDataProd(formatDateLabel(base));
+                              setEtiquetaDataVal(formatDateLabel(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)));
+                              setIsRecipeOpen(false);
+                            }}
+                          >
+                            {r.receita}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Responsável</div>
+                  <select className={styles.formSelect} value={etiquetaResponsavel} onChange={(e) => setEtiquetaResponsavel(e.target.value)}>
+                    <option value="RANGEL SOUZA">RANGEL SOUZA</option>
+                    <option value="RAMON">RAMON</option>
+                  </select>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Qtd. Produzida</div>
+                  <div className={styles.qtyWrap}>
+                    <input className={styles.qtyInput} value={etiquetaQtd} onChange={(e) => setEtiquetaQtd(e.target.value)} />
+                    <div className={styles.qtyUnit}>{etiquetaUnidade}</div>
+                  </div>
+                </div>
+
+                <div className={styles.datesHeader}>
+                  <div className={styles.datesHeaderCol}>
+                    <div className={styles.formLabel}>Data Produção</div>
+                    <div className={styles.datesHint}>Hoje</div>
+                  </div>
+                  <div className={styles.datesHeaderColRight}>
+                    <div className={styles.formLabel}>Data de Validade</div>
+                    <div className={styles.datesHint}>{`${etiquetaValidityDays} Dia(s)`}</div>
+                  </div>
+                </div>
+
+                <div className={styles.datesRow}>
+                  <div className={styles.dateWrap} ref={etiquetaProdWrapRef}>
+                    <input
+                      className={styles.formInput}
+                      value={etiquetaDataProd}
+                      onChange={(e) => setEtiquetaDataProd(e.target.value)}
+                      onFocus={() => {
+                        const parsed = parseDateLabelLoose(etiquetaDataProd) ?? new Date();
+                        setEtiquetaMonth(startOfMonth(parsed));
+                        setOpenEtiquetaCalendar("prod");
+                      }}
+                      onClick={() => {
+                        const parsed = parseDateLabelLoose(etiquetaDataProd) ?? new Date();
+                        setEtiquetaMonth(startOfMonth(parsed));
+                        setOpenEtiquetaCalendar("prod");
+                      }}
+                    />
+                    {openEtiquetaCalendar === "prod" ? (
+                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data de produção" onClick={(e) => e.stopPropagation()}>
+                        <div className={styles.calendarHeader}>
+                          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEtiquetaMonth((m) => addMonths(m, -1))}>
+                            ◀
+                          </button>
+                          <div className={styles.calTitle}>
+                            <span className={styles.calMonthName}>
+                              {["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][
+                                etiquetaMonth.getMonth()
+                              ]}
+                            </span>{" "}
+                            <span className={styles.calYear}>{etiquetaMonth.getFullYear()}</span>
+                          </div>
+                          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEtiquetaMonth((m) => addMonths(m, 1))}>
+                            ▶
+                          </button>
+                        </div>
+
+                        <div className={styles.calDow}>
+                          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
+                            <div key={d} className={styles.calDowCell}>
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className={styles.calGrid}>
+                          {(() => {
+                            const first = startOfMonth(etiquetaMonth);
+                            const start = first.getDay();
+                            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+                            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
+                            const selected = parseDateLabelLoose(etiquetaDataProd);
+                            const cells: Array<JSX.Element> = [];
+
+                            for (let i = 0; i < start; i += 1) {
+                              const day = prevDaysInMonth - (start - 1 - i);
+                              cells.push(
+                                <button key={`pm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {day}
+                                </button>,
+                              );
+                            }
+
+                            for (let day = 1; day <= daysInMonth; day += 1) {
+                              const d = new Date(first.getFullYear(), first.getMonth(), day);
+                              const isSelected =
+                                selected &&
+                                d.getFullYear() === selected.getFullYear() &&
+                                d.getMonth() === selected.getMonth() &&
+                                d.getDate() === selected.getDate();
+                              cells.push(
+                                <button
+                                  type="button"
+                                  key={`d-${day}`}
+                                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
+                                  onClick={() => {
+                                    setEtiquetaDataProd(formatDateLabel(d));
+                                    if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(d.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
+                                    setOpenEtiquetaCalendar(null);
+                                  }}
+                                >
+                                  {day}
+                                </button>,
+                              );
+                            }
+                            const total = cells.length;
+                            const rem = total % 7;
+                            const pad = rem === 0 ? 0 : 7 - rem;
+                            for (let i = 0; i < pad; i += 1) {
+                              cells.push(
+                                <button key={`nm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {i + 1}
+                                </button>,
+                              );
+                            }
+                            return cells;
+                          })()}
+                        </div>
+
+                        <div className={styles.calFooter}>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              const t = new Date();
+                              setEtiquetaDataProd(formatDateLabel(t));
+                              if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(t.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
+                              setEtiquetaMonth(startOfMonth(t));
+                            }}
+                          >
+                            <span className={styles.dotBlue} aria-hidden />
+                            hoje
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              setEtiquetaDataProd("");
+                            }}
+                          >
+                            <span className={styles.dotRed} aria-hidden />
+                            limpar
+                          </button>
+                          <button type="button" className={styles.calFooterBtn} onClick={() => setOpenEtiquetaCalendar(null)}>
+                            <span className={styles.xMark} aria-hidden>
+                              ×
+                            </span>
+                            fechar
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className={styles.dateWrap} ref={etiquetaValWrapRef}>
+                    <input
+                      className={styles.formInput}
+                      value={etiquetaDataVal}
+                      onChange={(e) => setEtiquetaDataVal(e.target.value)}
+                      onFocus={() => {
+                        const parsed = parseDateLabelLoose(etiquetaDataVal) ?? new Date();
+                        setEtiquetaMonth(startOfMonth(parsed));
+                        setOpenEtiquetaCalendar("val");
+                      }}
+                      onClick={() => {
+                        const parsed = parseDateLabelLoose(etiquetaDataVal) ?? new Date();
+                        setEtiquetaMonth(startOfMonth(parsed));
+                        setOpenEtiquetaCalendar("val");
+                      }}
+                    />
+                    {openEtiquetaCalendar === "val" ? (
+                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data de validade" onClick={(e) => e.stopPropagation()}>
+                        <div className={styles.calendarHeader}>
+                          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEtiquetaMonth((m) => addMonths(m, -1))}>
+                            ◀
+                          </button>
+                          <div className={styles.calTitle}>
+                            <span className={styles.calMonthName}>
+                              {["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][
+                                etiquetaMonth.getMonth()
+                              ]}
+                            </span>{" "}
+                            <span className={styles.calYear}>{etiquetaMonth.getFullYear()}</span>
+                          </div>
+                          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEtiquetaMonth((m) => addMonths(m, 1))}>
+                            ▶
+                          </button>
+                        </div>
+
+                        <div className={styles.calDow}>
+                          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
+                            <div key={d} className={styles.calDowCell}>
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className={styles.calGrid}>
+                          {(() => {
+                            const first = startOfMonth(etiquetaMonth);
+                            const start = first.getDay();
+                            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+                            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
+                            const selected = parseDateLabelLoose(etiquetaDataVal);
+                            const cells: Array<JSX.Element> = [];
+
+                            for (let i = 0; i < start; i += 1) {
+                              const day = prevDaysInMonth - (start - 1 - i);
+                              cells.push(
+                                <button key={`pm2-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {day}
+                                </button>,
+                              );
+                            }
+
+                            for (let day = 1; day <= daysInMonth; day += 1) {
+                              const d = new Date(first.getFullYear(), first.getMonth(), day);
+                              const isSelected =
+                                selected &&
+                                d.getFullYear() === selected.getFullYear() &&
+                                d.getMonth() === selected.getMonth() &&
+                                d.getDate() === selected.getDate();
+                              cells.push(
+                                <button
+                                  type="button"
+                                  key={`d2-${day}`}
+                                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
+                                  onClick={() => {
+                                    setEtiquetaDataVal(formatDateLabel(d));
+                                    setOpenEtiquetaCalendar(null);
+                                  }}
+                                >
+                                  {day}
+                                </button>,
+                              );
+                            }
+                            const total = cells.length;
+                            const rem = total % 7;
+                            const pad = rem === 0 ? 0 : 7 - rem;
+                            for (let i = 0; i < pad; i += 1) {
+                              cells.push(
+                                <button key={`nm2-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {i + 1}
+                                </button>,
+                              );
+                            }
+                            return cells;
+                          })()}
+                        </div>
+
+                        <div className={styles.calFooter}>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              const t = new Date();
+                              setEtiquetaDataVal(formatDateLabel(t));
+                              setEtiquetaMonth(startOfMonth(t));
+                            }}
+                          >
+                            <span className={styles.dotBlue} aria-hidden />
+                            hoje
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              setEtiquetaDataVal("");
+                            }}
+                          >
+                            <span className={styles.dotRed} aria-hidden />
+                            limpar
+                          </button>
+                          <button type="button" className={styles.calFooterBtn} onClick={() => setOpenEtiquetaCalendar(null)}>
+                            <span className={styles.xMark} aria-hidden>
+                              ×
+                            </span>
+                            fechar
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                <div className={styles.obs}>{`OBS: O prazo de validade padrão do item selecionado é de ${etiquetaValidityDays} Dia(s).`}</div>
+
+                <div className={styles.previewWrap}>
+                  <div className={styles.previewTitle}>PRÉ-VISUALIZAÇÃO</div>
+                  <div className={styles.previewPaper}>
+                    <div className={styles.previewTopRow}>
+                      <div className={styles.previewName}>{etiquetaSelectedRecipe ? etiquetaSelectedRecipe.receita : "Selecione uma receita"}</div>
+                      <div className={styles.previewQty}>
+                        {etiquetaSelectedRecipe ? `1 ${etiquetaUnidade}` : `0 ${etiquetaUnidade}`}
+                      </div>
+                    </div>
+                    <div className={styles.previewHr} />
+                    <div className={styles.previewLine}>
+                      <div className={styles.previewLabel}>Responsável:</div>
+                      <div className={styles.previewValue}>{etiquetaResponsavel}</div>
+                    </div>
+                    <div className={styles.previewLine}>
+                      <div className={styles.previewLabel}>Data Produção:</div>
+                      <div className={styles.previewValue}>01/03/2026</div>
+                    </div>
+                    <div className={styles.previewLine}>
+                      <div className={styles.previewLabel}>Data de Validade:</div>
+                      <div className={styles.previewValue}>{etiquetaValidityDays ? "08/03/2026" : "01/03/2026"}</div>
+                    </div>
+                    <div className={styles.previewHr} />
+                    <div className={styles.previewFooter}>
+                      Impresso em 01/03/2026 às 22:27 · Por CMV Fácil · #F2G24KY
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.etiquetaFooter}>
+                <button
+                  type="button"
+                  className={styles.printBtn}
+                  disabled={!etiquetaRecipeId}
+                  onClick={() => {
+                    if (!etiquetaRecipeId) return;
+                    setIsEtiquetaOpen(false);
+                  }}
+                >
+                  Salvar e Imprimir
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isDeleteOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
+            <div className={`${styles.modal} ${styles.confirmModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Excluir Receita?</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDeleteOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon} aria-hidden>
+                  <IconTrashOutline />
+                </div>
+                <div className={styles.confirmText}>
+                  Caso exclua a receita <strong>&quot;{deletingName}&quot;</strong> não poderá recuperá-la.
+                </div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDelete}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteOpen(false)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isNewRecipeOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsNewRecipeOpen(false)}>
+            <div className={`${styles.modal} ${styles.recipeModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Cadastro de Receita (Pré-preparo)</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsNewRecipeOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.recipeBody}>
+                <div className={styles.stepRow}>
+                  <div className={styles.stepText}>{`${newRecipeStep} de 3`}</div>
+                  <div className={styles.stepBars} aria-hidden>
+                    <div className={newRecipeStep >= 1 ? `${styles.stepBar} ${styles.stepBarOn}` : styles.stepBar} />
+                    <div className={newRecipeStep >= 2 ? `${styles.stepBar} ${styles.stepBarOn}` : styles.stepBar} />
+                    <div className={newRecipeStep >= 3 ? `${styles.stepBar} ${styles.stepBarOn}` : styles.stepBar} />
+                  </div>
+                </div>
+
+                {newRecipeStep === 1 ? (
+                  <>
+                    <div className={styles.imageRow}>
+                      <div className={styles.imageBox} onClick={() => newRecipeFileRef.current?.click()} role="button" tabIndex={0}>
+                        Enviar Imagem
+                      </div>
+                      <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
+                      <input
+                        ref={newRecipeFileRef}
+                        type="file"
+                        accept="image/*"
+                        className={styles.fileInput}
+                        onChange={() => {
+                          if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+                        }}
+                      />
+                    </div>
+
+                    <div className={styles.formField}>
+                      <div className={styles.formLabel}>Nome da Receita</div>
+                      <input
+                        className={styles.formInput}
+                        placeholder="Ex: Maionese da casa"
+                        value={newRecipeName}
+                        onChange={(e) => setNewRecipeName(e.target.value)}
+                      />
+                    </div>
+
+                    <div className={styles.formField}>
+                      <div className={styles.formLabel}>Especificação</div>
+                      <input
+                        className={styles.formInput}
+                        placeholder="Descreva como será usado..."
+                        value={newRecipeSpec}
+                        onChange={(e) => setNewRecipeSpec(e.target.value)}
+                      />
+                    </div>
+
+                    <div className={styles.grid2}>
+                      <div className={styles.formField}>
+                        <div className={styles.formLabelRow}>
+                          <div className={styles.formLabel}>Categoria</div>
+                          <button
+                            type="button"
+                            className={styles.addCategoryBtn}
+                            onClick={() => {
+                              openAddCategoryModal("newRecipe");
+                            }}
+                          >
+                            ADD Categoria
+                          </button>
+                        </div>
+                        <select className={styles.formSelect} value={newRecipeCategory} onChange={(e) => setNewRecipeCategory(e.target.value)}>
+                          <option value="">Selecione</option>
+                          {categoriesPretty.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className={styles.formField}>
+                        <div className={styles.formLabel}>Unidade de Medida</div>
+                        <select className={styles.formSelect} value={newRecipeUnit} onChange={(e) => setNewRecipeUnit(e.target.value)}>
+                          <option value="">Selecione</option>
+                          <option value="Kg">Kg</option>
+                          <option value="g">g</option>
+                          <option value="L">L</option>
+                          <option value="ml">ml</option>
+                          <option value="Un">Un</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className={styles.formField}>
+                      <div className={styles.formLabel}>
+                        Prazo de Validade <span className={styles.optional}>(opcional)</span>
+                      </div>
+                      <div className={styles.validityRow}>
+                        <input className={styles.validityInput} inputMode="numeric" value={newRecipeValidity} onChange={(e) => setNewRecipeValidity(e.target.value)} />
+                      <select className={styles.validitySelect} value={newRecipeValidityUnit} onChange={() => {}} disabled>
+                        <option value="Dia(s)">Dia(s)</option>
+                        </select>
+                      </div>
+                      <div className={styles.helper}>Este prazo será considerado para todas as etiquetas desse item.</div>
+                    </div>
+                  </>
+                ) : newRecipeStep === 2 ? (
+                  <>
+                    <div className={styles.stepTitle}>Ingredientes Utilizados</div>
+                    <div className={styles.stepSubtitle}>
+                      Adicione os itens que compõem esta receita, com suas respectivas quantidades.
+                    </div>
+
+                    <div className={styles.ingredientsBox}>
+                      <div className={styles.ingredientsHead}>
+                        <div className={styles.ingredientsHeadItem}>Item</div>
+                        <div className={styles.ingredientsHeadQty}>Quantidade</div>
+                        <div className={styles.ingredientsHeadCost}>Custo</div>
+                      </div>
+
+                      <div className={styles.ingredientsRow}>
+                        <div className={styles.ingredientWrap} ref={ingredientWrapRef}>
+                          <div className={styles.ingredientItem}>
+                          <span className={styles.ingredientSearchIcon} aria-hidden>
+                            <IconSearch />
+                          </span>
+                          <input
+                            className={styles.ingredientItemInput}
+                            placeholder="Pesquise por itens..."
+                            value={ingredientQuery}
+                            onChange={(e) => {
+                              setIngredientQuery(e.target.value);
+                              setIsIngredientMenuOpen(true);
+                            }}
+                            onFocus={() => setIsIngredientMenuOpen(true)}
+                          />
+                          <button
+                            type="button"
+                            className={styles.ingredientChevronBtn}
+                            aria-label="Abrir lista de insumos"
+                            onClick={() => setIsIngredientMenuOpen((v) => !v)}
+                          >
+                            ▾
+                          </button>
+                          </div>
+
+                          {isIngredientMenuOpen ? (
+                            <div className={styles.ingredientDropdown} role="listbox" aria-label="Insumos cadastrados">
+                              {ingredientSuggestions.map((name) => (
+                                <button
+                                  key={name}
+                                  type="button"
+                                  className={styles.ingredientOption}
+                                  onClick={() => {
+                                    setIngredientQuery(name);
+                                    setIngredientUnit(insumosByName.get(name.toLowerCase())?.medida ?? "Und");
+                                    setIsIngredientMenuOpen(false);
+                                  }}
+                                >
+                                  {name}
+                                </button>
+                              ))}
+                              {!ingredientSuggestions[0] ? <div className={styles.ingredientEmpty}>Nenhum insumo encontrado</div> : null}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className={styles.ingredientQtyWrap}>
+                          <input className={styles.ingredientQtyInput} value={ingredientQty} onChange={(e) => setIngredientQty(e.target.value)} />
+                          <div className={styles.ingredientQtyUnit}>{ingredientUnit}</div>
+                        </div>
+
+                        <div className={styles.ingredientCostWrap}>
+                          <div className={styles.ingredientCostPrefix}>R$</div>
+                          <input className={styles.ingredientCostInput} value={ingredientCost} readOnly />
+                        </div>
+
+                        <button
+                          type="button"
+                          className={styles.ingredientAddBtn}
+                          aria-label="Adicionar ingrediente"
+                          onClick={() => {
+                            const item = ingredientQuery.trim();
+                            if (!item) return;
+                            const cents = clampNonNegativeInt(parseCurrencyBRLToCents(ingredientCost));
+                            const qty = ingredientQty.replace(/[^\d,]/g, "").trim() || "0";
+                            setNewRecipeIngredients((prev) => [
+                              ...prev,
+                              { id: String(prev.length + 1), item, quantidade: qty, unidade: ingredientUnit, custoCents: cents },
+                            ]);
+                            setIngredientQuery("");
+                            setIngredientQty("0,000");
+                            setIngredientUnit("Und");
+                            setIngredientCost("0,00");
+                          }}
+                        >
+                          <IconPlusCircle />
+                        </button>
+                      </div>
+
+                      <div className={styles.ingredientsDividerIcon} aria-hidden>
+                        <IconChevronDownDouble />
+                      </div>
+
+                      {newRecipeIngredients.map((ing) => (
+                        <div key={ing.id} className={styles.ingredientsListRow}>
+                          <div className={styles.ingredientsListItem}>{ing.item}</div>
+                          <div className={styles.ingredientsListQty}>{`${ing.quantidade} ${ing.unidade}`}</div>
+                          <div className={styles.ingredientsListCost}>{formatCurrencyBRLFromCents(ing.custoCents)}</div>
+                          <button
+                            type="button"
+                            className={styles.ingredientsTrashBtn}
+                            aria-label="Remover"
+                            onClick={() => setNewRecipeIngredients((prev) => prev.filter((r) => r.id !== ing.id))}
+                          >
+                            <IconTrashSmall />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div className={styles.ingredientsTotal}>
+                        <div>Custo Total</div>
+                        <div>{formatCurrencyBRLFromCents(recipeTotalCents)}</div>
+                      </div>
+                    </div>
+
+                    <div className={styles.yieldRow}>
+                      <div className={styles.yieldText}>
+                        <div className={styles.yieldTitle}>Quanto Rende?</div>
+                        <div className={styles.yieldSubtitle}>Informe quanto essa receita irá render em média após o preparo.</div>
+                      </div>
+                      <div className={styles.yieldInputWrap}>
+                        <input className={styles.yieldInput} value={newRecipeYield} onChange={(e) => setNewRecipeYield(e.target.value)} />
+                        <div className={styles.yieldUnit}>{newRecipeYieldUnit}</div>
+                      </div>
+                    </div>
+                  </>
+                ) : newRecipeStep === 3 ? (
+                  <>
+                    <div className={styles.stepTitle}>Resumo</div>
+                    <div className={styles.stepSubtitle}>Confira abaixo o resumo da sua receita antes de finalizar o cadastro.</div>
+
+                    <div className={styles.summaryCard}>
+                      <div className={styles.summaryTop}>
+                        <div className={styles.summaryIcon} aria-hidden>
+                          <IconCubeOutline />
+                        </div>
+                        <div className={styles.summaryMeta}>
+                          <div className={styles.summaryName}>{newRecipeName || "-"}</div>
+                          <div className={styles.summarySpec}>{newRecipeSpec || "-"}</div>
+                        </div>
+                      </div>
+
+                      <div className={styles.summaryStats}>
+                        <div className={styles.summaryRow}>
+                          <div className={styles.summaryLabel}>Custo Total:</div>
+                          <div className={styles.summaryValue}>{formatCurrencyBRLFromCents(recipeTotalCents)}</div>
+                        </div>
+                        <div className={styles.summaryRow}>
+                          <div className={styles.summaryLabel}>Rendimento:</div>
+                          <div className={styles.summaryValue}>{`${formatPtQty(recipeYieldValue)}${newRecipeYieldUnit}`}</div>
+                        </div>
+                        <div className={styles.summaryRow}>
+                          <div className={styles.summaryLabel}>Custo Unitário:</div>
+                          <div className={styles.summaryValueBig}>
+                            {`${recipeUnitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${newRecipeYieldUnit}`}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.recipeStepPlaceholder} />
+                )}
+              </div>
+
+              <div className={styles.recipeFooter}>
+                <button
+                  type="button"
+                  className={styles.recipeCancelBtn}
+                  onClick={() => {
+                    if (newRecipeStep === 1) {
+                      setIsNewRecipeOpen(false);
+                      return;
+                    }
+                    setNewRecipeStep((s) => (s === 3 ? 2 : 1));
+                  }}
+                >
+                  {newRecipeStep === 1 ? "Cancelar" : "Voltar"}
+                </button>
+                <button
+                  type="button"
+                  className={styles.recipeNextBtn}
+                  disabled={newRecipeStep === 1 ? !canGoNextRecipe : newRecipeStep === 2 ? !canGoNextRecipeStep2 : false}
+                  onClick={() => {
+                    if (newRecipeStep === 1 && !canGoNextRecipe) return;
+                    if (newRecipeStep === 2 && !canGoNextRecipeStep2) return;
+                    if (newRecipeStep === 3) {
+                      if (!canSaveRecipe) {
+                        window.alert("Preencha o rendimento da receita para liberar o salvamento.");
+                        setNewRecipeStep(2);
+                        return;
+                      }
+                      const nextId = String(Date.now());
+                      const totalLabel = formatCurrencyBRLFromCents(recipeTotalCents);
+                      const rendimentoLabel = `${formatPtQty(recipeYieldValue)}${newRecipeYieldUnit}`;
+                      const unitCostLabel = `${recipeUnitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${newRecipeYieldUnit}`;
+                      setRows((prev) => [
+                        {
+                          id: nextId,
+                          categoria: newRecipeCategory.toUpperCase(),
+                          receita: newRecipeName.trim(),
+                          custoTotal: totalLabel,
+                          rendimento: rendimentoLabel,
+                          custoUnitario: unitCostLabel,
+                          validadeDias: clampNonNegativeInt(Number.parseInt(newRecipeValidity.replace(/[^\d]/g, "") || "0", 10)) || 7,
+                          modoPreparo: "",
+                          ingredientes: newRecipeIngredients,
+                        },
+                        ...prev,
+                      ]);
+                      setSelectedCategory("Categorias");
+                      setQuery("");
+                      setIsNewRecipeOpen(false);
+                      return;
+                    }
+                    setNewRecipeStep((s) => (s === 1 ? 2 : s === 2 ? 3 : 3));
+                  }}
+                >
+                  {newRecipeStep === 3 ? "Salvar" : "Próximo"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isAddCategoryOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddCategoryOpen(false)}>
+            <div className={`${styles.modal} ${styles.addCatModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Adicionar Categoria</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsAddCategoryOpen(false)}>
+                  ×
+                </button>
+              </div>
+              <div className={styles.modalBody}>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Nome da Categoria</div>
+                  <input
+                    className={styles.formInput}
+                    placeholder="Ex: Farinha"
+                    value={addCategoryName}
+                    onChange={(e) => setAddCategoryName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") confirmAddCategory();
+                    }}
+                  />
+                </div>
+              </div>
+              <div className={styles.modalFooter}>
+                <div className={styles.addCatActions}>
+                  <button type="button" className={styles.recipeCancelBtn} onClick={() => setIsAddCategoryOpen(false)}>
+                    Cancelar
+                  </button>
+                  <button type="button" className={styles.recipeNextBtn} disabled={!addCategoryName.trim()} onClick={confirmAddCategory}>
+                    Adicionar
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </main>
+    </div>
+  );
+}

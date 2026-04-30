@@ -1,0 +1,651 @@
+.pageFrameWide {
+  width: 100%;
+  max-width: none;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.headerRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.titleWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.titleIcon {
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  background: #f5f6f6;
+  border: 1px solid #e6e9e8;
+  color: #7f8f8d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.pageTitle {
+  margin: 0;
+  color: #101214;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 15px;
+}
+
+.pageSubtitle {
+  margin: 1px 0 0;
+  color: #7f8f8d;
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.modeSwitch {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: #eceeed;
+  border-radius: 999px;
+  padding: 3px;
+  flex-shrink: 0;
+}
+
+.modeBtn,
+.modeActive {
+  border: 0;
+  border-radius: 999px;
+  min-width: 82px;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 9px;
+  font-weight: 700;
+  background: transparent;
+  color: #485755;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.modeActive {
+  background: #01040e;
+  color: #ffffff;
+}
+
+.infoBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  padding: 0 9px;
+  border-radius: 4px;
+  background: #e9f4f7;
+  color: #507b83;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.infoIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.filtersPanel {
+  display: grid;
+  grid-template-columns: minmax(180px, 232px) minmax(180px, 232px) 1fr;
+  gap: 18px;
+  align-items: end;
+}
+
+.filterField,
+.periodBlock,
+.metricCard,
+.tableCard {
+  background: #ffffff;
+  border: 1px solid #e4e8e7;
+  border-radius: 12px;
+}
+
+.filterField {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.fieldLabel {
+  display: block;
+  margin: 0 0 6px;
+  color: #536260;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.searchField {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 28px;
+  border: 1px solid #e2e7e6;
+  border-radius: 5px;
+  background: #ffffff;
+  padding: 0 8px;
+}
+
+.searchField:focus-within {
+  border-color: #0ab86d;
+  box-shadow: 0 0 0 2px rgba(10, 184, 109, 0.12);
+}
+
+.searchFieldIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #8b9a98;
+  flex-shrink: 0;
+}
+
+.searchField input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #637573;
+  font-size: 9px;
+}
+
+.searchField input::placeholder {
+  color: #a1aeac;
+}
+
+.select {
+  width: 100%;
+  height: 28px;
+  border: 1px solid #e2e7e6;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #8b9a98;
+  font-size: 9px;
+  padding: 0 8px;
+  outline: none;
+}
+
+.periodBlock {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.periodFields {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.dateFieldWrap {
+  position: relative;
+}
+
+.dateField {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: 126px;
+  height: 28px;
+  border: 1px solid #f19797;
+  border-radius: 5px;
+  padding: 0 8px;
+  background: #ffffff;
+  color: #8a9b98;
+  box-sizing: border-box;
+  cursor: pointer;
+  appearance: none;
+  outline: none;
+}
+
+.dateValue,
+.datePlaceholder {
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dateValue {
+  color: #637573;
+}
+
+.datePlaceholder {
+  color: #a1aeac;
+}
+
+.calendarPopover {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  width: 224px;
+  border: 1px solid #dfe5e4;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 12px 26px rgba(1, 4, 14, 0.12);
+  padding: 10px;
+}
+
+.calendarHeader {
+  display: grid;
+  grid-template-columns: 24px 1fr 24px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.calendarTitle {
+  text-align: center;
+  color: #101214;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.calendarNav {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #5e706d;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.calendarWeekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.calendarWeekdays span {
+  text-align: center;
+  color: #7d8d8b;
+  font-size: 8px;
+  font-weight: 700;
+}
+
+.calendarGrid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendarDay {
+  width: 100%;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #101214;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.calendarDayMuted {
+  color: #b0bbba;
+}
+
+.calendarDayToday {
+  font-weight: 700;
+}
+
+.calendarDaySelected {
+  background: #0b63f6;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.calendarFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
+.calendarAction {
+  border: 0;
+  background: transparent;
+  color: #0b63f6;
+  font-size: 9px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dateIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #708280;
+  flex-shrink: 0;
+}
+
+.periodText {
+  color: #101214;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.exportBtn {
+  height: 28px;
+  border: 1px solid #e5e9e8;
+  border-radius: 5px;
+  background: #ffffff;
+  color: #90a09e;
+  padding: 0 8px;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.exportBtn:disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.metricCard {
+  padding: 9px 10px 10px;
+  background: #eef0ef;
+  border: 0;
+  border-radius: 10px;
+}
+
+.metricTitle {
+  color: #1f2c2a;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.metricHint {
+  margin-top: 1px;
+  color: #81918f;
+  font-size: 8px;
+  line-height: 11px;
+}
+
+.metricInputRow {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0;
+}
+
+.metricInput {
+  height: 24px;
+  border: 1px solid #e2e7e6;
+  border-right: 0;
+  border-radius: 4px 0 0 4px;
+  padding: 0 8px;
+  font-size: 9px;
+  color: #1a2221;
+  outline: none;
+  background: #ffffff;
+}
+
+.metricSuffix {
+  min-width: 54px;
+  height: 24px;
+  border: 1px solid #e2e7e6;
+  border-radius: 0 4px 4px 0;
+  background: #e5e9e8;
+  color: #6d7f7d;
+  font-size: 8px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tableCard {
+  border: 1px solid #e1e5e4;
+  border-radius: 14px;
+  background: #ffffff;
+  overflow: hidden;
+  overflow-x: auto;
+}
+
+.tableHeader,
+.tableRow {
+  display: grid;
+  grid-template-columns: 38px minmax(260px, 1.8fr) minmax(90px, 0.7fr) minmax(96px, 0.7fr) minmax(114px, 0.8fr) minmax(114px, 0.8fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px 12px;
+}
+
+.tableHeader {
+  background: #00282d;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.tableBody {
+  display: flex;
+  flex-direction: column;
+}
+
+.tableRow {
+  border-top: 1px solid #eef1f1;
+  background: #ffffff;
+}
+
+.tableHeadDrag {
+  min-width: 0;
+}
+
+.tableHeadBtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.checkCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.checkCell input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+}
+
+.itemCell {
+  min-width: 0;
+}
+
+.itemName {
+  color: #101214;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.itemNameLink {
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.itemMeta {
+  color: #95a8a6;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.costCell {
+  min-width: 0;
+}
+
+.costMain {
+  color: #101214;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.costSub {
+  color: #95a8a6;
+  font-size: 10px;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.measureCell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.valueNeutral,
+.valueDanger,
+.valuePlain {
+  min-width: 54px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.valueNeutral {
+  color: #596a67;
+}
+
+.valueDanger {
+  color: #ff4d6d;
+}
+
+.valuePlain {
+  color: #101214;
+}
+
+.unitPlain {
+  color: #101214;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.unitTag {
+  min-width: 34px;
+  height: 24px;
+  border-radius: 999px;
+  background: #f0f2f1;
+  color: #566866;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+.stockInput {
+  width: 72px;
+  height: 28px;
+  border: 1px solid #e1e5e4;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #596a67;
+  font-size: 12px;
+  text-align: right;
+  padding: 0 6px;
+  outline: none;
+}
+
+.buyInput {
+  composes: stockInput;
+  color: #ff4d6d;
+  font-weight: 700;
+}
+
+.emptyState {
+  padding: 24px 16px;
+  color: #95a8a6;
+  font-size: 11px;
+}
+
+@media (max-width: 1100px) {
+  .headerRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .filtersPanel,
+  .metricGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .periodFields {
+    align-items: stretch;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .periodBlock {
+    display: block;
+  }
+
+  .dateField {
+    width: 100%;
+  }
+
+  .calendarPopover {
+    width: 100%;
+    min-width: 224px;
+  }
+
+  .tableCard {
+    overflow-x: auto;
+  }
+
+  .tableHeader,
+  .tableRow {
+    min-width: 860px;
+  }
+}

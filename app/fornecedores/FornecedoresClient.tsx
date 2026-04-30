@@ -1,7 +1,23 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
+import AppSidebar from "../components/AppSidebar";
+import {
+  readFornecedorEquivalenciasMap,
+  readFornecedorInfoMap,
+  readFornecedorProdutosMap,
+  subscribeFornecedorEquivalencias,
+  subscribeFornecedorInfo,
+  subscribeFornecedorProdutos,
+  writeFornecedorEquivalenciasMap,
+  writeFornecedorInfoMap,
+  writeFornecedorProdutosMap,
+  type FornecedorInfoMap,
+  type FornecedorEquivalenciasMap,
+  type FornecedorProdutos,
+} from "../lib/fornecedoresStore";
+import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./fornecedores.module.css";
 
 type FornecedorRow = {
@@ -87,6 +103,34 @@ function SortIcon({ dir }: { dir: "asc" | "desc" }) {
   return (
     <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true">
       {dir === "asc" ? <path d="M7 14 12 9l5 5H7Z" fill="currentColor" /> : <path d="M7 10h10l-5 5-5-5Z" fill="currentColor" />}
+    </svg>
+  );
+}
+
+function IconUser() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm-7 9a7 7 0 0 1 14 0"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+function IconPin() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M12 21s7-5.1 7-11a7 7 0 1 0-14 0c0 5.9 7 11 7 11Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.8"
+      />
+      <path d="M12 10.5a2.2 2.2 0 1 0 0-4.4 2.2 2.2 0 0 0 0 4.4Z" fill="currentColor" opacity="0.15" />
     </svg>
   );
 }
@@ -218,6 +262,29 @@ export default function FornecedoresClient() {
   const [draggingColumn, setDraggingColumn] = useState<null | ColumnKey>(null);
 
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isProdutosOpen, setIsProdutosOpen] = useState(false);
+  const [prodFornecedorKey, setProdFornecedorKey] = useState<string | null>(null);
+  const [prodFornecedorLabel, setProdFornecedorLabel] = useState<string>("");
+  const [prodVendedor, setProdVendedor] = useState<string>("");
+  const [prodEndereco, setProdEndereco] = useState<string>("");
+  const [produtosMap, setProdutosMap] = useState<FornecedorProdutos>({});
+  const [infoMap, setInfoMap] = useState<FornecedorInfoMap>({});
+  const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [produtoDraft, setProdutoDraft] = useState("");
+  const [produtoQuery, setProdutoQuery] = useState("");
+  const [isProdutoMenuOpen, setIsProdutoMenuOpen] = useState(false);
+  const produtoMenuRef = useRef<HTMLDivElement | null>(null);
+  const produtoDropdownRef = useRef<HTMLDivElement | null>(null);
+  const produtoInputRef = useRef<HTMLInputElement | null>(null);
+  const produtosBodyRef = useRef<HTMLDivElement | null>(null);
+  const [produtoDropdownRect, setProdutoDropdownRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  const [isVincOpen, setIsVincOpen] = useState(false);
+  const [vincNomeOriginal, setVincNomeOriginal] = useState("");
+  const [vincNomeNota, setVincNomeNota] = useState("");
+  const [vincUnidadeNota, setVincUnidadeNota] = useState("CX");
+  const [vincInsumoEq, setVincInsumoEq] = useState("");
+  const [vincEqQtd, setVincEqQtd] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftFornecedor, setDraftFornecedor] = useState("");
   const [draftVendedorNome, setDraftVendedorNome] = useState("");
@@ -273,6 +340,250 @@ export default function FornecedoresClient() {
     return [...columnOrder, "acoes"].map((k) => widths[k as keyof typeof widths]).join(" ");
   }, [columnOrder]);
 
+  useEffect(() => {
+    setProdutosMap(readFornecedorProdutosMap());
+    return subscribeFornecedorProdutos((m) => setProdutosMap(m));
+  }, []);
+
+  useEffect(() => {
+    setInfoMap(readFornecedorInfoMap());
+    return subscribeFornecedorInfo((m) => setInfoMap(m));
+  }, []);
+
+  useEffect(() => {
+    setEquivalenciasMap(readFornecedorEquivalenciasMap());
+    return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+  }, []);
+
+  useEffect(() => {
+    setRows((prev) => {
+      const byKey = new Map(prev.map((r) => [r.fornecedor.trim().toUpperCase(), r]));
+      const nextList: FornecedorRow[] = [];
+      for (const [key, info] of Object.entries(infoMap)) {
+        const fornecedorLabel = info.fornecedor || key;
+        const existing = byKey.get(key);
+        const itens = (produtosMap[key]?.length ?? existing?.itens ?? 0) || 0;
+        if (existing) {
+          nextList.push({
+            ...existing,
+            fornecedor: fornecedorLabel,
+            vendedorNome: info.vendedor || existing.vendedorNome || "-",
+            whatsapp: info.whatsapp || existing.whatsapp || "-",
+            endereco: info.endereco || existing.endereco || "-",
+            itens,
+          });
+        } else {
+          nextList.push({
+            id: String(prev.length + nextList.length + 1),
+            fornecedor: fornecedorLabel,
+            itens,
+            vendedorNome: info.vendedor || "-",
+            whatsapp: info.whatsapp || "-",
+            endereco: info.endereco || "-",
+          });
+        }
+      }
+      if (!nextList.length) return prev;
+      for (const r of prev) {
+        const key = r.fornecedor.trim().toUpperCase();
+        if (infoMap[key]) continue;
+        nextList.push({ ...r, itens: produtosMap[key]?.length ?? r.itens });
+      }
+      return nextList;
+    });
+  }, [infoMap, produtosMap]);
+
+  useEffect(() => {
+    setInsumosStore(readInsumosFromStore());
+    return subscribeInsumos((rows) => setInsumosStore(rows));
+  }, []);
+
+  useEffect(() => {
+    if (!isProdutoMenuOpen) return;
+    function onDown(e: MouseEvent) {
+      const el = produtoMenuRef.current;
+      const dl = produtoDropdownRef.current;
+      if (!el && !dl) return;
+      if (e.target instanceof Node && ((el && el.contains(e.target)) || (dl && dl.contains(e.target)))) return;
+      setIsProdutoMenuOpen(false);
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [isProdutoMenuOpen]);
+
+  const syncProdutoDropdownRect = () => {
+    const el = produtoInputRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    setProdutoDropdownRect({ left: r.left, top: r.bottom + 6, width: r.width });
+  };
+
+  useEffect(() => {
+    if (!isProdutoMenuOpen) {
+      setProdutoDropdownRect(null);
+      return;
+    }
+    syncProdutoDropdownRect();
+    function onMove() {
+      syncProdutoDropdownRect();
+    }
+    window.addEventListener("resize", onMove);
+    window.addEventListener("scroll", onMove, true);
+    const body = produtosBodyRef.current;
+    body?.addEventListener("scroll", onMove);
+    return () => {
+      window.removeEventListener("resize", onMove);
+      window.removeEventListener("scroll", onMove, true);
+      body?.removeEventListener("scroll", onMove);
+    };
+  }, [isProdutoMenuOpen, isProdutosOpen]);
+
+  const produtosFornecedor = useMemo(() => {
+    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (!key) return [];
+    return produtosMap[key] ?? [];
+  }, [prodFornecedorKey, produtosMap]);
+
+  const insumosByName = useMemo(() => {
+    const map = new Map<string, InsumoStoreItem>();
+    for (const i of insumosStore) map.set(i.item.toLowerCase(), i);
+    return map;
+  }, [insumosStore]);
+
+  const suggestions = useMemo(() => {
+    const list = insumosStore.map((i) => i.item);
+    const q = produtoQuery.trim().toLowerCase();
+    const filtered = q ? list.filter((n) => n.toLowerCase().includes(q)) : list;
+    return filtered.slice(0, 8);
+  }, [insumosStore, produtoQuery]);
+
+  function openVinculacao(name: string) {
+    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    const existing = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    setVincNomeOriginal(name);
+    setVincNomeNota(name);
+    setVincUnidadeNota(existing?.unidadeNaNota || "CX");
+    setVincInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? ""));
+    setVincEqQtd(existing?.equivalenteQuantidade || "");
+    setIsVincOpen(true);
+  }
+
+  function saveVinculacao() {
+    const fornecedorKey = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (!fornecedorKey) return;
+    const nomeNaNota = vincNomeNota.trim();
+    const unidadeNaNota = vincUnidadeNota.trim() || "Und";
+    const insumoEquivalente = vincInsumoEq.trim();
+    if (!nomeNaNota || !insumoEquivalente) return;
+    const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
+    const originalName = vincNomeOriginal.trim();
+    const existing = equivalenciasMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
+    const nextItem = {
+      id: existing?.id ?? String(Date.now()),
+      nomeNaNota,
+      unidadeNaNota,
+      insumoEquivalente,
+      equivalenteQuantidade: vincEqQtd.trim(),
+      equivalenteUnidade,
+    };
+    const oldName = originalName;
+    const curProdutos = produtosMap[fornecedorKey] ?? [];
+    const hasNomeNaNota = curProdutos.some((x) => x.toLowerCase() === nomeNaNota.toLowerCase());
+    if (!oldName && !hasNomeNaNota) {
+      setProdutosMap((prev) => {
+        const cur = prev[fornecedorKey] ?? [];
+        const next: FornecedorProdutos = { ...prev, [fornecedorKey]: [...cur, nomeNaNota] };
+        writeFornecedorProdutosMap(next);
+        return next;
+      });
+      setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === fornecedorKey ? { ...r, itens: r.itens + 1 } : r)));
+    }
+    if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
+      setProdutosMap((prev) => {
+        const cur = prev[fornecedorKey] ?? [];
+        const nextList = cur.map((x) => (x.toLowerCase() === oldName.toLowerCase() ? nomeNaNota : x));
+        const dedup: string[] = [];
+        for (const n of nextList) {
+          if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
+        }
+        const next: FornecedorProdutos = { ...prev, [fornecedorKey]: dedup };
+        writeFornecedorProdutosMap(next);
+        return next;
+      });
+    }
+    setEquivalenciasMap((prev) => {
+      const cur = prev[fornecedorKey] ?? [];
+      const filtered = cur.filter(
+        (x) =>
+          x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
+      );
+      const next = { ...prev, [fornecedorKey]: [...filtered, nextItem] };
+      writeFornecedorEquivalenciasMap(next);
+      return next;
+    });
+    setVincNomeOriginal(nomeNaNota);
+    setIsVincOpen(false);
+  }
+
+  function openProdutos(row: FornecedorRow) {
+    const key = row.fornecedor.trim().toUpperCase();
+    if (!key) return;
+    setProdFornecedorKey(key);
+    setProdFornecedorLabel(row.fornecedor);
+    setProdVendedor(row.vendedorNome || "-");
+    setProdEndereco(row.endereco || "-");
+    setProdutoDraft("");
+    setProdutoQuery("");
+    setIsProdutoMenuOpen(false);
+    setProdutoDropdownRect(null);
+    setIsProdutosOpen(true);
+  }
+
+  function addProduto() {
+    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    const item = (produtoDraft || produtoQuery).trim();
+    if (!key) return;
+    if (!item) {
+      setProdutoDraft("");
+      setProdutoQuery("");
+      setIsProdutoMenuOpen(false);
+      setProdutoDropdownRect(null);
+      openVinculacao("");
+      return;
+    }
+    const curList = produtosMap[key] ?? [];
+    const has = curList.some((x) => x.toLowerCase() === item.toLowerCase());
+    if (has) {
+      openVinculacao(curList.find((x) => x.toLowerCase() === item.toLowerCase()) ?? item);
+      return;
+    }
+    setProdutosMap((prev) => {
+      const cur = prev[key] ?? [];
+      const next: FornecedorProdutos = { ...prev, [key]: [...cur, item] };
+      writeFornecedorProdutosMap(next);
+      return next;
+    });
+    setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: r.itens + 1 } : r)));
+    setProdutoDraft("");
+    setProdutoQuery("");
+    setIsProdutoMenuOpen(false);
+    setProdutoDropdownRect(null);
+    openVinculacao(item);
+  }
+
+  function removeProduto(item: string) {
+    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (!key) return;
+    setProdutosMap((prev) => {
+      const cur = prev[key] ?? [];
+      const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
+      const next: FornecedorProdutos = { ...prev, [key]: nextList };
+      writeFornecedorProdutosMap(next);
+      return next;
+    });
+    setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: Math.max(0, r.itens - 1) } : r)));
+  }
+
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const filtered = q
@@ -322,13 +633,21 @@ export default function FornecedoresClient() {
     const vendedorNome = draftVendedorNome.trim() || "-";
     const whatsapp = draftWhatsapp.trim() || "-";
     const endereco = draftEndereco.trim() || "-";
+    const key = fornecedor.toUpperCase();
+    const nextInfo = { ...infoMap, [key]: { fornecedor, vendedor: vendedorNome === "-" ? "" : vendedorNome, whatsapp: whatsapp === "-" ? "" : whatsapp, endereco: endereco === "-" ? "" : endereco } };
+    setInfoMap(nextInfo);
+    writeFornecedorInfoMap(nextInfo);
 
     if (!editingId) {
       setRows((prev) => [{ id: String(prev.length + 1), fornecedor, itens: 0, vendedorNome, whatsapp, endereco }, ...prev]);
+      setQuery("");
+      setSortKey(null);
+      setSortDir("asc");
       setIsFormOpen(false);
       return;
     }
     setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, fornecedor, vendedorNome, whatsapp, endereco } : r)));
+    setQuery("");
     setIsFormOpen(false);
     setEditingId(null);
   }
@@ -391,95 +710,7 @@ export default function FornecedoresClient() {
 
   return (
     <div className={dash.dashboard}>
-      <aside className={dash.menuLateral}>
-        <div className={dash.menuTop}>
-          <div className={dash.brand}>
-            <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
-          </div>
-
-          <div className={dash.companyCard}>
-            <div className={dash.companyAvatar} aria-hidden />
-            <div className={dash.companyMeta}>
-              <p className={dash.companyName}>Nome da Empresa</p>
-              <p className={dash.companyPlan}>PRO</p>
-            </div>
-          </div>
-
-          <button type="button" className={dash.primaryBtn}>
-            <img src="/dashboard/ml7hdudz-6qw4osi.svg" className={dash.primaryBtnIcon} alt="" />
-            Nova Contagem
-          </button>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Relatório</p>
-            <a className={dash.navItem} href="/dashboard">
-              <img src="/dashboard/ml7hdudz-z2dzc40.svg" className={dash.navIcon} alt="" />
-              CMV Real
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Cadastros</p>
-            <a className={dash.navItem} href="/insumos">
-              <img src="/dashboard/ml7hdudz-f06j0dk.svg" className={dash.navIcon} alt="" />
-              Insumos
-            </a>
-            <a className={`${dash.navItem} ${dash.navItemActive}`} href="/fornecedores">
-              <img src="/dashboard/ml7hdudz-xapr7wq.svg" className={dash.navIcon} alt="" />
-              Fornecedores
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Rotina</p>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-ul1u5or.svg" className={dash.navIcon} alt="" />
-              Entradas
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-q3mw2yd.svg" className={dash.navIcon} alt="" />
-              Inventário
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-8091yrv.svg" className={dash.navIcon} alt="" />
-              Listas de Compras
-            </a>
-          </div>
-
-          <div className={dash.group}>
-            <p className={dash.groupTitle}>Ajuda</p>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-csojjx2.svg" className={dash.navIcon} alt="" />
-              Ajustes
-            </a>
-            <a className={dash.navItem} href="#">
-              <img src="/dashboard/ml7hdudz-osfwhe6.svg" className={dash.navIcon} alt="" />
-              Suporte
-            </a>
-          </div>
-        </div>
-
-        <div className={dash.menuBottom}>
-          <div className={dash.usersActiveCard}>
-            <div className={dash.usersActiveRow}>
-              <img src="/dashboard/ml7hdudz-j3gj37b.svg" className={dash.usersActiveIcon} alt="" />
-              <p className={dash.usersActiveText}>Usuários Ativos (3 de 5)</p>
-            </div>
-            <div className={dash.progress}>
-              <div className={dash.progressOn} />
-              <div className={dash.progressOff} />
-            </div>
-          </div>
-
-          <button type="button" className={dash.userDropdown}>
-            <div className={dash.userLeft}>
-              <div className={dash.userAvatar} aria-hidden />
-              <p className={dash.userHello}>Olá, Ramon</p>
-            </div>
-            <img src="/dashboard/ml7hdudz-89hevuh.svg" className={dash.userChevron} alt="" />
-          </button>
-        </div>
-      </aside>
+      <AppSidebar active="fornecedores" />
 
       <main className={dash.content}>
         <section className={styles.header}>
@@ -557,12 +788,12 @@ export default function FornecedoresClient() {
                 {columnOrder.map((col) => {
                   if (col === "fornecedor") {
                     return (
-                      <div key={col} className={styles.supplierCell}>
+                      <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)}>
                         <span className={styles.supplierIcon} aria-hidden>
                           <IconBox />
                         </span>
                         <span className={styles.supplierName}>{r.fornecedor}</span>
-                      </div>
+                      </button>
                     );
                   }
                   if (col === "itens") return <div key={col} className={styles.td}>{`${r.itens} item${r.itens === 1 ? "" : "s"}`}</div>;
@@ -581,10 +812,26 @@ export default function FornecedoresClient() {
                 })}
 
                 <div className={styles.tdActions}>
-                  <button type="button" className={styles.iconBtn} aria-label="Editar" onClick={() => openEdit(r)}>
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    aria-label="Editar"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEdit(r);
+                    }}
+                  >
                     <IconEdit />
                   </button>
-                  <button type="button" className={styles.iconBtn} aria-label="Excluir" onClick={() => openDelete(r)}>
+                  <button
+                    type="button"
+                    className={styles.iconBtn}
+                    aria-label="Excluir"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openDelete(r);
+                    }}
+                  >
                     <IconTrash />
                   </button>
                 </div>
@@ -783,6 +1030,238 @@ export default function FornecedoresClient() {
                 <a className={styles.downloadLink} href="/fornecedores/fornecedores-modelo.csv" download>
                   Baixar Planilha Modelo
                 </a>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isProdutosOpen && prodFornecedorKey ? (
+          <div
+            className={styles.modalOverlay}
+            role="presentation"
+            onClick={() => {
+              setIsProdutosOpen(false);
+              setProdFornecedorKey(null);
+              setProdFornecedorLabel("");
+            }}
+          >
+            <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>{prodFornecedorLabel || prodFornecedorKey}</div>
+                <button
+                  type="button"
+                  className={styles.modalClose}
+                  aria-label="Fechar"
+                  onClick={() => {
+                    setIsProdutosOpen(false);
+                    setProdFornecedorKey(null);
+                    setProdFornecedorLabel("");
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.produtosTop}>
+                <div className={styles.produtosTopCard}>
+                  <div className={styles.produtosTopIcon} aria-hidden>
+                    <IconUser />
+                  </div>
+                  <div className={styles.produtosTopText}>
+                    <div className={styles.produtosTopLabel}>Vendedor</div>
+                    <div className={styles.produtosTopValue}>{prodVendedor || "-"}</div>
+                  </div>
+                </div>
+
+                <div className={styles.produtosTopCard}>
+                  <div className={styles.produtosTopIcon} aria-hidden>
+                    <IconPin />
+                  </div>
+                  <div className={styles.produtosTopText}>
+                    <div className={styles.produtosTopLabel}>Endereço</div>
+                    <div className={styles.produtosTopValue}>{prodEndereco || "-"}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.produtosBody} ref={produtosBodyRef}>
+                <div className={styles.produtosTitle}>{`Produtos do Fornecedor (${produtosFornecedor.length})`}</div>
+                <div className={styles.produtosSub}>
+                  Vincule os produtos a este fornecedor para facilitar o registro de compras e a seleção de itens nas notas.
+                </div>
+
+                <div className={styles.produtosAddRow}>
+                  <div className={styles.produtoPickWrap} ref={produtoMenuRef}>
+                    <div className={styles.produtoPick}>
+                      <span className={styles.produtoPickIcon} aria-hidden>
+                        <IconSearch />
+                      </span>
+                      <input
+                        className={styles.produtoPickInput}
+                        placeholder="Pesquise por itens..."
+                        value={produtoQuery}
+                        onChange={(e) => {
+                          setProdutoQuery(e.target.value);
+                          setProdutoDraft("");
+                          setIsProdutoMenuOpen(true);
+                        }}
+                        onFocus={() => setIsProdutoMenuOpen(true)}
+                        ref={produtoInputRef}
+                      />
+                      <button
+                        type="button"
+                        className={styles.produtoPickChevron}
+                        aria-label="Abrir lista"
+                        onClick={() => {
+                          setIsProdutoMenuOpen((v) => !v);
+                          setTimeout(() => syncProdutoDropdownRect(), 0);
+                        }}
+                      >
+                        ▾
+                      </button>
+                    </div>
+                  </div>
+
+                  <button type="button" className={styles.produtoAddBtn} onClick={addProduto}>
+                    + ADD
+                  </button>
+                </div>
+
+                {isProdutoMenuOpen && produtoDropdownRect ? (
+                  <div
+                    className={styles.produtoDropdownFixed}
+                    ref={produtoDropdownRef}
+                    role="listbox"
+                    aria-label="Insumos do sistema"
+                    style={{ left: produtoDropdownRect.left, top: produtoDropdownRect.top, width: produtoDropdownRect.width }}
+                  >
+                    {suggestions.map((name) => (
+                      <button
+                        key={name}
+                        type="button"
+                        className={styles.produtoOption}
+                        onClick={() => {
+                          setProdutoDraft(name);
+                          setProdutoQuery(name);
+                          setIsProdutoMenuOpen(false);
+                          setProdutoDropdownRect(null);
+                        }}
+                      >
+                        {name}
+                      </button>
+                    ))}
+                    {!suggestions[0] ? <div className={styles.produtoEmpty}>Nenhum insumo encontrado</div> : null}
+                  </div>
+                ) : null}
+
+                <div className={styles.produtosList}>
+                  {produtosFornecedor.map((name) => (
+                    <div
+                      key={name}
+                      className={styles.produtosRow}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openVinculacao(name)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") openVinculacao(name);
+                      }}
+                    >
+                      <div className={styles.produtosNameWrap}>
+                        <div className={styles.produtosName}>{name}</div>
+                        <div className={styles.produtosEq}>
+                          {(() => {
+                            const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+                            const map = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+                            const eq = map?.insumoEquivalente ?? (insumosByName.get(name.toLowerCase()) ? name : "");
+                            if (!eq) return "-";
+                            const qty = String(map?.equivalenteQuantidade ?? "").trim();
+                            if (!qty) return eq;
+                            const unit = String(map?.equivalenteUnidade ?? insumosByName.get(eq.toLowerCase())?.medida ?? "").trim();
+                            return unit ? `${eq} - ${qty} ${unit}` : `${eq} - ${qty}`;
+                          })()}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.produtosTrash}
+                        aria-label="Remover"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeProduto(name);
+                        }}
+                      >
+                        <IconTrash />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isProdutosOpen && prodFornecedorKey && isVincOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVincOpen(false)}>
+            <div className={`${styles.modal} ${styles.vincModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Configurar Vinculação</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsVincOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.formBody}>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Nome na nota</div>
+                  <input
+                    className={styles.formInput}
+                    value={vincNomeNota}
+                    onChange={(e) => setVincNomeNota(e.target.value)}
+                    autoFocus
+                    onFocus={(e) => e.currentTarget.select()}
+                  />
+                </div>
+
+                <div className={styles.formRow2}>
+                  <div className={styles.formField}>
+                    <div className={styles.formLabel}>Unidade de Medida na nota</div>
+                    <select className={styles.formInput} value={vincUnidadeNota} onChange={(e) => setVincUnidadeNota(e.target.value)}>
+                      {["CX", "Und", "Kg", "g", "L", "ml", "Pc"].map((u) => (
+                        <option key={u} value={u}>
+                          {u}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className={styles.formField}>
+                    <div className={styles.formLabel}>Insumo equivalente</div>
+                    <select className={styles.formInput} value={vincInsumoEq} onChange={(e) => setVincInsumoEq(e.target.value)}>
+                      {(insumosStore[0] ? insumosStore.map((i) => i.item) : ["Bacon Fatiado"]).map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className={styles.mapHint}>
+                  <div className={styles.mapHintLine}>
+                    {`1${vincUnidadeNota || "Und"} de ${vincNomeNota.trim() || "(nome na nota)"} equivale a `}
+                    <input className={styles.mapHintInput} value={vincEqQtd} onChange={(e) => setVincEqQtd(e.target.value)} placeholder="____" />
+                    {` ${insumosByName.get(vincInsumoEq.toLowerCase())?.medida ?? "Und"} de ${vincInsumoEq || "(insumo)"}`}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.modalFooter}>
+                <button type="button" className={styles.modalCancel} onClick={() => setIsVincOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className={styles.modalPrimary} onClick={saveVinculacao} disabled={!vincNomeNota.trim() || !vincInsumoEq.trim()}>
+                  Salvar
+                </button>
               </div>
             </div>
           </div>

@@ -210,6 +210,22 @@
   min-width: 0;
 }
 
+.supplierCellBtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.supplierCellBtn:hover .supplierName {
+  text-decoration: underline;
+}
+
 .supplierIcon {
   display: inline-flex;
   align-items: center;
@@ -337,6 +353,281 @@
   color: #01040e;
   font-size: 18px;
   line-height: 1;
+}
+
+.produtosModal {
+  width: 780px;
+  max-width: calc(100vw - 40px);
+  max-height: calc(100vh - 80px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.produtosTop {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 14px;
+  border-bottom: 1px solid #eef1f1;
+}
+
+.produtosTopCard {
+  display: flex;
+  align-items: center;
+  column-gap: 10px;
+  min-width: 0;
+}
+
+.produtosTopIcon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: #00282d;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.produtosTopText {
+  min-width: 0;
+}
+
+.produtosTopLabel {
+  font-size: 11px;
+  font-weight: 800;
+  color: #01040e;
+}
+
+.produtosTopValue {
+  font-size: 11px;
+  font-weight: 600;
+  color: #95a8a6;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.produtosBody {
+  padding: 14px;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.produtosTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.produtosSub {
+  font-size: 11px;
+  font-weight: 600;
+  color: #95a8a6;
+  margin-top: 2px;
+}
+
+.produtosAddRow {
+  display: grid;
+  grid-template-columns: 1fr 96px;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.produtoPickWrap {
+  position: relative;
+  min-width: 0;
+}
+
+.produtoPick {
+  display: flex;
+  align-items: center;
+  column-gap: 10px;
+  border: 1px solid #e1e5e4;
+  border-radius: 10px;
+  height: 40px;
+  padding: 0 10px;
+  background: #ffffff;
+  min-width: 0;
+}
+
+.produtoPickIcon {
+  color: #95a8a6;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.produtoPickInput {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: #01040e;
+}
+
+.produtoPickInput::placeholder {
+  color: #95a8a6;
+}
+
+.produtoPickChevron {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #95a8a6;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.produtoDropdownFixed {
+  position: fixed;
+  border-radius: 10px;
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
+  z-index: 120;
+  max-height: 260px;
+  overflow: auto;
+}
+
+.produtoOption {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 10px 12px;
+  text-align: left;
+  font-size: 12px;
+  font-weight: 700;
+  color: #01040e;
+  cursor: pointer;
+}
+
+.produtoOption:hover {
+  background: #f7f8f8;
+}
+
+.produtoEmpty {
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #95a8a6;
+}
+
+.produtoAddBtn {
+  height: 40px;
+  border-radius: 10px;
+  border: 1px solid #059e5d;
+  background: #0ab86d;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.produtosList {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  row-gap: 10px;
+}
+
+.produtosRow {
+  background: #f1f3f3;
+  border: 1px solid #eef1f1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 12px;
+  cursor: pointer;
+}
+
+.produtosRow:hover {
+  background: #f7f8f8;
+}
+
+.produtosNameWrap {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  row-gap: 2px;
+}
+
+.produtosName {
+  font-size: 12px;
+  font-weight: 800;
+  color: #01040e;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.produtosEq {
+  font-size: 10px;
+  font-weight: 700;
+  color: #95a8a6;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  white-space: normal;
+  line-height: 14px;
+}
+
+.produtosTrash {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #eef1f1;
+  background: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #01040e;
+  flex-shrink: 0;
+}
+
+.vincModal {
+  max-width: 640px;
+}
+
+.mapHint {
+  border: 1px solid #eef1f1;
+  border-radius: 12px;
+  background: #f7f8f8;
+  padding: 12px;
+}
+
+.mapHintLine {
+  font-size: 12px;
+  font-weight: 700;
+  color: #01040e;
+  line-height: 18px;
+}
+
+.mapHintInput {
+  width: 90px;
+  height: 28px;
+  border-radius: 10px;
+  border: 1px solid rgba(10, 184, 109, 0.45);
+  background: #ffffff;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #01040e;
+  outline: 0;
+  margin: 0 6px;
 }
 
 .formBody {
@@ -632,6 +923,12 @@
     justify-content: flex-start;
   }
   .formRow2 {
+    grid-template-columns: 1fr;
+  }
+  .produtosTop {
+    grid-template-columns: 1fr;
+  }
+  .produtosAddRow {
     grid-template-columns: 1fr;
   }
 }
