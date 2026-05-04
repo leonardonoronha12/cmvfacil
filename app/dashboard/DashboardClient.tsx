@@ -521,6 +521,24 @@ function formatBrlFromCents(cents: number) {
   return `${cents < 0 ? "-" : ""}R$${intLabel},${dec}`;
 }
 
+function formatBrlInput(input: string) {
+  const cleaned = input.replace(/[^\d,.-]/g, "").trim();
+  if (!cleaned) return "";
+  return formatBrlFromCents(parseBrlToCents(cleaned));
+}
+
+function formatPercentInput(input: string) {
+  const cleaned = input.replace(/[^\d,]/g, "").trim();
+  if (!cleaned) return "";
+  const hasComma = cleaned.includes(",");
+  const [rawInt, rawDec = ""] = cleaned.split(",", 2);
+  const intDigits = rawInt.replace(/\D/g, "");
+  const decDigits = rawDec.replace(/\D/g, "").slice(0, 2);
+  const intPart = intDigits ? String(Number.parseInt(intDigits, 10)) : "0";
+  if (hasComma) return `${intPart},${decDigits.padEnd(2, "0")}%`;
+  return `${intPart},00%`;
+}
+
 function parseDateDDMMYYYY(value: string) {
   const raw = value.trim();
   const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -781,7 +799,6 @@ export default function DashboardClient() {
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
-  const autoCalcKeyRef = useRef<string>("");
   const tableHeaderDidDragRef = useRef(false);
   const [calc, setCalc] = useState<{
     cmvPercent: number;
@@ -903,16 +920,14 @@ export default function DashboardClient() {
     setEndDate((prev) => (prev ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
   }, [inventoryOptions]);
 
-  useEffect(() => {
-    if (!inventoryOptions.length) return;
-    if (!startDate || !endDate) return;
-    const key = `${startDate}|${endDate}`;
-    if (autoCalcKeyRef.current === key) return;
-    autoCalcKeyRef.current = key;
-    handleCalculate();
-  }, [contagens.length, endDate, entradas.length, inventoryOptions.length, insumos.length, startDate, desperdicios.length]);
+  const canCalculate =
+    inventoryOptions.length > 0 && Boolean(startDate.trim()) && Boolean(endDate.trim()) && Boolean(revenue.trim()) && Boolean(targetCmv.trim());
 
   function handleCalculate() {
+    if (!canCalculate) {
+      setCalcError("Preencha datas, faturamento e CMV meta para calcular.");
+      return;
+    }
     setCalcError("");
     const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? null;
     const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? null;
@@ -1784,7 +1799,13 @@ export default function DashboardClient() {
               <span className={styles.topFieldIcon}>
                 <IconMoneySmall />
               </span>
-              <input className={styles.topInput} inputMode="decimal" placeholder="R$0,00" value={revenue} onChange={(e) => setRevenue(e.target.value)} />
+              <input
+                className={styles.topInput}
+                inputMode="decimal"
+                placeholder="R$0,00"
+                value={revenue}
+                onChange={(e) => setRevenue(formatBrlInput(e.target.value))}
+              />
             </div>
 
             <div className={styles.topField}>
@@ -1792,10 +1813,21 @@ export default function DashboardClient() {
               <span className={styles.topFieldIcon}>
                 <IconTargetSmall />
               </span>
-              <input className={styles.topInput} inputMode="decimal" placeholder="30,00%" value={targetCmv} onChange={(e) => setTargetCmv(e.target.value)} />
+              <input
+                className={styles.topInput}
+                inputMode="decimal"
+                placeholder="30,00%"
+                value={targetCmv}
+                onChange={(e) => setTargetCmv(formatPercentInput(e.target.value))}
+              />
             </div>
 
-            <button type="button" className={styles.topAction} onClick={handleCalculate} disabled={!inventoryOptions.length}>
+            <button
+              type="button"
+              className={canCalculate ? `${styles.topAction} ${styles.topActionEnabled}` : styles.topAction}
+              onClick={handleCalculate}
+              disabled={!canCalculate}
+            >
               <span className={styles.topActionIcon}>
                 <IconCalendarSmall />
               </span>

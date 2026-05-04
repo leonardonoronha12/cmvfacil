@@ -382,10 +382,23 @@
   color: #6f7d7b;
   font-size: 10px;
   font-weight: 700;
+  cursor: not-allowed;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
 .topAction:disabled {
   opacity: 1;
+}
+
+.topActionEnabled {
+  border-color: #7ad49f;
+  background: #dcf6e6;
+  color: #0a8f53;
+  cursor: pointer;
+}
+
+.topActionEnabled .topActionIcon {
+  color: #0a8f53;
 }
 
 .topActionIcon {
