@@ -536,6 +536,25 @@ function formatPercentInput(input: string) {
   return `${clamped.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
 }
 
+function placeCaretBeforeCurrencyDecimals(input: HTMLInputElement | null) {
+  if (!input) return;
+  window.requestAnimationFrame(() => {
+    const commaIndex = input.value.lastIndexOf(",");
+    const pos = commaIndex >= 0 ? commaIndex : input.value.length;
+    input.setSelectionRange(pos, pos);
+  });
+}
+
+function placeCaretBeforePercentDecimals(input: HTMLInputElement | null) {
+  if (!input) return;
+  window.requestAnimationFrame(() => {
+    const commaIndex = input.value.lastIndexOf(",");
+    const percentIndex = input.value.lastIndexOf("%");
+    const pos = commaIndex >= 0 ? commaIndex : percentIndex >= 0 ? percentIndex : input.value.length;
+    input.setSelectionRange(pos, pos);
+  });
+}
+
 function parseDateDDMMYYYY(value: string) {
   const raw = value.trim();
   const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
@@ -796,6 +815,8 @@ export default function DashboardClient() {
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
+  const revenueInputRef = useRef<HTMLInputElement | null>(null);
+  const targetCmvInputRef = useRef<HTMLInputElement | null>(null);
   const tableHeaderDidDragRef = useRef(false);
   const [calc, setCalc] = useState<{
     cmvPercent: number;
@@ -1820,11 +1841,17 @@ export default function DashboardClient() {
                 <IconMoneySmall />
               </span>
               <input
+                ref={revenueInputRef}
                 className={styles.topInput}
                 inputMode="decimal"
                 placeholder="R$0,00"
                 value={revenue}
-                onChange={(e) => setRevenue(formatBrlInput(e.target.value))}
+                onFocus={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
+                onClick={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
+                onChange={(e) => {
+                  setRevenue(formatBrlInput(e.target.value));
+                  placeCaretBeforeCurrencyDecimals(revenueInputRef.current);
+                }}
               />
             </div>
 
@@ -1834,11 +1861,17 @@ export default function DashboardClient() {
                 <IconTargetSmall />
               </span>
               <input
+                ref={targetCmvInputRef}
                 className={styles.topInput}
                 inputMode="decimal"
                 placeholder="30,00%"
                 value={targetCmv}
-                onChange={(e) => setTargetCmv(formatPercentInput(e.target.value))}
+                onFocus={() => placeCaretBeforePercentDecimals(targetCmvInputRef.current)}
+                onClick={() => placeCaretBeforePercentDecimals(targetCmvInputRef.current)}
+                onChange={(e) => {
+                  setTargetCmv(formatPercentInput(e.target.value));
+                  placeCaretBeforePercentDecimals(targetCmvInputRef.current);
+                }}
               />
             </div>
 
