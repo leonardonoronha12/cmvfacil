@@ -527,6 +527,18 @@ function formatBrlInput(input: string) {
   return formatBrlFromCents(parseBrlToCents(cleaned));
 }
 
+function sanitizeBrlDraft(input: string) {
+  const cleaned = String(input ?? "").replace(/[^\d,.-]/g, "");
+  if (!cleaned) return "";
+  const neg = cleaned.includes("-") ? "-" : "";
+  const unsigned = cleaned.replace(/-/g, "");
+  const [rawInt = "", rawDec = ""] = unsigned.split(",", 2);
+  const intPart = rawInt.replace(/\./g, "").replace(/[^\d]/g, "");
+  const decPart = rawDec.replace(/[^\d]/g, "").slice(0, 2);
+  if (!intPart && !decPart) return "";
+  return decPart ? `${neg}${intPart || "0"},${decPart}` : `${neg}${intPart}`;
+}
+
 function formatPercentInput(input: string) {
   const cleaned = input.replace(/[^\d,]/g, "").trim();
   if (!cleaned) return "";
@@ -534,6 +546,18 @@ function formatPercentInput(input: string) {
   if (!Number.isFinite(value) || value <= 0) return "";
   const clamped = Math.min(99, value);
   return `${clamped.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function sanitizePercentDraft(input: string) {
+  const cleaned = String(input ?? "").replace(/[^\d,]/g, "");
+  if (!cleaned) return "";
+  const [rawInt = "", rawDec = ""] = cleaned.split(",", 2);
+  const intDigits = rawInt.replace(/[^\d]/g, "").slice(0, 2);
+  const decDigits = rawDec.replace(/[^\d]/g, "").slice(0, 2);
+  if (!intDigits && !decDigits) return "";
+  const intValue = intDigits ? Number.parseInt(intDigits, 10) : 0;
+  const limitedInt = Math.min(99, Number.isFinite(intValue) ? intValue : 0);
+  return decDigits ? `${limitedInt},${decDigits}` : String(limitedInt);
 }
 
 function toEditableBrlInput(input: string) {
@@ -1363,6 +1387,18 @@ export default function DashboardClient() {
     return { slices, legend };
   }, [calc]);
 
+  const chartDisplay = useMemo(() => {
+    if (categoriaChart.slices.length && categoriaChart.legend.length) return categoriaChart;
+    return {
+      slices: chartSlices,
+      legend: legendItems.map((item, index) => ({
+        label: item.label,
+        tone: item.tone,
+        cents: chartSlices[index]?.value ?? 0,
+      })),
+    };
+  }, [categoriaChart, chartSlices]);
+
   const variacaoRows = useMemo(() => {
     if (!calc) return [];
     const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? null;
@@ -1827,7 +1863,7 @@ export default function DashboardClient() {
                 value={revenue}
                 onFocus={() => setRevenue((prev) => toEditableBrlInput(prev))}
                 onBlur={() => setRevenue((prev) => formatBrlInput(prev))}
-                onChange={(e) => setRevenue(e.target.value)}
+                onChange={(e) => setRevenue(sanitizeBrlDraft(e.target.value))}
               />
             </div>
 
@@ -1843,7 +1879,7 @@ export default function DashboardClient() {
                 value={targetCmv}
                 onFocus={() => setTargetCmv((prev) => toEditablePercentInput(prev))}
                 onBlur={() => setTargetCmv((prev) => formatPercentInput(prev))}
-                onChange={(e) => setTargetCmv(e.target.value)}
+                onChange={(e) => setTargetCmv(sanitizePercentDraft(e.target.value))}
               />
             </div>
 
@@ -1922,11 +1958,11 @@ export default function DashboardClient() {
 
             <div className={styles.chartCard}>
               <div className={styles.chartArea}>
-                <PieChart slices={categoriaChart.slices.length ? categoriaChart.slices : chartSlices} size={170} />
+                <PieChart slices={chartDisplay.slices} size={170} />
               </div>
               <div className={styles.chartLegend}>
-                {calc && categoriaChart.legend.length ? (
-                  categoriaChart.legend.map((it) => (
+                {chartDisplay.legend.length ? (
+                  chartDisplay.legend.map((it) => (
                     <div key={it.label} className={styles.legendItem}>
                       <span className={`${styles.legendSwatch} ${styles[`legendSwatch_${it.tone}` as keyof typeof styles]}`} aria-hidden />
                       <span className={styles.legendLabel}>{`${it.label} • ${formatBrlFromCents(it.cents)}`}</span>

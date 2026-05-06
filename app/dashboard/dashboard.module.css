@@ -732,6 +732,11 @@
   min-height: 188px;
 }
 
+.chartArea svg {
+  display: block;
+  flex-shrink: 0;
+}
+
 .chartEmpty {
   padding: 12px;
   font-size: 11px;
