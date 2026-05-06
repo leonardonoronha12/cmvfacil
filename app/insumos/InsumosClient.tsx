@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
@@ -1046,21 +1047,31 @@ export default function InsumosClient() {
 
                 {columnOrder.map((col) => {
                   if (col === "item") {
+                    const itemHref = `/dashboard?itemId=${encodeURIComponent(r.id)}&tab=entradas`;
                     return (
-                      <div key={col} className={styles.tdItem}>
+                      <div key={col}>
                         {bulkDeleteMode ? (
-                          <input
-                            type="checkbox"
-                            className={styles.rowSelect}
-                            checked={selectedIds.has(r.id)}
-                            onChange={() => toggleRowSelected(r.id)}
-                            aria-label={`Selecionar ${r.item}`}
-                          />
-                        ) : null}
-                        <span className={styles.itemIcon}>
-                          <IconCube />
-                        </span>
-                        <span className={styles.itemName}>{r.item}</span>
+                          <div className={styles.tdItem}>
+                            <input
+                              type="checkbox"
+                              className={styles.rowSelect}
+                              checked={selectedIds.has(r.id)}
+                              onChange={() => toggleRowSelected(r.id)}
+                              aria-label={`Selecionar ${r.item}`}
+                            />
+                            <span className={styles.itemIcon}>
+                              <IconCube />
+                            </span>
+                            <span className={styles.itemName}>{r.item}</span>
+                          </div>
+                        ) : (
+                          <Link href={itemHref} className={`${styles.tdItem} ${styles.tdItemLink}`} aria-label={`Abrir detalhes do item ${r.item}`}>
+                            <span className={styles.itemIcon}>
+                              <IconCube />
+                            </span>
+                            <span className={styles.itemName}>{r.item}</span>
+                          </Link>
+                        )}
                       </div>
                     );
                   }

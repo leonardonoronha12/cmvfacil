@@ -376,6 +376,12 @@
   min-width: 0;
 }
 
+.tdItemLink {
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+}
+
 .itemIcon {
   display: inline-flex;
   align-items: center;
