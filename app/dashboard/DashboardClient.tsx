@@ -530,13 +530,23 @@ function formatBrlInput(input: string) {
 function formatPercentInput(input: string) {
   const cleaned = input.replace(/[^\d,]/g, "").trim();
   if (!cleaned) return "";
-  const hasComma = cleaned.includes(",");
+  const value = parsePtNumber(cleaned);
+  if (!Number.isFinite(value) || value <= 0) return "";
+  const clamped = Math.min(99, value);
+  return `${clamped.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
+function toEditableBrlInput(input: string) {
+  const cleaned = input.replace(/[^\d,.-]/g, "").trim();
+  if (!cleaned) return "";
   const [rawInt, rawDec = ""] = cleaned.split(",", 2);
-  const intDigits = rawInt.replace(/\D/g, "");
-  const decDigits = rawDec.replace(/\D/g, "").slice(0, 2);
-  const intPart = intDigits ? String(Number.parseInt(intDigits, 10)) : "0";
-  if (hasComma) return `${intPart},${decDigits.padEnd(2, "0")}%`;
-  return `${intPart},00%`;
+  const intPart = rawInt.replace(/\./g, "").replace(/[^\d-]/g, "");
+  const decPart = rawDec.replace(/[^\d]/g, "").slice(0, 2);
+  return decPart ? `${intPart},${decPart}` : intPart;
+}
+
+function toEditablePercentInput(input: string) {
+  return input.replace(/[^\d,]/g, "").trim();
 }
 
 function parseDateDDMMYYYY(value: string) {
@@ -921,7 +931,12 @@ export default function DashboardClient() {
   }, [inventoryOptions]);
 
   const canCalculate =
-    inventoryOptions.length > 0 && Boolean(startDate.trim()) && Boolean(endDate.trim()) && Boolean(revenue.trim()) && Boolean(targetCmv.trim());
+    inventoryOptions.length > 0 &&
+    Boolean(startDate.trim()) &&
+    Boolean(endDate.trim()) &&
+    parseBrlToCents(revenue) > 0 &&
+    parsePtNumber(targetCmv) >= 1 &&
+    parsePtNumber(targetCmv) <= 99;
 
   function handleCalculate() {
     if (!canCalculate) {
@@ -1804,7 +1819,9 @@ export default function DashboardClient() {
                 inputMode="decimal"
                 placeholder="R$0,00"
                 value={revenue}
-                onChange={(e) => setRevenue(formatBrlInput(e.target.value))}
+                onFocus={() => setRevenue((prev) => toEditableBrlInput(prev))}
+                onBlur={() => setRevenue((prev) => formatBrlInput(prev))}
+                onChange={(e) => setRevenue(e.target.value)}
               />
             </div>
 
@@ -1818,7 +1835,9 @@ export default function DashboardClient() {
                 inputMode="decimal"
                 placeholder="30,00%"
                 value={targetCmv}
-                onChange={(e) => setTargetCmv(formatPercentInput(e.target.value))}
+                onFocus={() => setTargetCmv((prev) => toEditablePercentInput(prev))}
+                onBlur={() => setTargetCmv((prev) => formatPercentInput(prev))}
+                onChange={(e) => setTargetCmv(e.target.value)}
               />
             </div>
 
@@ -1897,10 +1916,10 @@ export default function DashboardClient() {
 
             <div className={styles.chartCard}>
               <div className={styles.chartArea}>
-                {calc ? <PieChart slices={categoriaChart.slices} size={170} /> : <div className={styles.chartEmpty}>Calcule o CMV para ver o relatório por categoria.</div>}
+                <PieChart slices={categoriaChart.slices.length ? categoriaChart.slices : chartSlices} size={170} />
               </div>
               <div className={styles.chartLegend}>
-                {calc ? (
+                {calc && categoriaChart.legend.length ? (
                   categoriaChart.legend.map((it) => (
                     <div key={it.label} className={styles.legendItem}>
                       <span className={`${styles.legendSwatch} ${styles[`legendSwatch_${it.tone}` as keyof typeof styles]}`} aria-hidden />
