@@ -1603,6 +1603,11 @@
   border-top: 1px solid #eef1f1;
   font-size: 11px;
   color: #01040e;
+  cursor: pointer;
+}
+
+.variacaoRow:hover {
+  background: #f7f8f8;
 }
 
 .variacaoItem {
@@ -1610,6 +1615,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.variacaoItemBtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #01040e;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
 .variacaoCell {

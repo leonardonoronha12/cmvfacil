@@ -1729,6 +1729,12 @@ export default function DashboardClient() {
     writeFornecedorProdutosMap(next);
   }
 
+  function openVariacaoItem(row: { id: string; item: string }) {
+    setIsVariacaoOpen(false);
+    setHistoryItem({ insumoId: row.id, item: row.item });
+    setDetailsTab("entradas");
+  }
+
   useEffect(() => {
     if (!historyItem) return;
     setTimeout(() => historyRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
@@ -2613,8 +2619,30 @@ export default function DashboardClient() {
                     const pct = Number.isFinite(r.pct) ? r.pct : 0;
                     const tone = pct > 0 ? styles.variacaoRed : pct < 0 ? styles.variacaoGreen : styles.variacaoMuted;
                     return (
-                      <div key={r.id} className={styles.variacaoRow}>
-                        <div className={styles.variacaoItem}>{r.item}</div>
+                      <div
+                        key={r.id}
+                        className={styles.variacaoRow}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openVariacaoItem(r)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter" && e.key !== " ") return;
+                          e.preventDefault();
+                          openVariacaoItem(r);
+                        }}
+                      >
+                        <div className={styles.variacaoItem}>
+                          <button
+                            type="button"
+                            className={styles.variacaoItemBtn}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openVariacaoItem(r);
+                            }}
+                          >
+                            {r.item}
+                          </button>
+                        </div>
                         <div className={styles.variacaoCell}>{formatBrlFromCents(r.startCost)}</div>
                         <div className={styles.variacaoCell}>{formatBrlFromCents(r.endCost)}</div>
                         <div className={`${styles.variacaoCell} ${tone}`}>{`${pct.toLocaleString("pt-BR", {
