@@ -527,18 +527,6 @@ function formatBrlInput(input: string) {
   return formatBrlFromCents(parseBrlToCents(cleaned));
 }
 
-function sanitizeBrlDraft(input: string) {
-  const cleaned = String(input ?? "").replace(/[^\d,.-]/g, "");
-  if (!cleaned) return "";
-  const neg = cleaned.includes("-") ? "-" : "";
-  const unsigned = cleaned.replace(/-/g, "");
-  const [rawInt = "", rawDec = ""] = unsigned.split(",", 2);
-  const intPart = rawInt.replace(/\./g, "").replace(/[^\d]/g, "");
-  const decPart = rawDec.replace(/[^\d]/g, "").slice(0, 2);
-  if (!intPart && !decPart) return "";
-  return decPart ? `${neg}${intPart || "0"},${decPart}` : `${neg}${intPart}`;
-}
-
 function formatPercentInput(input: string) {
   const cleaned = input.replace(/[^\d,]/g, "").trim();
   if (!cleaned) return "";
@@ -546,31 +534,6 @@ function formatPercentInput(input: string) {
   if (!Number.isFinite(value) || value <= 0) return "";
   const clamped = Math.min(99, value);
   return `${clamped.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function sanitizePercentDraft(input: string) {
-  const cleaned = String(input ?? "").replace(/[^\d,]/g, "");
-  if (!cleaned) return "";
-  const [rawInt = "", rawDec = ""] = cleaned.split(",", 2);
-  const intDigits = rawInt.replace(/[^\d]/g, "").slice(0, 2);
-  const decDigits = rawDec.replace(/[^\d]/g, "").slice(0, 2);
-  if (!intDigits && !decDigits) return "";
-  const intValue = intDigits ? Number.parseInt(intDigits, 10) : 0;
-  const limitedInt = Math.min(99, Number.isFinite(intValue) ? intValue : 0);
-  return decDigits ? `${limitedInt},${decDigits}` : String(limitedInt);
-}
-
-function toEditableBrlInput(input: string) {
-  const cleaned = input.replace(/[^\d,.-]/g, "").trim();
-  if (!cleaned) return "";
-  const [rawInt, rawDec = ""] = cleaned.split(",", 2);
-  const intPart = rawInt.replace(/\./g, "").replace(/[^\d-]/g, "");
-  const decPart = rawDec.replace(/[^\d]/g, "").slice(0, 2);
-  return decPart ? `${intPart},${decPart}` : intPart;
-}
-
-function toEditablePercentInput(input: string) {
-  return input.replace(/[^\d,]/g, "").trim();
 }
 
 function parseDateDDMMYYYY(value: string) {
@@ -1861,9 +1824,7 @@ export default function DashboardClient() {
                 inputMode="decimal"
                 placeholder="R$0,00"
                 value={revenue}
-                onFocus={() => setRevenue((prev) => toEditableBrlInput(prev))}
-                onBlur={() => setRevenue((prev) => formatBrlInput(prev))}
-                onChange={(e) => setRevenue(sanitizeBrlDraft(e.target.value))}
+                onChange={(e) => setRevenue(formatBrlInput(e.target.value))}
               />
             </div>
 
@@ -1877,9 +1838,7 @@ export default function DashboardClient() {
                 inputMode="decimal"
                 placeholder="30,00%"
                 value={targetCmv}
-                onFocus={() => setTargetCmv((prev) => toEditablePercentInput(prev))}
-                onBlur={() => setTargetCmv((prev) => formatPercentInput(prev))}
-                onChange={(e) => setTargetCmv(sanitizePercentDraft(e.target.value))}
+                onChange={(e) => setTargetCmv(formatPercentInput(e.target.value))}
               />
             </div>
 
