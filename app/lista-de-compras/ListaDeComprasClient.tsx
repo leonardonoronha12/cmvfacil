@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
@@ -16,12 +16,15 @@ import {
   type FornecedorInfoMap,
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
+import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./lista-de-compras.module.css";
 
 type CompraRow = {
   id: string;
   item: string;
+  displayItem: string;
+  itemMetaLabel: string;
   categoria: string;
   medida: string;
   custoMedio: number;
@@ -38,8 +41,6 @@ type LatestItemInfo = {
   fornecedor: string;
   timestamp: number;
 };
-
-type PickerField = "start" | "end";
 
 function normalizeText(value: string) {
   return value
@@ -74,53 +75,15 @@ function formatDecimal3(value: number) {
   });
 }
 
-function formatDateDisplay(value: string) {
-  if (!value) return "Selecione uma data";
-  const [year, month, day] = value.split("-");
-  if (!year || !month || !day) return "Selecione uma data";
-  return `${day}/${month}/${year}`;
-}
-
-function parseIsoDate(value: string) {
-  if (!value) return null;
-  const [year, month, day] = value.split("-").map(Number);
-  if (!year || !month || !day) return null;
-  return new Date(year, month - 1, day);
-}
-
-function toIsoDate(date: Date) {
-  const year = String(date.getFullYear());
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function startOfMonth(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), 1);
-}
-
-function addMonths(date: Date, delta: number) {
-  return new Date(date.getFullYear(), date.getMonth() + delta, 1);
-}
-
-function isSameDay(a: Date | null, b: Date | null) {
-  if (!a || !b) return false;
-  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
-}
-
-function getCalendarDays(viewDate: Date) {
-  const first = startOfMonth(viewDate);
-  const startWeekDay = first.getDay();
-  const start = new Date(first);
-  start.setDate(first.getDate() - startWeekDay);
-  return Array.from({ length: 42 }, (_, index) => {
-    const day = new Date(start);
-    day.setDate(start.getDate() + index);
-    return {
-      date: day,
-      inMonth: day.getMonth() === viewDate.getMonth(),
-    };
-  });
+function parsePtNumber(input: string) {
+  const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const neg = s.includes("-");
+  const cleaned = s.replace(/-/g, "");
+  const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  const n = Number.parseFloat(normalized);
+  if (!Number.isFinite(n)) return 0;
+  return neg ? -n : n;
 }
 
 function parseDecimalInput(value: string) {
@@ -167,6 +130,17 @@ function parseDateLoose(value: string) {
 
   const iso = Date.parse(raw);
   return Number.isFinite(iso) ? iso : 0;
+}
+
+function startOfDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function parseQtyLabel(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return 0;
+  const match = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
+  return parsePtNumber(match?.[1] ?? raw);
 }
 
 function buildLatestEntriesIndex(
@@ -302,11 +276,13 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 export default function ListaDeComprasClient() {
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
+  const [contagens, setContagens] = useState<InventarioContagem[]>([]);
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [mode, setMode] = useState<"categoria" | "fornecedor">("categoria");
-  const [categoria, setCategoria] = useState("Categoria");
+  const [categoriaFilter, setCategoriaFilter] = useState("Categoria");
+  const [fornecedorFilter, setFornecedorFilter] = useState("Fornecedor");
   const [query, setQuery] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -318,20 +294,18 @@ export default function ListaDeComprasClient() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
-  const [comprarMap, setComprarMap] = useState<Record<string, string>>({});
-  const [openPicker, setOpenPicker] = useState<PickerField | null>(null);
-  const [pickerMonth, setPickerMonth] = useState<Date>(() => startOfMonth(new Date()));
-  const pickerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     setInsumos(readInsumosFromStore());
     setEntradas(readEntradasFromStore([]));
+    setContagens(readInventarioFromStore([]));
     setFornecedorInfoMap(readFornecedorInfoMap());
     setFornecedorProdutosMap(readFornecedorProdutosMap());
     setFornecedorEquivalenciasMap(readFornecedorEquivalenciasMap());
 
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));
+    const unsubInventario = subscribeInventario((rows) => setContagens(rows));
     const unsubInfo = subscribeFornecedorInfo((rows) => setFornecedorInfoMap(rows));
     const unsubProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
     const unsubEquiv = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
@@ -339,41 +313,197 @@ export default function ListaDeComprasClient() {
     return () => {
       unsubInsumos();
       unsubEntradas();
+      unsubInventario();
       unsubInfo();
       unsubProdutos();
       unsubEquiv();
     };
   }, []);
 
-  const rows = useMemo(() => {
+  const baseRows = useMemo(() => {
     const latestIndex = buildLatestEntriesIndex(entradas, fornecedorInfoMap, fornecedorEquivalenciasMap, fornecedorProdutosMap);
     const fornecedorFallback = buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
-    const search = query.trim().toLowerCase();
+    const contagemOptions = contagens
+      .map((contagem) => {
+        const t = parseDateLoose(contagem.data);
+        if (!t) return null;
+        const date = new Date(t);
+        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        return { iso, label: contagem.data, t, contagem };
+      })
+      .filter((value): value is { iso: string; label: string; t: number; contagem: InventarioContagem } => Boolean(value));
+    const startIso = startDate || contagemOptions[0]?.iso || "";
+    const endIso = endDate || contagemOptions[contagemOptions.length - 1]?.iso || "";
+    const startOpt = contagemOptions.find((option) => option.iso === startIso) ?? null;
+    const endOpt = contagemOptions.find((option) => option.iso === endIso) ?? null;
+    const minT = startOpt && endOpt ? Math.min(startOpt.t, endOpt.t) : 0;
+    const maxT = startOpt && endOpt ? Math.max(startOpt.t, endOpt.t) : 0;
+    const periodDays = startOpt && endOpt ? Math.max(Math.round((maxT - minT) / (1000 * 60 * 60 * 24)), 1) : 1;
 
-    const mapped = insumos
+    const contagemStart = startOpt?.contagem ?? null;
+    const contagemEnd = endOpt?.contagem ?? null;
+
+    const initialById = new Map<string, number>();
+    const finalById = new Map<string, number>();
+    for (const cat of contagemStart?.categorias ?? []) {
+      for (const item of cat.itens ?? []) initialById.set(item.id, parsePtNumber(item.estoqueFinal || "0"));
+    }
+    for (const cat of contagemEnd?.categorias ?? []) {
+      for (const item of cat.itens ?? []) finalById.set(item.id, parsePtNumber(item.estoqueFinal || "0"));
+    }
+
+    const insumoIdByKey = new Map<string, string>();
+    for (const item of insumos) {
+      const key = normalizeText(item.item);
+      if (!key || insumoIdByKey.has(key)) continue;
+      insumoIdByKey.set(key, item.id);
+    }
+
+    const entradasQtyById = new Map<string, number>();
+    for (const entrada of entradas) {
+      const t = parseDateLoose(entrada.dataLancamento);
+      if (!t || t < minT || t > maxT) continue;
+      for (const item of entrada.itensNota ?? []) {
+        const key = normalizeText(item.nome);
+        const id = insumoIdByKey.get(key);
+        if (!id) continue;
+        const qty = parseQtyLabel(item.quantidadeLabel ?? "");
+        entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qty);
+      }
+    }
+
+    const fornecedorKeyByLabel = new Map<string, string>();
+    for (const [key, info] of Object.entries(fornecedorInfoMap)) {
+      const label = info.fornecedor.trim();
+      if (!label || fornecedorKeyByLabel.has(label)) continue;
+      fornecedorKeyByLabel.set(label, key);
+    }
+    const selectedFornecedorKey = fornecedorKeyByLabel.get(fornecedorFilter) ?? fornecedorFilter.trim().toUpperCase();
+    const selectedEquivalencias = fornecedorEquivalenciasMap[selectedFornecedorKey] ?? [];
+    const selectedProdutos = fornecedorProdutosMap[selectedFornecedorKey] ?? [];
+    const supplierNameByItemKey = new Map<string, string>();
+    const supplierItemKeys = new Set<string>();
+
+    for (const row of selectedEquivalencias) {
+      const insumoKey = normalizeText(row.insumoEquivalente);
+      const nomeFornecedor = row.nomeNaNota.trim();
+      if (!insumoKey || !nomeFornecedor) continue;
+      supplierItemKeys.add(insumoKey);
+      if (!supplierNameByItemKey.has(insumoKey)) supplierNameByItemKey.set(insumoKey, nomeFornecedor);
+    }
+
+    for (const produto of selectedProdutos) {
+      const produtoKey = normalizeText(produto);
+      if (!produtoKey) continue;
+      supplierItemKeys.add(produtoKey);
+      if (!supplierNameByItemKey.has(produtoKey)) supplierNameByItemKey.set(produtoKey, produto.trim());
+    }
+
+    return insumos
       .filter((row) => !row.ocultar)
+      .filter((row) => {
+        if (mode !== "fornecedor" || fornecedorFilter === "Fornecedor") return true;
+        return supplierItemKeys.has(normalizeText(row.item));
+      })
       .map<CompraRow>((row) => {
         const itemKey = normalizeText(row.item);
         const latest = latestIndex.get(itemKey);
         const fornecedor = latest?.fornecedor || fornecedorFallback.get(itemKey) || "-";
+        const displayItem = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? supplierNameByItemKey.get(itemKey) ?? row.item : row.item;
+        const itemMetaLabel =
+          mode === "fornecedor"
+            ? displayItem !== row.item
+              ? row.item
+              : fornecedor
+            : row.categoria?.trim() || "-";
+        const initialQty = initialById.get(row.id) ?? 0;
+        const finalQty = finalById.get(row.id) ?? 0;
+        const entradasQty = entradasQtyById.get(row.id) ?? 0;
+        const saidasQty = initialQty + entradasQty - finalQty;
+        const consumoDiario = saidasQty / periodDays;
+        const comprar = Math.max(consumoDiario * (parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1)) - finalQty, 0);
         return {
           id: row.id,
           item: row.item,
+          displayItem,
+          itemMetaLabel,
           categoria: row.categoria?.trim() || "-",
           medida: row.medida?.trim() || "Und",
           custoMedio: parseMoney(row.custoMedio ?? ""),
           custoMedioLabel: row.custoMedio?.trim() || "R$0,00",
           fornecedor,
-          consumoDiario: 0,
-          estoqueFinal: 0,
-          comprar: 0,
+          consumoDiario,
+          estoqueFinal: finalQty,
+          comprar,
         };
-      })
-      .filter((row) => {
-        if (categoria !== "Categoria" && row.categoria !== categoria) return false;
-        if (!search) return true;
-        return `${row.item} ${row.categoria} ${row.fornecedor}`.toLowerCase().includes(search);
       });
+  }, [
+    contagens,
+    diasEntrega,
+    diasEstoque,
+    endDate,
+    entradas,
+    fornecedorFilter,
+    fornecedorEquivalenciasMap,
+    fornecedorInfoMap,
+    fornecedorProdutosMap,
+    insumos,
+    mode,
+    startDate,
+  ]);
+
+  const categorias = useMemo(() => {
+    const list = Array.from(new Set(baseRows.map((row) => row.categoria.trim()).filter((value) => value && value !== "-")));
+    return ["Categoria", ...list];
+  }, [baseRows]);
+
+  const fornecedores = useMemo(() => {
+    const labels = new Set<string>();
+    for (const [key, info] of Object.entries(fornecedorInfoMap)) {
+      if ((fornecedorProdutosMap[key]?.length ?? 0) > 0 || (fornecedorEquivalenciasMap[key]?.length ?? 0) > 0) {
+        const label = info.fornecedor.trim();
+        if (label) labels.add(label);
+      }
+    }
+    const list = Array.from(labels).sort((a, b) => a.localeCompare(b, "pt-BR"));
+    return ["Fornecedor", ...list];
+  }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
+
+  const inventoryOptions = useMemo(() => {
+    const out: Array<{ iso: string; label: string; t: number }> = [];
+    for (const c of contagens) {
+      const t = parseDateLoose(c.data);
+      if (!t) continue;
+      const date = new Date(t);
+      const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      out.push({ iso, label: c.data, t });
+    }
+    out.sort((a, b) => a.t - b.t);
+    const seen = new Set<string>();
+    return out.filter((option) => {
+      if (seen.has(option.iso)) return false;
+      seen.add(option.iso);
+      return true;
+    });
+  }, [contagens]);
+
+  const effectiveStartDate = startDate || inventoryOptions[0]?.iso || "";
+  const effectiveEndDate = endDate || inventoryOptions[inventoryOptions.length - 1]?.iso || "";
+
+  useEffect(() => {
+    if (!inventoryOptions.length) return;
+    setStartDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[0]!.iso));
+    setEndDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
+  }, [inventoryOptions]);
+
+  const rows = useMemo(() => {
+    const search = query.trim().toLowerCase();
+    const mapped = baseRows.filter((row) => {
+      if (mode === "categoria" && categoriaFilter !== "Categoria" && row.categoria !== categoriaFilter) return false;
+      if (mode === "fornecedor" && fornecedorFilter === "Fornecedor") return false;
+      if (!search) return true;
+      return `${row.displayItem} ${row.item} ${row.categoria} ${row.fornecedor}`.toLowerCase().includes(search);
+    });
 
     const decorated = mapped.map((row, index) => ({ row, index }));
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
@@ -397,8 +527,11 @@ export default function ListaDeComprasClient() {
             break;
           }
           case "comprar": {
-            const aValue = parseDecimalInput(comprarMap[a.row.id] ?? "0,000");
-            const bValue = parseDecimalInput(comprarMap[b.row.id] ?? "0,000");
+            const coberturaDias = parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1);
+            const aEstoqueFinal = parseDecimalInput(estoqueFinalMap[a.row.id] ?? formatDecimal3(a.row.estoqueFinal));
+            const bEstoqueFinal = parseDecimalInput(estoqueFinalMap[b.row.id] ?? formatDecimal3(b.row.estoqueFinal));
+            const aValue = Math.max(a.row.consumoDiario * coberturaDias - aEstoqueFinal, 0);
+            const bValue = Math.max(b.row.consumoDiario * coberturaDias - bEstoqueFinal, 0);
             cmp = aValue - bValue;
             break;
           }
@@ -418,41 +551,19 @@ export default function ListaDeComprasClient() {
     });
 
     return decorated.map((entry) => entry.row);
-  }, [categoria, comprarMap, entradas, estoqueFinalMap, fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap, insumos, mode, query, sortDir, sortKey]);
+  }, [baseRows, categoriaFilter, diasEntrega, diasEstoque, estoqueFinalMap, fornecedorFilter, mode, query, sortDir, sortKey]);
 
   useEffect(() => {
-    setEstoqueFinalMap((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const row of rows) {
-        if (next[row.id] != null) continue;
-        next[row.id] = "0,000";
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [rows]);
-
-  useEffect(() => {
-    setComprarMap((prev) => {
-      const next = { ...prev };
-      let changed = false;
-      for (const row of rows) {
-        if (next[row.id] != null) continue;
-        next[row.id] = "0,000";
-        changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [rows]);
-
-  const categorias = useMemo(() => {
-    const list = Array.from(new Set(insumos.map((row) => row.categoria?.trim() || "-").filter((value) => value && value !== "-")));
-    return ["Categoria", ...list];
-  }, [insumos]);
+    const next: Record<string, string> = {};
+    for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
+    setEstoqueFinalMap(next);
+  }, [baseRows]);
 
   const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds[row.id]);
-  const isPeriodReady = Boolean(startDate && endDate);
+  const isPeriodReady =
+    inventoryOptions.length > 0 &&
+    inventoryOptions.some((option) => option.iso === effectiveStartDate) &&
+    inventoryOptions.some((option) => option.iso === effectiveEndDate);
 
   function toggleSelectAll() {
     if (!isPeriodReady) return;
@@ -519,46 +630,13 @@ export default function ListaDeComprasClient() {
     setEstoqueFinalMap((prev) => ({ ...prev, [id]: cleaned }));
   }
 
-  function updateComprar(id: string, value: string) {
-    const cleaned = value.replace(/[^\d,]/g, "");
-    setComprarMap((prev) => ({ ...prev, [id]: cleaned }));
-  }
-
   function parsePositiveInt(value: string, fallback: number) {
     const num = Number(value.replace(/[^\d]/g, ""));
     return Number.isFinite(num) && num > 0 ? num : fallback;
   }
 
-  function openDatePicker(field: PickerField) {
-    const currentValue = field === "start" ? startDate : endDate;
-    setPickerMonth(startOfMonth(parseIsoDate(currentValue) ?? new Date()));
-    setOpenPicker((prev) => (prev === field ? null : field));
-  }
-
-  function selectDate(field: PickerField, date: Date) {
-    const iso = toIsoDate(date);
-    if (field === "start") setStartDate(iso);
-    else setEndDate(iso);
-    setOpenPicker(null);
-  }
-
-  useEffect(() => {
-    if (!openPicker) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (pickerRef.current?.contains(target)) return;
-      setOpenPicker(null);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    return () => document.removeEventListener("mousedown", onPointerDown);
-  }, [openPicker]);
-
   const diasEstoqueNum = parsePositiveInt(diasEstoque, 7);
   const diasEntregaNum = parsePositiveInt(diasEntrega, 1);
-  const weekDays = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sab"];
-  const calendarDays = getCalendarDays(pickerMonth);
-  const selectedDate = openPicker === "start" ? parseIsoDate(startDate) : openPicker === "end" ? parseIsoDate(endDate) : null;
-  const today = new Date();
 
   return (
     <div className={dash.dashboard}>
@@ -590,7 +668,11 @@ export default function ListaDeComprasClient() {
             <span className={styles.infoIcon}>
               <InfoIcon />
             </span>
-            <span>Selecione o período e desbloqueie a seleção dos itens para montar sua lista.</span>
+            <span>
+              {inventoryOptions.length
+                ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
+                : "Cadastre inventários para liberar o período e montar sua lista."}
+            </span>
           </section>
 
           <section className={styles.filtersPanel}>
@@ -605,9 +687,19 @@ export default function ListaDeComprasClient() {
             </div>
 
             <div className={styles.filterField}>
-              <label className={styles.fieldLabel}>Categoria</label>
-              <select className={styles.select} value={categoria} onChange={(e) => setCategoria(e.target.value)}>
-                {categorias.map((option) => (
+              <label className={styles.fieldLabel}>{mode === "categoria" ? "Categoria" : "Fornecedor"}</label>
+              <select
+                className={styles.select}
+                value={mode === "categoria" ? categoriaFilter : fornecedorFilter}
+                onChange={(e) => {
+                  if (mode === "categoria") {
+                    setCategoriaFilter(e.target.value);
+                    return;
+                  }
+                  setFornecedorFilter(e.target.value);
+                }}
+              >
+                {(mode === "categoria" ? categorias : fornecedores).map((option) => (
                   <option key={option} value={option}>
                     {option}
                   </option>
@@ -617,107 +709,37 @@ export default function ListaDeComprasClient() {
 
             <div className={styles.periodBlock}>
               <div className={styles.fieldLabel}>Período:</div>
-              <div className={styles.periodFields} ref={pickerRef}>
+              <div className={styles.periodFields}>
                 <div className={styles.dateFieldWrap}>
-                  <button type="button" className={styles.dateField} onClick={() => openDatePicker("start")}>
+                  <div className={styles.dateSelectWrap}>
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <span className={startDate ? styles.dateValue : styles.datePlaceholder}>{formatDateDisplay(startDate)}</span>
-                  </button>
-                  {openPicker === "start" ? (
-                    <div className={styles.calendarPopover}>
-                      <div className={styles.calendarHeader}>
-                        <button type="button" className={styles.calendarNav} onClick={() => setPickerMonth((prev) => addMonths(prev, -1))}>
-                          {"<"}
-                        </button>
-                        <div className={styles.calendarTitle}>
-                          {pickerMonth.toLocaleString("pt-BR", { month: "long", year: "numeric" })}
-                        </div>
-                        <button type="button" className={styles.calendarNav} onClick={() => setPickerMonth((prev) => addMonths(prev, 1))}>
-                          {">"}
-                        </button>
-                      </div>
-                      <div className={styles.calendarWeekdays}>
-                        {weekDays.map((day) => (
-                          <span key={day}>{day}</span>
-                        ))}
-                      </div>
-                      <div className={styles.calendarGrid}>
-                        {calendarDays.map(({ date, inMonth }) => (
-                          <button
-                            key={date.toISOString()}
-                            type="button"
-                            className={`${styles.calendarDay} ${!inMonth ? styles.calendarDayMuted : ""} ${
-                              isSameDay(selectedDate, date) ? styles.calendarDaySelected : ""
-                            } ${isSameDay(today, date) ? styles.calendarDayToday : ""}`}
-                            onClick={() => selectDate("start", date)}
-                          >
-                            {date.getDate()}
-                          </button>
-                        ))}
-                      </div>
-                      <div className={styles.calendarFooter}>
-                        <button type="button" className={styles.calendarAction} onClick={() => setStartDate("")}>
-                          Limpar
-                        </button>
-                        <button type="button" className={styles.calendarAction} onClick={() => selectDate("start", new Date())}>
-                          Hoje
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
+                    <select className={styles.dateSelect} value={effectiveStartDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
+                      {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
+                      {inventoryOptions.map((o) => (
+                        <option key={o.iso} value={o.iso}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <span className={styles.periodText}>Até</span>
                 <div className={styles.dateFieldWrap}>
-                  <button type="button" className={styles.dateField} onClick={() => openDatePicker("end")}>
+                  <div className={styles.dateSelectWrap}>
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <span className={endDate ? styles.dateValue : styles.datePlaceholder}>{formatDateDisplay(endDate)}</span>
-                  </button>
-                  {openPicker === "end" ? (
-                    <div className={styles.calendarPopover}>
-                      <div className={styles.calendarHeader}>
-                        <button type="button" className={styles.calendarNav} onClick={() => setPickerMonth((prev) => addMonths(prev, -1))}>
-                          {"<"}
-                        </button>
-                        <div className={styles.calendarTitle}>
-                          {pickerMonth.toLocaleString("pt-BR", { month: "long", year: "numeric" })}
-                        </div>
-                        <button type="button" className={styles.calendarNav} onClick={() => setPickerMonth((prev) => addMonths(prev, 1))}>
-                          {">"}
-                        </button>
-                      </div>
-                      <div className={styles.calendarWeekdays}>
-                        {weekDays.map((day) => (
-                          <span key={day}>{day}</span>
-                        ))}
-                      </div>
-                      <div className={styles.calendarGrid}>
-                        {calendarDays.map(({ date, inMonth }) => (
-                          <button
-                            key={date.toISOString()}
-                            type="button"
-                            className={`${styles.calendarDay} ${!inMonth ? styles.calendarDayMuted : ""} ${
-                              isSameDay(selectedDate, date) ? styles.calendarDaySelected : ""
-                            } ${isSameDay(today, date) ? styles.calendarDayToday : ""}`}
-                            onClick={() => selectDate("end", date)}
-                          >
-                            {date.getDate()}
-                          </button>
-                        ))}
-                      </div>
-                      <div className={styles.calendarFooter}>
-                        <button type="button" className={styles.calendarAction} onClick={() => setEndDate("")}>
-                          Limpar
-                        </button>
-                        <button type="button" className={styles.calendarAction} onClick={() => selectDate("end", new Date())}>
-                          Hoje
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
+                    <select className={styles.dateSelect} value={effectiveEndDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
+                      {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
+                      {inventoryOptions.map((o) => (
+                        <option key={o.iso} value={o.iso}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <button type="button" className={styles.exportBtn} disabled>
                   <ExportIcon />
@@ -796,7 +818,7 @@ export default function ListaDeComprasClient() {
                   const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
                   const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
                   const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
-                  const comprarValue = comprarMap[row.id] ?? formatDecimal3(comprarCalculado);
+                  const comprarValue = formatDecimal3(comprarCalculado);
                   return (
                     <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }}>
                       <label className={styles.checkCell}>
@@ -807,9 +829,9 @@ export default function ListaDeComprasClient() {
                           return (
                             <div key={column} className={styles.itemCell}>
                               <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                {row.item}
+                                {row.displayItem}
                               </Link>
-                              <div className={styles.itemMeta}>{mode === "fornecedor" ? row.fornecedor : row.categoria}</div>
+                              <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                             </div>
                           );
                         }
@@ -839,7 +861,7 @@ export default function ListaDeComprasClient() {
                         }
                         return (
                           <div key={column} className={styles.measureCell}>
-                            <input className={styles.buyInput} value={comprarValue} onChange={(e) => updateComprar(row.id, e.target.value)} inputMode="decimal" />
+                            <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
                             <span className={styles.unitTag}>{row.medida}</span>
                           </div>
                         );
@@ -848,7 +870,13 @@ export default function ListaDeComprasClient() {
                   );
                 })
               ) : (
-                <div className={styles.emptyState}>Nenhum item encontrado para a categoria selecionada.</div>
+                <div className={styles.emptyState}>
+                  {mode === "categoria"
+                    ? "Nenhum item encontrado para a categoria selecionada."
+                    : fornecedorFilter === "Fornecedor"
+                      ? "Selecione um fornecedor para montar a lista de compras."
+                      : "Nenhum item encontrado para o fornecedor selecionado."}
+                </div>
               )}
             </div>
           </section>

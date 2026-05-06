@@ -204,7 +204,7 @@
   position: relative;
 }
 
-.dateField {
+.dateSelectWrap {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -216,9 +216,25 @@
   background: #ffffff;
   color: #8a9b98;
   box-sizing: border-box;
-  cursor: pointer;
+}
+
+.dateSelect {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #637573;
+  font-size: 9px;
+  line-height: 1;
   appearance: none;
-  outline: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.dateSelect:disabled {
+  color: #a1aeac;
+  cursor: not-allowed;
 }
 
 .dateValue,
@@ -631,7 +647,7 @@
     display: block;
   }
 
-  .dateField {
+  .dateSelectWrap {
     width: 100%;
   }
 
