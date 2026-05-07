@@ -559,6 +559,13 @@
   gap: 6px;
 }
 
+.measureStack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+}
+
 .valueNeutral,
 .valueDanger,
 .valuePlain {
@@ -585,6 +592,12 @@
   font-size: 12px;
   font-weight: 700;
   line-height: 1;
+}
+
+.measureSub {
+  color: #95a8a6;
+  font-size: 10px;
+  line-height: 14px;
 }
 
 .unitTag {

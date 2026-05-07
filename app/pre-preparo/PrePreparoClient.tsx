@@ -7,6 +7,7 @@ import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
+import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import styles from "./pre-preparo.module.css";
 
 type PrePreparoRow = {
@@ -323,6 +324,33 @@ function parseDateLabelLoose(value: string) {
   const d = new Date(year, month, day);
   if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
   return d;
+}
+
+function parseRecipeUnitCost(row: PrePreparoRow) {
+  const unitCostLabel = String(row.custoUnitario ?? "").trim();
+  const direct = unitCostLabel.match(/R\$\s*([\d.,]+)\s*\/\s*([A-Za-zÀ-ÿ]+)/i);
+  if (direct) {
+    return {
+      cents: clampNonNegativeInt(parseCurrencyBRLToCents(String(direct[1] ?? ""))),
+      unit: String(direct[2] ?? "").trim() || "Und",
+    };
+  }
+  const totalCents = clampNonNegativeInt(parseCurrencyBRLToCents(row.custoTotal));
+  const { qty, unit } = parseQtyLabel(row.rendimento);
+  if (!qty || !totalCents) return null;
+  return {
+    cents: clampNonNegativeInt(Math.round(totalCents / qty)),
+    unit: unit || "Und",
+  };
+}
+
+function computeEtiquetaCostCents(row: PrePreparoRow, quantidade: number, unidade: string) {
+  if (!Number.isFinite(quantidade) || quantidade <= 0) return 0;
+  const unitCost = parseRecipeUnitCost(row);
+  if (!unitCost || unitCost.cents <= 0) return 0;
+  const qtyInCostUnit = unidade ? convertQty(quantidade, unidade, unitCost.unit) : quantidade;
+  const finalQty = Number.isFinite(qtyInCostUnit) && qtyInCostUnit > 0 ? qtyInCostUnit : quantidade;
+  return clampNonNegativeInt(Math.round(unitCost.cents * finalQty));
 }
 
 function startOfMonth(d: Date) {
@@ -814,6 +842,29 @@ export default function PrePreparoClient() {
   const canSaveRecipe = useMemo(() => {
     return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
   }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeSpec, newRecipeUnit, recipeYieldValue]);
+
+  function saveEtiqueta() {
+    if (!etiquetaSelectedRecipe) return;
+    const quantidade = parsePtNumber(etiquetaQtd);
+    const dataProducao = parseDateLabelLoose(etiquetaDataProd);
+    const dataValidade = parseDateLabelLoose(etiquetaDataVal);
+    if (!Number.isFinite(quantidade) || quantidade <= 0 || !dataProducao || !dataValidade) return;
+    const custoCents = computeEtiquetaCostCents(etiquetaSelectedRecipe, quantidade, etiquetaUnidade);
+    const next = {
+      id: String(Date.now()),
+      recipeId: etiquetaSelectedRecipe.id,
+      receita: etiquetaSelectedRecipe.receita,
+      responsavel: etiquetaResponsavel.trim(),
+      quantidade: formatPtQty(quantidade),
+      unidade: etiquetaUnidade.trim() || "Und",
+      custo: formatCurrencyBRLFromCents(custoCents),
+      dataProducao: formatDateLabel(dataProducao),
+      dataValidade: formatDateLabel(dataValidade),
+    };
+    const existing = readPrePreparoEtiquetasFromStore([]);
+    writePrePreparoEtiquetasToStore([next, ...existing]);
+    setIsEtiquetaOpen(false);
+  }
 
   async function downloadFichaTecnica(row: PrePreparoRow) {
     const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
@@ -1605,10 +1656,7 @@ export default function PrePreparoClient() {
                   type="button"
                   className={styles.printBtn}
                   disabled={!etiquetaRecipeId}
-                  onClick={() => {
-                    if (!etiquetaRecipeId) return;
-                    setIsEtiquetaOpen(false);
-                  }}
+                  onClick={saveEtiqueta}
                 >
                   Salvar e Imprimir
                 </button>

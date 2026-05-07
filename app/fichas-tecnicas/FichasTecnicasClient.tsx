@@ -24,6 +24,7 @@ type RecipeRow = {
 
 type ModalIngredientRow = {
   id: string;
+  ingredientId: string;
   item: string;
   quantidade: string;
   unidade: string;
@@ -50,6 +51,7 @@ type EditRecipeDraft = {
   precoVenda: string;
   cmvMeta: string;
   popularidade: string;
+  custoUnitario: number;
 };
 
 type FichaTableColumn = "receita" | "precoVenda" | "custoUnitario" | "cmvMeta" | "cmvAtual" | "bcg";
@@ -339,6 +341,16 @@ function formatMoney(value: number) {
   });
 }
 
+function formatMoneyDraft(input: string) {
+  const digits = String(input ?? "").replace(/\D/g, "");
+  if (!digits) return "0,00";
+  const cents = Number.parseInt(digits, 10);
+  return (cents / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function formatPercent2(value: number) {
   return `${value.toLocaleString("pt-BR", {
     minimumFractionDigits: 2,
@@ -346,13 +358,39 @@ function formatPercent2(value: number) {
   })}%`;
 }
 
+function formatPercentDraft(input: string) {
+  const digits = String(input ?? "").replace(/\D/g, "");
+  if (!digits) return "0,00";
+  const cents = Number.parseInt(digits, 10);
+  const value = Math.min(cents / 100, 99);
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatDecimalDraft(input: string, maxDecimals = 3) {
+  const raw = String(input ?? "").replace(/[^\d,]/g, "");
+  if (!raw) return "";
+  const hasLeadingComma = raw.startsWith(",");
+  const [intRaw = "", decRaw = ""] = raw.split(",", 2);
+  const intDigits = intRaw.replace(/\D/g, "");
+  const decDigits = decRaw.replace(/\D/g, "").slice(0, maxDecimals);
+  const intValue = intDigits ? Number.parseInt(intDigits, 10).toLocaleString("pt-BR") : "0";
+  if (hasLeadingComma) return decDigits ? `0,${decDigits}` : "0,";
+  if (raw.includes(",")) return `${intValue},${decDigits}`;
+  return intValue;
+}
+
 function popularityLabel(value: string) {
   switch (value) {
     case "alta":
       return "Popularidade Alta";
-    case "media":
-      return "Popularidade Média";
     case "baixa":
+      return "Popularidade Baixa";
+    case "Alta":
+      return "Popularidade Alta";
+    case "Baixa":
       return "Popularidade Baixa";
     default:
       return "Popularidade não informada";
@@ -372,6 +410,14 @@ function formatQtyLabel(value: string, unidade: string) {
     ? String(qty)
     : qty.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
   return `${label} ${unidade}`;
+}
+
+function calcRecipeMetrics(ingredientsTotal: number, recipeYield: number, precoVenda: number, cmvMeta: number) {
+  const safeYield = recipeYield > 0 ? recipeYield : 0;
+  const custoPorPorcao = safeYield > 0 ? ingredientsTotal / safeYield : 0;
+  const cmvAtual = precoVenda > 0 ? (custoPorPorcao / precoVenda) * 100 : 0;
+  const precoSugerido = cmvMeta > 0 ? custoPorPorcao / (cmvMeta / 100) : 0;
+  return { custoPorPorcao, cmvAtual, precoSugerido };
 }
 
 function formatPdfDate(value: Date) {
@@ -720,10 +766,12 @@ export default function FichasTecnicasClient() {
   const [ingredientQty, setIngredientQty] = useState("0,000");
   const [recipeYield, setRecipeYield] = useState("1,000");
   const [ingredientRows, setIngredientRows] = useState<ModalIngredientRow[]>([]);
+  const [editingIngredientRowId, setEditingIngredientRowId] = useState<string | null>(null);
   const [detailsRecipe, setDetailsRecipe] = useState<SavedRecipeDetails | null>(null);
   const [detailsViewTab, setDetailsViewTab] = useState<"ingredientes" | "preparo">("ingredientes");
   const [detailIngredientId, setDetailIngredientId] = useState("");
   const [detailIngredientQty, setDetailIngredientQty] = useState("0,000");
+  const [editingDetailIngredientRowId, setEditingDetailIngredientRowId] = useState<string | null>(null);
   const [isEditingPrep, setIsEditingPrep] = useState(false);
   const [prepDraft, setPrepDraft] = useState("");
   const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
@@ -834,7 +882,7 @@ export default function FichasTecnicasClient() {
       cmvMeta: "minmax(92px, 0.7fr)",
       cmvAtual: "minmax(110px, 0.8fr)",
       bcg: "minmax(150px, 1fr)",
-      acoes: "64px",
+      acoes: "88px",
     };
     const orderedColumns: Array<FichaTableColumn | "acoes"> = [...columnOrder, "acoes"];
     return orderedColumns.map((column) => widths[column]).join(" ");
@@ -869,7 +917,9 @@ export default function FichasTecnicasClient() {
   const ingredientsTotal = useMemo(() => ingredientRows.reduce((sum, row) => sum + row.custoTotal, 0), [ingredientRows]);
   const priceValue = useMemo(() => parseDecimalInput(precoVenda), [precoVenda]);
   const cmvMetaValue = useMemo(() => parseDecimalInput(cmvMetaDraft), [cmvMetaDraft]);
-  const cmvAtualValue = useMemo(() => (priceValue > 0 ? (ingredientsTotal / priceValue) * 100 : 0), [ingredientsTotal, priceValue]);
+  const recipeYieldValue = useMemo(() => parseDecimalInput(recipeYield), [recipeYield]);
+  const createMetrics = useMemo(() => calcRecipeMetrics(ingredientsTotal, recipeYieldValue, priceValue, cmvMetaValue), [cmvMetaValue, ingredientsTotal, priceValue, recipeYieldValue]);
+  const cmvAtualValue = createMetrics.cmvAtual;
   const cmvAbaixoMeta = cmvAtualValue <= cmvMetaValue;
   const canGoStep1 = recipeName.trim().length > 0;
   const canGoStep2 = ingredientRows.length > 0 && parseDecimalInput(recipeYield) > 0;
@@ -931,6 +981,7 @@ export default function FichasTecnicasClient() {
     setIngredientQty("0,000");
     setRecipeYield("1,000");
     setIngredientRows([]);
+    setEditingIngredientRowId(null);
   }
 
   function openCreateModal() {
@@ -947,40 +998,56 @@ export default function FichasTecnicasClient() {
     if (!selectedIngredient) return;
     const qty = parseDecimalInput(ingredientQty);
     if (qty <= 0) return;
-    setIngredientRows((prev) => [
-      ...prev,
-      {
-        id: `${selectedIngredient.id}-${Date.now()}`,
+    setIngredientRows((prev) => {
+      const nextRow: ModalIngredientRow = {
+        id: editingIngredientRowId ?? `${selectedIngredient.id}-${Date.now()}`,
+        ingredientId: selectedIngredient.id,
         item: selectedIngredient.item,
         quantidade: ingredientQty,
         unidade: selectedIngredient.medida || "Und",
         custoTotal: ingredientCost,
-      },
-    ]);
+      };
+      if (!editingIngredientRowId) return [...prev, nextRow];
+      return prev.map((row) => (row.id === editingIngredientRowId ? nextRow : row));
+    });
     setSelectedIngredientId("");
     setIngredientQty("0,000");
+    setEditingIngredientRowId(null);
   }
 
   function removeIngredientRow(id: string) {
     setIngredientRows((prev) => prev.filter((row) => row.id !== id));
+    if (editingIngredientRowId === id) {
+      setSelectedIngredientId("");
+      setIngredientQty("0,000");
+      setEditingIngredientRowId(null);
+    }
+  }
+
+  function editIngredientRow(row: ModalIngredientRow) {
+    setSelectedIngredientId(row.ingredientId);
+    setIngredientQty(row.quantidade);
+    setEditingIngredientRowId(row.id);
   }
 
   function openSavedRecipeDetails() {
+    const metrics = calcRecipeMetrics(ingredientsTotal, recipeYieldValue, priceValue, cmvMetaValue);
     setDetailsRecipe({
       recipeName: recipeName.trim() || "Sem nome",
       recipeImage,
       popularidade,
       precoVenda: priceValue,
       cmvMeta: cmvMetaValue,
-      cmvAtual: cmvAtualValue,
+      cmvAtual: metrics.cmvAtual,
       ingredientsTotal,
-      recipeYield: parseDecimalInput(recipeYield),
+      recipeYield: recipeYieldValue,
       ingredientRows,
       modoPreparo: "",
     });
     setDetailsViewTab("ingredientes");
     setDetailIngredientId("");
     setDetailIngredientQty("0,000");
+    setEditingDetailIngredientRowId(null);
     setIsEditingPrep(false);
     setPrepDraft("");
     closeCreateModal();
@@ -1005,40 +1072,66 @@ export default function FichasTecnicasClient() {
     const qty = parseDecimalInput(detailIngredientQty);
     if (qty <= 0) return;
 
-    const nextRows = [
-      ...detailsRecipe.ingredientRows,
-      {
-        id: `${selectedDetailIngredient.id}-${Date.now()}`,
-        item: selectedDetailIngredient.item,
-        quantidade: detailIngredientQty,
-        unidade: selectedDetailIngredient.medida || "Und",
-        custoTotal: detailIngredientCost,
-      },
-    ];
+    const nextRows = detailsRecipe.ingredientRows.some((row) => row.id === editingDetailIngredientRowId)
+      ? detailsRecipe.ingredientRows.map((row) =>
+          row.id === editingDetailIngredientRowId
+            ? {
+                id: editingDetailIngredientRowId!,
+                ingredientId: selectedDetailIngredient.id,
+                item: selectedDetailIngredient.item,
+                quantidade: detailIngredientQty,
+                unidade: selectedDetailIngredient.medida || "Und",
+                custoTotal: detailIngredientCost,
+              }
+            : row
+        )
+      : [
+          ...detailsRecipe.ingredientRows,
+          {
+            id: `${selectedDetailIngredient.id}-${Date.now()}`,
+            ingredientId: selectedDetailIngredient.id,
+            item: selectedDetailIngredient.item,
+            quantidade: detailIngredientQty,
+            unidade: selectedDetailIngredient.medida || "Und",
+            custoTotal: detailIngredientCost,
+          },
+        ];
 
     const nextTotal = nextRows.reduce((sum, row) => sum + row.custoTotal, 0);
-    const nextCmv = detailsRecipe.precoVenda > 0 ? (nextTotal / detailsRecipe.precoVenda) * 100 : 0;
+    const nextMetrics = calcRecipeMetrics(nextTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
     setDetailsRecipe({
       ...detailsRecipe,
       ingredientRows: nextRows,
       ingredientsTotal: nextTotal,
-      cmvAtual: nextCmv,
+      cmvAtual: nextMetrics.cmvAtual,
     });
     setDetailIngredientId("");
     setDetailIngredientQty("0,000");
+    setEditingDetailIngredientRowId(null);
   }
 
   function removeDetailIngredientRow(id: string) {
     if (!detailsRecipe) return;
     const nextRows = detailsRecipe.ingredientRows.filter((row) => row.id !== id);
     const nextTotal = nextRows.reduce((sum, row) => sum + row.custoTotal, 0);
-    const nextCmv = detailsRecipe.precoVenda > 0 ? (nextTotal / detailsRecipe.precoVenda) * 100 : 0;
+    const nextMetrics = calcRecipeMetrics(nextTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
     setDetailsRecipe({
       ...detailsRecipe,
       ingredientRows: nextRows,
       ingredientsTotal: nextTotal,
-      cmvAtual: nextCmv,
+      cmvAtual: nextMetrics.cmvAtual,
     });
+    if (editingDetailIngredientRowId === id) {
+      setDetailIngredientId("");
+      setDetailIngredientQty("0,000");
+      setEditingDetailIngredientRowId(null);
+    }
+  }
+
+  function editDetailIngredientRow(row: ModalIngredientRow) {
+    setDetailIngredientId(row.ingredientId);
+    setDetailIngredientQty(row.quantidade);
+    setEditingDetailIngredientRowId(row.id);
   }
 
   function startPrepEdit() {
@@ -1084,7 +1177,8 @@ export default function FichasTecnicasClient() {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }),
-      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "Alta" : row.bcg === "quebra-cabeca" ? "Média" : "Baixa",
+      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "Alta" : "Baixa",
+      custoUnitario: parseMoneyLabel(row.custoUnitario),
     });
     setActionMenuRowId(null);
   }
@@ -1111,7 +1205,8 @@ export default function FichasTecnicasClient() {
     if (!editDraft) return;
     const precoVendaValue = parseDecimalInput(editDraft.precoVenda);
     const cmvMetaValue = parseDecimalInput(editDraft.cmvMeta);
-    const bcgFromPopularity: BcgType = editDraft.popularidade === "Alta" ? "estrela" : editDraft.popularidade === "Média" ? "quebra-cabeca" : "abacaxi";
+    const bcgFromPopularity: BcgType = editDraft.popularidade === "Alta" ? "estrela" : "abacaxi";
+    const precoSugeridoValue = cmvMetaValue > 0 ? editDraft.custoUnitario / (cmvMetaValue / 100) : 0;
 
     setTableRows((prev) =>
       prev.map((row) =>
@@ -1120,6 +1215,7 @@ export default function FichasTecnicasClient() {
               ...row,
               receita: editDraft.recipeName.trim() || row.receita,
               precoVenda: formatMoney(precoVendaValue),
+              precoVendaSub: precoSugeridoValue > 0 ? formatMoney(precoSugeridoValue) : row.precoVendaSub,
               cmvMeta: `${cmvMetaValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
               bcg: bcgFromPopularity,
             }
@@ -1138,7 +1234,7 @@ export default function FichasTecnicasClient() {
     return {
       recipeName: row.receita,
       recipeImage: "",
-      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : row.bcg === "quebra-cabeca" ? "media" : "baixa",
+      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa",
       precoVenda: precoVendaValue,
       cmvMeta: cmvMetaRow,
       cmvAtual: cmvAtualRow,
@@ -1147,6 +1243,7 @@ export default function FichasTecnicasClient() {
       ingredientRows: [
         {
           id: `${row.id}-base`,
+          ingredientId: "",
           item: row.receita,
           quantidade: "1",
           unidade: "Und",
@@ -1169,9 +1266,7 @@ export default function FichasTecnicasClient() {
       minute: "2-digit",
     })}`;
     const recipeYieldLabel = `${formatDecimal3(recipe.recipeYield)} porções`;
-    const custoUnitarioValue = recipe.recipeYield > 0 ? recipe.ingredientsTotal / recipe.recipeYield : 0;
-    const precoSugeridoValue =
-      recipe.cmvMeta > 0 ? recipe.ingredientsTotal / (recipe.cmvMeta / 100) : recipe.precoVenda;
+    const metrics = calcRecipeMetrics(recipe.ingredientsTotal, recipe.recipeYield, recipe.precoVenda, recipe.cmvMeta);
 
     const markup = buildFichaTecnicaPdfMarkup({
       logoSrc,
@@ -1182,8 +1277,8 @@ export default function FichasTecnicasClient() {
       validade: "1 Dia(s)",
       categoria: popularityLabel(recipe.popularidade),
       custoTotal: formatMoney(recipe.ingredientsTotal),
-      custoUnitario: `${formatMoney(custoUnitarioValue)}/porção`,
-      precoSugerido: formatMoney(precoSugeridoValue),
+      custoUnitario: `${formatMoney(metrics.custoPorPorcao)}/porção`,
+      precoSugerido: formatMoney(metrics.precoSugerido),
       cmvMeta: formatPercent2(recipe.cmvMeta),
       modoPreparo: recipe.modoPreparo || "-",
       rendimento: recipeYieldLabel,
@@ -1217,7 +1312,7 @@ export default function FichasTecnicasClient() {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
   return (
@@ -1290,7 +1385,8 @@ export default function FichasTecnicasClient() {
                               type="text"
                               className={styles.detailsInlineInput}
                               value={detailIngredientQty}
-                              onChange={(e) => setDetailIngredientQty(e.target.value)}
+                              inputMode="decimal"
+                              onChange={(e) => setDetailIngredientQty(formatDecimalDraft(e.target.value, 3))}
                             />
                             <span className={styles.detailsInlineSuffix}>{selectedDetailIngredient?.medida || "Und"}</span>
                           </span>
@@ -1306,7 +1402,7 @@ export default function FichasTecnicasClient() {
                             onClick={addDetailIngredientRow}
                             disabled={!selectedDetailIngredient || parseDecimalInput(detailIngredientQty) <= 0}
                           >
-                            <PlusIcon />
+                            {editingDetailIngredientRowId ? <EditIcon /> : <PlusIcon />}
                           </button>
                         </div>
                       </div>
@@ -1321,6 +1417,9 @@ export default function FichasTecnicasClient() {
                             <div className={styles.detailsListItem}>{row.item}</div>
                             <div className={styles.detailsListQty}>{formatQtyLabel(row.quantidade, row.unidade)}</div>
                             <div className={styles.detailsListCost}>{formatMoney(row.custoTotal)}</div>
+                            <button type="button" className={styles.detailsEditRowBtn} onClick={() => editDetailIngredientRow(row)} aria-label={`Editar ${row.item}`}>
+                              <EditIcon />
+                            </button>
                             <button type="button" className={styles.detailsTrashBtn} onClick={() => removeDetailIngredientRow(row.id)} aria-label={`Remover ${row.item}`}>
                               <TrashIcon />
                             </button>
@@ -1351,7 +1450,7 @@ export default function FichasTecnicasClient() {
                           </div>
                           <div className={styles.detailsTotalCol}>
                             <span>Custo Unitário:</span>
-                            <strong>{`${formatMoney(detailsRecipe.recipeYield > 0 ? detailsRecipe.ingredientsTotal / detailsRecipe.recipeYield : 0)} / porção`}</strong>
+                            <strong>{`${formatMoney(calcRecipeMetrics(detailsRecipe.ingredientsTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta).custoPorPorcao)} / porção`}</strong>
                           </div>
                         </div>
                       </div>
@@ -1453,7 +1552,7 @@ export default function FichasTecnicasClient() {
                         </span>
                         <span className={styles.detailsSummaryText}>
                           <span className={styles.detailsSummaryLabel}>Preço Sugerido</span>
-                          <strong>{formatMoney(detailsRecipe.ingredientsTotal * 2)}</strong>
+                          <strong>{formatMoney(calcRecipeMetrics(detailsRecipe.ingredientsTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta).precoSugerido)}</strong>
                         </span>
                       </div>
                     </div>
@@ -1736,8 +1835,9 @@ export default function FichasTecnicasClient() {
                           <input
                             type="text"
                             className={styles.groupInput}
+                            inputMode="decimal"
                             value={precoVenda}
-                            onChange={(e) => setPrecoVenda(e.target.value)}
+                            onChange={(e) => setPrecoVenda(formatMoneyDraft(e.target.value))}
                           />
                         </div>
                       </label>
@@ -1748,8 +1848,9 @@ export default function FichasTecnicasClient() {
                           <input
                             type="text"
                             className={styles.groupInput}
+                            inputMode="decimal"
                             value={cmvMetaDraft}
-                            onChange={(e) => setCmvMetaDraft(e.target.value)}
+                            onChange={(e) => setCmvMetaDraft(formatPercentDraft(e.target.value))}
                           />
                           <span className={styles.inputSuffix}>%</span>
                         </div>
@@ -1760,7 +1861,6 @@ export default function FichasTecnicasClient() {
                         <select className={styles.modalSelect} value={popularidade} onChange={(e) => setPopularidade(e.target.value)}>
                           <option value="">Selecione</option>
                           <option value="alta">Alta</option>
-                          <option value="media">Média</option>
                           <option value="baixa">Baixa</option>
                         </select>
                       </label>
@@ -1802,7 +1902,8 @@ export default function FichasTecnicasClient() {
                           type="text"
                           className={styles.inlineInput}
                           value={ingredientQty}
-                          onChange={(e) => setIngredientQty(e.target.value)}
+                            inputMode="decimal"
+                            onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
                         />
                         <span className={styles.inlineSuffix}>{selectedIngredient?.medida || "Und"}</span>
                       </span>
@@ -1813,7 +1914,7 @@ export default function FichasTecnicasClient() {
                       </span>
 
                       <button type="button" className={styles.addBtn} onClick={addIngredientRow} disabled={!selectedIngredient || parseDecimalInput(ingredientQty) <= 0}>
-                        <PlusIcon />
+                        {editingIngredientRowId ? <EditIcon /> : <PlusIcon />}
                       </button>
                     </div>
                   </div>
@@ -1829,6 +1930,9 @@ export default function FichasTecnicasClient() {
                           <div className={styles.ingredientItem}>{row.item}</div>
                           <div className={styles.ingredientQty}>{formatQtyLabel(row.quantidade, row.unidade)}</div>
                           <div className={styles.ingredientCost}>{formatMoney(row.custoTotal)}</div>
+                          <button type="button" className={styles.editRowBtn} onClick={() => editIngredientRow(row)} aria-label={`Editar ${row.item}`}>
+                            <EditIcon />
+                          </button>
                           <button type="button" className={styles.deleteBtn} onClick={() => removeIngredientRow(row.id)} aria-label={`Remover ${row.item}`}>
                             <TrashIcon />
                           </button>
@@ -1883,7 +1987,7 @@ export default function FichasTecnicasClient() {
                       </div>
                       <div className={styles.summaryLine}>
                         <span>Custo Unitário:</span>
-                        <strong>{formatMoney(ingredientsTotal)}</strong>
+                        <strong>{`${formatMoney(createMetrics.custoPorPorcao)} / porção`}</strong>
                       </div>
                       <div className={styles.summaryLine}>
                         <span>CMV Meta:</span>
@@ -1928,7 +2032,7 @@ export default function FichasTecnicasClient() {
                     <div className={styles.yieldHint}>Informe quanto essa receita irá render em média após o preparo.</div>
                   </div>
                   <span className={styles.yieldInputWrap}>
-                    <input type="text" className={styles.yieldInput} value={recipeYield} onChange={(e) => setRecipeYield(e.target.value)} />
+                    <input type="text" className={styles.yieldInput} inputMode="decimal" value={recipeYield} onChange={(e) => setRecipeYield(formatDecimalDraft(e.target.value, 3))} />
                     <span className={styles.yieldSuffix}>Porções</span>
                   </span>
                 </div>
@@ -1960,82 +2064,93 @@ export default function FichasTecnicasClient() {
 
       {editDraft ? (
         <div className={styles.modalOverlay} role="presentation">
-          <div className={styles.editModalCard} role="dialog" aria-modal="true" aria-labelledby="editar-ficha-title">
+          <div className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="editar-ficha-title">
             <div className={styles.modalHeader}>
-              <h2 id="editar-ficha-title" className={styles.editModalTitle}>
-                Editar Receita (Ficha Técnica)
+              <h2 id="editar-ficha-title" className={styles.modalTitle}>
+                Cadastro de Receita (Item do Cardápio)
               </h2>
               <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={closeEditModal}>
                 ×
               </button>
             </div>
 
-            <div className={styles.editModalBody}>
-              <div className={styles.editHeroRow}>
-                <div className={styles.editImageBox}>
-                  <RecipeThumb type={editDraft.thumb} />
-                </div>
-                <div className={styles.editImageHint}>Tamanho recomendado: 600 x 600 px</div>
+            <div className={styles.modalBody}>
+              <div className={styles.stepRow}>
+                <span className={styles.stepText}>1 de 3</span>
+                <span className={`${styles.stepBar} ${styles.stepBarActive}`} />
+                <span className={styles.stepBar} />
+                <span className={styles.stepBar} />
               </div>
 
-              <div className={styles.editFormBlock}>
+              <div className={styles.heroRow}>
+                <div className={styles.imageUpload}>
+                  <RecipeThumb type={editDraft.thumb} />
+                </div>
+                <div className={styles.imageHint}>Tamanho recomendado: 600 x 600 px</div>
+              </div>
+
+              <div className={styles.formBlock}>
                 <label className={styles.fieldBlock}>
-                  <span className={styles.editFieldLabel}>Nome do Item</span>
+                  <span className={styles.fieldLabel}>Nome da Receita</span>
                   <input
                     type="text"
-                    className={styles.editTextInput}
+                    className={styles.textInput}
                     value={editDraft.recipeName}
                     onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, recipeName: e.target.value } : prev))}
                   />
                 </label>
 
-                <div className={styles.editFormGrid}>
+                <div className={styles.formGrid}>
                   <label className={styles.fieldBlock}>
-                    <span className={styles.editFieldLabel}>Preço de Venda</span>
-                    <div className={styles.editInputGroup}>
-                      <span className={styles.editInputPrefix}>R$</span>
+                    <span className={styles.fieldLabel}>Preço de Venda</span>
+                    <div className={`${styles.inputGroup} ${styles.inputGroupPrefix}`}>
+                      <span className={styles.inputPrefix}>R$</span>
                       <input
                         type="text"
-                        className={styles.editGroupInput}
+                        className={styles.groupInput}
+                        inputMode="decimal"
                         value={editDraft.precoVenda}
-                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, precoVenda: e.target.value } : prev))}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, precoVenda: formatMoneyDraft(e.target.value) } : prev))}
                       />
                     </div>
                   </label>
 
                   <label className={styles.fieldBlock}>
-                    <span className={styles.editFieldLabel}>CMV Meta</span>
-                    <div className={styles.editInputGroup}>
+                    <span className={styles.fieldLabel}>CMV Meta</span>
+                    <div className={`${styles.inputGroup} ${styles.inputGroupSuffix}`}>
                       <input
                         type="text"
-                        className={styles.editGroupInput}
+                        className={styles.groupInput}
+                        inputMode="decimal"
                         value={editDraft.cmvMeta}
-                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, cmvMeta: e.target.value } : prev))}
+                        onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, cmvMeta: formatPercentDraft(e.target.value) } : prev))}
                       />
-                      <span className={styles.editInputSuffix}>%</span>
+                      <span className={styles.inputSuffix}>%</span>
                     </div>
                   </label>
 
                   <label className={styles.fieldBlock}>
-                    <span className={styles.editFieldLabel}>Popularidade</span>
+                    <span className={styles.fieldLabel}>Popularidade</span>
                     <select
-                      className={styles.editSelect}
+                      className={styles.modalSelect}
                       value={editDraft.popularidade}
                       onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, popularidade: e.target.value } : prev))}
                     >
                       <option value="Alta">Alta</option>
-                      <option value="Média">Média</option>
                       <option value="Baixa">Baixa</option>
                     </select>
                   </label>
                 </div>
 
-                <div className={styles.editSuggestedPrice}>{`Preço Sugerido: ${formatMoney(parseDecimalInput(editDraft.precoVenda) * 0.85)}`}</div>
+                <div className={styles.editSuggestedPrice}>{`Preço Sugerido: ${formatMoney(parseDecimalInput(editDraft.cmvMeta) > 0 ? editDraft.custoUnitario / (parseDecimalInput(editDraft.cmvMeta) / 100) : 0)}`}</div>
               </div>
             </div>
 
-            <div className={styles.editModalFooter}>
-              <button type="button" className={styles.editSaveBtn} onClick={saveEditedRow}>
+            <div className={styles.modalFooter}>
+              <button type="button" className={styles.cancelBtn} onClick={closeEditModal}>
+                Cancelar
+              </button>
+              <button type="button" className={`${styles.nextBtn} ${styles.nextBtnActive}`} onClick={saveEditedRow}>
                 Salvar
               </button>
             </div>

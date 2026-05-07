@@ -70,19 +70,20 @@
 }
 
 .newButton {
-  height: 28px;
+  height: 38px;
   border: 0;
-  border-radius: 5px;
+  border-radius: 10px;
   background: #18b663;
   color: #ffffff;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  font-size: 9px;
-  font-weight: 700;
+  gap: 8px;
+  padding: 0 14px;
+  font-size: 12px;
+  font-weight: 800;
   cursor: pointer;
   flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .filtersRow {
@@ -993,7 +994,7 @@
   color: #2a3133;
   font-size: 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 136px 122px 24px;
+  grid-template-columns: minmax(0, 1fr) 136px 122px 24px 24px;
   gap: 8px;
   align-items: center;
   padding: 0 10px;
@@ -1004,6 +1005,7 @@
   font-weight: 700;
 }
 
+.detailsEditRowBtn,
 .detailsTrashBtn {
   width: 18px;
   height: 18px;
@@ -1018,6 +1020,11 @@
   cursor: pointer;
 }
 
+.detailsEditRowBtn {
+  color: #19b663;
+}
+
+.detailsEditRowBtn svg,
 .detailsTrashBtn svg {
   width: 12px;
   height: 12px;
@@ -1149,6 +1156,8 @@
   padding: 8px 10px;
   color: #202527;
   font-size: 9px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .detailsPrepActions {
@@ -1682,7 +1691,7 @@
   border-radius: 10px;
   background: #f6f7f7;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 96px 28px;
+  grid-template-columns: minmax(0, 1fr) 96px 96px 28px 28px;
   gap: 8px;
   align-items: center;
   padding: 0 12px;
@@ -1705,6 +1714,7 @@
   font-weight: 500;
 }
 
+.editRowBtn,
 .deleteBtn {
   width: 22px;
   height: 22px;
@@ -1715,6 +1725,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  cursor: pointer;
+}
+
+.editRowBtn {
+  color: #19b663;
 }
 
 .totalBar {

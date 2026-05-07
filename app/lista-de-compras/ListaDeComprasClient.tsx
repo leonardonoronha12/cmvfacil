@@ -30,6 +30,8 @@ type CompraRow = {
   custoMedio: number;
   custoMedioLabel: string;
   fornecedor: string;
+  fornecedorMedida: string;
+  fornecedorFator: number;
   consumoDiario: number;
   estoqueFinal: number;
   comprar: number;
@@ -71,6 +73,13 @@ function formatMoney(value: number) {
 function formatDecimal3(value: number) {
   return value.toLocaleString("pt-BR", {
     minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
+}
+
+function formatDecimalUpTo3(value: number) {
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 3,
   });
 }
@@ -381,7 +390,7 @@ export default function ListaDeComprasClient() {
     const selectedFornecedorKey = fornecedorKeyByLabel.get(fornecedorFilter) ?? fornecedorFilter.trim().toUpperCase();
     const selectedEquivalencias = fornecedorEquivalenciasMap[selectedFornecedorKey] ?? [];
     const selectedProdutos = fornecedorProdutosMap[selectedFornecedorKey] ?? [];
-    const supplierNameByItemKey = new Map<string, string>();
+    const supplierMetaByItemKey = new Map<string, { name: string; unit: string; factor: number }>();
     const supplierItemKeys = new Set<string>();
 
     for (const row of selectedEquivalencias) {
@@ -389,14 +398,26 @@ export default function ListaDeComprasClient() {
       const nomeFornecedor = row.nomeNaNota.trim();
       if (!insumoKey || !nomeFornecedor) continue;
       supplierItemKeys.add(insumoKey);
-      if (!supplierNameByItemKey.has(insumoKey)) supplierNameByItemKey.set(insumoKey, nomeFornecedor);
+      if (!supplierMetaByItemKey.has(insumoKey)) {
+        supplierMetaByItemKey.set(insumoKey, {
+          name: nomeFornecedor,
+          unit: row.unidadeNaNota.trim() || "Und",
+          factor: Math.max(parsePtNumber(row.equivalenteQuantidade), 1),
+        });
+      }
     }
 
     for (const produto of selectedProdutos) {
       const produtoKey = normalizeText(produto);
       if (!produtoKey) continue;
       supplierItemKeys.add(produtoKey);
-      if (!supplierNameByItemKey.has(produtoKey)) supplierNameByItemKey.set(produtoKey, produto.trim());
+      if (!supplierMetaByItemKey.has(produtoKey)) {
+        supplierMetaByItemKey.set(produtoKey, {
+          name: produto.trim(),
+          unit: "",
+          factor: 1,
+        });
+      }
     }
 
     return insumos
@@ -409,13 +430,9 @@ export default function ListaDeComprasClient() {
         const itemKey = normalizeText(row.item);
         const latest = latestIndex.get(itemKey);
         const fornecedor = latest?.fornecedor || fornecedorFallback.get(itemKey) || "-";
-        const displayItem = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? supplierNameByItemKey.get(itemKey) ?? row.item : row.item;
-        const itemMetaLabel =
-          mode === "fornecedor"
-            ? displayItem !== row.item
-              ? row.item
-              : fornecedor
-            : row.categoria?.trim() || "-";
+        const supplierMeta = supplierMetaByItemKey.get(itemKey);
+        const displayItem = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? supplierMeta?.name ?? row.item : row.item;
+        const itemMetaLabel = mode === "fornecedor" ? row.item : row.categoria?.trim() || "-";
         const initialQty = initialById.get(row.id) ?? 0;
         const finalQty = finalById.get(row.id) ?? 0;
         const entradasQty = entradasQtyById.get(row.id) ?? 0;
@@ -432,6 +449,8 @@ export default function ListaDeComprasClient() {
           custoMedio: parseMoney(row.custoMedio ?? ""),
           custoMedioLabel: row.custoMedio?.trim() || "R$0,00",
           fornecedor,
+          fornecedorMedida: supplierMeta?.unit || row.medida?.trim() || "Und",
+          fornecedorFator: supplierMeta?.factor && supplierMeta.factor > 0 ? supplierMeta.factor : 1,
           consumoDiario,
           estoqueFinal: finalQty,
           comprar,
@@ -478,7 +497,7 @@ export default function ListaDeComprasClient() {
       const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
       out.push({ iso, label: c.data, t });
     }
-    out.sort((a, b) => a.t - b.t);
+    out.sort((a, b) => b.t - a.t);
     const seen = new Set<string>();
     return out.filter((option) => {
       if (seen.has(option.iso)) return false;
@@ -487,13 +506,13 @@ export default function ListaDeComprasClient() {
     });
   }, [contagens]);
 
-  const effectiveStartDate = startDate || inventoryOptions[0]?.iso || "";
-  const effectiveEndDate = endDate || inventoryOptions[inventoryOptions.length - 1]?.iso || "";
+  const effectiveStartDate = startDate || inventoryOptions[inventoryOptions.length - 1]?.iso || "";
+  const effectiveEndDate = endDate || inventoryOptions[0]?.iso || "";
 
   useEffect(() => {
     if (!inventoryOptions.length) return;
-    setStartDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[0]!.iso));
-    setEndDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
+    setStartDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
+    setEndDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[0]!.iso));
   }, [inventoryOptions]);
 
   const rows = useMemo(() => {
@@ -512,13 +531,19 @@ export default function ListaDeComprasClient() {
         let cmp = 0;
         switch (sortKey) {
           case "item":
-            cmp = collator.compare(a.row.item, b.row.item);
+            cmp = collator.compare(mode === "fornecedor" ? a.row.displayItem : a.row.item, mode === "fornecedor" ? b.row.displayItem : b.row.item);
             break;
           case "custoMedio":
-            cmp = a.row.custoMedio - b.row.custoMedio;
+            cmp =
+              mode === "fornecedor"
+                ? a.row.custoMedio * a.row.fornecedorFator - b.row.custoMedio * b.row.fornecedorFator
+                : a.row.custoMedio - b.row.custoMedio;
             break;
           case "consumoDiario":
-            cmp = a.row.consumoDiario - b.row.consumoDiario;
+            cmp =
+              mode === "fornecedor"
+                ? a.row.consumoDiario / a.row.fornecedorFator - b.row.consumoDiario / b.row.fornecedorFator
+                : a.row.consumoDiario - b.row.consumoDiario;
             break;
           case "estoqueFinal": {
             const aValue = parseDecimalInput(estoqueFinalMap[a.row.id] ?? "0,000");
@@ -530,8 +555,8 @@ export default function ListaDeComprasClient() {
             const coberturaDias = parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1);
             const aEstoqueFinal = parseDecimalInput(estoqueFinalMap[a.row.id] ?? formatDecimal3(a.row.estoqueFinal));
             const bEstoqueFinal = parseDecimalInput(estoqueFinalMap[b.row.id] ?? formatDecimal3(b.row.estoqueFinal));
-            const aValue = Math.max(a.row.consumoDiario * coberturaDias - aEstoqueFinal, 0);
-            const bValue = Math.max(b.row.consumoDiario * coberturaDias - bEstoqueFinal, 0);
+            const aValue = Math.max(a.row.consumoDiario * coberturaDias - aEstoqueFinal, 0) / (mode === "fornecedor" ? a.row.fornecedorFator : 1);
+            const bValue = Math.max(b.row.consumoDiario * coberturaDias - bEstoqueFinal, 0) / (mode === "fornecedor" ? b.row.fornecedorFator : 1);
             cmp = aValue - bValue;
             break;
           }
@@ -818,7 +843,11 @@ export default function ListaDeComprasClient() {
                   const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
                   const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
                   const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
-                  const comprarValue = formatDecimal3(comprarCalculado);
+                  const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+                  const compraFornecedor = comprarCalculado / fornecedorFactor;
+                  const consumoFornecedor = row.consumoDiario / fornecedorFactor;
+                  const custoFornecedor = row.custoMedio * fornecedorFactor;
+                  const comprarValue = formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
                   return (
                     <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }}>
                       <label className={styles.checkCell}>
@@ -838,16 +867,19 @@ export default function ListaDeComprasClient() {
                         if (column === "custoMedio") {
                           return (
                             <div key={column} className={styles.costCell}>
-                              <div className={styles.costMain}>{row.custoMedioLabel}</div>
-                              <div className={styles.costSub}>{row.fornecedor}</div>
+                              <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
+                              <div className={styles.costSub}>{mode === "fornecedor" ? row.custoMedioLabel : row.fornecedor}</div>
                             </div>
                           );
                         }
                         if (column === "consumoDiario") {
                           return (
-                            <div key={column} className={styles.measureCell}>
-                              <span className={styles.valuePlain}>{formatDecimal3(row.consumoDiario)}</span>
-                              <span className={styles.unitPlain}>{row.medida}</span>
+                            <div key={column} className={styles.measureStack}>
+                              <div className={styles.measureCell}>
+                                <span className={styles.valuePlain}>{formatDecimalUpTo3(mode === "fornecedor" ? consumoFornecedor : row.consumoDiario)}</span>
+                                <span className={styles.unitPlain}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
+                              </div>
+                              {mode === "fornecedor" ? <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div> : null}
                             </div>
                           );
                         }
@@ -862,7 +894,7 @@ export default function ListaDeComprasClient() {
                         return (
                           <div key={column} className={styles.measureCell}>
                             <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
-                            <span className={styles.unitTag}>{row.medida}</span>
+                            <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
                           </div>
                         );
                       })}

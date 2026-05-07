@@ -8,6 +8,8 @@ import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsu
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow } from "../lib/desperdiciosStore";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -775,6 +777,7 @@ export default function DashboardClient() {
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [desperdicios, setDesperdicios] = useState<DesperdicioRow[]>([]);
+  const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
   const [tableQuery, setTableQuery] = useState("");
   const [tableCategoria, setTableCategoria] = useState("todas");
   const [tableColumnOrder, setTableColumnOrder] = useState<DashboardTableColumn[]>(["item", "initial", "entradas", "final", "saidas", "custo", "cmv"]);
@@ -843,6 +846,7 @@ export default function DashboardClient() {
     const contagensRows = readInventarioFromStore([]);
     const entradasRows = readEntradasFromStore([]);
     const desperdiciosRows = readDesperdiciosFromStore([]);
+    const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
     let infoRows = readFornecedorInfoMap();
     let produtosRows = readFornecedorProdutosMap();
     let equivalenciasRows = readFornecedorEquivalenciasMap();
@@ -873,6 +877,7 @@ export default function DashboardClient() {
     setContagens(contagensRows);
     setEntradas(entradasRows);
     setDesperdicios(desperdiciosRows);
+    setPrePreparoEtiquetas(etiquetasRows);
     setFornecedorInfoMap(infoRows);
     setFornecedorProdutosMap(produtosRows);
     setFornecedorEquivalenciasMap(equivalenciasRows);
@@ -881,6 +886,7 @@ export default function DashboardClient() {
     const unsubInv = subscribeInventario((rows) => setContagens(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));
     const unsubDesp = subscribeDesperdicios((rows) => setDesperdicios(rows));
+    const unsubEtiquetas = subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
     const unsubFornecedorInfo = subscribeFornecedorInfo((rows) => setFornecedorInfoMap(rows));
     const unsubFornecedorProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
     const unsubFornecedorEquivalencias = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
@@ -889,11 +895,19 @@ export default function DashboardClient() {
       unsubInv();
       unsubEntradas();
       unsubDesp();
+      unsubEtiquetas();
       unsubFornecedorInfo();
       unsubFornecedorProdutos();
       unsubFornecedorEquivalencias();
     };
   }, []);
+
+  const desperdiciosIntegrados = useMemo(() => {
+    const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas);
+    if (!generated.length) return desperdicios;
+    const generatedIds = new Set(generated.map((row) => row.id));
+    return [...generated, ...desperdicios.filter((row) => !generatedIds.has(row.id))];
+  }, [desperdicios, prePreparoEtiquetas]);
 
   useEffect(() => {
     const itemId = searchParams.get("itemId")?.trim() ?? "";
@@ -921,7 +935,7 @@ export default function DashboardClient() {
       const iso = toIsoDate(d);
       out.push({ iso, label: c.data, t: startOfDay(d).getTime() });
     }
-    out.sort((a, b) => a.t - b.t);
+    out.sort((a, b) => b.t - a.t);
     const seen = new Set<string>();
     const uniq: Array<{ iso: string; label: string; t: number }> = [];
     for (const x of out) {
@@ -934,8 +948,8 @@ export default function DashboardClient() {
 
   useEffect(() => {
     if (!inventoryOptions.length) return;
-    setStartDate((prev) => (prev ? prev : inventoryOptions[0]!.iso));
-    setEndDate((prev) => (prev ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
+    setStartDate((prev) => (prev ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
+    setEndDate((prev) => (prev ? prev : inventoryOptions[0]!.iso));
   }, [inventoryOptions]);
 
   const canCalculate =
@@ -1059,7 +1073,7 @@ export default function DashboardClient() {
     const deltaPp = cmvPercent - target;
 
     let desperdiciosCents = 0;
-    for (const d of desperdicios) {
+    for (const d of desperdiciosIntegrados) {
       const dd = parseDateLabelLoose(d.data);
       if (!dd) continue;
       const t = startOfDay(dd).getTime();

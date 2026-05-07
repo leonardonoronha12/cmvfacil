@@ -13,6 +13,8 @@ import {
 } from "../lib/desperdiciosMotivosStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { buildExpiredPrePreparoEtiquetaDesperdicios, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -318,6 +320,7 @@ export default function DesperdiciosClient() {
 
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>([]);
+  const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
   const [motivosStore, setMotivosStore] = useState<DesperdicioMotivoRow[]>([]);
   const [isMotivosOpen, setIsMotivosOpen] = useState(false);
   const [editingMotivoId, setEditingMotivoId] = useState<string | null>(null);
@@ -352,9 +355,16 @@ export default function DesperdiciosClient() {
     return list[0] ? list : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
   }, [motivosStore]);
 
+  const integratedRows = useMemo(() => {
+    const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas);
+    if (!generated.length) return rows;
+    const generatedIds = new Set(generated.map((row) => row.id));
+    return [...generated, ...rows.filter((row) => !generatedIds.has(row.id))];
+  }, [prePreparoEtiquetas, rows]);
+
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let filtered = q ? rows.filter((r) => `${r.data} ${r.item} ${r.motivo}`.toLowerCase().includes(q)) : rows;
+    let filtered = q ? integratedRows.filter((r) => `${r.data} ${r.item} ${r.motivo}`.toLowerCase().includes(q)) : integratedRows;
     if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => (r.motivo || "Sem motivo") === motivoFilter);
     const p = periodo.trim();
     if (p) {
@@ -401,7 +411,7 @@ export default function DesperdiciosClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [motivoFilter, periodo, query, rows, sortDir, sortKey]);
+  }, [integratedRows, motivoFilter, periodo, query, sortDir, sortKey]);
 
   function toggleSort(key: DesperdicioTableColumn) {
     if (sortKey !== key) {
@@ -480,12 +490,12 @@ export default function DesperdiciosClient() {
 
   const motivoCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const r of rows) {
+    for (const r of integratedRows) {
       const k = r.motivo || "Sem motivo";
       map.set(k, (map.get(k) ?? 0) + 1);
     }
     return map;
-  }, [rows]);
+  }, [integratedRows]);
 
   const chartData = useMemo(() => {
     const byMotivo = new Map<string, number>();
@@ -522,6 +532,11 @@ export default function DesperdiciosClient() {
   useEffect(() => {
     setPrePreparoStore(readPrePreparoFromStore());
     return subscribePrePreparo((rows) => setPrePreparoStore(rows));
+  }, []);
+
+  useEffect(() => {
+    setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
+    return subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
   }, []);
 
   useEffect(() => {
@@ -750,6 +765,10 @@ export default function DesperdiciosClient() {
   }
 
   function openConfirmDeleteDesperdicio(row: DesperdicioRow) {
+    if (isPrePreparoEtiquetaWasteId(row.id)) {
+      window.alert("Esse desperdício foi gerado automaticamente por uma etiqueta vencida no Pré-preparo.");
+      return;
+    }
     setConfirmType("desperdicio");
     setConfirmDesperdicio(row);
     setConfirmMotivo(null);
@@ -779,6 +798,10 @@ export default function DesperdiciosClient() {
   }
 
   function openEdit(row: DesperdicioRow) {
+    if (isPrePreparoEtiquetaWasteId(row.id)) {
+      window.alert("Edite a etiqueta no módulo de Pré-preparo para atualizar esse lançamento automático.");
+      return;
+    }
     setEditingId(row.id);
     setDraftData(row.data);
     setDraftItem(row.item);
@@ -1146,7 +1169,9 @@ export default function DesperdiciosClient() {
             <div style={{ textAlign: "right" }}>Ações</div>
           </div>
 
-          {visible.map((r) => (
+          {visible.map((r) => {
+            const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
+            return (
             <div key={r.id} className={styles.row} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
               {columnOrder.map((column) => (
                 <div key={column} className={styles.tableCellWrap}>
@@ -1154,15 +1179,30 @@ export default function DesperdiciosClient() {
                 </div>
               ))}
               <div className={styles.actionsCell}>
-                <button type="button" className={styles.iconBtn} aria-label="Editar" onClick={() => openEdit(r)}>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label="Editar"
+                  onClick={() => openEdit(r)}
+                  disabled={isAutoEtiqueta}
+                  title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                >
                   <IconPencil />
                 </button>
-                <button type="button" className={styles.iconBtn} aria-label="Excluir" onClick={() => openConfirmDeleteDesperdicio(r)}>
+                <button
+                  type="button"
+                  className={styles.iconBtn}
+                  aria-label="Excluir"
+                  onClick={() => openConfirmDeleteDesperdicio(r)}
+                  disabled={isAutoEtiqueta}
+                  title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                >
                   <IconTrash />
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </section>
 
         {isFormOpen ? (
