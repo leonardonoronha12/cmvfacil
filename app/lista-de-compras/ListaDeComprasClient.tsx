@@ -340,7 +340,8 @@ export default function ListaDeComprasClient() {
         const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
         return { iso, label: contagem.data, t, contagem };
       })
-      .filter((value): value is { iso: string; label: string; t: number; contagem: InventarioContagem } => Boolean(value));
+      .filter((value): value is { iso: string; label: string; t: number; contagem: InventarioContagem } => Boolean(value))
+      .sort((a, b) => b.t - a.t);
     const startIso = startDate || contagemOptions[0]?.iso || "";
     const endIso = endDate || contagemOptions[contagemOptions.length - 1]?.iso || "";
     const startOpt = contagemOptions.find((option) => option.iso === startIso) ?? null;
@@ -506,14 +507,16 @@ export default function ListaDeComprasClient() {
     });
   }, [contagens]);
 
-  const effectiveStartDate = startDate || inventoryOptions[inventoryOptions.length - 1]?.iso || "";
-  const effectiveEndDate = endDate || inventoryOptions[0]?.iso || "";
+  const periodOptions = useMemo(() => [...inventoryOptions].sort((a, b) => b.t - a.t), [inventoryOptions]);
+
+  const effectiveStartDate = startDate || periodOptions[periodOptions.length - 1]?.iso || "";
+  const effectiveEndDate = endDate || periodOptions[0]?.iso || "";
 
   useEffect(() => {
-    if (!inventoryOptions.length) return;
-    setStartDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
-    setEndDate((prev) => (inventoryOptions.some((option) => option.iso === prev) ? prev : inventoryOptions[0]!.iso));
-  }, [inventoryOptions]);
+    if (!periodOptions.length) return;
+    setStartDate((prev) => (periodOptions.some((option) => option.iso === prev) ? prev : periodOptions[periodOptions.length - 1]!.iso));
+    setEndDate((prev) => (periodOptions.some((option) => option.iso === prev) ? prev : periodOptions[0]!.iso));
+  }, [periodOptions]);
 
   const rows = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -742,7 +745,7 @@ export default function ListaDeComprasClient() {
                     </span>
                     <select className={styles.dateSelect} value={effectiveStartDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
-                      {inventoryOptions.map((o) => (
+                      {periodOptions.map((o) => (
                         <option key={o.iso} value={o.iso}>
                           {o.label}
                         </option>
@@ -758,7 +761,7 @@ export default function ListaDeComprasClient() {
                     </span>
                     <select className={styles.dateSelect} value={effectiveEndDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
-                      {inventoryOptions.map((o) => (
+                      {periodOptions.map((o) => (
                         <option key={o.iso} value={o.iso}>
                           {o.label}
                         </option>

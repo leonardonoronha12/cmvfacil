@@ -946,11 +946,13 @@ export default function DashboardClient() {
     return uniq;
   }, [contagens]);
 
+  const periodOptions = useMemo(() => [...inventoryOptions].sort((a, b) => b.t - a.t), [inventoryOptions]);
+
   useEffect(() => {
-    if (!inventoryOptions.length) return;
-    setStartDate((prev) => (prev ? prev : inventoryOptions[inventoryOptions.length - 1]!.iso));
-    setEndDate((prev) => (prev ? prev : inventoryOptions[0]!.iso));
-  }, [inventoryOptions]);
+    if (!periodOptions.length) return;
+    setStartDate((prev) => (prev ? prev : periodOptions[periodOptions.length - 1]!.iso));
+    setEndDate((prev) => (prev ? prev : periodOptions[0]!.iso));
+  }, [periodOptions]);
 
   const canCalculate =
     inventoryOptions.length > 0 &&
@@ -1827,7 +1829,7 @@ export default function DashboardClient() {
                 <IconCalendarSmall />
               </span>
               <select className={styles.topInput} value={startDate} onChange={(e) => setStartDate(e.target.value)}>
-                {inventoryOptions.map((o) => (
+                {periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
@@ -1841,7 +1843,7 @@ export default function DashboardClient() {
                 <IconCalendarSmall />
               </span>
               <select className={styles.topInput} value={endDate} onChange={(e) => setEndDate(e.target.value)}>
-                {inventoryOptions.map((o) => (
+                {periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
