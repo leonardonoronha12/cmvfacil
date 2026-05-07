@@ -61,24 +61,17 @@ const toneColors = {
 } as const;
 
 const legendItems = [
-  { label: "Queijos e Laticínios", tone: "green" },
-  { label: "Conservas/Enlatados/Grãos/Outros", tone: "greenDark" },
-  { label: "Proteínas/ Embutidos", tone: "red" },
-  { label: "Legumes/ Verduras/ Temperos/ Congelados", tone: "yellow" },
-  { label: "Molhos e Base", tone: "blue" },
-  { label: "Embalagens/ Descartáveis/ Outros", tone: "purple" },
-  { label: "Doces", tone: "pink" },
-  { label: "Massas e Base", tone: "mint" },
-  { label: "Bebidas", tone: "lime" },
-  { label: "Frete", tone: "orange" },
+  { label: "Revenda", tone: "green" },
+  { label: "Limpeza", tone: "greenDark" },
+  { label: "Hortifruti", tone: "red" },
+  { label: "Matéria Prima", tone: "yellow" },
+  { label: "Embalagens", tone: "blue" },
+  { label: "Laticínios", tone: "purple" },
+  { label: "Uso interno", tone: "mint" },
+  { label: "Pizza", tone: "pink" },
+  { label: "Pré-Preparo", tone: "lime" },
+  { label: "Temperos", tone: "orange" },
 ] as const;
-
-const pieValues = [14, 8, 12, 2, 3, 42, 2, 5, 18, 2] as const;
-const pieData: PieSlice[] = legendItems.map((it, i) => ({
-  label: it.label,
-  value: pieValues[i] ?? 1,
-  color: toneColors[it.tone],
-}));
 
 function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
   const rad = ((angleDeg - 90) * Math.PI) / 180;
@@ -106,18 +99,20 @@ function donutPath(cx: number, cy: number, rOuter: number, rInner: number, start
 }
 
 function PieChart({ slices, size = 220 }: { slices: PieSlice[]; size?: number }) {
+  const validSlices = slices.filter((slice) => slice.value > 0);
+  if (!validSlices.length) return null;
   const view = 240;
   const cx = view / 2;
   const cy = view / 2;
   const rOuter = 92;
   const rInner = 44;
-  const total = slices.reduce((acc, s) => acc + s.value, 0) || 1;
+  const total = validSlices.reduce((acc, s) => acc + s.value, 0) || 1;
 
   let start = 0;
   return (
     <svg width={size} height={size} viewBox={`0 0 ${view} ${view}`} role="img" aria-label="Distribuição por categoria">
       <g>
-        {slices.map((s) => {
+        {validSlices.map((s) => {
           const sweep = (s.value / total) * 360;
           const end = start + sweep;
           const d = donutPath(cx, cy, rOuter, rInner, start, end);
@@ -1107,23 +1102,6 @@ export default function DashboardClient() {
     }
   }
 
-  const chartSlices = useMemo(() => {
-    const order = [
-      "Queijos e Laticínios",
-      "Conservas/Enlatados/Grãos/Outros",
-      "Proteínas/ Embutidos",
-      "Legumes/ Verduras/ Temperos/ Congelados",
-      "Frete",
-      "Embalagens/ Descartáveis/ Outros",
-      "Doces",
-      "Molhos e Base",
-      "Massas e Base",
-      "Bebidas",
-    ];
-    const byLabel = new Map(pieData.map((s) => [s.label, s] as const));
-    return order.map((l) => byLabel.get(l)).filter((v): v is PieSlice => Boolean(v));
-  }, []);
-
   const categorias = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
@@ -1364,10 +1342,6 @@ export default function DashboardClient() {
     return `${formatBrlFromCents(calc?.desperdiciosCents ?? 0)} em desperdícios no período`;
   }, [calc?.desperdiciosCents]);
 
-  const itensCmvAltoLinha = useMemo(() => {
-    return "0 itens com CMV alto";
-  }, []);
-
   const categoriaChart = useMemo(() => {
     if (!calc) return { slices: [] as PieSlice[], legend: [] as Array<{ label: string; tone: string; cents: number }> };
     const byCat = new Map<string, number>();
@@ -1388,16 +1362,20 @@ export default function DashboardClient() {
   }, [calc]);
 
   const chartDisplay = useMemo(() => {
-    if (categoriaChart.slices.length && categoriaChart.legend.length) return categoriaChart;
+    if (categoriaChart.slices.length && categoriaChart.legend.length) {
+      return {
+        slices: categoriaChart.slices,
+        legend: categoriaChart.legend.map((item) => ({ label: item.label, tone: item.tone })),
+      };
+    }
     return {
-      slices: chartSlices,
-      legend: legendItems.map((item, index) => ({
+      slices: [] as PieSlice[],
+      legend: legendItems.map((item) => ({
         label: item.label,
         tone: item.tone,
-        cents: chartSlices[index]?.value ?? 0,
       })),
     };
-  }, [categoriaChart, chartSlices]);
+  }, [categoriaChart]);
 
   const variacaoRows = useMemo(() => {
     if (!calc) return [];
@@ -1957,7 +1935,6 @@ export default function DashboardClient() {
                 <div className={styles.deltaRow}>{deltaLabel}</div>
                 <div className={styles.deltaRow}>{comparativoAnteriorLabel || "—"}</div>
                 <div className={styles.deltaRow}>{desperdiciosLinha}</div>
-                <div className={styles.deltaRow}>{itensCmvAltoLinha}</div>
               </div>
               <button type="button" className={styles.deltaLink} onClick={() => setIsVariacaoOpen(true)} disabled={!calc}>
                 Ver variação de custo dos insumos
@@ -1965,15 +1942,17 @@ export default function DashboardClient() {
             </div>
 
             <div className={styles.chartCard}>
-              <div className={styles.chartArea}>
-                <PieChart slices={chartDisplay.slices} size={170} />
+              <div className={styles.chartCanvas}>
+                <div className={styles.chartArea}>
+                  {chartDisplay.slices.some((slice) => slice.value > 0) ? <PieChart slices={chartDisplay.slices} size={148} /> : <div className={styles.chartEmpty} aria-hidden />}
+                </div>
               </div>
               <div className={styles.chartLegend}>
                 {chartDisplay.legend.length ? (
                   chartDisplay.legend.map((it) => (
                     <div key={it.label} className={styles.legendItem}>
                       <span className={`${styles.legendSwatch} ${styles[`legendSwatch_${it.tone}` as keyof typeof styles]}`} aria-hidden />
-                      <span className={styles.legendLabel}>{`${it.label} • ${formatBrlFromCents(it.cents)}`}</span>
+                      <span className={styles.legendLabel}>{it.label}</span>
                     </div>
                   ))
                 ) : (
