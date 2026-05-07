@@ -628,6 +628,10 @@
   gap: 12px;
 }
 
+.detailsSection > .detailsCards {
+  height: 240px;
+}
+
 .cmvCard {
   display: flex;
   flex-direction: column;
@@ -769,6 +773,10 @@
   row-gap: 4px;
   padding-left: 14px;
   width: 160px;
+}
+
+.detailsSection > .detailsCards > .chartCard > .chartLegend {
+  height: 0;
 }
 
 .legendEmpty {
