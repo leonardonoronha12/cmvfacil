@@ -364,6 +364,11 @@
   font-size: 10px;
 }
 
+select.topInput option {
+  color: #01040e;
+  background: #ffffff;
+}
+
 .topInput::placeholder {
   color: rgba(255, 255, 255, 0.6);
 }
