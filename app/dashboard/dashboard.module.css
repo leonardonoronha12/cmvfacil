@@ -629,7 +629,9 @@
 }
 
 .detailsSection > .detailsCards {
-  height: 240px;
+  height: 240px !important;
+  min-height: 240px;
+  max-height: 240px;
 }
 
 .cmvCard {
