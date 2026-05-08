@@ -364,9 +364,22 @@
   font-size: 10px;
 }
 
-select.topInput option {
+select.topInput {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+select.topInput:focus,
+select.topInput:active {
   color: #01040e;
-  background: #ffffff;
+}
+
+select.topInput option {
+  color: #01040e !important;
+  background: #ffffff !important;
+}
+
+select.topInput option:checked {
+  color: #ffffff !important;
 }
 
 .topInput::placeholder {
