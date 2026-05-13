@@ -988,13 +988,13 @@
 }
 
 .detailsListRow {
-  min-height: 28px;
+  min-height: 40px;
   border-radius: 6px;
   background: #f0f2f2;
   color: #2a3133;
   font-size: 8px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 136px 122px 24px 24px;
+  grid-template-columns: minmax(0, 1fr) 136px 122px 40px 40px;
   gap: 8px;
   align-items: center;
   padding: 0 10px;
@@ -1007,12 +1007,12 @@
 
 .detailsEditRowBtn,
 .detailsTrashBtn {
-  width: 18px;
-  height: 18px;
-  border: 1px solid #d7dddd;
-  border-radius: 5px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #e1e5e4;
+  border-radius: 12px;
   background: #ffffff;
-  color: #6a7877;
+  color: #01040e;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1020,14 +1020,15 @@
   cursor: pointer;
 }
 
-.detailsEditRowBtn {
-  color: #19b663;
+.detailsEditRowBtn:hover,
+.detailsTrashBtn:hover {
+  background: #f7f8f8;
 }
 
 .detailsEditRowBtn svg,
 .detailsTrashBtn svg {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   display: block;
   flex-shrink: 0;
 }
@@ -1691,7 +1692,7 @@
   border-radius: 10px;
   background: #f6f7f7;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 96px 96px 28px 28px;
+  grid-template-columns: minmax(0, 1fr) 96px 96px 40px 40px;
   gap: 8px;
   align-items: center;
   padding: 0 12px;
@@ -1716,20 +1717,27 @@
 
 .editRowBtn,
 .deleteBtn {
-  width: 22px;
-  height: 22px;
-  border: 1px solid #dfe5e4;
-  border-radius: 6px;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #e1e5e4;
+  border-radius: 12px;
   background: #ffffff;
-  color: #606f6d;
+  color: #01040e;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
 }
 
-.editRowBtn {
-  color: #19b663;
+.editRowBtn:hover,
+.deleteBtn:hover {
+  background: #f7f8f8;
+}
+
+.editRowBtn svg,
+.deleteBtn svg {
+  width: 16px;
+  height: 16px;
 }
 
 .totalBar {

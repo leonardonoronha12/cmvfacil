@@ -382,6 +382,16 @@ function formatDecimalDraft(input: string, maxDecimals = 3) {
   return intValue;
 }
 
+function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
+  const value = parseDecimalInput(input);
+  return value > 0
+    ? value.toLocaleString("pt-BR", {
+        minimumFractionDigits: maxDecimals,
+        maximumFractionDigits: maxDecimals,
+      })
+    : `0,${"0".repeat(maxDecimals)}`;
+}
+
 function popularityLabel(value: string) {
   switch (value) {
     case "alta":
@@ -998,12 +1008,13 @@ export default function FichasTecnicasClient() {
     if (!selectedIngredient) return;
     const qty = parseDecimalInput(ingredientQty);
     if (qty <= 0) return;
+    const formattedQty = formatDecimalFixedDraft(ingredientQty, 3);
     setIngredientRows((prev) => {
       const nextRow: ModalIngredientRow = {
         id: editingIngredientRowId ?? `${selectedIngredient.id}-${Date.now()}`,
         ingredientId: selectedIngredient.id,
         item: selectedIngredient.item,
-        quantidade: ingredientQty,
+        quantidade: formattedQty,
         unidade: selectedIngredient.medida || "Und",
         custoTotal: ingredientCost,
       };
@@ -1071,6 +1082,7 @@ export default function FichasTecnicasClient() {
     if (!detailsRecipe || !selectedDetailIngredient) return;
     const qty = parseDecimalInput(detailIngredientQty);
     if (qty <= 0) return;
+    const formattedQty = formatDecimalFixedDraft(detailIngredientQty, 3);
 
     const nextRows = detailsRecipe.ingredientRows.some((row) => row.id === editingDetailIngredientRowId)
       ? detailsRecipe.ingredientRows.map((row) =>
@@ -1079,7 +1091,7 @@ export default function FichasTecnicasClient() {
                 id: editingDetailIngredientRowId!,
                 ingredientId: selectedDetailIngredient.id,
                 item: selectedDetailIngredient.item,
-                quantidade: detailIngredientQty,
+                quantidade: formattedQty,
                 unidade: selectedDetailIngredient.medida || "Und",
                 custoTotal: detailIngredientCost,
               }
@@ -1091,7 +1103,7 @@ export default function FichasTecnicasClient() {
             id: `${selectedDetailIngredient.id}-${Date.now()}`,
             ingredientId: selectedDetailIngredient.id,
             item: selectedDetailIngredient.item,
-            quantidade: detailIngredientQty,
+            quantidade: formattedQty,
             unidade: selectedDetailIngredient.medida || "Und",
             custoTotal: detailIngredientCost,
           },
@@ -1387,6 +1399,7 @@ export default function FichasTecnicasClient() {
                               value={detailIngredientQty}
                               inputMode="decimal"
                               onChange={(e) => setDetailIngredientQty(formatDecimalDraft(e.target.value, 3))}
+                          onBlur={(e) => setDetailIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
                             />
                             <span className={styles.detailsInlineSuffix}>{selectedDetailIngredient?.medida || "Und"}</span>
                           </span>
@@ -1902,8 +1915,9 @@ export default function FichasTecnicasClient() {
                           type="text"
                           className={styles.inlineInput}
                           value={ingredientQty}
-                            inputMode="decimal"
-                            onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
+                          inputMode="decimal"
+                          onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
+                          onBlur={(e) => setIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
                         />
                         <span className={styles.inlineSuffix}>{selectedIngredient?.medida || "Und"}</span>
                       </span>
