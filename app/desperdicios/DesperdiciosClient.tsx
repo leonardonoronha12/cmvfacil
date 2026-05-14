@@ -14,7 +14,7 @@ import {
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
-import { buildExpiredPrePreparoEtiquetaDesperdicios, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { getExpiredPrePreparoEtiquetaDesperdicioSync, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -356,10 +356,7 @@ export default function DesperdiciosClient() {
   }, [motivosStore]);
 
   const integratedRows = useMemo(() => {
-    const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas);
-    if (!generated.length) return rows;
-    const generatedIds = new Set(generated.map((row) => row.id));
-    return [...generated, ...rows.filter((row) => !generatedIds.has(row.id))];
+    return getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas).merged;
   }, [prePreparoEtiquetas, rows]);
 
   const visible = useMemo(() => {
@@ -611,6 +608,25 @@ export default function DesperdiciosClient() {
     if (!rowsReadyRef.current) return;
     writeDesperdiciosToStore(rows);
   }, [rows]);
+
+  useEffect(() => {
+    if (!rowsReadyRef.current) return;
+    const sync = getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas);
+    const changed =
+      sync.merged.length !== rows.length ||
+      sync.merged.some((row, index) => {
+        const current = rows[index];
+        return !current || current.id !== row.id || current.data !== row.data || current.item !== row.item || current.quantidade !== row.quantidade || current.custo !== row.custo || current.motivo !== row.motivo;
+      });
+    if (!changed) return;
+    setRows(sync.merged);
+    for (const row of sync.upserts) {
+      void upsertDesperdicioToSupabase(row).catch(() => {});
+    }
+    for (const row of sync.deletes) {
+      void deleteDesperdicioFromSupabase(row.id).catch(() => {});
+    }
+  }, [prePreparoEtiquetas, rows]);
 
   useEffect(() => {
     if (!isDataCalOpen) return;

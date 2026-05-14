@@ -3,9 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
+import { readDesperdiciosFromStore, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { getExpiredPrePreparoEtiquetaDesperdicioSync } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import styles from "./pre-preparo.module.css";
@@ -862,7 +865,16 @@ export default function PrePreparoClient() {
       dataValidade: formatDateLabel(dataValidade),
     };
     const existing = readPrePreparoEtiquetasFromStore([]);
-    writePrePreparoEtiquetasToStore([next, ...existing]);
+    const nextEtiquetas = [next, ...existing];
+    writePrePreparoEtiquetasToStore(nextEtiquetas);
+    const desperdiciosAtualizados = getExpiredPrePreparoEtiquetaDesperdicioSync(readDesperdiciosFromStore([]), nextEtiquetas);
+    writeDesperdiciosToStore(desperdiciosAtualizados.merged);
+    for (const row of desperdiciosAtualizados.upserts) {
+      void upsertDesperdicioToSupabase(row).catch(() => {});
+    }
+    for (const row of desperdiciosAtualizados.deletes) {
+      void deleteDesperdicioFromSupabase(row.id).catch(() => {});
+    }
     setIsEtiquetaOpen(false);
   }
 

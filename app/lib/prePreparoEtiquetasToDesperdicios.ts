@@ -81,6 +81,10 @@ export function isPrePreparoEtiquetaWasteId(id: string) {
   return String(id ?? "").startsWith(ETIQUETA_WASTE_PREFIX);
 }
 
+function desperdicioRowsEqual(a: DesperdicioRow, b: DesperdicioRow) {
+  return a.id === b.id && a.data === b.data && a.item === b.item && a.quantidade === b.quantidade && a.custo === b.custo && a.motivo === b.motivo;
+}
+
 export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEtiquetaRow[], referenceDate = new Date()): DesperdicioRow[] {
   const today = startOfDay(referenceDate).getTime();
   const out: Array<DesperdicioRow & { t: number }> = [];
@@ -103,4 +107,22 @@ export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEti
   }
   out.sort((a, b) => b.t - a.t);
   return out.map(({ t: _t, ...row }) => row);
+}
+
+export function getExpiredPrePreparoEtiquetaDesperdicioSync(rows: DesperdicioRow[], labels: PrePreparoEtiquetaRow[], referenceDate = new Date()) {
+  const generated = buildExpiredPrePreparoEtiquetaDesperdicios(labels, referenceDate);
+  const generatedMap = new Map(generated.map((row) => [row.id, row]));
+  const currentGenerated = rows.filter((row) => isPrePreparoEtiquetaWasteId(row.id));
+  const currentGeneratedMap = new Map(currentGenerated.map((row) => [row.id, row]));
+  const manualRows = rows.filter((row) => !isPrePreparoEtiquetaWasteId(row.id));
+
+  const upserts = generated.filter((row) => {
+    const existing = currentGeneratedMap.get(row.id);
+    return !existing || !desperdicioRowsEqual(existing, row);
+  });
+
+  const deletes = currentGenerated.filter((row) => !generatedMap.has(row.id));
+  const merged = [...generated, ...manualRows];
+
+  return { generated, merged, upserts, deletes };
 }
