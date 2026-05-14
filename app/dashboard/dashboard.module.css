@@ -19,7 +19,8 @@
   align-items: stretch;
   align-self: stretch;
   justify-content: flex-start;
-  position: sticky;
+  position: fixed;
+  left: 0;
   top: 0;
   background: #f3f5f4;
   padding: 10px 10px 14px;
@@ -283,6 +284,7 @@
   align-self: stretch;
   background: #f6f7f7;
   padding: 24px 32px;
+  margin-left: 194px;
   overflow-y: auto;
   row-gap: 24px;
 }
@@ -2561,6 +2563,7 @@ select.topInput option:checked {
   }
   .content {
     padding: 18px 18px;
+    margin-left: 240px;
   }
   .cardsRow {
     flex-direction: column;
@@ -2579,6 +2582,7 @@ select.topInput option:checked {
   }
   .menuLateral {
     position: static;
+    left: auto;
     top: auto;
     width: 100%;
     min-width: 0;
@@ -2587,5 +2591,6 @@ select.topInput option:checked {
   }
   .content {
     padding: 16px 16px;
+    margin-left: 0;
   }
 }
