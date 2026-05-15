@@ -1798,7 +1798,7 @@ export default function DashboardClient() {
             </button>
           </div>
         ) : null}
-        <div className={`${styles.pageFrame} ${styles.pageFrameWide}`}>
+        <div className={styles.pageFrame}>
         <section className={styles.topSection} style={historyItem ? { display: "none" } : undefined}>
           <div className={styles.topBar}>
             <div className={styles.topField}>
