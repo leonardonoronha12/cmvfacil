@@ -290,7 +290,7 @@
 }
 
 .pageFrame {
-  width: min(1120px, calc(100vw - 260px));
+  width: 1120px;
   max-width: 1120px;
   display: flex;
   flex-direction: column;
