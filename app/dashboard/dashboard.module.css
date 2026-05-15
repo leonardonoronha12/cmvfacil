@@ -307,8 +307,8 @@
 
 @media (max-width: 1100px) {
   .pageFrame {
-    width: 100%;
-    max-width: none;
+    width: min(1120px, calc(100vw - 290px));
+    max-width: 1120px;
   }
 }
 
