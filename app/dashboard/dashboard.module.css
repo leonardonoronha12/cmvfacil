@@ -2580,6 +2580,10 @@ select.topInput option:checked {
   .dashboard {
     flex-direction: column;
   }
+  .pageFrame {
+    width: 100%;
+    max-width: none;
+  }
   .menuLateral {
     position: static;
     left: auto;
