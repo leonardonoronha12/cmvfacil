@@ -642,8 +642,10 @@ select.topInput option:checked {
 
 .detailsCards {
   display: grid;
-  align-self: stretch;
+  align-self: center;
   justify-content: start;
+  width: min(920px, 100%);
+  margin: 0 auto;
   grid-template-columns: 220px 220px minmax(360px, 1fr);
   gap: 12px;
 }
@@ -2583,6 +2585,10 @@ select.topInput option:checked {
   .pageFrame {
     width: 100%;
     max-width: none;
+  }
+  .detailsCards {
+    max-width: none;
+    margin: 0;
   }
   .menuLateral {
     position: static;
