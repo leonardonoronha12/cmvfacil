@@ -503,7 +503,7 @@ export default function InsumosClient() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Insumos");
     (ws as any)["!dataValidation"] = [
-      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ['"Und,Kg,g,L,ml,PC,CX"'] },
+      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ['"Und,Kg,L"'] },
       { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"true,false"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
