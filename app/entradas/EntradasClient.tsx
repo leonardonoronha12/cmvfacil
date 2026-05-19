@@ -19,6 +19,7 @@ import {
   type FornecedorInfo,
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
 import { deleteEntradaFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
@@ -538,6 +539,8 @@ export default function EntradasClient() {
   const [fornecedorModalLabel, setFornecedorModalLabel] = useState<string>("");
   const [fornecedorProdutosSearch, setFornecedorProdutosSearch] = useState("");
   const [fornecedorProdutosPick, setFornecedorProdutosPick] = useState("");
+  const fornecedoresReadyRef = useRef(false);
+  const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -764,8 +767,16 @@ export default function EntradasClient() {
       seen.add(k);
       out.push(name);
     }
+    for (const [key, info] of Object.entries(fornecedorInfoMap)) {
+      const label = String(info?.fornecedor ?? key).trim();
+      if (!label) continue;
+      const k = label.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(label);
+    }
     return out;
-  }, [customFornecedores, rows]);
+  }, [customFornecedores, fornecedorInfoMap, rows]);
 
   function openNewModal() {
     setNewFornecedor("");
@@ -855,9 +866,27 @@ export default function EntradasClient() {
   }, [rows]);
 
   useEffect(() => {
-    setFornecedorInfoMap(readFornecedorInfoMap());
-    setFornecedorProdutosMap(readFornecedorProdutosMap());
-    setFornecedorItemMap(readFornecedorEquivalenciasMap());
+    (async () => {
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) {
+          writeFornecedorInfoMap(db.info);
+          writeFornecedorProdutosMap(db.produtos);
+          writeFornecedorEquivalenciasMap(db.equivalencias);
+        }
+      } catch {}
+
+      const localInfo = readFornecedorInfoMap();
+      const localProdutos = readFornecedorProdutosMap();
+      const localEq = readFornecedorEquivalenciasMap();
+      setFornecedorInfoMap(localInfo);
+      setFornecedorProdutosMap(localProdutos);
+      setFornecedorItemMap(localEq);
+      fornecedoresReadyRef.current = true;
+      void saveFornecedoresStateToSupabase({ info: localInfo, produtos: localProdutos, equivalencias: localEq }).catch(() => {});
+    })();
+
     const u1 = subscribeFornecedorInfo((m) => setFornecedorInfoMap(m));
     const u2 = subscribeFornecedorProdutos((m) => setFornecedorProdutosMap(m));
     const u3 = subscribeFornecedorEquivalencias((m) => setFornecedorItemMap(m));
@@ -867,6 +896,14 @@ export default function EntradasClient() {
       u3();
     };
   }, []);
+
+  useEffect(() => {
+    if (!fornecedoresReadyRef.current) return;
+    if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+    fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
+      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {});
+    }, 450);
+  }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap]);
 
   useEffect(() => {
     const current = readFornecedorInfoMap();

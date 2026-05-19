@@ -5,6 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow } from "../lib/desperdiciosStore";
@@ -837,46 +839,68 @@ export default function DashboardClient() {
   }
 
   useEffect(() => {
-    const insumosRows = readInsumosFromStore();
-    const contagensRows = readInventarioFromStore([]);
-    const entradasRows = readEntradasFromStore([]);
-    const desperdiciosRows = readDesperdiciosFromStore([]);
-    const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
-    let infoRows = readFornecedorInfoMap();
-    let produtosRows = readFornecedorProdutosMap();
-    let equivalenciasRows = readFornecedorEquivalenciasMap();
+    (async () => {
+      let insumosRows: InsumoStoreItem[] = [];
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) {
+          insumosRows = dbRows;
+          writeInsumosToStore(dbRows);
+        }
+      } catch {}
 
-    if (insumosRows.length) {
-      const merged = mergeSampleFornecedorSeed(insumosRows, infoRows, produtosRows, equivalenciasRows);
-      if (merged.changed) {
-        infoRows = merged.info;
-        produtosRows = merged.produtos;
-        equivalenciasRows = merged.equivalencias;
+      if (!insumosRows.length) insumosRows = readInsumosFromStore();
+
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) {
+          writeFornecedorInfoMap(db.info);
+          writeFornecedorProdutosMap(db.produtos);
+          writeFornecedorEquivalenciasMap(db.equivalencias);
+        }
+      } catch {}
+
+      const contagensRows = readInventarioFromStore([]);
+      const entradasRows = readEntradasFromStore([]);
+      const desperdiciosRows = readDesperdiciosFromStore([]);
+      const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
+      let infoRows = readFornecedorInfoMap();
+      let produtosRows = readFornecedorProdutosMap();
+      let equivalenciasRows = readFornecedorEquivalenciasMap();
+
+      if (insumosRows.length) {
+        const merged = mergeSampleFornecedorSeed(insumosRows, infoRows, produtosRows, equivalenciasRows);
+        if (merged.changed) {
+          infoRows = merged.info;
+          produtosRows = merged.produtos;
+          equivalenciasRows = merged.equivalencias;
+          writeFornecedorInfoMap(infoRows);
+          writeFornecedorProdutosMap(produtosRows);
+          writeFornecedorEquivalenciasMap(equivalenciasRows);
+        }
+      }
+
+      if (!Object.keys(infoRows).length && !Object.keys(produtosRows).length && insumosRows.length) {
+        const seed = buildSampleFornecedorSeed(insumosRows);
+        infoRows = seed.info;
+        produtosRows = seed.produtos;
+        equivalenciasRows = seed.equivalencias;
         writeFornecedorInfoMap(infoRows);
         writeFornecedorProdutosMap(produtosRows);
         writeFornecedorEquivalenciasMap(equivalenciasRows);
       }
-    }
 
-    if (!Object.keys(infoRows).length && !Object.keys(produtosRows).length && insumosRows.length) {
-      const seed = buildSampleFornecedorSeed(insumosRows);
-      infoRows = seed.info;
-      produtosRows = seed.produtos;
-      equivalenciasRows = seed.equivalencias;
-      writeFornecedorInfoMap(infoRows);
-      writeFornecedorProdutosMap(produtosRows);
-      writeFornecedorEquivalenciasMap(equivalenciasRows);
-    }
-
-    setInsumos(insumosRows);
-    setContagens(contagensRows);
-    setEntradas(entradasRows);
-    setDesperdicios(desperdiciosRows);
-    setPrePreparoEtiquetas(etiquetasRows);
-    setFornecedorInfoMap(infoRows);
-    setFornecedorProdutosMap(produtosRows);
-    setFornecedorEquivalenciasMap(equivalenciasRows);
-    setLastCalc(readLastCalc());
+      setInsumos(insumosRows);
+      setContagens(contagensRows);
+      setEntradas(entradasRows);
+      setDesperdicios(desperdiciosRows);
+      setPrePreparoEtiquetas(etiquetasRows);
+      setFornecedorInfoMap(infoRows);
+      setFornecedorProdutosMap(produtosRows);
+      setFornecedorEquivalenciasMap(equivalenciasRows);
+      setLastCalc(readLastCalc());
+    })();
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
     const unsubInv = subscribeInventario((rows) => setContagens(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));

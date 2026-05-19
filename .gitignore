@@ -13,3 +13,6 @@ supabase/.temp
 .vercel
 
 .env*.local
+.appdata/
+.localappdata/
+AGENTS.md

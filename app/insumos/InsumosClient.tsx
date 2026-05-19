@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
+import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -348,6 +349,10 @@ export default function InsumosClient() {
   const [importing, setImporting] = useState(false);
   const [dataRows, setDataRows] = useState<InsumoRow[]>(initialRows);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const rowsReadyRef = useRef(false);
+  const prevIdsRef = useRef<Set<string>>(new Set());
+  const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
+  const syncTimeoutRef = useRef<number | null>(null);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -361,22 +366,52 @@ export default function InsumosClient() {
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
 
   useEffect(() => {
-    const stored = readInsumosFromStore();
-    if (!stored.length) return;
-    setDataRows((prev) => {
-      return stored.map((s, idx) => ({
-        id: String(idx + 1),
-        ocultar: Boolean(s.ocultar),
-        item: String(s.item ?? "").trim(),
-        medida: String(s.medida ?? "").trim() || "Und",
-        custoMedio: String(s.custoMedio ?? "").trim() || "-",
-        categoria: String(s.categoria ?? "").trim() || "-",
-        especificacao: String(s.especificacao ?? "").trim() || "-",
-      }));
-    });
+    (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) {
+          const mapped = dbRows.map((s, idx) => ({
+            id: String(s.id || idx + 1),
+            ocultar: Boolean(s.ocultar),
+            item: String(s.item ?? "").trim(),
+            medida: String(s.medida ?? "").trim() || "Und",
+            custoMedio: String(s.custoMedio ?? "").trim() || "-",
+            categoria: String(s.categoria ?? "").trim() || "-",
+            especificacao: String(s.especificacao ?? "").trim() || "-",
+          }));
+          rowsReadyRef.current = true;
+          prevIdsRef.current = new Set(mapped.map((r) => r.id));
+          setDataRows(mapped);
+          writeInsumosToStore(dbRows);
+          return;
+        }
+      } catch {}
+
+      const stored = readInsumosFromStore();
+      if (stored.length) {
+        const mapped = stored.map((s, idx) => ({
+          id: String(s.id || idx + 1),
+          ocultar: Boolean(s.ocultar),
+          item: String(s.item ?? "").trim(),
+          medida: String(s.medida ?? "").trim() || "Und",
+          custoMedio: String(s.custoMedio ?? "").trim() || "-",
+          categoria: String(s.categoria ?? "").trim() || "-",
+          especificacao: String(s.especificacao ?? "").trim() || "-",
+        }));
+        rowsReadyRef.current = true;
+        prevIdsRef.current = new Set(mapped.map((r) => r.id));
+        setDataRows(mapped);
+        return;
+      }
+
+      rowsReadyRef.current = true;
+      prevIdsRef.current = new Set(initialRows.map((r) => r.id));
+      setDataRows(initialRows);
+    })();
   }, []);
 
   useEffect(() => {
+    if (!rowsReadyRef.current) return;
     writeInsumosToStore(
       dataRows.map((r) => ({
         id: r.id,
@@ -388,6 +423,35 @@ export default function InsumosClient() {
         ocultar: r.ocultar,
       })),
     );
+  }, [dataRows]);
+
+  useEffect(() => {
+    if (!rowsReadyRef.current) return;
+
+    const nextIds = new Set(dataRows.map((r) => r.id));
+    for (const id of prevIdsRef.current) {
+      if (!nextIds.has(id)) pendingDeleteIdsRef.current.add(id);
+    }
+    for (const id of nextIds) {
+      if (pendingDeleteIdsRef.current.has(id)) pendingDeleteIdsRef.current.delete(id);
+    }
+    prevIdsRef.current = nextIds;
+
+    if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
+    syncTimeoutRef.current = window.setTimeout(() => {
+      const deleteIds = Array.from(pendingDeleteIdsRef.current);
+      pendingDeleteIdsRef.current.clear();
+      const storeRows = dataRows.map((r) => ({
+        id: r.id,
+        item: r.item,
+        medida: r.medida,
+        custoMedio: r.custoMedio,
+        categoria: r.categoria,
+        especificacao: r.especificacao,
+        ocultar: r.ocultar,
+      }));
+      void syncInsumosToSupabase(storeRows, deleteIds).catch(() => {});
+    }, 450);
   }, [dataRows]);
 
   useEffect(() => {

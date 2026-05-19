@@ -17,6 +17,7 @@ import {
   type FornecedorEquivalenciasMap,
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./fornecedores.module.css";
 
@@ -270,6 +271,8 @@ export default function FornecedoresClient() {
   const [produtosMap, setProdutosMap] = useState<FornecedorProdutos>({});
   const [infoMap, setInfoMap] = useState<FornecedorInfoMap>({});
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const fornecedoresReadyRef = useRef(false);
+  const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [produtoDraft, setProdutoDraft] = useState("");
   const [produtoQuery, setProdutoQuery] = useState("");
@@ -341,19 +344,44 @@ export default function FornecedoresClient() {
   }, [columnOrder]);
 
   useEffect(() => {
-    setProdutosMap(readFornecedorProdutosMap());
-    return subscribeFornecedorProdutos((m) => setProdutosMap(m));
+    (async () => {
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) {
+          writeFornecedorInfoMap(db.info);
+          writeFornecedorProdutosMap(db.produtos);
+          writeFornecedorEquivalenciasMap(db.equivalencias);
+        }
+      } catch {}
+
+      const localInfo = readFornecedorInfoMap();
+      const localProdutos = readFornecedorProdutosMap();
+      const localEq = readFornecedorEquivalenciasMap();
+      setInfoMap(localInfo);
+      setProdutosMap(localProdutos);
+      setEquivalenciasMap(localEq);
+      fornecedoresReadyRef.current = true;
+      void saveFornecedoresStateToSupabase({ info: localInfo, produtos: localProdutos, equivalencias: localEq }).catch(() => {});
+    })();
+
+    const u1 = subscribeFornecedorInfo((m) => setInfoMap(m));
+    const u2 = subscribeFornecedorProdutos((m) => setProdutosMap(m));
+    const u3 = subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+    return () => {
+      u1();
+      u2();
+      u3();
+    };
   }, []);
 
   useEffect(() => {
-    setInfoMap(readFornecedorInfoMap());
-    return subscribeFornecedorInfo((m) => setInfoMap(m));
-  }, []);
-
-  useEffect(() => {
-    setEquivalenciasMap(readFornecedorEquivalenciasMap());
-    return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
-  }, []);
+    if (!fornecedoresReadyRef.current) return;
+    if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+    fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
+      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {});
+    }, 450);
+  }, [equivalenciasMap, infoMap, produtosMap]);
 
   useEffect(() => {
     setRows((prev) => {
