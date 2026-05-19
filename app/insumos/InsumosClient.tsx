@@ -364,19 +364,15 @@ export default function InsumosClient() {
     const stored = readInsumosFromStore();
     if (!stored.length) return;
     setDataRows((prev) => {
-      const keepMetaByItem = new Map(prev.map((r) => [r.item.toLowerCase(), r]));
-      return stored.map((s, idx) => {
-        const meta = keepMetaByItem.get(s.item.toLowerCase());
-        return {
-          id: String(idx + 1),
-          ocultar: meta?.ocultar ?? false,
-          item: s.item,
-          medida: s.medida,
-          custoMedio: meta?.custoMedio ?? "-",
-          categoria: meta?.categoria ?? "-",
-          especificacao: meta?.especificacao ?? "-",
-        };
-      });
+      return stored.map((s, idx) => ({
+        id: String(idx + 1),
+        ocultar: Boolean(s.ocultar),
+        item: String(s.item ?? "").trim(),
+        medida: String(s.medida ?? "").trim() || "Und",
+        custoMedio: String(s.custoMedio ?? "").trim() || "-",
+        categoria: String(s.categoria ?? "").trim() || "-",
+        especificacao: String(s.especificacao ?? "").trim() || "-",
+      }));
     });
   }, []);
 
@@ -424,6 +420,10 @@ export default function InsumosClient() {
     "especificacao",
   ]);
   const [draggingColumn, setDraggingColumn] = useState<null | "item" | "medida" | "custoMedio" | "categoria" | "especificacao">(null);
+
+  function toggleOcultar(id: string) {
+    setDataRows((prev) => prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r)));
+  }
 
   async function onImport() {
     if (importing) return;
@@ -504,7 +504,7 @@ export default function InsumosClient() {
     XLSX.utils.book_append_sheet(wb, ws, "Insumos");
     (ws as any)["!dataValidation"] = [
       { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ['"Und,Kg,L"'] },
-      { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"true,false"'] },
+      { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
     downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-importacao-insumos.xlsx");
@@ -1040,7 +1040,7 @@ export default function InsumosClient() {
               <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
                 <div className={styles.tdSmall}>
                   <label className={styles.toggle}>
-                    <input type="checkbox" defaultChecked={r.ocultar} />
+                    <input type="checkbox" checked={r.ocultar} onChange={() => toggleOcultar(r.id)} />
                     <span className={styles.toggleTrack} aria-hidden />
                   </label>
                 </div>

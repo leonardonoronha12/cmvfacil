@@ -999,7 +999,9 @@ export default function DashboardClient() {
     }
 
     const insumoIdByKey = new Map<string, string>();
+    const ocultarByInsumoId = new Map<string, boolean>();
     for (const i of insumos) {
+      ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
@@ -1017,10 +1019,11 @@ export default function DashboardClient() {
         for (const it of e.itensNota) {
           const key = normalizeKey(it.nome);
           const id = insumoIdByKey.get(key);
+          const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
           const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-          if (id) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qty);
+          if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qty);
           const sub = parseBrlToCents(it.subtotalLabel ?? "");
-          if (sub) comprasCents += sub;
+          if (sub && (!id || !isHidden)) comprasCents += sub;
         }
       } else {
         comprasCents += parseBrlToCents(e.valorNota ?? "");
@@ -1032,7 +1035,7 @@ export default function DashboardClient() {
     let finalCents = 0;
     let saidasCents = 0;
 
-    const list = [...insumos].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
+    const list = insumos.filter((i) => !i.ocultar).sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
     for (const i of list) {
       const unit = i.medida || "Und";
       const initialQty = initialById.get(i.id) ?? 0;
@@ -1105,7 +1108,7 @@ export default function DashboardClient() {
   const categorias = useMemo(() => {
     const out: string[] = [];
     const seen = new Set<string>();
-    for (const i of insumos) {
+    for (const i of insumos.filter((x) => !x.ocultar)) {
       const c = String(i.categoria ?? "").trim();
       if (!c || c === "-") continue;
       const k = c.toLowerCase();
