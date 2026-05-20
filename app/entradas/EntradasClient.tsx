@@ -1206,7 +1206,10 @@ export default function EntradasClient() {
     const id = detailsId;
     if (!id) return;
     const nome = detailItemName.trim();
-    if (!nome) return;
+    if (!nome) {
+      showToast("Informe o item.", "error");
+      return;
+    }
     const subtotalCents = parseBrlToCents(detailSubtotal);
     const qty = parsePtNumber(detailQty);
     const unitDerived = qty > 0 ? subtotalCents / 100 / qty : 0;
@@ -1218,6 +1221,10 @@ export default function EntradasClient() {
       subtotalLabel: formatBrlFromCents(subtotalCents),
       custoUnitarioLabel: unitCostLabel,
     };
+    if (!qty || !Number.isFinite(qty) || qty <= 0 || !subtotalCents || !Number.isFinite(subtotalCents) || subtotalCents <= 0) {
+      showToast("Preencha quantidade e subtotal.", "error");
+      return;
+    }
 
     setRows((prev) =>
       prev.map((r) => {
@@ -1249,6 +1256,7 @@ export default function EntradasClient() {
     setDetailUnit("Und");
     setDetailSubtotal("0,000");
     setDetailUnitCost("0,000");
+    showToast("Item adicionado!", "success");
   }
 
   function deleteNotaItem(itemId: string) {
@@ -1269,6 +1277,7 @@ export default function EntradasClient() {
         { ...detailsRow, itensNota: items, itens: `${items.length} ${items.length === 1 ? "Item" : "Itens"}`, valorNota: formatBrlFromCents(total) } as unknown as any,
       ).catch(() => {});
     }
+    showToast("Item removido.", "success");
   }
 
   return (
