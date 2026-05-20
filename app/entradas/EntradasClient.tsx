@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import {
@@ -544,8 +545,9 @@ export default function EntradasClient() {
   const [fornecedorProdutosPick, setFornecedorProdutosPick] = useState("");
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
 
-  function showToast(message: string, type: "success" | "error", durationMs = 2500) {
+  function showToast(message: string, type: "success" | "error", durationMs = 6000) {
     setToast({ message, type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
@@ -553,6 +555,10 @@ export default function EntradasClient() {
       toastTimerRef.current = null;
     }, durationMs);
   }
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -851,9 +857,9 @@ export default function EntradasClient() {
           const dbRows = await loadEntradasFromSupabase();
           if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
         } catch {}
-        showToast("Nota criada!", "success");
+        showToast("Nota criada!", "success", 6000);
       } catch {
-        showToast("Erro ao salvar no banco de dados.", "error");
+        showToast("Erro ao salvar no banco de dados.", "error", 8000);
       } finally {
         setIsCreatingNota(false);
       }
@@ -1268,11 +1274,14 @@ export default function EntradasClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="entradas" />
-      {toast ? (
-        <div className={styles.toastWrap} aria-live="polite">
-          <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-        </div>
-      ) : null}
+      {isMounted && toast
+        ? createPortal(
+            <div className={styles.toastWrap} aria-live="polite">
+              <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
+            </div>,
+            document.body,
+          )
+        : null}
 
       <main className={dash.content}>
         <section className={styles.header}>
