@@ -114,7 +114,8 @@ export async function middleware(req: NextRequest) {
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     isPublicFile ||
-    pathname.startsWith("/api/auth/")
+    pathname.startsWith("/api/auth/") ||
+    pathname === "/api/version"
   ) {
     return NextResponse.next();
   }

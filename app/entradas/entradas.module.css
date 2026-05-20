@@ -1594,3 +1594,30 @@
     min-width: 870px;
   }
 }
+
+.toastWrap {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.toast {
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(1, 4, 14, 0.14);
+  border: 1px solid transparent;
+  background: #ffffff;
+  color: #01040e;
+}
+
+.toastSuccess {
+  border-color: rgba(34, 197, 94, 0.35);
+}
+
+.toastError {
+  border-color: rgba(239, 68, 68, 0.35);
+}

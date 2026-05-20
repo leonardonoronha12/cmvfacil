@@ -498,6 +498,8 @@ export default function EntradasClient() {
   const [rows, setRows] = useState<EntradaRow[]>(initialRows);
   const rowsReadyRef = useRef(false);
   const [customFornecedores, setCustomFornecedores] = useState<string[]>([]);
+  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftFornecedor, setDraftFornecedor] = useState("");
@@ -511,6 +513,7 @@ export default function EntradasClient() {
   const [isRecebCalendarOpen, setIsRecebCalendarOpen] = useState(false);
   const [recebMonth, setRecebMonth] = useState(() => startOfMonth(new Date()));
   const recebWrapRef = useRef<HTMLDivElement | null>(null);
+  const [isCreatingNota, setIsCreatingNota] = useState(false);
   const [isAddFornecedorOpen, setIsAddFornecedorOpen] = useState(false);
   const [addFornecedorName, setAddFornecedorName] = useState("");
   const [addFornecedorVendedor, setAddFornecedorVendedor] = useState("");
@@ -541,6 +544,21 @@ export default function EntradasClient() {
   const [fornecedorProdutosPick, setFornecedorProdutosPick] = useState("");
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
+
+  function showToast(message: string, type: "success" | "error", durationMs = 2500) {
+    setToast({ message, type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -789,7 +807,11 @@ export default function EntradasClient() {
   function confirmNew() {
     const fornecedor = newFornecedor.trim();
     const dataReceb = normalizeDateLabelPT(newDataReceb);
-    if (!fornecedor || !dataReceb) return;
+    if (!fornecedor || !dataReceb) {
+      showToast("Preencha fornecedor e data.", "error");
+      return;
+    }
+    if (isCreatingNota) return;
     const now = new Date();
     const id = String(Date.now());
     let maxN = 0;
@@ -809,10 +831,33 @@ export default function EntradasClient() {
       dataCriacao: formatDateLabelPT(now),
       itensNota: [],
     };
+    setQuery("");
+    showToast("Salvando nota...", "success", 6000);
+    const d = parseDateLabelLoose(dataReceb);
+    if (d) {
+      const currentStart = parseDateLabelLoose(dateStart);
+      const currentEnd = parseDateLabelLoose(dateEnd);
+      if (currentStart && d.getTime() < currentStart.getTime()) setDateStart(formatDateLabelNoCommaPT(d));
+      if (currentEnd && d.getTime() > currentEnd.getTime()) setDateEnd(formatDateLabelNoCommaPT(d));
+    }
     setRows((prev) => [newRow, ...prev]);
     setIsNewOpen(false);
     openDetailsModal(newRow);
-    void upsertEntradaToSupabase(newRow as unknown as any).catch(() => {});
+    setIsCreatingNota(true);
+    void (async () => {
+      try {
+        await upsertEntradaToSupabase(newRow as unknown as any);
+        try {
+          const dbRows = await loadEntradasFromSupabase();
+          if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
+        } catch {}
+        showToast("Nota criada!", "success");
+      } catch {
+        showToast("Erro ao salvar no banco de dados.", "error");
+      } finally {
+        setIsCreatingNota(false);
+      }
+    })();
   }
 
   useEffect(() => {
@@ -1211,6 +1256,11 @@ export default function EntradasClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="entradas" />
+      {toast ? (
+        <div className={styles.toastWrap} aria-live="polite">
+          <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
+        </div>
+      ) : null}
 
       <main className={dash.content}>
         <section className={styles.header}>
@@ -2093,8 +2143,13 @@ export default function EntradasClient() {
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={!newFornecedor.trim() || !newDataReceb.trim()} onClick={confirmNew}>
-                  Salvar
+                <button
+                  type="button"
+                  className={styles.saveBtn}
+                  disabled={isCreatingNota || !newFornecedor.trim() || !newDataReceb.trim()}
+                  onClick={confirmNew}
+                >
+                  {isCreatingNota ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </div>
