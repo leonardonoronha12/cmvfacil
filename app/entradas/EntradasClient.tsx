@@ -1022,7 +1022,10 @@ export default function EntradasClient() {
 
   function confirmAddFornecedor() {
     const name = addFornecedorName.trim();
-    if (!name) return;
+    if (!name) {
+      showToast("Informe o nome do fornecedor.", "error");
+      return;
+    }
     setCustomFornecedores((prev) => {
       const k = name.toLowerCase();
       const has = prev.some((p) => p.toLowerCase() === k);
@@ -1048,6 +1051,7 @@ export default function EntradasClient() {
       writeFornecedorInfoMap(next);
       return next;
     });
+    showToast("Fornecedor cadastrado!", "success");
   }
 
   function openEditModal(row: EntradaRow) {
@@ -1062,12 +1066,16 @@ export default function EntradasClient() {
     if (!id) return;
     const fornecedor = draftFornecedor.trim();
     const dataLancamento = normalizeDateLabelPT(draftDataLancamento);
-    if (!fornecedor || !dataLancamento) return;
+    if (!fornecedor || !dataLancamento) {
+      showToast("Preencha fornecedor e data.", "error");
+      return;
+    }
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, fornecedor, dataLancamento } : r)));
     const base = rows.find((r) => r.id === id);
     if (base) void upsertEntradaToSupabase({ ...base, fornecedor, dataLancamento } as unknown as any).catch(() => {});
     setIsEditOpen(false);
     setEditingId(null);
+    showToast("Alterações salvas!", "success");
   }
 
   function openDeleteModal(row: EntradaRow) {
@@ -1155,7 +1163,10 @@ export default function EntradasClient() {
     const nomeNaNota = mapNomeNota.trim();
     const unidadeNaNota = mapUnidadeNota.trim() || "Und";
     const insumoEquivalente = mapInsumoEq.trim();
-    if (!nomeNaNota || !insumoEquivalente) return;
+    if (!nomeNaNota || !insumoEquivalente) {
+      showToast("Preencha nome na nota e insumo equivalente.", "error");
+      return;
+    }
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
     const novo: FornecedorItemEquivalencia = {
       id: String(Date.now()),
@@ -1182,6 +1193,7 @@ export default function EntradasClient() {
     setDetailUnit(unidadeNaNota);
     setIsAddFornecedorItemOpen(false);
     setIsItemMenuOpen(false);
+    showToast("Vínculo salvo!", "success");
   }
 
   function confirmAddNotaItem() {
@@ -1640,7 +1652,7 @@ export default function EntradasClient() {
 
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.saveBtn} disabled={!draftFornecedor.trim() || !draftDataLancamento.trim()} onClick={confirmEdit}>
-                  Salvar
+                  Salvar edição
                 </button>
               </div>
             </div>
@@ -2149,7 +2161,7 @@ export default function EntradasClient() {
                   disabled={isCreatingNota || !newFornecedor.trim() || !newDataReceb.trim()}
                   onClick={confirmNew}
                 >
-                  {isCreatingNota ? "Salvando..." : "Salvar"}
+                  {isCreatingNota ? "Criando..." : "Criar nota"}
                 </button>
               </div>
             </div>
@@ -2210,7 +2222,7 @@ export default function EntradasClient() {
 
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.saveBtn} disabled={!addFornecedorName.trim()} onClick={confirmAddFornecedor}>
-                  Salvar
+                  Cadastrar
                 </button>
               </div>
             </div>
@@ -2266,7 +2278,7 @@ export default function EntradasClient() {
 
               <div className={styles.modalFooter}>
                 <button type="button" className={styles.saveBtn} disabled={!mapNomeNota.trim() || !mapInsumoEq.trim()} onClick={confirmAddItemFornecedor}>
-                  Salvar
+                  Salvar vínculo
                 </button>
               </div>
             </div>
