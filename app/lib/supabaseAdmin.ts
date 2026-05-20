@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { getSupabaseAuthConfig } from "./supabaseAuthConfig";
 
 function getEnv(name: string) {
   const v = (process.env[name] ?? "").trim();
@@ -22,3 +23,16 @@ export function getSupabaseAdmin() {
   });
 }
 
+export function getSupabaseServerClient(accessToken?: string) {
+  try {
+    return getSupabaseAdmin();
+  } catch {
+    const cfg = getSupabaseAuthConfig();
+    const headers: Record<string, string> = {};
+    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+    return createClient(cfg.url, cfg.anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false },
+      global: { headers },
+    });
+  }
+}

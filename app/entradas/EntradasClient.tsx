@@ -858,8 +858,9 @@ export default function EntradasClient() {
           if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
         } catch {}
         showToast("Nota criada!", "success", 6000);
-      } catch {
-        showToast("Erro ao salvar no banco de dados.", "error", 8000);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        showToast(`Erro ao salvar no banco de dados: ${msg}`, "error", 8000);
       } finally {
         setIsCreatingNota(false);
       }
