@@ -86,6 +86,20 @@ function parseDateNumericLoose(value: string) {
   return d;
 }
 
+function sortContagensAsc(list: InventarioContagem[]) {
+  const decorated = list.map((c, index) => ({
+    c,
+    index,
+    t: parseDateNumericLoose(c.data)?.getTime() ?? Number.POSITIVE_INFINITY,
+  }));
+  decorated.sort((a, b) => {
+    const cmp = a.t - b.t;
+    if (cmp) return cmp;
+    return a.index - b.index;
+  });
+  return decorated.map((d) => d.c);
+}
+
 const initialContagens: InventarioContagem[] = [
   {
     id: "c1",
@@ -172,15 +186,17 @@ export default function InventarioClient() {
       try {
         const db = await loadInventarioFromSupabase();
         if (db[0]) {
-          setContagens(db);
-          setSelectedContagemId(db[0]?.id ?? null);
+          const sorted = sortContagensAsc(db);
+          setContagens(sorted);
+          setSelectedContagemId(sorted[0]?.id ?? null);
           contagensReadyRef.current = true;
           return;
         }
       } catch {}
       const stored = readInventarioFromStore(initialContagens);
-      setContagens(stored);
-      setSelectedContagemId(stored[0]?.id ?? null);
+      const sortedStored = sortContagensAsc(stored);
+      setContagens(sortedStored);
+      setSelectedContagemId(sortedStored[0]?.id ?? null);
       contagensReadyRef.current = true;
     })();
   }, []);
@@ -319,7 +335,7 @@ export default function InventarioClient() {
         const next = prev.map((c) => (c.id === id ? { ...c, data } : c));
         const updated = next.find((x) => x.id === id);
         if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-        return next;
+        return sortContagensAsc(next);
       });
       setSelectedContagemId(id);
       setQuery("");
@@ -339,7 +355,7 @@ export default function InventarioClient() {
       data,
       categorias: [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente", itens }],
     };
-    setContagens((prev) => [next, ...prev]);
+    setContagens((prev) => sortContagensAsc([...prev, next]));
     setSelectedContagemId(id);
     setQuery("");
     setIsNewOpen(false);
