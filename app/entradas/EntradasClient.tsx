@@ -422,6 +422,19 @@ function parseQtyLabel(input: string) {
   return { qty, unit };
 }
 
+function formatMaskedPtInput(value: string, decimals: number) {
+  const n = parsePtNumber(value);
+  return formatPtNumber(n, decimals);
+}
+
+function selectAllSoon(el: HTMLInputElement) {
+  window.setTimeout(() => {
+    try {
+      el.setSelectionRange(0, el.value.length);
+    } catch {}
+  }, 0);
+}
+
 function formatPtNumber(value: number, decimals: number) {
   const neg = value < 0;
   const v = Math.abs(value);
@@ -525,7 +538,7 @@ export default function EntradasClient() {
   const [detailItemName, setDetailItemName] = useState("");
   const [detailQty, setDetailQty] = useState("0,000");
   const [detailUnit, setDetailUnit] = useState("Und");
-  const [detailSubtotal, setDetailSubtotal] = useState("0,000");
+  const [detailSubtotal, setDetailSubtotal] = useState("0,00");
   const [detailUnitCost, setDetailUnitCost] = useState("0,000");
   const [isItemMenuOpen, setIsItemMenuOpen] = useState(false);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
@@ -1106,7 +1119,7 @@ export default function EntradasClient() {
     setDetailItemName("");
     setDetailQty("0,000");
     setDetailUnit("Und");
-    setDetailSubtotal("0,000");
+    setDetailSubtotal("0,00");
     setDetailUnitCost("0,000");
     setIsItemMenuOpen(false);
     setIsDetailsOpen(true);
@@ -1255,7 +1268,7 @@ export default function EntradasClient() {
     setDetailItemName("");
     setDetailQty("0,000");
     setDetailUnit("Und");
-    setDetailSubtotal("0,000");
+    setDetailSubtotal("0,00");
     setDetailUnitCost("0,000");
     showToast("Item adicionado!", "success");
   }
@@ -1879,13 +1892,57 @@ export default function EntradasClient() {
                       </div>
 
                       <div className={styles.qtyWrap}>
-                        <input className={styles.qtyInput} value={detailQty} onChange={(e) => setDetailQty(e.target.value)} />
+                        <input
+                          className={styles.qtyInput}
+                          inputMode="decimal"
+                          value={detailQty}
+                          onMouseDown={(e) => {
+                            const el = e.currentTarget;
+                            if (document.activeElement !== el) {
+                              e.preventDefault();
+                              el.focus();
+                              selectAllSoon(el);
+                            }
+                          }}
+                          onFocus={(e) => {
+                            const next = formatMaskedPtInput(detailQty, 3);
+                            if (next !== detailQty) setDetailQty(next);
+                            selectAllSoon(e.currentTarget);
+                          }}
+                          onBlur={() => {
+                            const next = formatMaskedPtInput(detailQty, 3);
+                            if (next !== detailQty) setDetailQty(next);
+                          }}
+                          onChange={(e) => setDetailQty(e.target.value)}
+                        />
                         <div className={styles.qtyUnit}>{detailUnit}</div>
                       </div>
 
                       <div className={styles.moneyWrap}>
                         <div className={styles.moneyPrefix}>R$</div>
-                        <input className={styles.moneyInput} value={detailSubtotal} onChange={(e) => setDetailSubtotal(e.target.value)} />
+                        <input
+                          className={styles.moneyInput}
+                          inputMode="decimal"
+                          value={detailSubtotal}
+                          onMouseDown={(e) => {
+                            const el = e.currentTarget;
+                            if (document.activeElement !== el) {
+                              e.preventDefault();
+                              el.focus();
+                              selectAllSoon(el);
+                            }
+                          }}
+                          onFocus={(e) => {
+                            const next = formatMaskedPtInput(detailSubtotal, 2);
+                            if (next !== detailSubtotal) setDetailSubtotal(next);
+                            selectAllSoon(e.currentTarget);
+                          }}
+                          onBlur={() => {
+                            const next = formatMaskedPtInput(detailSubtotal, 2);
+                            if (next !== detailSubtotal) setDetailSubtotal(next);
+                          }}
+                          onChange={(e) => setDetailSubtotal(e.target.value)}
+                        />
                       </div>
 
                       <div className={styles.moneyWrap}>
