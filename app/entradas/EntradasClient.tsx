@@ -1516,6 +1516,19 @@ export default function EntradasClient() {
                       className={styles.calFooterBtn}
                       onClick={(e) => {
                         e.stopPropagation();
+                        setDateStart("");
+                        setDateEnd("");
+                        setPeriodPicking("start");
+                        setIsPeriodCalendarOpen(false);
+                      }}
+                    >
+                      limpar
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.calFooterBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setIsPeriodCalendarOpen(false);
                       }}
                     >
