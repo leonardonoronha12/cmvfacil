@@ -486,8 +486,8 @@ function IconPlusCircle() {
 
 export default function EntradasClient() {
   const [query, setQuery] = useState("");
-  const [dateStart, setDateStart] = useState("01 Jul 2025");
-  const [dateEnd, setDateEnd] = useState("28 Mar 2026");
+  const [dateStart, setDateStart] = useState("");
+  const [dateEnd, setDateEnd] = useState("");
   const [columnOrder, setColumnOrder] = useState<EntradaTableColumn[]>(["dataLancamento", "fornecedor", "valorNota", "responsavel", "dataCriacao"]);
   const [draggingColumn, setDraggingColumn] = useState<EntradaTableColumn | null>(null);
   const [sortKey, setSortKey] = useState<EntradaTableColumn | null>(null);
@@ -1326,7 +1326,7 @@ export default function EntradasClient() {
               ref={periodWrapRef}
               onClick={() => {
                 if (isPeriodCalendarOpen) return;
-                const parsed = parseDateLabelLoose(dateEnd) ?? new Date();
+                const parsed = parseDateLabelLoose(dateEnd) ?? parseDateLabelLoose(dateStart) ?? new Date();
                 setPeriodMonth(startOfMonth(parsed));
                 setPeriodPicking("start");
                 setIsPeriodCalendarOpen(true);
@@ -1337,12 +1337,12 @@ export default function EntradasClient() {
               </span>
               <input
                 className={styles.periodInput}
-                value={`${dateStart}, ${dateEnd}`}
+                value={dateStart && dateEnd ? `${dateStart}, ${dateEnd}` : "Todo período"}
                 onChange={() => {}}
                 readOnly
                 aria-label="Período de Lançamento"
                 onFocus={() => {
-                  const parsed = parseDateLabelLoose(dateEnd) ?? new Date();
+                  const parsed = parseDateLabelLoose(dateEnd) ?? parseDateLabelLoose(dateStart) ?? new Date();
                   setPeriodMonth(startOfMonth(parsed));
                   setPeriodPicking("start");
                   setIsPeriodCalendarOpen(true);
