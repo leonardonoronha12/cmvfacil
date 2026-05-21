@@ -11,6 +11,7 @@ import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "..
 import { getExpiredPrePreparoEtiquetaDesperdicioSync } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import styles from "./pre-preparo.module.css";
 
 type PrePreparoRow = {
@@ -211,6 +212,136 @@ function parsePtNumber(value: string) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function parseDecimalInput(value: string) {
+  const normalized = String(value ?? "").replace(/\./g, "").replace(",", ".");
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function formatDecimal3(value: number) {
+  return value.toLocaleString("pt-BR", {
+    minimumFractionDigits: 3,
+    maximumFractionDigits: 3,
+  });
+}
+
+function formatMoney(value: number) {
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function formatDecimalDraft(input: string, maxDecimals = 3) {
+  const raw = String(input ?? "").replace(/[^\d,]/g, "");
+  if (!raw) return "";
+  const hasLeadingComma = raw.startsWith(",");
+  const [intRaw = "", decRaw = ""] = raw.split(",", 2);
+  const intDigits = intRaw.replace(/\D/g, "");
+  const decDigits = decRaw.replace(/\D/g, "").slice(0, maxDecimals);
+  const intValue = intDigits ? Number.parseInt(intDigits, 10).toLocaleString("pt-BR") : "0";
+  if (hasLeadingComma) return decDigits ? `0,${decDigits}` : "0,";
+  if (raw.includes(",")) return `${intValue},${decDigits}`;
+  return intValue;
+}
+
+function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
+  const value = parseDecimalInput(input);
+  return value > 0
+    ? value.toLocaleString("pt-BR", {
+        minimumFractionDigits: maxDecimals,
+        maximumFractionDigits: maxDecimals,
+      })
+    : `0,${"0".repeat(maxDecimals)}`;
+}
+
+function parseMoneyLabel(value?: string) {
+  const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
+  if (!raw) return 0;
+  return parseDecimalInput(raw);
+}
+
+function formatQtyLabel(value: string, unidade: string) {
+  const qty = parseDecimalInput(value);
+  if (!Number.isFinite(qty)) return `0 ${unidade}`;
+  const label = Number.isInteger(qty) ? String(qty) : qty.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  return `${label} ${unidade}`;
+}
+
+function DetailsPlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 5V19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M5 12H19" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DetailsSearchMiniIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M10.5 4.5A6 6 0 1 0 10.5 16.5A6 6 0 0 0 10.5 4.5Z" stroke="currentColor" strokeWidth="1.8" />
+      <path d="M15 15L19.5 19.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DetailsChevronDoubleIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7.5 7.5L12 12L16.5 7.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M7.5 12.5L12 17L16.5 12.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DetailsTrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.5 7.5H18.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M9.5 4.75H14.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M8 7.5V17.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M12 7.5V17.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M16 7.5V17.5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M6.5 7.5V18C6.5 18.5523 6.94772 19 7.5 19H16.5C17.0523 19 17.5 18.5523 17.5 18V7.5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DetailsPdfIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 4.5H14.5L18 8V19A1.5 1.5 0 0 1 16.5 20.5H7A1.5 1.5 0 0 1 5.5 19V6A1.5 1.5 0 0 1 7 4.5Z" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M14 4.5V8H17.5" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M8 15.5H9.4C10.3 15.5 10.9 14.9 10.9 14C10.9 13.1 10.3 12.5 9.4 12.5H8V16.8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12.5 16.8V12.5H13.7C14.9 12.5 15.7 13.4 15.7 14.65C15.7 15.9 14.9 16.8 13.7 16.8H12.5Z" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17.2 16.8V12.5H19.6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M17.2 14.6H19.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DetailsEditIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4.5 19.5H8L18.2 9.3C18.98 8.52 18.98 7.26 18.2 6.48L17.52 5.8C16.74 5.02 15.48 5.02 14.7 5.8L4.5 16V19.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M13.5 7L17 10.5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function DetailsIconCalendarSmall() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6.75 4.5H17.25V19.5H6.75V4.5Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M12 8.25V14.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9.75 12L12 14.25L14.25 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function formatBRLValueFromCents(valueCents: number) {
   const v = Math.abs(valueCents);
   const intPart = Math.floor(v / 100);
@@ -242,6 +373,27 @@ function normalizeNameKey(value: string) {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+const PREPREPARO_HIDE_KEY = "cmvfacil.prepreparo.hidden.v1";
+
+function readPrePreparoHiddenMap(): Record<string, boolean> {
+  if (typeof window === "undefined") return {};
+  const raw = window.localStorage.getItem(PREPREPARO_HIDE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, boolean> = {};
+    for (const [k, v] of Object.entries(parsed ?? {})) out[k] = Boolean(v);
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writePrePreparoHiddenMap(map: Record<string, boolean>) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(PREPREPARO_HIDE_KEY, JSON.stringify(map ?? {}));
 }
 
 function convertQty(qty: number, fromUnit: string, toUnit: string) {
@@ -400,6 +552,12 @@ export default function PrePreparoClient() {
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const [detailsRecipeId, setDetailsRecipeId] = useState<string | null>(null);
   const [detailsTab, setDetailsTab] = useState<"ingredientes" | "preparo" | "etiquetas">("ingredientes");
+  const [detailIngredientId, setDetailIngredientId] = useState("");
+  const [detailIngredientQty, setDetailIngredientQty] = useState("0,000");
+  const [editingDetailIngredientRowId, setEditingDetailIngredientRowId] = useState<string | null>(null);
+  const [isEditingPrep, setIsEditingPrep] = useState(false);
+  const [prepDraft, setPrepDraft] = useState("");
+  const [hiddenMap, setHiddenMap] = useState<Record<string, boolean>>(() => readPrePreparoHiddenMap());
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
@@ -484,6 +642,19 @@ export default function PrePreparoClient() {
   useEffect(() => {
     writePrePreparoToStore(rows as any);
   }, [rows]);
+
+  useEffect(() => {
+    writePrePreparoHiddenMap(hiddenMap);
+  }, [hiddenMap]);
+
+  useEffect(() => {
+    if (!detailsRecipeId) return;
+    setDetailIngredientId("");
+    setDetailIngredientQty("0,000");
+    setEditingDetailIngredientRowId(null);
+    setIsEditingPrep(false);
+    setPrepDraft("");
+  }, [detailsRecipeId]);
 
   useEffect(() => {
     setEntradasRows(readEntradasFromStore());
@@ -771,6 +942,90 @@ export default function PrePreparoClient() {
     setOpenMenuId(null);
   }
 
+  function recomputeRowMetrics(row: PrePreparoRow) {
+    const totalCents = (row.ingredientes ?? []).reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
+    const yieldParsed = parseQtyLabel(row.rendimento);
+    const yieldQty = yieldParsed.qty;
+    const yieldUnit = yieldParsed.unit || "Und";
+    const totalLabel = formatCurrencyBRLFromCents(totalCents);
+    const unitCost = yieldQty > 0 ? totalCents / 100 / yieldQty : 0;
+    const unitCostLabel = `${unitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${yieldUnit}`;
+    return { ...row, custoTotal: totalLabel, custoUnitario: unitCostLabel };
+  }
+
+  function updateDetailsRow(next: PrePreparoRow) {
+    setRows((prev) => prev.map((r) => (r.id === next.id ? recomputeRowMetrics(next) : r)));
+  }
+
+  function addDetailIngredientRow() {
+    if (!detailsRow || !selectedDetailIngredient) return;
+    const qty = parseDecimalInput(detailIngredientQty);
+    if (!(qty > 0)) return;
+    const nextQty = formatDecimalFixedDraft(detailIngredientQty, 3);
+    const costCents = clampNonNegativeInt(Math.round(detailIngredientCost * 100));
+    const nextRow: IngredienteRow = {
+      id: editingDetailIngredientRowId || String(Date.now()),
+      item: selectedDetailIngredient.item,
+      quantidade: nextQty,
+      unidade: selectedDetailIngredient.medida || "Und",
+      custoCents: costCents,
+    };
+    const prevList = detailsRow.ingredientes ?? [];
+    const nextList = editingDetailIngredientRowId ? prevList.map((r) => (r.id === editingDetailIngredientRowId ? nextRow : r)) : [...prevList, nextRow];
+    updateDetailsRow({ ...detailsRow, ingredientes: nextList });
+    setDetailIngredientId("");
+    setDetailIngredientQty("0,000");
+    setEditingDetailIngredientRowId(null);
+  }
+
+  function editDetailIngredientRow(row: IngredienteRow) {
+    setDetailsTab("ingredientes");
+    setEditingDetailIngredientRowId(row.id);
+    const found = ingredientOptions.find((i) => normalizeNameKey(i.item) === normalizeNameKey(row.item)) ?? null;
+    setDetailIngredientId(found?.id ?? "");
+    setDetailIngredientQty(formatDecimalFixedDraft(row.quantidade, 3));
+  }
+
+  function removeDetailIngredientRow(id: string) {
+    if (!detailsRow) return;
+    const prevList = detailsRow.ingredientes ?? [];
+    const nextList = prevList.filter((r) => r.id !== id);
+    updateDetailsRow({ ...detailsRow, ingredientes: nextList });
+    if (editingDetailIngredientRowId === id) {
+      setEditingDetailIngredientRowId(null);
+      setDetailIngredientId("");
+      setDetailIngredientQty("0,000");
+    }
+  }
+
+  function startPrepEdit() {
+    if (!detailsRow) return;
+    setPrepDraft(detailsRow.modoPreparo ?? "");
+    setIsEditingPrep(true);
+  }
+
+  function cancelPrepEdit() {
+    if (!detailsRow) return;
+    setPrepDraft(detailsRow.modoPreparo ?? "");
+    setIsEditingPrep(false);
+  }
+
+  function savePrepEdit() {
+    if (!detailsRow) return;
+    updateDetailsRow({ ...detailsRow, modoPreparo: prepDraft });
+    setIsEditingPrep(false);
+  }
+
+  function toggleDetailsHidden() {
+    if (!detailsRow) return;
+    const id = detailsRow.id;
+    setHiddenMap((prev) => {
+      const next = { ...(prev ?? {}) };
+      next[id] = !next[id];
+      return next;
+    });
+  }
+
   const categories = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -823,6 +1078,52 @@ export default function PrePreparoClient() {
     if (!detailsRecipeId) return [];
     return etiquetasRows.filter((e) => e.recipeId === detailsRecipeId);
   }, [detailsRecipeId, etiquetasRows]);
+
+  const ingredientOptions = useMemo(() => insumosStore.filter((row) => !row.ocultar), [insumosStore]);
+
+  const selectedDetailIngredient = useMemo(
+    () => ingredientOptions.find((row) => row.id === detailIngredientId) ?? null,
+    [detailIngredientId, ingredientOptions]
+  );
+
+  const detailIngredientCost = useMemo(() => {
+    if (!selectedDetailIngredient) return 0;
+    return parseDecimalInput(detailIngredientQty) * parseMoneyLabel(selectedDetailIngredient.custoMedio);
+  }, [detailIngredientQty, selectedDetailIngredient]);
+
+  const detailsIngredientsTotalCents = useMemo(() => {
+    return (detailsRow?.ingredientes ?? []).reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
+  }, [detailsRow?.ingredientes]);
+
+  const detailsYield = useMemo(() => {
+    const parsed = detailsRow ? parseQtyLabel(detailsRow.rendimento) : { qty: 0, unit: "" };
+    return { qty: parsed.qty, unit: parsed.unit || "Und" };
+  }, [detailsRow?.rendimento, detailsRow]);
+
+  const detailsIsHidden = useMemo(() => {
+    if (!detailsRow) return false;
+    return Boolean(hiddenMap[detailsRow.id]);
+  }, [detailsRow?.id, detailsRow, hiddenMap]);
+
+  const detailsValidityLabel = useMemo(() => {
+    const days = detailsRow?.validadeDias ?? 7;
+    return `${days} Dia(s)`;
+  }, [detailsRow?.validadeDias]);
+
+  const detailsUltimaEntradaLabel = useMemo(() => {
+    if (!detailsRow) return "-";
+    const keys = new Set((detailsRow.ingredientes ?? []).map((i) => normalizeNameKey(i.item)));
+    let latest: Date | null = null;
+    for (const nota of entradasRows) {
+      const d = parseDateLabelLoose(nota.dataLancamento);
+      if (!d) continue;
+      const itens = nota.itensNota ?? [];
+      const hit = itens.some((it) => keys.has(normalizeNameKey(it.nome)));
+      if (!hit) continue;
+      if (!latest || d.getTime() > latest.getTime()) latest = d;
+    }
+    return latest ? formatDateLabel(latest) : "-";
+  }, [detailsRow, entradasRows]);
 
   const etiquetaRecipeOptions = useMemo(() => {
     const q = etiquetaRecipeQuery.trim().toLowerCase();
@@ -1017,123 +1318,262 @@ export default function PrePreparoClient() {
 
       <main className={dash.content}>
         {detailsRow ? (
-          <section className={dash.itemDetails}>
-            <div className={dash.itemDetailsTop}>
-              <button
-                type="button"
-                className={dash.itemBack}
-                onClick={() => {
-                  setDetailsRecipeId(null);
-                  setDetailsTab("ingredientes");
-                }}
-              >
-                <span className={dash.itemBackIcon}>←</span>
-                <span className={dash.itemBackText}>{`Detalhes do Item / ${detailsRow.receita}`}</span>
-              </button>
-
-              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <button type="button" className={styles.secondaryBtn} onClick={() => openEtiquetaModal(detailsRow)}>
-                  <IconLabel />
-                  Nova Etiqueta
+          <div className={ft.pageFrameWide}>
+            <section className={`${dash.itemDetails} ${ft.detailsPage}`}>
+              <div className={`${dash.itemDetailsTop} ${ft.detailsHeader}`}>
+                <button
+                  type="button"
+                  className={`${dash.itemBack} ${ft.detailsBackBtn}`}
+                  onClick={() => {
+                    setDetailsRecipeId(null);
+                    setDetailsTab("ingredientes");
+                  }}
+                >
+                  <span className={`${dash.itemBackIcon} ${ft.detailsBackIcon}`}>←</span>
+                  <span className={`${dash.itemBackText} ${ft.detailsBackText}`}>{`Detalhes do Item / ${detailsRow.receita}`}</span>
                 </button>
-                <button type="button" className={styles.primaryBtn} onClick={() => openEditModal(detailsRow)}>
-                  <IconEdit />
-                  Editar
-                </button>
-              </div>
-            </div>
-
-            <div className={dash.itemDetailsGrid}>
-              <div className={dash.itemDetailsMain}>
-                <div className={dash.itemDetailsTabs}>
-                  <button
-                    type="button"
-                    className={detailsTab === "ingredientes" ? dash.itemTabActive : dash.itemTab}
-                    onClick={() => setDetailsTab("ingredientes")}
-                  >
-                    Ingredientes
-                  </button>
-                  <button type="button" className={detailsTab === "preparo" ? dash.itemTabActive : dash.itemTab} onClick={() => setDetailsTab("preparo")}>
-                    Modo de Preparo
-                  </button>
-                  <button
-                    type="button"
-                    className={detailsTab === "etiquetas" ? dash.itemTabActive : dash.itemTab}
-                    onClick={() => setDetailsTab("etiquetas")}
-                  >
-                    Etiquetas
+                <div className={`${dash.itemMoreWrap} ${ft.detailsMoreWrap}`}>
+                  <button type="button" className={`${dash.itemMore} ${ft.detailsMoreBtn}`} aria-label="Mais opções">
+                    ⋮
                   </button>
                 </div>
+              </div>
 
-                {detailsTab === "ingredientes" ? (
-                  <div className={dash.itemDetailsBody}>
-                    <div className={styles.ingredientsBox}>
-                      <div className={styles.ingredientsHead}>
-                        <div className={styles.ingredientsHeadItem}>Item</div>
-                        <div className={styles.ingredientsHeadQty}>Quantidade</div>
-                        <div className={styles.ingredientsHeadCost}>Custo</div>
-                        <div />
+              <div className={`${dash.itemDetailsGrid} ${ft.detailsLayout}`}>
+                <div className={`${dash.itemDetailsMain} ${ft.detailsMain}`}>
+                  <div className={`${dash.itemDetailsTabs} ${ft.detailsTabs}`}>
+                    <button
+                      type="button"
+                      className={detailsTab === "ingredientes" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
+                      onClick={() => setDetailsTab("ingredientes")}
+                    >
+                      Ingredientes
+                    </button>
+                    <button
+                      type="button"
+                      className={detailsTab === "preparo" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
+                      onClick={() => setDetailsTab("preparo")}
+                    >
+                      Modo de Preparo
+                    </button>
+                    <button
+                      type="button"
+                      className={detailsTab === "etiquetas" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
+                      onClick={() => setDetailsTab("etiquetas")}
+                    >
+                      Etiquetas
+                    </button>
+                  </div>
+
+                  {detailsTab === "ingredientes" ? (
+                    <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
+                      <div className={ft.detailsSectionTitle}>Lista de Ingredientes</div>
+
+                      <div className={ft.detailsIngredientBox}>
+                        <div className={ft.detailsIngredientHead}>
+                          <div>Item</div>
+                          <div>Quantidade</div>
+                          <div>Custo</div>
+                        </div>
+
+                        <div className={ft.detailsIngredientEntry}>
+                          <label className={ft.detailsItemSelectWrap}>
+                            <span className={ft.detailsItemSearchIcon}>
+                              <DetailsSearchMiniIcon />
+                            </span>
+                            <select
+                              value={detailIngredientId}
+                              onChange={(e) => {
+                                setDetailIngredientId(e.target.value);
+                              }}
+                              className={ft.detailsItemSelect}
+                            >
+                              <option value="">Pesquise por itens...</option>
+                              {ingredientOptions.map((item) => (
+                                <option key={item.id} value={item.id}>
+                                  {item.item}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+
+                          <span className={ft.detailsInlineGroup}>
+                            <input
+                              type="text"
+                              className={ft.detailsInlineInput}
+                              value={detailIngredientQty}
+                              inputMode="decimal"
+                              onChange={(e) => setDetailIngredientQty(formatDecimalDraft(e.target.value, 3))}
+                              onBlur={(e) => setDetailIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
+                            />
+                            <span className={ft.detailsInlineSuffix}>{selectedDetailIngredient?.medida || "Und"}</span>
+                          </span>
+
+                          <span className={`${ft.detailsInlineGroup} ${ft.detailsInlineGroupPrefix}`}>
+                            <span className={ft.detailsInlinePrefix}>R$</span>
+                            <input type="text" className={ft.detailsInlineInput} value={formatDecimal3(detailIngredientCost)} readOnly />
+                          </span>
+
+                          <button
+                            type="button"
+                            className={ft.detailsAddBtn}
+                            onClick={addDetailIngredientRow}
+                            disabled={!selectedDetailIngredient || parseDecimalInput(detailIngredientQty) <= 0}
+                          >
+                            {editingDetailIngredientRowId ? <DetailsEditIcon /> : <DetailsPlusIcon />}
+                          </button>
+                        </div>
                       </div>
-                      {(detailsRow.ingredientes ?? []).map((ing) => (
-                        <div key={ing.id} className={styles.ingredientsListRow}>
-                          <div className={styles.ingredientsListItem}>{ing.item}</div>
-                          <div className={styles.ingredientsListQty}>{`${ing.quantidade} ${ing.unidade}`}</div>
-                          <div className={styles.ingredientsListCost}>{formatCurrencyBRLFromCents(ing.custoCents)}</div>
-                          <div />
-                        </div>
-                      ))}
-                      {(detailsRow.ingredientes ?? [])[0] ? null : <div className={styles.ingredientEmpty}>Sem ingredientes cadastrados</div>}
-                    </div>
-                  </div>
-                ) : detailsTab === "preparo" ? (
-                  <div className={dash.itemDetailsBody}>
-                    <div className={styles.stepTitle}>Modo de Preparo</div>
-                    <div className={styles.stepSubtitle}>Use o botão Editar para alterar o texto.</div>
-                    <div style={{ whiteSpace: "pre-wrap", padding: 12, border: "1px solid #eef1f1", borderRadius: 12, background: "#ffffff" }}>
-                      {detailsRow.modoPreparo?.trim() ? detailsRow.modoPreparo : "Escreva o modo de preparo deste item..."}
-                    </div>
-                  </div>
-                ) : (
-                  <div className={dash.itemDetailsBody}>
-                    <div className={styles.stepTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
-                    <div className={styles.stepSubtitle}>Etiquetas geradas para este item.</div>
-                    <div className={styles.ingredientsBox}>
-                      {detailsEtiquetas.map((e) => (
-                        <div key={e.id} className={styles.ingredientsListRow}>
-                          <div className={styles.ingredientsListItem}>{e.dataValidade}</div>
-                          <div className={styles.ingredientsListQty}>{`${e.quantidade} ${e.unidade}`}</div>
-                          <div className={styles.ingredientsListCost}>{e.responsavel || "-"}</div>
-                          <div />
-                        </div>
-                      ))}
-                      {detailsEtiquetas[0] ? null : <div className={styles.ingredientEmpty}>Nenhuma etiqueta cadastrada</div>}
-                    </div>
-                  </div>
-                )}
-              </div>
 
-              <aside className={dash.itemDetailsAside}>
-                <div className={dash.itemAsideCard}>
-                  <div className={dash.itemAsideHead}>
-                    <div className={dash.itemAsideTitle}>{detailsRow.receita}</div>
-                    <div className={dash.itemAsideMeta}>Pré-preparo</div>
-                  </div>
-                  <div className={dash.itemAsideRow}>
-                    <div className={dash.itemAsideLabel}>Custo Total</div>
-                    <div className={dash.itemAsideValue}>{detailsRow.custoTotal}</div>
-                  </div>
-                  <div className={dash.itemAsideRow}>
-                    <div className={dash.itemAsideLabel}>Rendimento</div>
-                    <div className={dash.itemAsideValue}>{detailsRow.rendimento}</div>
-                  </div>
-                  <div className={dash.itemAsideRow}>
-                    <div className={dash.itemAsideLabel}>Custo Unitário</div>
-                    <div className={dash.itemAsideValue}>{detailsRow.custoUnitario}</div>
-                  </div>
+                      <div className={ft.detailsDividerIcon}>
+                        <DetailsChevronDoubleIcon />
+                      </div>
+
+                      <div className={ft.detailsList}>
+                        {(detailsRow.ingredientes ?? []).map((row) => (
+                          <div key={row.id} className={ft.detailsListRow}>
+                            <div className={ft.detailsListItem}>{row.item}</div>
+                            <div className={ft.detailsListQty}>{formatQtyLabel(row.quantidade, row.unidade)}</div>
+                            <div className={ft.detailsListCost}>{formatMoney(row.custoCents / 100)}</div>
+                            <button type="button" className={ft.detailsEditRowBtn} onClick={() => editDetailIngredientRow(row)} aria-label={`Editar ${row.item}`}>
+                              <DetailsEditIcon />
+                            </button>
+                            <button type="button" className={ft.detailsTrashBtn} onClick={() => removeDetailIngredientRow(row.id)} aria-label={`Remover ${row.item}`}>
+                              <DetailsTrashIcon />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className={ft.detailsDividerIconBottom}>
+                        <DetailsChevronDoubleIcon />
+                      </div>
+
+                      <div className={ft.detailsBottomRow}>
+                        <div className={ft.detailsYieldCard}>
+                          <div>
+                            <div className={ft.yieldTitle}>Quanto Rende?</div>
+                            <div className={ft.yieldHint}>Informe quanto essa receita irá render em média após o preparo.</div>
+                          </div>
+                          <div className={ft.detailsYieldMeta}>
+                            <div className={ft.detailsYieldInput}>{formatDecimal3(detailsYield.qty)}</div>
+                            <div className={ft.detailsYieldSuffix}>{detailsYield.unit}</div>
+                          </div>
+                        </div>
+
+                        <div className={ft.detailsTotalsCard}>
+                          <div className={ft.detailsTotalCol}>
+                            <span>Custo Total:</span>
+                            <strong>{formatMoney(detailsIngredientsTotalCents / 100)}</strong>
+                          </div>
+                          <div className={ft.detailsTotalCol}>
+                            <span>Custo Unitário:</span>
+                            <strong>{`${formatMoney(detailsYield.qty > 0 ? detailsIngredientsTotalCents / 100 / detailsYield.qty : 0)} / ${detailsYield.unit}`}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : detailsTab === "preparo" ? (
+                    <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
+                      <div className={ft.detailsPrepHeader}>
+                        <div className={ft.detailsSectionTitle}>Modo de Preparo</div>
+                        {!isEditingPrep ? (
+                          <button type="button" className={ft.detailsEditBtn} onClick={startPrepEdit}>
+                            editar
+                          </button>
+                        ) : null}
+                      </div>
+
+                      {isEditingPrep ? (
+                        <>
+                          <textarea
+                            className={ft.detailsPrepTextarea}
+                            placeholder="Escreva o modo de preparo deste item..."
+                            value={prepDraft}
+                            onChange={(e) => setPrepDraft(e.target.value)}
+                          />
+                          <div className={ft.detailsPrepActions}>
+                            <button type="button" className={ft.detailsSaveTextBtn} onClick={savePrepEdit}>
+                              Salvar
+                            </button>
+                            <button type="button" className={ft.detailsCancelTextBtn} onClick={cancelPrepEdit}>
+                              Cancelar
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className={ft.detailsPrepSaved}>{detailsRow.modoPreparo || "Escreva o modo de preparo deste item..."}</div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
+                      <div className={ft.detailsSectionTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
+                      <div className={ft.detailsList}>
+                        {detailsEtiquetas.map((e) => (
+                          <div key={e.id} className={ft.detailsListRow}>
+                            <div className={ft.detailsListItem}>{e.dataValidade}</div>
+                            <div className={ft.detailsListQty}>{`${e.quantidade} ${e.unidade}`}</div>
+                            <div className={ft.detailsListCost}>{e.responsavel || "-"}</div>
+                            <div />
+                            <div />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </aside>
-            </div>
-          </section>
+
+                <aside className={`${dash.itemDetailsAside} ${ft.detailsSidebar}`}>
+                  <div className={ft.detailsSidebarCard}>
+                    <div className={ft.detailsPreviewBox}>
+                      <div className={ft.detailsPreviewFallback}>
+                        <div className={ft.previewTopBar} />
+                        <div className={ft.previewThumbGrid}>
+                          <span className={ft.previewThumbMain} />
+                          <span className={ft.previewThumbSide} />
+                        </div>
+                      </div>
+                    </div>
+                    <div className={`${dash.itemAsideTitle} ${ft.detailsSidebarTitle}`}>{detailsRow.receita}</div>
+                    <div className={`${dash.itemAsideMeta} ${ft.detailsSidebarMeta}`}>Pré-Preparo</div>
+
+                    <div className={dash.itemAsideRow}>
+                      <div className={dash.itemAsideLabel}>Ocultar do CMV Real</div>
+                      <button type="button" className={detailsIsHidden ? dash.itemToggleOn : dash.itemToggleOff} onClick={toggleDetailsHidden}>
+                        <span />
+                      </button>
+                    </div>
+
+                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void downloadFichaTecnica(detailsRow)}>
+                      <DetailsPdfIcon />
+                      Baixar Ficha Técnica
+                    </button>
+
+                    <div className={dash.itemAsideKpis}>
+                      <div className={dash.itemAsideKpi}>
+                        <div className={dash.itemAsideKpiIcon}>
+                          <DetailsIconCalendarSmall />
+                        </div>
+                        <div className={dash.itemAsideKpiText}>
+                          <div className={dash.itemAsideKpiLabel}>Prazo de Validade Padrão</div>
+                          <div className={dash.itemAsideKpiValue}>{detailsValidityLabel}</div>
+                        </div>
+                      </div>
+                      <div className={dash.itemAsideKpi}>
+                        <div className={dash.itemAsideKpiIcon}>
+                          <DetailsIconCalendarSmall />
+                        </div>
+                        <div className={dash.itemAsideKpiText}>
+                          <div className={dash.itemAsideKpiLabel}>Última Entrada</div>
+                          <div className={dash.itemAsideKpiValue}>{detailsUltimaEntradaLabel}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </div>
         ) : (
           <>
             <section className={styles.header}>
