@@ -44,6 +44,17 @@ type LatestItemInfo = {
   timestamp: number;
 };
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 function normalizeText(value: string) {
   return value
     .normalize("NFD")
@@ -303,6 +314,8 @@ export default function ListaDeComprasClient() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
+  const [isExportingXlsx, setIsExportingXlsx] = useState(false);
 
   useEffect(() => {
     setInsumos(readInsumosFromStore());
@@ -593,6 +606,158 @@ export default function ListaDeComprasClient() {
     inventoryOptions.some((option) => option.iso === effectiveStartDate) &&
     inventoryOptions.some((option) => option.iso === effectiveEndDate);
 
+  const exportRows = useMemo(() => {
+    const selected = rows.filter((row) => Boolean(selectedIds[row.id]));
+    return selected.length ? selected : rows;
+  }, [rows, selectedIds]);
+
+  const canExport = isPeriodReady && exportRows.length > 0 && !isExportingPdf && !isExportingXlsx;
+
+  function computeCompra(row: CompraRow) {
+    const estoqueFinalValue = estoqueFinalMap[row.id] ?? "0,000";
+    const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
+    const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
+    const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
+    const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+    const compraFornecedor = comprarCalculado / fornecedorFactor;
+    return {
+      estoqueFinalNum,
+      comprarCalculado,
+      compraFornecedor,
+      unidadeComprar: mode === "fornecedor" ? row.fornecedorMedida : row.medida,
+      unidadeInsumo: row.medida,
+    };
+  }
+
+  async function downloadListaXlsx() {
+    if (!isPeriodReady || !exportRows.length) return;
+    if (isExportingXlsx) return;
+    setIsExportingXlsx(true);
+    try {
+      const XLSX = await import("xlsx");
+      const header = mode === "fornecedor"
+        ? ["Item", "Fornecedor", "Qtd Comprar", "Unidade", "Qtd Insumo", "Unidade Insumo", "Categoria", "Custo Médio (Insumo)"]
+        : ["Item", "Categoria", "Fornecedor", "Qtd Comprar", "Unidade", "Custo Médio"];
+      const table = [
+        header,
+        ...exportRows.map((row) => {
+          const calc = computeCompra(row);
+          if (mode === "fornecedor") {
+            return [
+              row.displayItem,
+              row.fornecedor,
+              Number(calc.compraFornecedor.toFixed(3)),
+              calc.unidadeComprar,
+              Number(calc.comprarCalculado.toFixed(3)),
+              calc.unidadeInsumo,
+              row.categoria,
+              row.custoMedioLabel,
+            ];
+          }
+          return [
+            row.displayItem,
+            row.categoria,
+            row.fornecedor,
+            Number(calc.comprarCalculado.toFixed(3)),
+            calc.unidadeComprar,
+            row.custoMedioLabel,
+          ];
+        }),
+      ];
+      const ws = XLSX.utils.aoa_to_sheet(table);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Lista");
+      const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+      downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `lista-de-compras-${effectiveStartDate}-ate-${effectiveEndDate}.xlsx`);
+    } finally {
+      setIsExportingXlsx(false);
+    }
+  }
+
+  async function downloadListaPdf() {
+    if (!isPeriodReady || !exportRows.length) return;
+    if (isExportingPdf) return;
+    setIsExportingPdf(true);
+    try {
+      const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+      const doc = await PDFDocument.create();
+      const font = await doc.embedFont(StandardFonts.Helvetica);
+      const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+      const pageSize: [number, number] = [595.28, 841.89];
+      const margin = 40;
+      const rowH = 18;
+      const colItemPct = 0.52;
+      const colQtyPct = 0.16;
+      const colUnitPct = 0.12;
+
+      function clipText(text: string, maxWidth: number, size: number) {
+        const raw = String(text ?? "");
+        if (font.widthOfTextAtSize(raw, size) <= maxWidth) return raw;
+        let out = raw;
+        while (out.length > 1 && font.widthOfTextAtSize(`${out}…`, size) > maxWidth) out = out.slice(0, -1);
+        return `${out}…`;
+      }
+
+      let page = doc.addPage(pageSize);
+      let y = pageSize[1] - margin;
+
+      function drawHeader() {
+        const title = "Lista de Compras";
+        const now = new Date();
+        const meta = `Período: ${effectiveStartDate || "-"} até ${effectiveEndDate || "-"} • Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+        page.drawText(title, { x: margin, y, size: 16, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        y -= 18;
+        page.drawText(meta, { x: margin, y, size: 10, font, color: rgb(0.3, 0.3, 0.3) });
+        y -= 18;
+
+        const tableW = pageSize[0] - margin * 2;
+        const colItem = tableW * colItemPct;
+        const colQty = tableW * colQtyPct;
+        const colUnit = tableW * colUnitPct;
+        const colFornecedor = tableW - colItem - colQty - colUnit;
+
+        page.drawRectangle({ x: margin, y: y - 12, width: tableW, height: 16, color: rgb(0.93, 0.94, 0.94), borderRadius: 6 } as any);
+        page.drawText("Item", { x: margin + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        page.drawText("Qtd", { x: margin + colItem + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        page.drawText("Un", { x: margin + colItem + colQty + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        page.drawText("Fornecedor", { x: margin + colItem + colQty + colUnit + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        y -= 20;
+
+        return { tableW, colItem, colQty, colUnit, colFornecedor };
+      }
+
+      let cols = drawHeader();
+      const fontSize = 10;
+
+      for (const row of exportRows) {
+        if (y < margin + 40) {
+          page = doc.addPage(pageSize);
+          y = pageSize[1] - margin;
+          cols = drawHeader();
+        }
+
+        const calc = computeCompra(row);
+        const qty = mode === "fornecedor" ? calc.compraFornecedor : calc.comprarCalculado;
+        const qtyLabel = formatDecimalUpTo3(qty);
+        const itemLabel = clipText(row.displayItem, cols.colItem - 12, fontSize);
+        const fornecedorLabel = clipText(row.fornecedor, cols.colFornecedor - 12, fontSize);
+
+        page.drawText(itemLabel, { x: margin + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
+        page.drawText(qtyLabel, { x: margin + cols.colItem + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
+        page.drawText(calc.unidadeComprar, { x: margin + cols.colItem + cols.colQty + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
+        page.drawText(fornecedorLabel, { x: margin + cols.colItem + cols.colQty + cols.colUnit + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
+
+        y -= rowH;
+      }
+
+      const bytes = await doc.save();
+      downloadBlob(new Blob([bytes], { type: "application/pdf" }), `lista-de-compras-${effectiveStartDate}-ate-${effectiveEndDate}.pdf`);
+    } finally {
+      setIsExportingPdf(false);
+    }
+  }
+
   function toggleSelectAll() {
     if (!isPeriodReady) return;
     setSelectedIds((prev) => {
@@ -769,11 +934,11 @@ export default function ListaDeComprasClient() {
                     </select>
                   </div>
                 </div>
-                <button type="button" className={styles.exportBtn} disabled>
+                <button type="button" className={styles.exportBtn} disabled={!canExport} onClick={downloadListaPdf}>
                   <ExportIcon />
                   PDF
                 </button>
-                <button type="button" className={styles.exportBtn} disabled>
+                <button type="button" className={styles.exportBtn} disabled={!canExport} onClick={downloadListaXlsx}>
                   <ExportIcon />
                   XLSX
                 </button>
