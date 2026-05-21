@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
@@ -562,6 +563,9 @@ function IconChevronDownDouble() {
 }
 
 export default function PrePreparoClient() {
+  const toastTimerRef = useRef<number | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>(initialRows);
@@ -581,6 +585,15 @@ export default function PrePreparoClient() {
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [etiquetasRows, setEtiquetasRows] = useState(() => readPrePreparoEtiquetasFromStore([]));
+
+  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
+    setToast({ message, type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
 
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
@@ -638,6 +651,16 @@ export default function PrePreparoClient() {
   useEffect(() => {
     if (newRecipeValidityUnit !== "Dia(s)") setNewRecipeValidityUnit("Dia(s)");
   }, [newRecipeValidityUnit]);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (draftValidityUnit !== "Dia(s)") setDraftValidityUnit("Dia(s)");
@@ -1060,11 +1083,13 @@ export default function PrePreparoClient() {
   function toggleDetailsHidden() {
     if (!detailsRow) return;
     const id = detailsRow.id;
+    const nextHidden = !Boolean(hiddenMap[id]);
     setHiddenMap((prev) => {
       const next = { ...(prev ?? {}) };
-      next[id] = !next[id];
+      next[id] = nextHidden;
       return next;
     });
+    if (nextHidden) showToast("Ocultado do CMV Real.", "success");
   }
 
   const categories = useMemo(() => {
@@ -1366,6 +1391,14 @@ export default function PrePreparoClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="pre-preparo" />
+      {isMounted && toast
+        ? createPortal(
+            <div className={styles.toastWrap} aria-live="polite">
+              <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
+            </div>,
+            document.body
+          )
+        : null}
 
       <main className={dash.content}>
         {detailsRow ? (

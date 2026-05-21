@@ -2050,6 +2050,12 @@ select.topInput option:checked {
   padding: 2px;
   display: inline-flex;
   align-items: center;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.itemToggleOff:hover {
+  filter: brightness(0.97);
 }
 
 .itemToggleOff > span {
@@ -2070,6 +2076,12 @@ select.topInput option:checked {
   padding: 2px;
   display: inline-flex;
   align-items: center;
+  cursor: pointer;
+  transition: filter 120ms ease;
+}
+
+.itemToggleOn:hover {
+  filter: brightness(0.97);
 }
 
 .itemToggleOn > span {
