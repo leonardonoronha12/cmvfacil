@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
@@ -749,6 +750,9 @@ function badgeClass(type: BcgType) {
 }
 
 export default function FichasTecnicasClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const openedFromQueryRef = useRef(false);
   const [tableRows, setTableRows] = useState<RecipeRow[]>(allRows);
   const [query, setQuery] = useState("");
   const [quadrante, setQuadrante] = useState("Quadrante");
@@ -792,6 +796,23 @@ export default function FichasTecnicasClient() {
     setInsumos(readInsumosFromStore());
     return subscribeInsumos(setInsumos);
   }, []);
+
+  useEffect(() => {
+    if (openedFromQueryRef.current) return;
+    const open = (searchParams.get("open") ?? "").trim();
+    if (!open) return;
+    const key = normalizeText(open);
+    const row =
+      tableRows.find((r) => normalizeText(r.receita) === key) ??
+      tableRows.find((r) => normalizeText(r.receita).includes(key) || key.includes(normalizeText(r.receita))) ??
+      null;
+    if (!row) return;
+    setDetailsRecipe(buildDetailsRecipeFromRow(row));
+    setDetailsViewTab("ingredientes");
+    setActionMenuRowId(null);
+    openedFromQueryRef.current = true;
+    router.replace("/fichas-tecnicas");
+  }, [router, searchParams, tableRows]);
 
   useEffect(() => {
     function handleWindowPointerDown(event: MouseEvent) {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
@@ -393,6 +394,7 @@ function IconChevronDownDouble() {
 }
 
 export default function PrePreparoClient() {
+  const router = useRouter();
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>(initialRows);
@@ -1047,7 +1049,24 @@ export default function PrePreparoClient() {
         <section className={styles.board}>
           {visible[0] ? (
             visible.map((r) => (
-              <div key={r.id} className={styles.recipeCard}>
+              <div
+                key={r.id}
+                className={styles.recipeCard}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  const recipe = r.receita.trim();
+                  if (!recipe) return;
+                  router.push(`/fichas-tecnicas?open=${encodeURIComponent(recipe)}`);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key !== "Enter" && e.key !== " ") return;
+                  e.preventDefault();
+                  const recipe = r.receita.trim();
+                  if (!recipe) return;
+                  router.push(`/fichas-tecnicas?open=${encodeURIComponent(recipe)}`);
+                }}
+              >
                 <div className={styles.recipeTop}>
                   <div className={styles.recipeLeft}>
                     <div className={styles.recipeIcon} aria-hidden>
@@ -1059,7 +1078,7 @@ export default function PrePreparoClient() {
                       <div className={styles.recipeDash}>-</div>
                     </div>
                   </div>
-                  <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined}>
+                  <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined} onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
                       className={styles.dotsBtn}
