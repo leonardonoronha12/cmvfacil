@@ -607,11 +607,11 @@ export default function ListaDeComprasClient() {
     inventoryOptions.some((option) => option.iso === effectiveEndDate);
 
   const exportRows = useMemo(() => {
-    const selected = rows.filter((row) => Boolean(selectedIds[row.id]));
-    return selected.length ? selected : rows;
+    return rows.filter((row) => Boolean(selectedIds[row.id]));
   }, [rows, selectedIds]);
 
-  const canExport = isPeriodReady && exportRows.length > 0 && !isExportingPdf && !isExportingXlsx;
+  const canExport = isPeriodReady && exportRows.length > 0;
+  const exportDisabled = !canExport || isExportingPdf || isExportingXlsx;
 
   function computeCompra(row: CompraRow) {
     const estoqueFinalValue = estoqueFinalMap[row.id] ?? "0,000";
@@ -630,8 +630,7 @@ export default function ListaDeComprasClient() {
   }
 
   async function downloadListaXlsx() {
-    if (!isPeriodReady || !exportRows.length) return;
-    if (isExportingXlsx) return;
+    if (!canExport || exportDisabled) return;
     setIsExportingXlsx(true);
     try {
       const XLSX = await import("xlsx");
@@ -675,8 +674,7 @@ export default function ListaDeComprasClient() {
   }
 
   async function downloadListaPdf() {
-    if (!isPeriodReady || !exportRows.length) return;
-    if (isExportingPdf) return;
+    if (!canExport || exportDisabled) return;
     setIsExportingPdf(true);
     try {
       const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
@@ -934,11 +932,11 @@ export default function ListaDeComprasClient() {
                     </select>
                   </div>
                 </div>
-                <button type="button" className={styles.exportBtn} disabled={!canExport} onClick={downloadListaPdf}>
+                <button type="button" className={styles.exportBtn} disabled={exportDisabled} onClick={downloadListaPdf}>
                   <ExportIcon />
                   PDF
                 </button>
-                <button type="button" className={styles.exportBtn} disabled={!canExport} onClick={downloadListaXlsx}>
+                <button type="button" className={styles.exportBtn} disabled={exportDisabled} onClick={downloadListaXlsx}>
                   <ExportIcon />
                   XLSX
                 </button>

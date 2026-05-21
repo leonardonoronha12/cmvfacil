@@ -371,21 +371,33 @@
 
 .exportBtn {
   height: 28px;
-  border: 1px solid #e5e9e8;
+  border: 1px solid #dfe5e4;
   border-radius: 5px;
   background: #ffffff;
-  color: #90a09e;
+  color: #202527;
   padding: 0 8px;
   font-size: 9px;
   font-weight: 700;
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.exportBtn:hover {
+  background: #f7f8f8;
+  border-color: #d3d9d8;
 }
 
 .exportBtn:disabled {
   opacity: 0.8;
   cursor: not-allowed;
+}
+
+.exportBtn:disabled:hover {
+  background: #ffffff;
+  border-color: #dfe5e4;
 }
 
 .metricGrid {
