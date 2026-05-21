@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
@@ -11,7 +10,7 @@ import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, type 
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
-import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import styles from "./pre-preparo.module.css";
 
 type PrePreparoRow = {
@@ -394,15 +393,17 @@ function IconChevronDownDouble() {
 }
 
 export default function PrePreparoClient() {
-  const router = useRouter();
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>(initialRows);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const [detailsRecipeId, setDetailsRecipeId] = useState<string | null>(null);
+  const [detailsTab, setDetailsTab] = useState<"ingredientes" | "preparo" | "etiquetas">("ingredientes");
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [etiquetasRows, setEtiquetasRows] = useState(() => readPrePreparoEtiquetasFromStore([]));
 
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
@@ -473,6 +474,11 @@ export default function PrePreparoClient() {
   useEffect(() => {
     const stored = readPrePreparoFromStore(initialRows as any);
     if (stored[0]) setRows(stored as any);
+  }, []);
+
+  useEffect(() => {
+    setEtiquetasRows(readPrePreparoEtiquetasFromStore([]));
+    return subscribePrePreparoEtiquetas((next) => setEtiquetasRows(next));
   }, []);
 
   useEffect(() => {
@@ -808,6 +814,16 @@ export default function PrePreparoClient() {
     return filtered.filter((r) => `${r.categoria} ${r.receita}`.toLowerCase().includes(q));
   }, [query, rows, selectedCategory]);
 
+  const detailsRow = useMemo(() => {
+    if (!detailsRecipeId) return null;
+    return rows.find((r) => r.id === detailsRecipeId) ?? null;
+  }, [detailsRecipeId, rows]);
+
+  const detailsEtiquetas = useMemo(() => {
+    if (!detailsRecipeId) return [];
+    return etiquetasRows.filter((e) => e.recipeId === detailsRecipeId);
+  }, [detailsRecipeId, etiquetasRows]);
+
   const etiquetaRecipeOptions = useMemo(() => {
     const q = etiquetaRecipeQuery.trim().toLowerCase();
     const base = rows;
@@ -1000,195 +1016,317 @@ export default function PrePreparoClient() {
       <AppSidebar active="pre-preparo" />
 
       <main className={dash.content}>
-        <section className={styles.header}>
-          <div className={styles.headerIcon}>
-            <IconPrep />
-          </div>
-          <div className={styles.headerText}>
-            <h1 className={styles.title}>Pré-preparo</h1>
-            <p className={styles.subtitle}>Acompanhe com precisão o custo de cada receita usando fichas de ingredientes detalhadas.</p>
-          </div>
-        </section>
-
-        <section className={styles.toolbar}>
-          <div className={styles.filters}>
-            <div className={styles.search}>
-              <span className={styles.searchIcon}>
-                <IconSearch />
-              </span>
-              <input className={styles.searchInput} placeholder="Pesquise por receitas..." value={query} onChange={(e) => setQuery(e.target.value)} />
-            </div>
-            <select className={styles.select} value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
-              <option value="Categorias">Categorias</option>
-              {categories.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className={styles.actions}>
-            <button
-              type="button"
-              className={styles.secondaryBtn}
-              onClick={() => {
-                openEtiquetaModal(null);
-              }}
-            >
-              <IconLabel />
-              Nova Etiqueta
-            </button>
-            <button type="button" className={styles.primaryBtn} onClick={openNewRecipeModal}>
-              <IconPlus />
-              Nova Receita
-            </button>
-          </div>
-        </section>
-
-        <section className={styles.board}>
-          {visible[0] ? (
-            visible.map((r) => (
-              <div
-                key={r.id}
-                className={styles.recipeCard}
-                role="button"
-                tabIndex={0}
+        {detailsRow ? (
+          <section className={dash.itemDetails}>
+            <div className={dash.itemDetailsTop}>
+              <button
+                type="button"
+                className={dash.itemBack}
                 onClick={() => {
-                  const recipe = r.receita.trim();
-                  if (!recipe) return;
-                  router.push(`/fichas-tecnicas?open=${encodeURIComponent(recipe)}`);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key !== "Enter" && e.key !== " ") return;
-                  e.preventDefault();
-                  const recipe = r.receita.trim();
-                  if (!recipe) return;
-                  router.push(`/fichas-tecnicas?open=${encodeURIComponent(recipe)}`);
+                  setDetailsRecipeId(null);
+                  setDetailsTab("ingredientes");
                 }}
               >
-                <div className={styles.recipeTop}>
-                  <div className={styles.recipeLeft}>
-                    <div className={styles.recipeIcon} aria-hidden>
-                      <IconCubeOutline />
-                    </div>
-                    <div className={styles.recipeMeta}>
-                      <div className={styles.recipeCategory}>{r.categoria}</div>
-                      <div className={styles.recipeName}>{r.receita}</div>
-                      <div className={styles.recipeDash}>-</div>
-                    </div>
-                  </div>
-                  <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined} onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className={styles.dotsBtn}
-                      aria-label="Opções"
-                      onClick={() => setOpenMenuId((prev) => (prev === r.id ? null : r.id))}
-                    >
-                      <IconDots />
-                    </button>
-                    {openMenuId === r.id ? (
-                      <div className={styles.menu} role="menu" aria-label="Opções da receita">
-                        <button
-                          type="button"
-                          className={styles.menuItem}
-                          role="menuitem"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            openEditModal(r);
-                          }}
-                        >
-                          <span className={styles.menuIcon} aria-hidden>
-                            <IconEdit />
-                          </span>
-                          Editar
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.menuItem}
-                          role="menuitem"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            openEtiquetaModal(r);
-                          }}
-                        >
-                          <span className={styles.menuIcon} aria-hidden>
-                            <IconEtiqueta />
-                          </span>
-                          Nova Etiqueta
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.menuItem}
-                          role="menuitem"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            void downloadFichaTecnica(r);
-                          }}
-                        >
-                          <span className={styles.menuIcon} aria-hidden>
-                            <IconPdf />
-                          </span>
-                          Ficha Técnica
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.menuItem}
-                          role="menuitem"
-                          onClick={() => {
-                            setOpenMenuId(null);
-                            openDeleteModal(r);
-                          }}
-                        >
-                          <span className={styles.menuIcon} aria-hidden>
-                            <IconTrashOutline />
-                          </span>
-                          Excluir
-                        </button>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
+                <span className={dash.itemBackIcon}>←</span>
+                <span className={dash.itemBackText}>{`Detalhes do Item / ${detailsRow.receita}`}</span>
+              </button>
 
-                <div className={styles.recipeStats}>
-                  <div className={styles.statRow}>
-                    <div className={styles.statLabel}>Custo Total:</div>
-                    <div className={styles.statValue}>{r.custoTotal}</div>
-                  </div>
-                  <div className={styles.statRow}>
-                    <div className={styles.statLabel}>Rendimento:</div>
-                    <div className={styles.statValue}>{r.rendimento}</div>
-                  </div>
-                  <div className={styles.statRow}>
-                    <div className={styles.statLabel}>Custo Unitário:</div>
-                    <div className={styles.statValue}>{r.custoUnitario}</div>
-                  </div>
-                </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button type="button" className={styles.secondaryBtn} onClick={() => openEtiquetaModal(detailsRow)}>
+                  <IconLabel />
+                  Nova Etiqueta
+                </button>
+                <button type="button" className={styles.primaryBtn} onClick={() => openEditModal(detailsRow)}>
+                  <IconEdit />
+                  Editar
+                </button>
               </div>
-            ))
-          ) : (
-            <div className={styles.emptyBoard}>Sem receitas cadastradas</div>
-          )}
-        </section>
+            </div>
 
-        <section className={styles.footer}>
-          <div>{`${visible.length} resultado(s) encontrado(s)`}</div>
-          <div className={styles.pagination}>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
-              «
-            </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
-              ‹
-            </button>
-            <div className={styles.pageInfo}>1 de 1</div>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
-              ›
-            </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
-              »
-            </button>
-          </div>
-        </section>
+            <div className={dash.itemDetailsGrid}>
+              <div className={dash.itemDetailsMain}>
+                <div className={dash.itemDetailsTabs}>
+                  <button
+                    type="button"
+                    className={detailsTab === "ingredientes" ? dash.itemTabActive : dash.itemTab}
+                    onClick={() => setDetailsTab("ingredientes")}
+                  >
+                    Ingredientes
+                  </button>
+                  <button type="button" className={detailsTab === "preparo" ? dash.itemTabActive : dash.itemTab} onClick={() => setDetailsTab("preparo")}>
+                    Modo de Preparo
+                  </button>
+                  <button
+                    type="button"
+                    className={detailsTab === "etiquetas" ? dash.itemTabActive : dash.itemTab}
+                    onClick={() => setDetailsTab("etiquetas")}
+                  >
+                    Etiquetas
+                  </button>
+                </div>
+
+                {detailsTab === "ingredientes" ? (
+                  <div className={dash.itemDetailsBody}>
+                    <div className={styles.ingredientsBox}>
+                      <div className={styles.ingredientsHead}>
+                        <div className={styles.ingredientsHeadItem}>Item</div>
+                        <div className={styles.ingredientsHeadQty}>Quantidade</div>
+                        <div className={styles.ingredientsHeadCost}>Custo</div>
+                        <div />
+                      </div>
+                      {(detailsRow.ingredientes ?? []).map((ing) => (
+                        <div key={ing.id} className={styles.ingredientsListRow}>
+                          <div className={styles.ingredientsListItem}>{ing.item}</div>
+                          <div className={styles.ingredientsListQty}>{`${ing.quantidade} ${ing.unidade}`}</div>
+                          <div className={styles.ingredientsListCost}>{formatCurrencyBRLFromCents(ing.custoCents)}</div>
+                          <div />
+                        </div>
+                      ))}
+                      {(detailsRow.ingredientes ?? [])[0] ? null : <div className={styles.ingredientEmpty}>Sem ingredientes cadastrados</div>}
+                    </div>
+                  </div>
+                ) : detailsTab === "preparo" ? (
+                  <div className={dash.itemDetailsBody}>
+                    <div className={styles.stepTitle}>Modo de Preparo</div>
+                    <div className={styles.stepSubtitle}>Use o botão Editar para alterar o texto.</div>
+                    <div style={{ whiteSpace: "pre-wrap", padding: 12, border: "1px solid #eef1f1", borderRadius: 12, background: "#ffffff" }}>
+                      {detailsRow.modoPreparo?.trim() ? detailsRow.modoPreparo : "Escreva o modo de preparo deste item..."}
+                    </div>
+                  </div>
+                ) : (
+                  <div className={dash.itemDetailsBody}>
+                    <div className={styles.stepTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
+                    <div className={styles.stepSubtitle}>Etiquetas geradas para este item.</div>
+                    <div className={styles.ingredientsBox}>
+                      {detailsEtiquetas.map((e) => (
+                        <div key={e.id} className={styles.ingredientsListRow}>
+                          <div className={styles.ingredientsListItem}>{e.dataValidade}</div>
+                          <div className={styles.ingredientsListQty}>{`${e.quantidade} ${e.unidade}`}</div>
+                          <div className={styles.ingredientsListCost}>{e.responsavel || "-"}</div>
+                          <div />
+                        </div>
+                      ))}
+                      {detailsEtiquetas[0] ? null : <div className={styles.ingredientEmpty}>Nenhuma etiqueta cadastrada</div>}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <aside className={dash.itemDetailsAside}>
+                <div className={dash.itemAsideCard}>
+                  <div className={dash.itemAsideHead}>
+                    <div className={dash.itemAsideTitle}>{detailsRow.receita}</div>
+                    <div className={dash.itemAsideMeta}>Pré-preparo</div>
+                  </div>
+                  <div className={dash.itemAsideRow}>
+                    <div className={dash.itemAsideLabel}>Custo Total</div>
+                    <div className={dash.itemAsideValue}>{detailsRow.custoTotal}</div>
+                  </div>
+                  <div className={dash.itemAsideRow}>
+                    <div className={dash.itemAsideLabel}>Rendimento</div>
+                    <div className={dash.itemAsideValue}>{detailsRow.rendimento}</div>
+                  </div>
+                  <div className={dash.itemAsideRow}>
+                    <div className={dash.itemAsideLabel}>Custo Unitário</div>
+                    <div className={dash.itemAsideValue}>{detailsRow.custoUnitario}</div>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </section>
+        ) : (
+          <>
+            <section className={styles.header}>
+              <div className={styles.headerIcon}>
+                <IconPrep />
+              </div>
+              <div className={styles.headerText}>
+                <h1 className={styles.title}>Pré-preparo</h1>
+                <p className={styles.subtitle}>Acompanhe com precisão o custo de cada receita usando fichas de ingredientes detalhadas.</p>
+              </div>
+            </section>
+
+            <section className={styles.toolbar}>
+              <div className={styles.filters}>
+                <div className={styles.search}>
+                  <span className={styles.searchIcon}>
+                    <IconSearch />
+                  </span>
+                  <input className={styles.searchInput} placeholder="Pesquise por receitas..." value={query} onChange={(e) => setQuery(e.target.value)} />
+                </div>
+                <select className={styles.select} value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
+                  <option value="Categorias">Categorias</option>
+                  {categories.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className={styles.actions}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={() => {
+                    openEtiquetaModal(null);
+                  }}
+                >
+                  <IconLabel />
+                  Nova Etiqueta
+                </button>
+                <button type="button" className={styles.primaryBtn} onClick={openNewRecipeModal}>
+                  <IconPlus />
+                  Nova Receita
+                </button>
+              </div>
+            </section>
+
+            <section className={styles.board}>
+              {visible[0] ? (
+                visible.map((r) => (
+                  <div
+                    key={r.id}
+                    className={styles.recipeCard}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => {
+                      setOpenMenuId(null);
+                      setDetailsTab("ingredientes");
+                      setDetailsRecipeId(r.id);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Enter" && e.key !== " ") return;
+                      e.preventDefault();
+                      setOpenMenuId(null);
+                      setDetailsTab("ingredientes");
+                      setDetailsRecipeId(r.id);
+                    }}
+                  >
+                    <div className={styles.recipeTop}>
+                      <div className={styles.recipeLeft}>
+                        <div className={styles.recipeIcon} aria-hidden>
+                          <IconCubeOutline />
+                        </div>
+                        <div className={styles.recipeMeta}>
+                          <div className={styles.recipeCategory}>{r.categoria}</div>
+                          <div className={styles.recipeName}>{r.receita}</div>
+                          <div className={styles.recipeDash}>-</div>
+                        </div>
+                      </div>
+                      <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined} onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className={styles.dotsBtn}
+                          aria-label="Opções"
+                          onClick={() => setOpenMenuId((prev) => (prev === r.id ? null : r.id))}
+                        >
+                          <IconDots />
+                        </button>
+                        {openMenuId === r.id ? (
+                          <div className={styles.menu} role="menu" aria-label="Opções da receita">
+                            <button
+                              type="button"
+                              className={styles.menuItem}
+                              role="menuitem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                openEditModal(r);
+                              }}
+                            >
+                              <span className={styles.menuIcon} aria-hidden>
+                                <IconEdit />
+                              </span>
+                              Editar
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.menuItem}
+                              role="menuitem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                openEtiquetaModal(r);
+                              }}
+                            >
+                              <span className={styles.menuIcon} aria-hidden>
+                                <IconEtiqueta />
+                              </span>
+                              Nova Etiqueta
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.menuItem}
+                              role="menuitem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                void downloadFichaTecnica(r);
+                              }}
+                            >
+                              <span className={styles.menuIcon} aria-hidden>
+                                <IconPdf />
+                              </span>
+                              Ficha Técnica
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.menuItem}
+                              role="menuitem"
+                              onClick={() => {
+                                setOpenMenuId(null);
+                                openDeleteModal(r);
+                              }}
+                            >
+                              <span className={styles.menuIcon} aria-hidden>
+                                <IconTrashOutline />
+                              </span>
+                              Excluir
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className={styles.recipeStats}>
+                      <div className={styles.statRow}>
+                        <div className={styles.statLabel}>Custo Total:</div>
+                        <div className={styles.statValue}>{r.custoTotal}</div>
+                      </div>
+                      <div className={styles.statRow}>
+                        <div className={styles.statLabel}>Rendimento:</div>
+                        <div className={styles.statValue}>{r.rendimento}</div>
+                      </div>
+                      <div className={styles.statRow}>
+                        <div className={styles.statLabel}>Custo Unitário:</div>
+                        <div className={styles.statValue}>{r.custoUnitario}</div>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className={styles.emptyBoard}>Sem receitas cadastradas</div>
+              )}
+            </section>
+
+            <section className={styles.footer}>
+              <div>{`${visible.length} resultado(s) encontrado(s)`}</div>
+              <div className={styles.pagination}>
+                <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+                  «
+                </button>
+                <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+                  ‹
+                </button>
+                <div className={styles.pageInfo}>1 de 1</div>
+                <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+                  ›
+                </button>
+                <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+                  »
+                </button>
+              </div>
+            </section>
+          </>
+        )}
 
         {isEditOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEditOpen(false)}>
