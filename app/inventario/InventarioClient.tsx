@@ -100,6 +100,33 @@ function sortContagensAsc(list: InventarioContagem[]) {
   return decorated.map((d) => d.c);
 }
 
+function normalizeContagens(list: InventarioContagem[]) {
+  return list.map((c) => {
+    const categorias = (c.categorias ?? []).map((cat) => {
+      const itens = cat.itens ?? [];
+      const byId = new Map<string, { it: InventarioItemRow; index: number }>();
+      for (let i = 0; i < itens.length; i += 1) {
+        const it = itens[i];
+        const id = String(it.id ?? "");
+        if (!id) continue;
+        const existing = byId.get(id);
+        if (!existing) {
+          byId.set(id, { it, index: i });
+          continue;
+        }
+        const existingHas = Boolean(String(existing.it.estoqueFinal ?? "").trim());
+        const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
+        if (!existingHas && nextHas) byId.set(id, { it, index: existing.index });
+      }
+      const deduped = Array.from(byId.values())
+        .sort((a, b) => a.index - b.index)
+        .map((x) => x.it);
+      return { ...cat, itens: deduped };
+    });
+    return { ...c, categorias };
+  });
+}
+
 const initialContagens: InventarioContagem[] = [
   {
     id: "c1",
@@ -158,7 +185,16 @@ export default function InventarioClient() {
   const allItems = useMemo(() => {
     const list = selectedContagem?.categorias ?? [];
     const out: InventarioItemRow[] = [];
-    for (const cat of list) out.push(...(cat.itens ?? []));
+    const seen = new Set<string>();
+    for (const cat of list) {
+      for (const it of cat.itens ?? []) {
+        const id = String(it.id ?? "");
+        if (!id) continue;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push(it);
+      }
+    }
     const q = query.trim().toLowerCase();
     return q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
   }, [query, selectedContagem?.categorias]);
@@ -186,7 +222,7 @@ export default function InventarioClient() {
       try {
         const db = await loadInventarioFromSupabase();
         if (db[0]) {
-          const sorted = sortContagensAsc(db);
+          const sorted = sortContagensAsc(normalizeContagens(db));
           setContagens(sorted);
           setSelectedContagemId(sorted[0]?.id ?? null);
           contagensReadyRef.current = true;
@@ -194,7 +230,7 @@ export default function InventarioClient() {
         }
       } catch {}
       const stored = readInventarioFromStore(initialContagens);
-      const sortedStored = sortContagensAsc(stored);
+      const sortedStored = sortContagensAsc(normalizeContagens(stored));
       setContagens(sortedStored);
       setSelectedContagemId(sortedStored[0]?.id ?? null);
       contagensReadyRef.current = true;
@@ -218,13 +254,25 @@ export default function InventarioClient() {
         const catIdx = categorias.findIndex((x) => String(x.nome || "").toUpperCase() === "MATÉRIA PRIMA");
         const cat: InventarioCategoria =
           catIdx >= 0 ? categorias[catIdx] : { id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente" as const, itens: [] };
-        const existing = new Map<string, InventarioItemRow>();
-        for (const it of cat.itens ?? []) existing.set(it.item.toLowerCase(), it);
-        const merged: InventarioItemRow[] = [...(cat.itens ?? [])];
+        const dedupeById = new Map<string, InventarioItemRow>();
+        for (const it of cat.itens ?? []) {
+          const id = String(it.id ?? "");
+          if (!id) continue;
+          const prevIt = dedupeById.get(id);
+          if (!prevIt) {
+            dedupeById.set(id, it);
+            continue;
+          }
+          const prevHas = Boolean(String(prevIt.estoqueFinal ?? "").trim());
+          const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
+          if (!prevHas && nextHas) dedupeById.set(id, it);
+        }
+        const merged: InventarioItemRow[] = Array.from(dedupeById.values());
+        const existingIds = new Set<string>(merged.map((it) => String(it.id ?? "")).filter(Boolean));
         for (const ins of insumosStore) {
-          const k = ins.item.toLowerCase();
-          if (existing.has(k)) continue;
+          if (existingIds.has(ins.id)) continue;
           merged.push({ id: ins.id, item: ins.item, unidade: ins.medida, estoqueFinal: "" });
+          existingIds.add(ins.id);
           changed = true;
         }
         const nextCat: InventarioCategoria = { ...cat, itens: merged };
@@ -371,9 +419,10 @@ export default function InventarioClient() {
         const categorias = (c.categorias ?? []).map((cat) => ({ ...cat, itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, estoqueFinal: value } : it)) }));
         return { ...c, categorias };
       });
-      const updated = next.find((x) => x.id === cId);
+      const normalized = normalizeContagens(next);
+      const updated = normalized.find((x) => x.id === cId);
       if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-      return next;
+      return normalized;
     });
   }
 
