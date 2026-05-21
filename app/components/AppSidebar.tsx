@@ -1,4 +1,9 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
+import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 
 type SidebarKey =
   | "dashboard"
@@ -142,6 +147,15 @@ function IconChat() {
 }
 
 export default function AppSidebar({ active }: { active: SidebarKey }) {
+  const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
+
+  useEffect(() => {
+    setEtiquetas(readPrePreparoEtiquetasFromStore([]));
+    return subscribePrePreparoEtiquetas((next) => setEtiquetas(next));
+  }, []);
+
+  const etiquetasVencidas = useMemo(() => buildExpiredPrePreparoEtiquetaDesperdicios(etiquetas).length, [etiquetas]);
+
   return (
     <aside className={dash.menuLateral}>
       <div className={dash.menuTop}>
@@ -204,7 +218,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           <a className={navClass(active, "desperdicios")} href="/desperdicios">
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
-            <span className={dash.navBadge}>1</span>
+            {etiquetasVencidas > 0 ? <span className={dash.navBadge}>{etiquetasVencidas}</span> : null}
           </a>
         </div>
 
