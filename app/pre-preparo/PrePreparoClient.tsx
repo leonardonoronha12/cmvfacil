@@ -1089,7 +1089,7 @@ export default function PrePreparoClient() {
       next[id] = nextHidden;
       return next;
     });
-    if (nextHidden) showToast("Ocultado do CMV Real.", "success");
+    showToast(nextHidden ? "Ocultado do CMV Real." : "Desocultado do CMV Real.", "success");
   }
 
   const categories = useMemo(() => {
