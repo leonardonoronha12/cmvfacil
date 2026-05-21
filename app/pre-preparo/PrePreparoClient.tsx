@@ -342,6 +342,23 @@ function DetailsIconCalendarSmall() {
   );
 }
 
+function DetailsCheckIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.5 12.5L10 17L18.5 8.5" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function DetailsXIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 7L17 17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+      <path d="M17 7L7 17" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function formatBRLValueFromCents(valueCents: number) {
   const v = Math.abs(valueCents);
   const intPart = Math.floor(v / 100);
@@ -554,7 +571,9 @@ export default function PrePreparoClient() {
   const [detailsTab, setDetailsTab] = useState<"ingredientes" | "preparo" | "etiquetas">("ingredientes");
   const [detailIngredientId, setDetailIngredientId] = useState("");
   const [detailIngredientQty, setDetailIngredientQty] = useState("0,000");
-  const [editingDetailIngredientRowId, setEditingDetailIngredientRowId] = useState<string | null>(null);
+  const [rowEditId, setRowEditId] = useState<string | null>(null);
+  const [rowEditIngredientId, setRowEditIngredientId] = useState("");
+  const [rowEditQty, setRowEditQty] = useState("0,000");
   const [isEditingPrep, setIsEditingPrep] = useState(false);
   const [prepDraft, setPrepDraft] = useState("");
   const [hiddenMap, setHiddenMap] = useState<Record<string, boolean>>(() => readPrePreparoHiddenMap());
@@ -651,7 +670,9 @@ export default function PrePreparoClient() {
     if (!detailsRecipeId) return;
     setDetailIngredientId("");
     setDetailIngredientQty("0,000");
-    setEditingDetailIngredientRowId(null);
+    setRowEditId(null);
+    setRowEditIngredientId("");
+    setRowEditQty("0,000");
     setIsEditingPrep(false);
     setPrepDraft("");
   }, [detailsRecipeId]);
@@ -964,26 +985,50 @@ export default function PrePreparoClient() {
     const nextQty = formatDecimalFixedDraft(detailIngredientQty, 3);
     const costCents = clampNonNegativeInt(Math.round(detailIngredientCost * 100));
     const nextRow: IngredienteRow = {
-      id: editingDetailIngredientRowId || String(Date.now()),
+      id: String(Date.now()),
       item: selectedDetailIngredient.item,
       quantidade: nextQty,
       unidade: selectedDetailIngredient.medida || "Und",
       custoCents: costCents,
     };
     const prevList = detailsRow.ingredientes ?? [];
-    const nextList = editingDetailIngredientRowId ? prevList.map((r) => (r.id === editingDetailIngredientRowId ? nextRow : r)) : [...prevList, nextRow];
+    const nextList = [...prevList, nextRow];
     updateDetailsRow({ ...detailsRow, ingredientes: nextList });
     setDetailIngredientId("");
     setDetailIngredientQty("0,000");
-    setEditingDetailIngredientRowId(null);
   }
 
-  function editDetailIngredientRow(row: IngredienteRow) {
+  function startRowEdit(row: IngredienteRow) {
     setDetailsTab("ingredientes");
-    setEditingDetailIngredientRowId(row.id);
+    setRowEditId(row.id);
     const found = ingredientOptions.find((i) => normalizeNameKey(i.item) === normalizeNameKey(row.item)) ?? null;
-    setDetailIngredientId(found?.id ?? "");
-    setDetailIngredientQty(formatDecimalFixedDraft(row.quantidade, 3));
+    setRowEditIngredientId(found?.id ?? "");
+    setRowEditQty(formatDecimalFixedDraft(row.quantidade, 3));
+  }
+
+  function cancelRowEdit() {
+    setRowEditId(null);
+    setRowEditIngredientId("");
+    setRowEditQty("0,000");
+  }
+
+  function saveRowEdit() {
+    if (!detailsRow) return;
+    const id = rowEditId;
+    if (!id) return;
+    const selected = ingredientOptions.find((i) => i.id === rowEditIngredientId) ?? null;
+    if (!selected) return;
+    const qty = parseDecimalInput(rowEditQty);
+    if (!(qty > 0)) return;
+    const nextQty = formatDecimalFixedDraft(rowEditQty, 3);
+    const cost = qty * parseMoneyLabel(selected.custoMedio);
+    const costCents = clampNonNegativeInt(Math.round(cost * 100));
+    const prevList = detailsRow.ingredientes ?? [];
+    const nextList = prevList.map((r) =>
+      r.id === id ? { ...r, item: selected.item, quantidade: nextQty, unidade: selected.medida || "Und", custoCents: costCents } : r
+    );
+    updateDetailsRow({ ...detailsRow, ingredientes: nextList });
+    cancelRowEdit();
   }
 
   function removeDetailIngredientRow(id: string) {
@@ -991,11 +1036,7 @@ export default function PrePreparoClient() {
     const prevList = detailsRow.ingredientes ?? [];
     const nextList = prevList.filter((r) => r.id !== id);
     updateDetailsRow({ ...detailsRow, ingredientes: nextList });
-    if (editingDetailIngredientRowId === id) {
-      setEditingDetailIngredientRowId(null);
-      setDetailIngredientId("");
-      setDetailIngredientQty("0,000");
-    }
+    if (rowEditId === id) cancelRowEdit();
   }
 
   function startPrepEdit() {
@@ -1090,6 +1131,16 @@ export default function PrePreparoClient() {
     if (!selectedDetailIngredient) return 0;
     return parseDecimalInput(detailIngredientQty) * parseMoneyLabel(selectedDetailIngredient.custoMedio);
   }, [detailIngredientQty, selectedDetailIngredient]);
+
+  const selectedRowEditIngredient = useMemo(
+    () => ingredientOptions.find((row) => row.id === rowEditIngredientId) ?? null,
+    [ingredientOptions, rowEditIngredientId]
+  );
+
+  const rowEditCost = useMemo(() => {
+    if (!selectedRowEditIngredient) return 0;
+    return parseDecimalInput(rowEditQty) * parseMoneyLabel(selectedRowEditIngredient.custoMedio);
+  }, [rowEditQty, selectedRowEditIngredient]);
 
   const detailsIngredientsTotalCents = useMemo(() => {
     return (detailsRow?.ingredientes ?? []).reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
@@ -1420,7 +1471,7 @@ export default function PrePreparoClient() {
                             onClick={addDetailIngredientRow}
                             disabled={!selectedDetailIngredient || parseDecimalInput(detailIngredientQty) <= 0}
                           >
-                            {editingDetailIngredientRowId ? <DetailsEditIcon /> : <DetailsPlusIcon />}
+                            <DetailsPlusIcon />
                           </button>
                         </div>
                       </div>
@@ -1431,17 +1482,65 @@ export default function PrePreparoClient() {
 
                       <div className={ft.detailsList}>
                         {(detailsRow.ingredientes ?? []).map((row) => (
-                          <div key={row.id} className={ft.detailsListRow}>
-                            <div className={ft.detailsListItem}>{row.item}</div>
-                            <div className={ft.detailsListQty}>{formatQtyLabel(row.quantidade, row.unidade)}</div>
-                            <div className={ft.detailsListCost}>{formatMoney(row.custoCents / 100)}</div>
-                            <button type="button" className={ft.detailsEditRowBtn} onClick={() => editDetailIngredientRow(row)} aria-label={`Editar ${row.item}`}>
-                              <DetailsEditIcon />
-                            </button>
-                            <button type="button" className={ft.detailsTrashBtn} onClick={() => removeDetailIngredientRow(row.id)} aria-label={`Remover ${row.item}`}>
-                              <DetailsTrashIcon />
-                            </button>
-                          </div>
+                          rowEditId === row.id ? (
+                            <div key={row.id} className={ft.detailsListRow}>
+                              <label className={ft.detailsItemSelectWrap}>
+                                <span className={ft.detailsItemSearchIcon}>
+                                  <DetailsSearchMiniIcon />
+                                </span>
+                                <select value={rowEditIngredientId} onChange={(e) => setRowEditIngredientId(e.target.value)} className={ft.detailsItemSelect}>
+                                  <option value="">Pesquise por itens...</option>
+                                  {ingredientOptions.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.item}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
+
+                              <span className={ft.detailsInlineGroup}>
+                                <input
+                                  type="text"
+                                  className={ft.detailsInlineInput}
+                                  value={rowEditQty}
+                                  inputMode="decimal"
+                                  onChange={(e) => setRowEditQty(formatDecimalDraft(e.target.value, 3))}
+                                  onBlur={(e) => setRowEditQty(formatDecimalFixedDraft(e.target.value, 3))}
+                                />
+                                <span className={ft.detailsInlineSuffix}>{selectedRowEditIngredient?.medida || row.unidade || "Und"}</span>
+                              </span>
+
+                              <span className={`${ft.detailsInlineGroup} ${ft.detailsInlineGroupPrefix}`}>
+                                <span className={ft.detailsInlinePrefix}>R$</span>
+                                <input type="text" className={ft.detailsInlineInput} value={formatDecimal3(rowEditCost)} readOnly />
+                              </span>
+
+                              <button
+                                type="button"
+                                className={ft.detailsEditRowBtn}
+                                onClick={saveRowEdit}
+                                disabled={!selectedRowEditIngredient || parseDecimalInput(rowEditQty) <= 0}
+                                aria-label={`Salvar ${row.item}`}
+                              >
+                                <DetailsCheckIcon />
+                              </button>
+                              <button type="button" className={ft.detailsTrashBtn} onClick={cancelRowEdit} aria-label={`Cancelar ${row.item}`}>
+                                <DetailsXIcon />
+                              </button>
+                            </div>
+                          ) : (
+                            <div key={row.id} className={ft.detailsListRow}>
+                              <div className={ft.detailsListItem}>{row.item}</div>
+                              <div className={ft.detailsListQty}>{formatQtyLabel(row.quantidade, row.unidade)}</div>
+                              <div className={ft.detailsListCost}>{formatMoney(row.custoCents / 100)}</div>
+                              <button type="button" className={ft.detailsEditRowBtn} onClick={() => startRowEdit(row)} aria-label={`Editar ${row.item}`}>
+                                <DetailsEditIcon />
+                              </button>
+                              <button type="button" className={ft.detailsTrashBtn} onClick={() => removeDetailIngredientRow(row.id)} aria-label={`Remover ${row.item}`}>
+                                <DetailsTrashIcon />
+                              </button>
+                            </div>
+                          )
                         ))}
                       </div>
 
