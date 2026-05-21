@@ -1374,7 +1374,7 @@ export default function DashboardClient() {
     const byCat = new Map<string, number>();
     for (const r of calc.rows) {
       const c = (r.categoria || "-").trim() || "-";
-      const cents = parseBrlToCents(r.cmv);
+      const cents = Math.abs(parseBrlToCents(r.cmv));
       byCat.set(c, (byCat.get(c) ?? 0) + cents);
     }
     const sorted = [...byCat.entries()]
