@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
@@ -750,7 +750,6 @@ function badgeClass(type: BcgType) {
 }
 
 export default function FichasTecnicasClient() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
   const [tableRows, setTableRows] = useState<RecipeRow[]>(allRows);
@@ -811,8 +810,7 @@ export default function FichasTecnicasClient() {
     setDetailsViewTab("ingredientes");
     setActionMenuRowId(null);
     openedFromQueryRef.current = true;
-    router.replace("/fichas-tecnicas");
-  }, [router, searchParams, tableRows]);
+  }, [searchParams, tableRows]);
 
   useEffect(() => {
     function handleWindowPointerDown(event: MouseEvent) {
