@@ -744,7 +744,7 @@ export default function PrePreparoClient() {
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
-  }, [isEditingYield, yieldDraftQty, yieldDraftUnit, detailsRow]);
+  }, [detailsRecipeId, isEditingYield, yieldDraftQty, yieldDraftUnit]);
 
   useEffect(() => {
     setEntradasRows(readEntradasFromStore());
