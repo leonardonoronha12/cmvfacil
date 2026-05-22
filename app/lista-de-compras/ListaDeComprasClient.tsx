@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -12,6 +13,9 @@ import {
   subscribeFornecedorEquivalencias,
   subscribeFornecedorInfo,
   subscribeFornecedorProdutos,
+  writeFornecedorEquivalenciasMap,
+  writeFornecedorInfoMap,
+  writeFornecedorProdutosMap,
   type FornecedorEquivalenciasMap,
   type FornecedorInfoMap,
   type FornecedorProdutos,
@@ -321,9 +325,26 @@ export default function ListaDeComprasClient() {
     setInsumos(readInsumosFromStore());
     setEntradas(readEntradasFromStore([]));
     setContagens(readInventarioFromStore([]));
-    setFornecedorInfoMap(readFornecedorInfoMap());
-    setFornecedorProdutosMap(readFornecedorProdutosMap());
-    setFornecedorEquivalenciasMap(readFornecedorEquivalenciasMap());
+    (async () => {
+      let nextInfo: FornecedorInfoMap = {};
+      let nextProdutos: FornecedorProdutos = {};
+      let nextEq: FornecedorEquivalenciasMap = {};
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) {
+          nextInfo = db.info;
+          nextProdutos = db.produtos;
+          nextEq = db.equivalencias;
+        }
+      } catch {}
+      writeFornecedorInfoMap(nextInfo);
+      writeFornecedorProdutosMap(nextProdutos);
+      writeFornecedorEquivalenciasMap(nextEq);
+      setFornecedorInfoMap(nextInfo);
+      setFornecedorProdutosMap(nextProdutos);
+      setFornecedorEquivalenciasMap(nextEq);
+    })();
 
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));

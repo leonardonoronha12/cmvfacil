@@ -337,24 +337,27 @@ export default function FornecedoresClient() {
 
   useEffect(() => {
     (async () => {
+      let nextInfo: FornecedorInfoMap = {};
+      let nextProdutos: FornecedorProdutos = {};
+      let nextEq: FornecedorEquivalenciasMap = {};
       try {
         const db = await loadFornecedoresStateFromSupabase();
         const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
         if (hasDb) {
-          writeFornecedorInfoMap(db.info);
-          writeFornecedorProdutosMap(db.produtos);
-          writeFornecedorEquivalenciasMap(db.equivalencias);
+          nextInfo = db.info;
+          nextProdutos = db.produtos;
+          nextEq = db.equivalencias;
         }
       } catch {}
 
-      const localInfo = readFornecedorInfoMap();
-      const localProdutos = readFornecedorProdutosMap();
-      const localEq = readFornecedorEquivalenciasMap();
-      setInfoMap(localInfo);
-      setProdutosMap(localProdutos);
-      setEquivalenciasMap(localEq);
+      writeFornecedorInfoMap(nextInfo);
+      writeFornecedorProdutosMap(nextProdutos);
+      writeFornecedorEquivalenciasMap(nextEq);
+      setInfoMap(nextInfo);
+      setProdutosMap(nextProdutos);
+      setEquivalenciasMap(nextEq);
       fornecedoresReadyRef.current = true;
-      void saveFornecedoresStateToSupabase({ info: localInfo, produtos: localProdutos, equivalencias: localEq }).catch(() => {});
+      void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => {});
     })();
 
     const u1 = subscribeFornecedorInfo((m) => setInfoMap(m));

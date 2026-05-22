@@ -7,7 +7,8 @@ import AppSidebar from "../components/AppSidebar";
 import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
 import { readDesperdiciosFromStore, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
-import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
+import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
@@ -722,7 +723,16 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    setEquivalenciasMap(readFornecedorEquivalenciasMap());
+    (async () => {
+      let nextEq: FornecedorEquivalenciasMap = {};
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) nextEq = db.equivalencias;
+      } catch {}
+      writeFornecedorEquivalenciasMap(nextEq);
+      setEquivalenciasMap(nextEq);
+    })();
     return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
   }, []);
 

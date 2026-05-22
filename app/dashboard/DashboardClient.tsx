@@ -743,23 +743,27 @@ export default function DashboardClient() {
 
       if (!insumosRows.length) insumosRows = readInsumosFromStore();
 
+      let infoRows: FornecedorInfoMap = {};
+      let produtosRows: FornecedorProdutos = {};
+      let equivalenciasRows: FornecedorEquivalenciasMap = {};
       try {
         const db = await loadFornecedoresStateFromSupabase();
         const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
         if (hasDb) {
-          writeFornecedorInfoMap(db.info);
-          writeFornecedorProdutosMap(db.produtos);
-          writeFornecedorEquivalenciasMap(db.equivalencias);
+          infoRows = db.info;
+          produtosRows = db.produtos;
+          equivalenciasRows = db.equivalencias;
         }
       } catch {}
+
+      writeFornecedorInfoMap(infoRows);
+      writeFornecedorProdutosMap(produtosRows);
+      writeFornecedorEquivalenciasMap(equivalenciasRows);
 
       const contagensRows = readInventarioFromStore([]);
       const entradasRows = readEntradasFromStore([]);
       const desperdiciosRows = readDesperdiciosFromStore([]);
       const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
-      let infoRows = readFornecedorInfoMap();
-      let produtosRows = readFornecedorProdutosMap();
-      let equivalenciasRows = readFornecedorEquivalenciasMap();
 
       setInsumos(insumosRows);
       setContagens(contagensRows);
