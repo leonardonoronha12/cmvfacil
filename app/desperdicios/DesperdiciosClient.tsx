@@ -295,12 +295,6 @@ function isProtectedMotivo(nome: string) {
   return normalizeKey(nome) === "validade vencida";
 }
 
-const initialRows: DesperdicioRow[] = [
-  { id: "1", data: "28 Mar, 2026", item: "Alface", quantidade: "0,200Kg", custo: "R$5,00", motivo: "Validade Vencida" },
-  { id: "2", data: "28 Mar, 2026", item: "Tomate", quantidade: "0,350Kg", custo: "R$6,55", motivo: "Erro operacional" },
-  { id: "3", data: "27 Mar, 2026", item: "Cebola Roxa", quantidade: "0,200Kg", custo: "R$3,44", motivo: "Validade Vencida" },
-];
-
 type DesperdicioTableColumn = "data" | "item" | "quantidade" | "custo" | "motivo";
 
 function SortMark({ dir }: { dir: "asc" | "desc" }) {
@@ -308,7 +302,7 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 }
 
 export default function DesperdiciosClient() {
-  const [rows, setRows] = useState<DesperdicioRow[]>(initialRows);
+  const [rows, setRows] = useState<DesperdicioRow[]>([]);
   const rowsReadyRef = useRef(false);
   const [query, setQuery] = useState("");
   const [motivoFilter, setMotivoFilter] = useState("Motivo");
@@ -580,7 +574,7 @@ export default function DesperdiciosClient() {
           return;
         }
       } catch {}
-      setRows(readDesperdiciosFromStore(initialRows));
+      setRows(readDesperdiciosFromStore([]));
       rowsReadyRef.current = true;
     })();
   }, []);
@@ -1185,40 +1179,47 @@ export default function DesperdiciosClient() {
             <div style={{ textAlign: "right" }}>Ações</div>
           </div>
 
-          {visible.map((r) => {
-            const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
-            return (
-            <div key={r.id} className={styles.row} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
-              {columnOrder.map((column) => (
-                <div key={column} className={styles.tableCellWrap}>
-                  {renderTableCell(r, column)}
-                </div>
-              ))}
-              <div className={styles.actionsCell}>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  aria-label="Editar"
-                  onClick={() => openEdit(r)}
-                  disabled={isAutoEtiqueta}
-                  title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
-                >
-                  <IconPencil />
-                </button>
-                <button
-                  type="button"
-                  className={styles.iconBtn}
-                  aria-label="Excluir"
-                  onClick={() => openConfirmDeleteDesperdicio(r)}
-                  disabled={isAutoEtiqueta}
-                  title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
-                >
-                  <IconTrash />
-                </button>
-              </div>
+          {!visible.length ? (
+            <div className={styles.emptyState}>
+              <div className={styles.emptyTitle}>Nenhum desperdício lançado</div>
+              <div className={styles.emptyText}>Clique em “Novo Lançamento” para começar.</div>
             </div>
-            );
-          })}
+          ) : (
+            visible.map((r) => {
+              const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
+              return (
+                <div key={r.id} className={styles.row} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+                  {columnOrder.map((column) => (
+                    <div key={column} className={styles.tableCellWrap}>
+                      {renderTableCell(r, column)}
+                    </div>
+                  ))}
+                  <div className={styles.actionsCell}>
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label="Editar"
+                      onClick={() => openEdit(r)}
+                      disabled={isAutoEtiqueta}
+                      title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                    >
+                      <IconPencil />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label="Excluir"
+                      onClick={() => openConfirmDeleteDesperdicio(r)}
+                      disabled={isAutoEtiqueta}
+                      title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                    >
+                      <IconTrash />
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </section>
 
         {isFormOpen ? (

@@ -77,8 +77,9 @@ function normalizeRows(input: unknown): EntradaStoreRow[] {
 
 export function readEntradasFromStore(fallback: EntradaStoreRow[] = []): EntradaStoreRow[] {
   if (typeof window === "undefined") return fallback;
-  const rows = normalizeRows(safeParse(window.localStorage.getItem(KEY)));
-  return rows.length ? rows : fallback;
+  const raw = window.localStorage.getItem(KEY);
+  if (raw === null) return fallback;
+  return normalizeRows(safeParse(raw));
 }
 
 export function writeEntradasToStore(rows: EntradaStoreRow[]) {

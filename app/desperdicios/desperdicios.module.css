@@ -463,6 +463,29 @@
   text-align: left;
 }
 
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  row-gap: 6px;
+  padding: 46px 16px;
+  border-bottom: 1px solid #eef1f1;
+}
+
+.emptyTitle {
+  color: #01040e;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.emptyText {
+  color: #95a8a6;
+  font-size: 12px;
+  text-align: center;
+  max-width: 420px;
+}
+
 .row {
   display: grid;
   grid-template-columns: 130px 1fr 120px 130px 1fr 110px;

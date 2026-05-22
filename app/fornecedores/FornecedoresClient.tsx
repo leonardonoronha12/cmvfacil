@@ -30,14 +30,6 @@ type FornecedorRow = {
   endereco: string;
 };
 
-const initialRows: FornecedorRow[] = [
-  { id: "1", fornecedor: "Bem Bom Pescado", itens: 1, vendedorNome: "-", whatsapp: "6281118754", endereco: "Rod Go 080" },
-  { id: "2", fornecedor: "Coca Cola", itens: 7, vendedorNome: "-", whatsapp: "6299813573", endereco: "Av servio Tulio Jaime 1600 Residencial ipanema" },
-  { id: "3", fornecedor: "Embalagens Bahia", itens: 22, vendedorNome: "-", whatsapp: "6230983577", endereco: "Rua rui barbosa" },
-  { id: "4", fornecedor: "JBS", itens: 4, vendedorNome: "-", whatsapp: "(62) 99269-5448", endereco: "Av lago Azul s/n Fazenda Caveira" },
-  { id: "5", fornecedor: "São Salvador Alimentos Sa", itens: 5, vendedorNome: "-", whatsapp: "(62) 99288-3079", endereco: "Rodovia Go 222 Zona Rural" },
-];
-
 function IconBox() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -254,7 +246,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 }
 
 export default function FornecedoresClient() {
-  const [rows, setRows] = useState<FornecedorRow[]>(initialRows);
+  const [rows, setRows] = useState<FornecedorRow[]>([]);
   const [query, setQuery] = useState("");
 
   const [sortKey, setSortKey] = useState<null | ColumnKey>(null);
@@ -411,7 +403,7 @@ export default function FornecedoresClient() {
           });
         }
       }
-      if (!nextList.length) return prev;
+      if (!nextList.length) return [];
       for (const r of prev) {
         const key = r.fornecedor.trim().toUpperCase();
         if (infoMap[key]) continue;
@@ -811,60 +803,67 @@ export default function FornecedoresClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {visibleRows.map((r) => (
-              <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
-                {columnOrder.map((col) => {
-                  if (col === "fornecedor") {
+            {!visibleRows.length ? (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyTitle}>Nenhum fornecedor cadastrado</div>
+                <div className={styles.emptyText}>Clique em “Novo Fornecedor” ou importe uma planilha para começar.</div>
+              </div>
+            ) : (
+              visibleRows.map((r) => (
+                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
+                  {columnOrder.map((col) => {
+                    if (col === "fornecedor") {
+                      return (
+                        <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)}>
+                          <span className={styles.supplierIcon} aria-hidden>
+                            <IconBox />
+                          </span>
+                          <span className={styles.supplierName}>{r.fornecedor}</span>
+                        </button>
+                      );
+                    }
+                    if (col === "itens") return <div key={col} className={styles.td}>{`${r.itens} item${r.itens === 1 ? "" : "s"}`}</div>;
+                    if (col === "whatsapp")
+                      return (
+                        <div key={col} className={styles.td}>
+                          {r.whatsapp && r.whatsapp !== "-" ? <span className={styles.vendorLink}>{r.whatsapp}</span> : <span className={styles.tdMuted}>-</span>}
+                          {r.vendedorNome && r.vendedorNome !== "-" ? <div className={styles.vendorMuted}>{r.vendedorNome}</div> : null}
+                        </div>
+                      );
                     return (
-                      <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)}>
-                        <span className={styles.supplierIcon} aria-hidden>
-                          <IconBox />
-                        </span>
-                        <span className={styles.supplierName}>{r.fornecedor}</span>
-                      </button>
-                    );
-                  }
-                  if (col === "itens") return <div key={col} className={styles.td}>{`${r.itens} item${r.itens === 1 ? "" : "s"}`}</div>;
-                  if (col === "whatsapp")
-                    return (
-                      <div key={col} className={styles.td}>
-                        {r.whatsapp && r.whatsapp !== "-" ? <span className={styles.vendorLink}>{r.whatsapp}</span> : <span className={styles.tdMuted}>-</span>}
-                        {r.vendedorNome && r.vendedorNome !== "-" ? <div className={styles.vendorMuted}>{r.vendedorNome}</div> : null}
+                      <div key={col} className={styles.tdMuted}>
+                        {r.endereco || "-"}
                       </div>
                     );
-                  return (
-                    <div key={col} className={styles.tdMuted}>
-                      {r.endereco || "-"}
-                    </div>
-                  );
-                })}
+                  })}
 
-                <div className={styles.tdActions}>
-                  <button
-                    type="button"
-                    className={styles.iconBtn}
-                    aria-label="Editar"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openEdit(r);
-                    }}
-                  >
-                    <IconEdit />
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.iconBtn}
-                    aria-label="Excluir"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openDelete(r);
-                    }}
-                  >
-                    <IconTrash />
-                  </button>
+                  <div className={styles.tdActions}>
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label="Editar"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openEdit(r);
+                      }}
+                    >
+                      <IconEdit />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.iconBtn}
+                      aria-label="Excluir"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openDelete(r);
+                      }}
+                    >
+                      <IconTrash />
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </section>
         </div>
 

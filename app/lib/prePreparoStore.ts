@@ -64,8 +64,9 @@ function normalizeRows(input: unknown): PrePreparoStoreRow[] {
 
 export function readPrePreparoFromStore(fallback: PrePreparoStoreRow[] = []): PrePreparoStoreRow[] {
   if (typeof window === "undefined") return fallback;
-  const rows = normalizeRows(safeParse(window.localStorage.getItem(KEY)));
-  return rows.length ? rows : fallback;
+  const raw = window.localStorage.getItem(KEY);
+  if (raw === null) return fallback;
+  return normalizeRows(safeParse(raw));
 }
 
 export function writePrePreparoToStore(rows: PrePreparoStoreRow[]) {
@@ -84,4 +85,3 @@ export function subscribePrePreparo(listener: (rows: PrePreparoStoreRow[]) => vo
   window.addEventListener(EVENT, onEvent);
   return () => window.removeEventListener(EVENT, onEvent);
 }
-

@@ -57,133 +57,6 @@ type FornecedorItemMap = {
 
 type EntradaTableColumn = "dataLancamento" | "fornecedor" | "valorNota" | "responsavel" | "dataCriacao";
 
-const initialRows: EntradaRow[] = [
-  {
-    id: "1",
-    numero: "#1671",
-    dataLancamento: "28 Mar, 2026",
-    fornecedor: "PROMOFOOD",
-    valorNota: "R$788,58",
-    itens: "2 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-    itensNota: [
-      { id: "1", nome: "Contra Filé", quantidadeLabel: "8,395Kg", subtotalLabel: "R$293,74", custoUnitarioLabel: "R$34,990/Kg" },
-      { id: "2", nome: "Ponta de Peito", quantidadeLabel: "16,5Kg", subtotalLabel: "R$494,84", custoUnitarioLabel: "R$29,990/Kg" },
-    ],
-  },
-  {
-    id: "2",
-    numero: "#1672",
-    dataLancamento: "28 Mar, 2026",
-    fornecedor: "BELLO ALIMENTOS",
-    valorNota: "R$1.284,51",
-    itens: "3 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "3",
-    numero: "#1673",
-    dataLancamento: "28 Mar, 2026",
-    fornecedor: "TOP VERDE",
-    valorNota: "R$390,00",
-    itens: "4 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "4",
-    numero: "#1674",
-    dataLancamento: "28 Mar, 2026",
-    fornecedor: "CAZUZA",
-    valorNota: "R$3.687,00",
-    itens: "1 Item",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "5",
-    numero: "#1675",
-    dataLancamento: "28 Mar, 2026",
-    fornecedor: "CAZUZA",
-    valorNota: "R$6.358,00",
-    itens: "2 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "6",
-    numero: "#1676",
-    dataLancamento: "26 Mar, 2026",
-    fornecedor: "NORSA S.A",
-    valorNota: "R$5.211,53",
-    itens: "10 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "7",
-    numero: "#1677",
-    dataLancamento: "26 Mar, 2026",
-    fornecedor: "NORSA S.A",
-    valorNota: "R$2.286,05",
-    itens: "1 Item",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "02 Mar, 2026",
-  },
-  {
-    id: "8",
-    numero: "#1678",
-    dataLancamento: "13 Mar, 2026",
-    fornecedor: "TOP VERDE",
-    valorNota: "R$435,00",
-    itens: "4 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "13 Mar, 2026",
-  },
-  {
-    id: "9",
-    numero: "#1679",
-    dataLancamento: "12 Mar, 2026",
-    fornecedor: "SIGMA DISTRIBUIDORA",
-    valorNota: "R$400,00",
-    itens: "1 Item",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "12 Mar, 2026",
-  },
-  {
-    id: "10",
-    numero: "#1680",
-    dataLancamento: "12 Mar, 2026",
-    fornecedor: "TOP VERDE",
-    valorNota: "R$475,00",
-    itens: "4 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "12 Mar, 2026",
-  },
-  {
-    id: "11",
-    numero: "#1681",
-    dataLancamento: "12 Mar, 2026",
-    fornecedor: "ATACADÃO",
-    valorNota: "R$436,56",
-    itens: "7 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "12 Mar, 2026",
-  },
-  {
-    id: "12",
-    numero: "#1682",
-    dataLancamento: "12 Mar, 2026",
-    fornecedor: "SORPAN",
-    valorNota: "R$1.633,91",
-    itens: "23 Itens",
-    responsavel: "Rafael Busiquia",
-    dataCriacao: "12 Mar, 2026",
-  },
-];
-
 function IconEntrada() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -509,7 +382,7 @@ export default function EntradasClient() {
   const [periodPicking, setPeriodPicking] = useState<"start" | "end">("start");
   const [periodMonth, setPeriodMonth] = useState(() => startOfMonth(new Date()));
   const periodWrapRef = useRef<HTMLDivElement | null>(null);
-  const [rows, setRows] = useState<EntradaRow[]>(initialRows);
+  const [rows, setRows] = useState<EntradaRow[]>([]);
   const rowsReadyRef = useRef(false);
   const [customFornecedores, setCustomFornecedores] = useState<string[]>([]);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
@@ -846,7 +719,7 @@ export default function EntradasClient() {
       fornecedor: fornecedor.toUpperCase(),
       valorNota: "R$0,00",
       itens: "0 Itens",
-      responsavel: "Rafael Busiquia",
+      responsavel: "",
       dataCriacao: formatDateLabelPT(now),
       itensNota: [],
     };
@@ -919,7 +792,7 @@ export default function EntradasClient() {
           return;
         }
       } catch {}
-      const stored = readEntradasFromStore(initialRows as unknown as any) as unknown as EntradaRow[];
+      const stored = readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[];
       setRows(stored.map((r) => ({ ...r, dataLancamento: normalizeDateLabelPT(r.dataLancamento) })));
       rowsReadyRef.current = true;
     })();
@@ -1592,18 +1465,24 @@ export default function EntradasClient() {
           </div>
 
           <div className={styles.tableBody}>
-            {visible.map((r) => (
-              <div
-                key={r.id}
-                className={styles.tr}
-                role="button"
-                tabIndex={0}
-                style={{ gridTemplateColumns: tableGridTemplateColumns }}
-                onClick={() => openDetailsModal(r)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") openDetailsModal(r);
-                }}
-              >
+            {!visible.length ? (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyTitle}>Nenhuma nota cadastrada</div>
+                <div className={styles.emptyText}>Clique em “Nova Nota” para começar.</div>
+              </div>
+            ) : (
+              visible.map((r) => (
+                <div
+                  key={r.id}
+                  className={styles.tr}
+                  role="button"
+                  tabIndex={0}
+                  style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                  onClick={() => openDetailsModal(r)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") openDetailsModal(r);
+                  }}
+                >
                 {columnOrder.map((column) => (
                   <div key={column} className={styles.tableCellWrap}>
                     {renderCell(r, column)}
@@ -1636,8 +1515,9 @@ export default function EntradasClient() {
                     <IconTrash />
                   </button>
                 </div>
-              </div>
-            ))}
+                </div>
+              ))
+            )}
           </div>
         </section>
 

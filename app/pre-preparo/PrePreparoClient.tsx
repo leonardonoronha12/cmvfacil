@@ -36,28 +36,6 @@ type IngredienteRow = {
   custoCents: number;
 };
 
-const initialRows: PrePreparoRow[] = [
-  {
-    id: "1",
-    categoria: "FARINHA",
-    receita: "Risoto de Salmão",
-    custoTotal: "R$100,00",
-    rendimento: "9Kg",
-    custoUnitario: "R$1.011,11 / Kg",
-    validadeDias: 7,
-    modoPreparo: "",
-    ingredientes: [
-      {
-        id: "1",
-        item: "Farinha de milho",
-        quantidade: "100",
-        unidade: "Kg",
-        custoCents: 10000,
-      },
-    ],
-  },
-];
-
 function IconPrep() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -590,7 +568,7 @@ export default function PrePreparoClient() {
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
-  const [rows, setRows] = useState<PrePreparoRow[]>(initialRows);
+  const [rows, setRows] = useState<PrePreparoRow[]>([]);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const [detailsRecipeId, setDetailsRecipeId] = useState<string | null>(null);
@@ -663,7 +641,7 @@ export default function PrePreparoClient() {
   const [etiquetaRecipeQuery, setEtiquetaRecipeQuery] = useState("");
   const [isRecipeOpen, setIsRecipeOpen] = useState(false);
   const recipeWrapRef = useRef<HTMLDivElement | null>(null);
-  const [etiquetaResponsavel, setEtiquetaResponsavel] = useState("RANGEL SOUZA");
+  const [etiquetaResponsavel, setEtiquetaResponsavel] = useState("");
   const [etiquetaQtd, setEtiquetaQtd] = useState("1,000");
   const [etiquetaUnidade, setEtiquetaUnidade] = useState("Kg");
   const [etiquetaDataProd, setEtiquetaDataProd] = useState(() => formatDateLabel(new Date()));
@@ -705,8 +683,8 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    const stored = readPrePreparoFromStore(initialRows as any);
-    if (stored[0]) setRows(stored as any);
+    const stored = readPrePreparoFromStore([] as any);
+    setRows(stored as any);
   }, []);
 
   useEffect(() => {
@@ -1080,15 +1058,7 @@ export default function PrePreparoClient() {
     setNewRecipeUnit("");
     setNewRecipeValidity("7");
     setNewRecipeValidityUnit("Dia(s)");
-    setNewRecipeIngredients([
-      {
-        id: "1",
-        item: "Farinha de milho",
-        quantidade: "1000",
-        unidade: "Kg",
-        custoCents: 9100000,
-      },
-    ]);
+    setNewRecipeIngredients([]);
     setIngredientQuery("");
     setIngredientQty("0,000");
     setIngredientUnit("Und");
@@ -1101,7 +1071,6 @@ export default function PrePreparoClient() {
 
   function openEtiquetaModal(row?: PrePreparoRow | null) {
     const base = new Date();
-    setEtiquetaResponsavel("RANGEL SOUZA");
     setEtiquetaQtd("1,000");
     setEtiquetaDataProd(formatDateLabel(base));
     setOpenEtiquetaCalendar(null);
@@ -2647,10 +2616,12 @@ export default function PrePreparoClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Responsável</div>
-                  <select className={styles.formSelect} value={etiquetaResponsavel} onChange={(e) => setEtiquetaResponsavel(e.target.value)}>
-                    <option value="RANGEL SOUZA">RANGEL SOUZA</option>
-                    <option value="RAMON">RAMON</option>
-                  </select>
+                  <input
+                    className={styles.formInput}
+                    placeholder="Digite o nome..."
+                    value={etiquetaResponsavel}
+                    onChange={(e) => setEtiquetaResponsavel(e.target.value)}
+                  />
                 </div>
 
                 <div className={styles.formField}>

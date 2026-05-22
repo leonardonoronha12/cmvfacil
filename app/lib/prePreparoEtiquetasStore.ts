@@ -62,8 +62,9 @@ function normalizeRows(input: unknown): PrePreparoEtiquetaRow[] {
 
 export function readPrePreparoEtiquetasFromStore(fallback: PrePreparoEtiquetaRow[] = []): PrePreparoEtiquetaRow[] {
   if (typeof window === "undefined") return fallback;
-  const rows = normalizeRows(safeParse(window.localStorage.getItem(KEY)));
-  return rows.length ? rows : fallback;
+  const raw = window.localStorage.getItem(KEY);
+  if (raw === null) return fallback;
+  return normalizeRows(safeParse(raw));
 }
 
 export function writePrePreparoEtiquetasToStore(rows: PrePreparoEtiquetaRow[]) {

@@ -86,8 +86,9 @@ function normalizeContagens(input: unknown): InventarioContagem[] {
 
 export function readInventarioFromStore(fallback: InventarioContagem[] = []): InventarioContagem[] {
   if (typeof window === "undefined") return fallback;
-  const rows = normalizeContagens(safeParse(window.localStorage.getItem(KEY)));
-  return rows.length ? rows : fallback;
+  const raw = window.localStorage.getItem(KEY);
+  if (raw === null) return fallback;
+  return normalizeContagens(safeParse(raw));
 }
 
 export function writeInventarioToStore(rows: InventarioContagem[]) {
@@ -106,4 +107,3 @@ export function subscribeInventario(listener: (rows: InventarioContagem[]) => vo
   window.addEventListener(EVENT, onEvent);
   return () => window.removeEventListener(EVENT, onEvent);
 }
-

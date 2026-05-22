@@ -18,99 +18,6 @@ type InsumoRow = {
   especificacao: string;
 };
 
-const initialRows: InsumoRow[] = [
-  {
-    id: "1",
-    ocultar: false,
-    item: "Água com Gás",
-    medida: "Und",
-    custoMedio: "R$1,68",
-    categoria: "Revenda",
-    especificacao: "Crystal",
-  },
-  {
-    id: "2",
-    ocultar: false,
-    item: "Água Sanitária",
-    medida: "L",
-    custoMedio: "R$2,29",
-    categoria: "Limpeza",
-    especificacao: "-",
-  },
-  {
-    id: "3",
-    ocultar: false,
-    item: "Água sem Gás",
-    medida: "Und",
-    custoMedio: "R$1,40",
-    categoria: "Revenda",
-    especificacao: "Crystal",
-  },
-  {
-    id: "4",
-    ocultar: false,
-    item: "Álcool",
-    medida: "L",
-    custoMedio: "R$4,39",
-    categoria: "Limpeza",
-    especificacao: "-",
-  },
-  {
-    id: "5",
-    ocultar: false,
-    item: "Alface",
-    medida: "Und",
-    custoMedio: "R$6,10",
-    categoria: "Matéria Prima",
-    especificacao: "Americana",
-  },
-  {
-    id: "6",
-    ocultar: false,
-    item: "Amido de milho",
-    medida: "Kg",
-    custoMedio: "R$38,15",
-    categoria: "Matéria Prima",
-    especificacao: "-",
-  },
-  {
-    id: "7",
-    ocultar: false,
-    item: "Anel de Cebola",
-    medida: "Kg",
-    custoMedio: "R$21,12",
-    categoria: "Matéria Prima",
-    especificacao: "McCain ou Quality Fries",
-  },
-  {
-    id: "8",
-    ocultar: false,
-    item: "Bacon em Cubos",
-    medida: "Kg",
-    custoMedio: "R$29,32",
-    categoria: "Matéria Prima",
-    especificacao: "-",
-  },
-  {
-    id: "9",
-    ocultar: false,
-    item: "Bacon Fatiado",
-    medida: "Kg",
-    custoMedio: "R$33,82",
-    categoria: "Matéria Prima",
-    especificacao: "-",
-  },
-  {
-    id: "10",
-    ocultar: false,
-    item: "Barbecue",
-    medida: "Kg",
-    custoMedio: "R$11,48",
-    categoria: "Matéria Prima",
-    especificacao: "Cepêra",
-  },
-];
-
 function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
@@ -128,8 +35,6 @@ function getUniqueCategoriesFromRows(rows: InsumoRow[]) {
   }
   return out;
 }
-
-const initialCategories = getUniqueCategoriesFromRows(initialRows);
 
 function toMoney(value: unknown) {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -357,7 +262,7 @@ export default function InsumosClient() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [dataRows, setDataRows] = useState<InsumoRow[]>(initialRows);
+  const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowsReadyRef = useRef(false);
   const prevIdsRef = useRef<Set<string>>(new Set());
@@ -369,7 +274,7 @@ export default function InsumosClient() {
   const [newSpec, setNewSpec] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newInitialCost, setNewInitialCost] = useState("");
-  const [categories, setCategories] = useState<string[]>(initialCategories);
+  const [categories, setCategories] = useState<string[]>([]);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -417,9 +322,9 @@ export default function InsumosClient() {
       }
 
       rowsReadyRef.current = true;
-      prevIdsRef.current = new Set(initialRows.map((r) => r.id));
-      setDataRows(initialRows);
-      setCategories(getUniqueCategoriesFromRows(initialRows));
+      prevIdsRef.current = new Set();
+      setDataRows([]);
+      setCategories([]);
     })();
   }, []);
 
@@ -1124,54 +1029,60 @@ export default function InsumosClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {visibleRows.map((r) => (
-              <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
-                <div className={styles.tdSmall}>
-                  <label className={styles.toggle}>
-                    <input type="checkbox" checked={r.ocultar} onChange={() => toggleOcultar(r.id)} />
-                    <span className={styles.toggleTrack} aria-hidden />
-                  </label>
-                </div>
+            {!visibleRows.length ? (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
+                <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
+              </div>
+            ) : (
+              visibleRows.map((r) => (
+                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
+                  <div className={styles.tdSmall}>
+                    <label className={styles.toggle}>
+                      <input type="checkbox" checked={r.ocultar} onChange={() => toggleOcultar(r.id)} />
+                      <span className={styles.toggleTrack} aria-hidden />
+                    </label>
+                  </div>
 
-                {columnOrder.map((col) => {
-                  if (col === "item") {
-                    const itemHref = `/dashboard?itemId=${encodeURIComponent(r.id)}&tab=entradas`;
+                  {columnOrder.map((col) => {
+                    if (col === "item") {
+                      const itemHref = `/dashboard?itemId=${encodeURIComponent(r.id)}&tab=entradas`;
+                      return (
+                        <div key={col}>
+                          {bulkDeleteMode ? (
+                            <div className={styles.tdItem}>
+                              <input
+                                type="checkbox"
+                                className={styles.rowSelect}
+                                checked={selectedIds.has(r.id)}
+                                onChange={() => toggleRowSelected(r.id)}
+                                aria-label={`Selecionar ${r.item}`}
+                              />
+                              <span className={styles.itemIcon}>
+                                <IconCube />
+                              </span>
+                              <span className={styles.itemName}>{r.item}</span>
+                            </div>
+                          ) : (
+                            <Link href={itemHref} className={`${styles.tdItem} ${styles.tdItemLink}`} aria-label={`Abrir detalhes do item ${r.item}`}>
+                              <span className={styles.itemIcon}>
+                                <IconCube />
+                              </span>
+                              <span className={styles.itemName}>{r.item}</span>
+                            </Link>
+                          )}
+                        </div>
+                      );
+                    }
+                    if (col === "medida") return <div key={col} className={styles.td}>{r.medida}</div>;
+                    if (col === "custoMedio") return <div key={col} className={styles.tdStrong}>{r.custoMedio}</div>;
+                    if (col === "categoria") return <div key={col} className={styles.td}>{r.categoria}</div>;
                     return (
-                      <div key={col}>
-                        {bulkDeleteMode ? (
-                          <div className={styles.tdItem}>
-                            <input
-                              type="checkbox"
-                              className={styles.rowSelect}
-                              checked={selectedIds.has(r.id)}
-                              onChange={() => toggleRowSelected(r.id)}
-                              aria-label={`Selecionar ${r.item}`}
-                            />
-                            <span className={styles.itemIcon}>
-                              <IconCube />
-                            </span>
-                            <span className={styles.itemName}>{r.item}</span>
-                          </div>
-                        ) : (
-                          <Link href={itemHref} className={`${styles.tdItem} ${styles.tdItemLink}`} aria-label={`Abrir detalhes do item ${r.item}`}>
-                            <span className={styles.itemIcon}>
-                              <IconCube />
-                            </span>
-                            <span className={styles.itemName}>{r.item}</span>
-                          </Link>
-                        )}
+                      <div key={col} className={styles.tdMuted}>
+                        {r.especificacao}
                       </div>
                     );
-                  }
-                  if (col === "medida") return <div key={col} className={styles.td}>{r.medida}</div>;
-                  if (col === "custoMedio") return <div key={col} className={styles.tdStrong}>{r.custoMedio}</div>;
-                  if (col === "categoria") return <div key={col} className={styles.td}>{r.categoria}</div>;
-                  return (
-                    <div key={col} className={styles.tdMuted}>
-                      {r.especificacao}
-                    </div>
-                  );
-                })}
+                  })}
 
                 <div className={styles.tdActions}>
                   <button
@@ -1194,7 +1105,8 @@ export default function InsumosClient() {
                   </button>
                 </div>
               </div>
-            ))}
+              ))
+            )}
           </section>
         </div>
 

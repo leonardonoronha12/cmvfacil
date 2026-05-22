@@ -142,6 +142,29 @@
   font-weight: 700;
 }
 
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  row-gap: 6px;
+  padding: 46px 16px;
+  border-top: 1px solid #eef1f1;
+}
+
+.emptyTitle {
+  color: #01040e;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.emptyText {
+  color: #95a8a6;
+  font-size: 12px;
+  text-align: center;
+  max-width: 420px;
+}
+
 .tr {
   display: grid;
   grid-template-columns: 2fr 0.7fr 1fr 1.5fr 120px;
