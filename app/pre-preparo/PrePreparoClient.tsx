@@ -670,8 +670,10 @@ export default function PrePreparoClient() {
   const [etiquetaDataVal, setEtiquetaDataVal] = useState(() => formatDateLabel(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)));
   const [openEtiquetaCalendar, setOpenEtiquetaCalendar] = useState<"prod" | "val" | null>(null);
   const [etiquetaMonth, setEtiquetaMonth] = useState(() => startOfMonth(new Date()));
+  const [etiquetaCalendarAnchor, setEtiquetaCalendarAnchor] = useState<{ x: number; y: number; place: "below" | "above" } | null>(null);
   const etiquetaProdWrapRef = useRef<HTMLDivElement | null>(null);
   const etiquetaValWrapRef = useRef<HTMLDivElement | null>(null);
+  const etiquetaCalendarRef = useRef<HTMLDivElement | null>(null);
 
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -785,8 +787,9 @@ export default function PrePreparoClient() {
     function onDown(e: MouseEvent) {
       const p = etiquetaProdWrapRef.current;
       const v = etiquetaValWrapRef.current;
-      if (!p && !v) return;
-      if (e.target instanceof Node && ((p && p.contains(e.target)) || (v && v.contains(e.target)))) return;
+      const c = etiquetaCalendarRef.current;
+      if (!p && !v && !c) return;
+      if (e.target instanceof Node && ((p && p.contains(e.target)) || (v && v.contains(e.target)) || (c && c.contains(e.target)))) return;
       setOpenEtiquetaCalendar(null);
     }
     window.addEventListener("mousedown", onDown);
@@ -1097,7 +1100,7 @@ export default function PrePreparoClient() {
   }
 
   function openEtiquetaModal(row?: PrePreparoRow | null) {
-    const base = new Date(2026, 2, 1);
+    const base = new Date();
     setEtiquetaResponsavel("RANGEL SOUZA");
     setEtiquetaQtd("1,000");
     setEtiquetaDataProd(formatDateLabel(base));
@@ -1116,6 +1119,161 @@ export default function PrePreparoClient() {
     }
     setIsEtiquetaOpen(true);
     setIsRecipeOpen(false);
+  }
+
+  function openEtiquetaCalendarAt(kind: "prod" | "val") {
+    const now = new Date();
+    setEtiquetaMonth(startOfMonth(now));
+    setOpenEtiquetaCalendar(kind);
+    const wrap = kind === "prod" ? etiquetaProdWrapRef.current : etiquetaValWrapRef.current;
+    const target = (wrap?.querySelector("input") as HTMLElement | null) ?? wrap;
+    const rect = target?.getBoundingClientRect?.();
+    if (!rect) return;
+    const estimatedHeight = 320;
+    const place: "below" | "above" = rect.bottom + 6 + estimatedHeight > window.innerHeight - 10 ? "above" : "below";
+    setEtiquetaCalendarAnchor({
+      x: rect.left + rect.width / 2,
+      y: place === "below" ? rect.bottom + 6 : rect.top - 6,
+      place,
+    });
+  }
+
+  function renderEtiquetaCalendar(kind: "prod" | "val") {
+    if (!etiquetaCalendarAnchor) return null;
+    const selectedLabel = kind === "prod" ? etiquetaDataProd : etiquetaDataVal;
+    const selected = parseDateLabelLoose(selectedLabel);
+    const place = etiquetaCalendarAnchor.place;
+    return (
+      <div
+        ref={etiquetaCalendarRef}
+        className={styles.calendarPopover}
+        role="dialog"
+        aria-label={kind === "prod" ? "Selecionar data de produção" : "Selecionar data de validade"}
+        style={{
+          position: "fixed",
+          left: etiquetaCalendarAnchor.x,
+          top: etiquetaCalendarAnchor.y,
+          transform: place === "above" ? "translate(-50%, -100%)" : "translateX(-50%)",
+          zIndex: 2000,
+        }}
+      >
+        <div className={styles.calendarHeader}>
+          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEtiquetaMonth((m) => addMonths(m, -1))}>
+            ◀
+          </button>
+          <div className={styles.calTitle}>
+            <span className={styles.calMonthName}>
+              {["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][etiquetaMonth.getMonth()]}
+            </span>{" "}
+            <span className={styles.calYear}>{etiquetaMonth.getFullYear()}</span>
+          </div>
+          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEtiquetaMonth((m) => addMonths(m, 1))}>
+            ▶
+          </button>
+        </div>
+
+        <div className={styles.calDow}>
+          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
+            <div key={d} className={styles.calDowCell}>
+              {d}
+            </div>
+          ))}
+        </div>
+
+        <div className={styles.calGrid}>
+          {(() => {
+            const first = startOfMonth(etiquetaMonth);
+            const start = first.getDay();
+            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
+            const cells: Array<JSX.Element> = [];
+
+            for (let i = 0; i < start; i += 1) {
+              const day = prevDaysInMonth - (start - 1 - i);
+              cells.push(
+                <button key={`pm-${kind}-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                  {day}
+                </button>,
+              );
+            }
+
+            for (let day = 1; day <= daysInMonth; day += 1) {
+              const d = new Date(first.getFullYear(), first.getMonth(), day);
+              const isSelected =
+                selected && d.getFullYear() === selected.getFullYear() && d.getMonth() === selected.getMonth() && d.getDate() === selected.getDate();
+              cells.push(
+                <button
+                  type="button"
+                  key={`d-${kind}-${day}`}
+                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
+                  onClick={() => {
+                    if (kind === "prod") {
+                      setEtiquetaDataProd(formatDateLabel(d));
+                      if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(d.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
+                    } else {
+                      setEtiquetaDataVal(formatDateLabel(d));
+                    }
+                    setOpenEtiquetaCalendar(null);
+                  }}
+                >
+                  {day}
+                </button>,
+              );
+            }
+
+            const total = cells.length;
+            const rem = total % 7;
+            const pad = rem === 0 ? 0 : 7 - rem;
+            for (let i = 0; i < pad; i += 1) {
+              cells.push(
+                <button key={`nm-${kind}-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                  {i + 1}
+                </button>,
+              );
+            }
+
+            return cells;
+          })()}
+        </div>
+
+        <div className={styles.calFooter}>
+          <button
+            type="button"
+            className={styles.calFooterBtn}
+            onClick={() => {
+              const t = new Date();
+              if (kind === "prod") {
+                setEtiquetaDataProd(formatDateLabel(t));
+                if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(t.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
+              } else {
+                setEtiquetaDataVal(formatDateLabel(t));
+              }
+              setEtiquetaMonth(startOfMonth(t));
+            }}
+          >
+            <span className={styles.dotBlue} aria-hidden />
+            hoje
+          </button>
+          <button
+            type="button"
+            className={styles.calFooterBtn}
+            onClick={() => {
+              if (kind === "prod") setEtiquetaDataProd("");
+              else setEtiquetaDataVal("");
+            }}
+          >
+            <span className={styles.dotRed} aria-hidden />
+            limpar
+          </button>
+          <button type="button" className={styles.calFooterBtn} onClick={() => setOpenEtiquetaCalendar(null)}>
+            <span className={styles.xMark} aria-hidden>
+              ×
+            </span>
+            fechar
+          </button>
+        </div>
+      </div>
+    );
   }
 
   function openDeleteModal(row: PrePreparoRow) {
@@ -2369,7 +2527,7 @@ export default function PrePreparoClient() {
                               setEtiquetaRecipeId(r.id);
                               setEtiquetaRecipeQuery(r.receita);
                               setEtiquetaUnidade("Kg");
-                              const base = new Date(2026, 2, 1);
+                              const base = new Date();
                               setEtiquetaDataProd(formatDateLabel(base));
                               setEtiquetaDataVal(formatDateLabel(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)));
                               setIsRecipeOpen(false);
@@ -2416,131 +2574,9 @@ export default function PrePreparoClient() {
                       className={styles.formInput}
                       value={etiquetaDataProd}
                       onChange={(e) => setEtiquetaDataProd(e.target.value)}
-                      onFocus={() => {
-                        const parsed = parseDateLabelLoose(etiquetaDataProd) ?? new Date();
-                        setEtiquetaMonth(startOfMonth(parsed));
-                        setOpenEtiquetaCalendar("prod");
-                      }}
-                      onClick={() => {
-                        const parsed = parseDateLabelLoose(etiquetaDataProd) ?? new Date();
-                        setEtiquetaMonth(startOfMonth(parsed));
-                        setOpenEtiquetaCalendar("prod");
-                      }}
+                      onFocus={() => openEtiquetaCalendarAt("prod")}
+                      onClick={() => openEtiquetaCalendarAt("prod")}
                     />
-                    {openEtiquetaCalendar === "prod" ? (
-                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data de produção" onClick={(e) => e.stopPropagation()}>
-                        <div className={styles.calendarHeader}>
-                          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEtiquetaMonth((m) => addMonths(m, -1))}>
-                            ◀
-                          </button>
-                          <div className={styles.calTitle}>
-                            <span className={styles.calMonthName}>
-                              {["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][
-                                etiquetaMonth.getMonth()
-                              ]}
-                            </span>{" "}
-                            <span className={styles.calYear}>{etiquetaMonth.getFullYear()}</span>
-                          </div>
-                          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEtiquetaMonth((m) => addMonths(m, 1))}>
-                            ▶
-                          </button>
-                        </div>
-
-                        <div className={styles.calDow}>
-                          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
-                            <div key={d} className={styles.calDowCell}>
-                              {d}
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className={styles.calGrid}>
-                          {(() => {
-                            const first = startOfMonth(etiquetaMonth);
-                            const start = first.getDay();
-                            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-                            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
-                            const selected = parseDateLabelLoose(etiquetaDataProd);
-                            const cells: Array<JSX.Element> = [];
-
-                            for (let i = 0; i < start; i += 1) {
-                              const day = prevDaysInMonth - (start - 1 - i);
-                              cells.push(
-                                <button key={`pm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
-                                  {day}
-                                </button>,
-                              );
-                            }
-
-                            for (let day = 1; day <= daysInMonth; day += 1) {
-                              const d = new Date(first.getFullYear(), first.getMonth(), day);
-                              const isSelected =
-                                selected &&
-                                d.getFullYear() === selected.getFullYear() &&
-                                d.getMonth() === selected.getMonth() &&
-                                d.getDate() === selected.getDate();
-                              cells.push(
-                                <button
-                                  type="button"
-                                  key={`d-${day}`}
-                                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
-                                  onClick={() => {
-                                    setEtiquetaDataProd(formatDateLabel(d));
-                                    if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(d.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
-                                    setOpenEtiquetaCalendar(null);
-                                  }}
-                                >
-                                  {day}
-                                </button>,
-                              );
-                            }
-                            const total = cells.length;
-                            const rem = total % 7;
-                            const pad = rem === 0 ? 0 : 7 - rem;
-                            for (let i = 0; i < pad; i += 1) {
-                              cells.push(
-                                <button key={`nm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
-                                  {i + 1}
-                                </button>,
-                              );
-                            }
-                            return cells;
-                          })()}
-                        </div>
-
-                        <div className={styles.calFooter}>
-                          <button
-                            type="button"
-                            className={styles.calFooterBtn}
-                            onClick={() => {
-                              const t = new Date();
-                              setEtiquetaDataProd(formatDateLabel(t));
-                              if (etiquetaValidityDays) setEtiquetaDataVal(formatDateLabel(new Date(t.getTime() + etiquetaValidityDays * 24 * 60 * 60 * 1000)));
-                              setEtiquetaMonth(startOfMonth(t));
-                            }}
-                          >
-                            <span className={styles.dotBlue} aria-hidden />
-                            hoje
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.calFooterBtn}
-                            onClick={() => {
-                              setEtiquetaDataProd("");
-                            }}
-                          >
-                            <span className={styles.dotRed} aria-hidden />
-                            limpar
-                          </button>
-                          <button type="button" className={styles.calFooterBtn} onClick={() => setOpenEtiquetaCalendar(null)}>
-                            <span className={styles.xMark} aria-hidden>
-                              ×
-                            </span>
-                            fechar
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
 
                   <div className={styles.dateWrap} ref={etiquetaValWrapRef}>
@@ -2548,129 +2584,9 @@ export default function PrePreparoClient() {
                       className={styles.formInput}
                       value={etiquetaDataVal}
                       onChange={(e) => setEtiquetaDataVal(e.target.value)}
-                      onFocus={() => {
-                        const parsed = parseDateLabelLoose(etiquetaDataVal) ?? new Date();
-                        setEtiquetaMonth(startOfMonth(parsed));
-                        setOpenEtiquetaCalendar("val");
-                      }}
-                      onClick={() => {
-                        const parsed = parseDateLabelLoose(etiquetaDataVal) ?? new Date();
-                        setEtiquetaMonth(startOfMonth(parsed));
-                        setOpenEtiquetaCalendar("val");
-                      }}
+                      onFocus={() => openEtiquetaCalendarAt("val")}
+                      onClick={() => openEtiquetaCalendarAt("val")}
                     />
-                    {openEtiquetaCalendar === "val" ? (
-                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data de validade" onClick={(e) => e.stopPropagation()}>
-                        <div className={styles.calendarHeader}>
-                          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEtiquetaMonth((m) => addMonths(m, -1))}>
-                            ◀
-                          </button>
-                          <div className={styles.calTitle}>
-                            <span className={styles.calMonthName}>
-                              {["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"][
-                                etiquetaMonth.getMonth()
-                              ]}
-                            </span>{" "}
-                            <span className={styles.calYear}>{etiquetaMonth.getFullYear()}</span>
-                          </div>
-                          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEtiquetaMonth((m) => addMonths(m, 1))}>
-                            ▶
-                          </button>
-                        </div>
-
-                        <div className={styles.calDow}>
-                          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
-                            <div key={d} className={styles.calDowCell}>
-                              {d}
-                            </div>
-                          ))}
-                        </div>
-
-                        <div className={styles.calGrid}>
-                          {(() => {
-                            const first = startOfMonth(etiquetaMonth);
-                            const start = first.getDay();
-                            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
-                            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
-                            const selected = parseDateLabelLoose(etiquetaDataVal);
-                            const cells: Array<JSX.Element> = [];
-
-                            for (let i = 0; i < start; i += 1) {
-                              const day = prevDaysInMonth - (start - 1 - i);
-                              cells.push(
-                                <button key={`pm2-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
-                                  {day}
-                                </button>,
-                              );
-                            }
-
-                            for (let day = 1; day <= daysInMonth; day += 1) {
-                              const d = new Date(first.getFullYear(), first.getMonth(), day);
-                              const isSelected =
-                                selected &&
-                                d.getFullYear() === selected.getFullYear() &&
-                                d.getMonth() === selected.getMonth() &&
-                                d.getDate() === selected.getDate();
-                              cells.push(
-                                <button
-                                  type="button"
-                                  key={`d2-${day}`}
-                                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
-                                  onClick={() => {
-                                    setEtiquetaDataVal(formatDateLabel(d));
-                                    setOpenEtiquetaCalendar(null);
-                                  }}
-                                >
-                                  {day}
-                                </button>,
-                              );
-                            }
-                            const total = cells.length;
-                            const rem = total % 7;
-                            const pad = rem === 0 ? 0 : 7 - rem;
-                            for (let i = 0; i < pad; i += 1) {
-                              cells.push(
-                                <button key={`nm2-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
-                                  {i + 1}
-                                </button>,
-                              );
-                            }
-                            return cells;
-                          })()}
-                        </div>
-
-                        <div className={styles.calFooter}>
-                          <button
-                            type="button"
-                            className={styles.calFooterBtn}
-                            onClick={() => {
-                              const t = new Date();
-                              setEtiquetaDataVal(formatDateLabel(t));
-                              setEtiquetaMonth(startOfMonth(t));
-                            }}
-                          >
-                            <span className={styles.dotBlue} aria-hidden />
-                            hoje
-                          </button>
-                          <button
-                            type="button"
-                            className={styles.calFooterBtn}
-                            onClick={() => {
-                              setEtiquetaDataVal("");
-                            }}
-                          >
-                            <span className={styles.dotRed} aria-hidden />
-                            limpar
-                          </button>
-                          <button type="button" className={styles.calFooterBtn} onClick={() => setOpenEtiquetaCalendar(null)}>
-                            <span className={styles.xMark} aria-hidden>
-                              ×
-                            </span>
-                            fechar
-                          </button>
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 </div>
 
@@ -2682,7 +2598,7 @@ export default function PrePreparoClient() {
                     <div className={styles.previewTopRow}>
                       <div className={styles.previewName}>{etiquetaSelectedRecipe ? etiquetaSelectedRecipe.receita : "Selecione uma receita"}</div>
                       <div className={styles.previewQty}>
-                        {etiquetaSelectedRecipe ? `1 ${etiquetaUnidade}` : `0 ${etiquetaUnidade}`}
+                        {etiquetaSelectedRecipe ? `${etiquetaQtd} ${etiquetaUnidade}` : `0 ${etiquetaUnidade}`}
                       </div>
                     </div>
                     <div className={styles.previewHr} />
@@ -2692,15 +2608,24 @@ export default function PrePreparoClient() {
                     </div>
                     <div className={styles.previewLine}>
                       <div className={styles.previewLabel}>Data Produção:</div>
-                      <div className={styles.previewValue}>01/03/2026</div>
+                      <div className={styles.previewValue}>{(() => {
+                        const d = parseDateLabelLoose(etiquetaDataProd);
+                        return d ? formatDateNumeric(d) : "-";
+                      })()}</div>
                     </div>
                     <div className={styles.previewLine}>
                       <div className={styles.previewLabel}>Data de Validade:</div>
-                      <div className={styles.previewValue}>{etiquetaValidityDays ? "08/03/2026" : "01/03/2026"}</div>
+                      <div className={styles.previewValue}>{(() => {
+                        const d = parseDateLabelLoose(etiquetaDataVal);
+                        return d ? formatDateNumeric(d) : "-";
+                      })()}</div>
                     </div>
                     <div className={styles.previewHr} />
                     <div className={styles.previewFooter}>
-                      Impresso em 01/03/2026 às 22:27 · Por CMV Fácil · #F2G24KY
+                      {(() => {
+                        const now = new Date();
+                        return `Impresso em ${formatDateNumeric(now)} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · Por CMV Fácil · #F2G24KY`;
+                      })()}
                     </div>
                   </div>
                 </div>
@@ -2719,6 +2644,7 @@ export default function PrePreparoClient() {
             </div>
           </div>
         ) : null}
+        {isMounted && openEtiquetaCalendar ? createPortal(renderEtiquetaCalendar(openEtiquetaCalendar), document.body) : null}
 
         {isDeleteOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
