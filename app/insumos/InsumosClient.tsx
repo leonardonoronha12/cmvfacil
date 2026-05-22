@@ -244,6 +244,16 @@ function parseCurrencyToNumber(value: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function formatMoneyDraft(input: string) {
+  const digits = String(input ?? "").replace(/\D/g, "");
+  if (!digits) return "";
+  const cents = Number.parseInt(digits, 10);
+  return (cents / 100).toLocaleString("pt-BR", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -1307,7 +1317,7 @@ export default function InsumosClient() {
         ) : null}
 
         {isNewItemOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsNewItemOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation">
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Cadastro de Item</div>
@@ -1375,7 +1385,8 @@ export default function InsumosClient() {
                       placeholder="0,00"
                       inputMode="decimal"
                       value={newInitialCost}
-                      onChange={(e) => setNewInitialCost(e.target.value)}
+                      onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
+                      onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                     />
                   </div>
                 </div>
@@ -1396,7 +1407,7 @@ export default function InsumosClient() {
         ) : null}
 
         {isEditItemOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEditItemOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation">
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Editar Item</div>
@@ -1465,7 +1476,8 @@ export default function InsumosClient() {
                       placeholder="0,00"
                       inputMode="decimal"
                       value={newInitialCost}
-                      onChange={(e) => setNewInitialCost(e.target.value)}
+                      onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
+                      onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                     />
                   </div>
                 </div>
