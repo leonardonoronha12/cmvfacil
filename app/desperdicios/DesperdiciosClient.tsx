@@ -13,8 +13,8 @@ import {
 } from "../lib/desperdiciosMotivosStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
-import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
-import { getExpiredPrePreparoEtiquetaDesperdicioSync, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -327,6 +327,7 @@ export default function DesperdiciosClient() {
 
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingEtiquetaId, setEditingEtiquetaId] = useState<string | null>(null);
   const [draftData, setDraftData] = useState(() => formatDateLabelLowerPT(new Date()));
   const [draftItem, setDraftItem] = useState("");
   const [draftUnitCost, setDraftUnitCost] = useState("0,00");
@@ -688,6 +689,7 @@ export default function DesperdiciosClient() {
 
   function openNew() {
     setEditingId(null);
+    setEditingEtiquetaId(null);
     setDraftData(formatDateLabelLowerPT(new Date()));
     setDraftItem("");
     setDraftUnitCost("0,00");
@@ -775,10 +777,6 @@ export default function DesperdiciosClient() {
   }
 
   function openConfirmDeleteDesperdicio(row: DesperdicioRow) {
-    if (isPrePreparoEtiquetaWasteId(row.id)) {
-      window.alert("Esse desperdício foi gerado automaticamente por uma etiqueta vencida no Pré-preparo.");
-      return;
-    }
     setConfirmType("desperdicio");
     setConfirmDesperdicio(row);
     setConfirmMotivo(null);
@@ -798,7 +796,22 @@ export default function DesperdiciosClient() {
 
   function confirmDelete() {
     if (confirmType === "desperdicio") {
-      if (confirmDesperdicio) removeRow(confirmDesperdicio);
+      if (confirmDesperdicio) {
+        if (isPrePreparoEtiquetaWasteId(confirmDesperdicio.id)) {
+          const etiquetaId = getEtiquetaIdFromWasteId(confirmDesperdicio.id);
+          if (etiquetaId) {
+            setPrePreparoEtiquetas((prev) => {
+              const next = prev.filter((e) => e.id !== etiquetaId);
+              writePrePreparoEtiquetasToStore(next);
+              return next;
+            });
+          }
+          setRows((prev) => prev.filter((r) => r.id !== confirmDesperdicio.id));
+          void deleteDesperdicioFromSupabase(confirmDesperdicio.id).catch(() => {});
+        } else {
+          removeRow(confirmDesperdicio);
+        }
+      }
     } else {
       if (confirmMotivo) deleteMotivo(confirmMotivo);
     }
@@ -808,11 +821,9 @@ export default function DesperdiciosClient() {
   }
 
   function openEdit(row: DesperdicioRow) {
-    if (isPrePreparoEtiquetaWasteId(row.id)) {
-      window.alert("Edite a etiqueta no módulo de Pré-preparo para atualizar esse lançamento automático.");
-      return;
-    }
     setEditingId(row.id);
+    const etiquetaId = getEtiquetaIdFromWasteId(row.id);
+    setEditingEtiquetaId(etiquetaId);
     setDraftData(row.data);
     setDraftItem(row.item);
     const qtyMatch = (row.quantidade ?? "").match(/([\d.,]+)\s*([A-Za-zÀ-ÿ]+)/);
@@ -841,7 +852,27 @@ export default function DesperdiciosClient() {
     const unitCostCents = parseBrlToCents(draftUnitCost);
     const totalCents = Math.max(0, Math.round(unitCostCents * Math.max(0, qtyNum)));
     const custo = formatBrlFromCents(totalCents);
-    const motivo = draftMotivo.trim() || "Sem motivo";
+    const motivo = editingEtiquetaId ? "Validade Vencida" : draftMotivo.trim() || "Sem motivo";
+
+    if (editingEtiquetaId) {
+      const parsedValidade = parseDateLabelLoose(data);
+      if (!parsedValidade) return;
+      const etiquetaId = editingEtiquetaId;
+      setPrePreparoEtiquetas((prev) => {
+        const next = prev.map((e) =>
+          e.id === etiquetaId
+            ? { ...e, quantidade: draftQty.trim(), unidade: qtyUnit, custo, dataValidade: formatDateLabelLowerPT(parsedValidade) }
+            : e,
+        );
+        writePrePreparoEtiquetasToStore(next);
+        return next;
+      });
+      setIsFormOpen(false);
+      setEditingId(null);
+      setEditingEtiquetaId(null);
+      setQuery("");
+      return;
+    }
 
     if (!editingId) {
       const r: DesperdicioRow = { id: String(Date.now()), data, item, quantidade, custo, motivo };
@@ -858,6 +889,7 @@ export default function DesperdiciosClient() {
     void upsertDesperdicioToSupabase({ id, data, item, quantidade, custo, motivo }).catch(() => {});
     setIsFormOpen(false);
     setEditingId(null);
+    setEditingEtiquetaId(null);
     setQuery("");
   }
 
@@ -1200,8 +1232,7 @@ export default function DesperdiciosClient() {
                       className={styles.iconBtn}
                       aria-label="Editar"
                       onClick={() => openEdit(r)}
-                      disabled={isAutoEtiqueta}
-                      title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                      title={isAutoEtiqueta ? "Editar etiqueta vencida" : ""}
                     >
                       <IconPencil />
                     </button>
@@ -1210,8 +1241,7 @@ export default function DesperdiciosClient() {
                       className={styles.iconBtn}
                       aria-label="Excluir"
                       onClick={() => openConfirmDeleteDesperdicio(r)}
-                      disabled={isAutoEtiqueta}
-                      title={isAutoEtiqueta ? "Gerado automaticamente por etiqueta vencida" : ""}
+                      title={isAutoEtiqueta ? "Excluir etiqueta vencida" : ""}
                     >
                       <IconTrash />
                     </button>
@@ -1226,8 +1256,17 @@ export default function DesperdiciosClient() {
           <div className={styles.modalOverlay} role="dialog" aria-modal="true">
             <div className={styles.modal}>
               <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>{editingId ? "Editar Desperdício" : "Novo Desperdício"}</div>
-                <button type="button" className={styles.modalClose} onClick={() => setIsFormOpen(false)} aria-label="Fechar">
+                <div className={styles.modalTitle}>{editingEtiquetaId ? "Editar Etiqueta Vencida" : editingId ? "Editar Desperdício" : "Novo Desperdício"}</div>
+                <button
+                  type="button"
+                  className={styles.modalClose}
+                  onClick={() => {
+                    setIsFormOpen(false);
+                    setEditingId(null);
+                    setEditingEtiquetaId(null);
+                  }}
+                  aria-label="Fechar"
+                >
                   ×
                 </button>
               </div>
@@ -1235,7 +1274,7 @@ export default function DesperdiciosClient() {
               <div className={styles.modalBody}>
                 <div className={styles.field}>
                   <div className={styles.label}>Item</div>
-                  <select className={styles.input} value={draftItem} onChange={(e) => setDraftItem(e.target.value)}>
+                  <select className={styles.input} value={draftItem} onChange={(e) => setDraftItem(e.target.value)} disabled={Boolean(editingEtiquetaId)}>
                     <option value="" disabled>
                       Ex: Carne Bovina
                     </option>
@@ -1278,11 +1317,11 @@ export default function DesperdiciosClient() {
                 <div className={styles.field}>
                   <div className={styles.labelRow}>
                     <div className={styles.label}>Motivo</div>
-                    <button type="button" className={styles.addLink} onClick={() => openMotivosModal(draftMotivo || null)}>
+                    <button type="button" className={styles.addLink} onClick={() => openMotivosModal(draftMotivo || null)} disabled={Boolean(editingEtiquetaId)}>
                       ADD Motivo
                     </button>
                   </div>
-                  <select className={styles.input} value={draftMotivo} onChange={(e) => setDraftMotivo(e.target.value)}>
+                  <select className={styles.input} value={draftMotivo} onChange={(e) => setDraftMotivo(e.target.value)} disabled={Boolean(editingEtiquetaId)}>
                     {motivos.map((m) => (
                       <option key={m} value={m}>
                         {m}
@@ -1292,7 +1331,7 @@ export default function DesperdiciosClient() {
                 </div>
 
                 <div className={styles.field}>
-                  <div className={styles.label}>Data de Lançamento</div>
+                  <div className={styles.label}>{editingEtiquetaId ? "Data de Validade" : "Data de Lançamento"}</div>
                   <div className={styles.calendarWrap} ref={dataCalWrapRef}>
                     <div className={styles.inputGroup}>
                       <button

@@ -81,6 +81,13 @@ export function isPrePreparoEtiquetaWasteId(id: string) {
   return String(id ?? "").startsWith(ETIQUETA_WASTE_PREFIX);
 }
 
+export function getEtiquetaIdFromWasteId(id: string) {
+  const raw = String(id ?? "");
+  if (!raw.startsWith(ETIQUETA_WASTE_PREFIX)) return null;
+  const etiquetaId = raw.slice(ETIQUETA_WASTE_PREFIX.length).trim();
+  return etiquetaId || null;
+}
+
 function desperdicioRowsEqual(a: DesperdicioRow, b: DesperdicioRow) {
   return a.id === b.id && a.data === b.data && a.item === b.item && a.quantidade === b.quantidade && a.custo === b.custo && a.motivo === b.motivo;
 }
