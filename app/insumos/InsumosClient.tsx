@@ -558,6 +558,13 @@ export default function InsumosClient() {
 
   async function downloadTemplateXlsx() {
     const XLSX = await import("xlsx");
+    const unitOptions = ["Und", "Kg", "g", "L", "ml"];
+    const categoryOptions = categories
+      .map((c) => normalizeCategoryName(c))
+      .filter((c) => c && c !== "-")
+      .slice(0, 50)
+      .map((c) => c.replaceAll('"', "").replaceAll(",", " "));
+    const categoryFormula = categoryOptions.length ? `"${categoryOptions.join(",")}"` : '"-"';
     const rows = [
       ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
       ["Álcool", "L", "4,39", "Limpeza", "-", false],
@@ -567,7 +574,8 @@ export default function InsumosClient() {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Insumos");
     (ws as any)["!dataValidation"] = [
-      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ['"Und,Kg,L"'] },
+      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: [`"${unitOptions.join(",")}"`] },
+      { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: [categoryFormula] },
       { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
