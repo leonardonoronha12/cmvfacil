@@ -599,16 +599,6 @@ export default function PrePreparoClient() {
     }, durationMs);
   }
 
-  const [customCategories, setCustomCategories] = useState<string[]>([]);
-  const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
-  const [categoriesTarget, setCategoriesTarget] = useState<"edit" | "newRecipe">("newRecipe");
-  const [categoryNewDraft, setCategoryNewDraft] = useState("");
-  const [editingCategoryOriginal, setEditingCategoryOriginal] = useState<string | null>(null);
-  const [editingCategoryDraft, setEditingCategoryDraft] = useState("");
-  const [isDeleteCategoryOpen, setIsDeleteCategoryOpen] = useState(false);
-  const [deletingCategoryName, setDeletingCategoryName] = useState("");
-  const [deletingCategoryCount, setDeletingCategoryCount] = useState(0);
-
   const [isNewRecipeOpen, setIsNewRecipeOpen] = useState(false);
   const [newRecipeStep, setNewRecipeStep] = useState<1 | 2 | 3>(1);
   const [newRecipeName, setNewRecipeName] = useState("");
@@ -918,131 +908,12 @@ export default function PrePreparoClient() {
     return filtered.slice(0, 10);
   }, [ingredientQuery, insumosStore]);
 
-  function openCategoriesModal(target: "edit" | "newRecipe") {
-    setCategoriesTarget(target);
-    setCategoryNewDraft("");
-    setEditingCategoryOriginal(null);
-    setEditingCategoryDraft("");
-    setIsDeleteCategoryOpen(false);
-    setDeletingCategoryName("");
-    setDeletingCategoryCount(0);
-    setIsCategoriesOpen(true);
-  }
-
-  function addCategory() {
-    const name = toTitleCase(normalizeCategoryName(categoryNewDraft));
-    if (!name) return;
-    setCustomCategories((prev) => {
-      const k = name.toLowerCase();
-      const has = prev.some((c) => c.toLowerCase() === k) || categoriesPretty.some((c) => c.toLowerCase() === k);
-      return has ? prev : [...prev, name];
-    });
-    if (categoriesTarget === "edit") setDraftCategory(name);
-    if (categoriesTarget === "newRecipe") setNewRecipeCategory(name);
-    setCategoryNewDraft("");
-  }
-
-  function editCategory(name: string) {
-    const k = name.toLowerCase();
-    if (lockedCategoryKeys.has(k)) return;
-    setIsCategoriesOpen(true);
-    setEditingCategoryOriginal(name);
-    setEditingCategoryDraft(name);
-  }
-
-  function cancelEditCategory() {
-    setEditingCategoryOriginal(null);
-    setEditingCategoryDraft("");
-  }
-
-  function confirmEditCategory() {
-    const from = editingCategoryOriginal;
-    if (!from) return;
-    const name = toTitleCase(normalizeCategoryName(editingCategoryDraft));
-    if (!name) return;
-
-    const existsKey = name.toLowerCase();
-    const fromKey = from.toLowerCase();
-    if (fromKey !== existsKey && categoriesPretty.some((c) => c.toLowerCase() === existsKey)) return;
-    if (lockedCategoryKeys.has(fromKey)) return;
-
-    setCustomCategories((prev) => {
-      const next: string[] = [];
-      let replaced = false;
-      for (const c of prev) {
-        if (c.toLowerCase() === fromKey) {
-          if (!replaced) next.push(name);
-          replaced = true;
-        } else next.push(c);
-      }
-      if (!replaced) return prev;
-      const seen = new Set<string>();
-      const out: string[] = [];
-      for (const c of next) {
-        const k = c.toLowerCase();
-        if (seen.has(k)) continue;
-        seen.add(k);
-        out.push(c);
-      }
-      return out;
-    });
-
-    setRows((prev) =>
-      prev.map((r) => {
-        const current = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
-        if (current.toLowerCase() !== fromKey) return r;
-        return { ...r, categoria: name.toUpperCase() };
-      }),
-    );
-
-    if (selectedCategory && toTitleCase(normalizeCategoryName(selectedCategory)).toLowerCase() === fromKey) setSelectedCategory(name.toUpperCase());
-    if (draftCategory && toTitleCase(normalizeCategoryName(draftCategory)).toLowerCase() === fromKey) setDraftCategory(name);
-    if (newRecipeCategory && toTitleCase(normalizeCategoryName(newRecipeCategory)).toLowerCase() === fromKey) setNewRecipeCategory(name);
-    cancelEditCategory();
-  }
-
-  function openDeleteCategory(name: string) {
-    const k = name.toLowerCase();
-    if (lockedCategoryKeys.has(k)) return;
-    setDeletingCategoryName(name);
-    setDeletingCategoryCount(categoryCounts.get(name) ?? 0);
-    setIsDeleteCategoryOpen(true);
-  }
-
-  function cancelDeleteCategory() {
-    setIsDeleteCategoryOpen(false);
-    setDeletingCategoryName("");
-    setDeletingCategoryCount(0);
-  }
-
-  function confirmDeleteCategory() {
-    const name = deletingCategoryName;
-    if (!name) return;
-    const key = name.toLowerCase();
-    if (lockedCategoryKeys.has(key)) return;
-
-    setCustomCategories((prev) => prev.filter((c) => c.toLowerCase() !== key));
-    if (deletingCategoryCount) {
-      setRows((prev) =>
-        prev.map((r) => {
-          const current = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
-          if (current.toLowerCase() !== key) return r;
-          return { ...r, categoria: "-" };
-        }),
-      );
-    }
-
-    if (selectedCategory && toTitleCase(normalizeCategoryName(selectedCategory)).toLowerCase() === key) setSelectedCategory("Categorias");
-    if (draftCategory && toTitleCase(normalizeCategoryName(draftCategory)).toLowerCase() === key) setDraftCategory("");
-    if (newRecipeCategory && toTitleCase(normalizeCategoryName(newRecipeCategory)).toLowerCase() === key) setNewRecipeCategory("");
-    if (editingCategoryOriginal && editingCategoryOriginal.toLowerCase() === key) cancelEditCategory();
-    cancelDeleteCategory();
-  }
-
   function openEditModal(row: PrePreparoRow) {
     setEditingId(row.id);
     setDraftName(row.receita);
-    setDraftCategory(toTitleCase(row.categoria));
+    const from = toTitleCase(normalizeCategoryName(String(row.categoria ?? "")));
+    const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
+    setDraftCategory(match);
     setDraftSpec("");
     setDraftUnit("Kg");
     setDraftValidity("7");
@@ -1401,24 +1272,10 @@ export default function PrePreparoClient() {
     showToast(nextHidden ? "Ocultado do CMV Real." : "Desocultado do CMV Real.", "success");
   }
 
-  const categories = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const r of rows) {
-      const key = r.categoria.trim();
-      if (!key || key === "-") continue;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      out.push(key);
-    }
-    return out;
-  }, [rows]);
-
   const insumoCategories = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const i of insumosStore) {
-      if (i.ocultar) continue;
       const key = String(i.categoria ?? "").trim();
       if (!key || key === "-") continue;
       const name = toTitleCase(normalizeCategoryName(key));
@@ -1431,52 +1288,40 @@ export default function PrePreparoClient() {
     return out;
   }, [insumosStore]);
 
-  const lockedCategoryKeys = useMemo(() => new Set(insumoCategories.map((c) => c.toLowerCase())), [insumoCategories]);
-
-  const categoriesPretty = useMemo(() => {
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const c of insumoCategories) {
-      const name = toTitleCase(c);
-      if (!name) continue;
-      const k = name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(name);
-    }
-    for (const c of categories) {
-      const name = toTitleCase(c);
-      if (!name) continue;
-      const k = name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(name);
-    }
-    for (const c of customCategories) {
-      const name = toTitleCase(c);
-      if (!name) continue;
-      const k = name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(name);
-    }
-    return out;
-  }, [categories, customCategories, insumoCategories]);
-
-  const categoryCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of rows) {
-      const name = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
-      if (!name || name === "-" || name.toLowerCase() === "categorias") continue;
-      map.set(name, (map.get(name) ?? 0) + 1);
-    }
-    return map;
-  }, [rows]);
-
-  const categoriesSorted = useMemo(() => {
+  const recipeCategories = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
-    return [...categoriesPretty].filter((c) => normalizeCategoryName(c).toLowerCase() !== "categorias").sort((a, b) => collator.compare(a, b));
-  }, [categoriesPretty]);
+    return [...insumoCategories].sort((a, b) => collator.compare(a, b));
+  }, [insumoCategories]);
+
+  useEffect(() => {
+    if (!recipeCategories.length) return;
+    setRows((prev) => {
+      let changed = false;
+      const next = prev.map((r) => {
+        const from = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+        const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "-";
+        if (r.categoria === match) return r;
+        changed = true;
+        return { ...r, categoria: match };
+      });
+      return changed ? next : prev;
+    });
+  }, [recipeCategories]);
+
+  useEffect(() => {
+    if (selectedCategory === "Categorias") return;
+    if (!recipeCategories.includes(selectedCategory)) setSelectedCategory("Categorias");
+  }, [recipeCategories, selectedCategory]);
+
+  useEffect(() => {
+    if (!draftCategory) return;
+    if (!recipeCategories.includes(draftCategory)) setDraftCategory("");
+  }, [draftCategory, recipeCategories]);
+
+  useEffect(() => {
+    if (!newRecipeCategory) return;
+    if (!recipeCategories.includes(newRecipeCategory)) setNewRecipeCategory("");
+  }, [newRecipeCategory, recipeCategories]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -2273,7 +2118,7 @@ export default function PrePreparoClient() {
                 </div>
                 <select className={styles.select} value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)}>
                   <option value="Categorias">Categorias</option>
-                  {categories.map((c) => (
+                  {recipeCategories.map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>
@@ -2478,20 +2323,12 @@ export default function PrePreparoClient() {
                 </div>
 
                 <div className={styles.formField}>
-                  <div className={styles.formLabelRow}>
-                    <div className={styles.formLabel}>Categoria</div>
-                    <button
-                      type="button"
-                      className={styles.addCategoryBtn}
-                      onClick={() => {
-                        openCategoriesModal("edit");
-                      }}
-                    >
-                      ADD Categoria
-                    </button>
-                  </div>
+                  <div className={styles.formLabel}>Categoria</div>
                   <select className={styles.formSelect} value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
-                    {categoriesPretty.map((c) => (
+                    {!recipeCategories.length ? (
+                      <option value="">Sem categorias</option>
+                    ) : null}
+                    {recipeCategories.map((c) => (
                       <option key={c} value={c}>
                         {c}
                       </option>
@@ -2537,7 +2374,7 @@ export default function PrePreparoClient() {
                     if (!editingId) return;
                     const name = draftName.trim();
                     if (!name) return;
-                    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, receita: name, categoria: draftCategory.toUpperCase() } : r)));
+                    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, receita: name, categoria: draftCategory } : r)));
                     setIsEditOpen(false);
                     setEditingId(null);
                   }}
@@ -2812,21 +2649,10 @@ export default function PrePreparoClient() {
 
                     <div className={styles.grid2}>
                       <div className={styles.formField}>
-                        <div className={styles.formLabelRow}>
-                          <div className={styles.formLabel}>Categoria</div>
-                          <button
-                            type="button"
-                            className={styles.addCategoryBtn}
-                            onClick={() => {
-                              openCategoriesModal("newRecipe");
-                            }}
-                          >
-                            ADD Categoria
-                          </button>
-                        </div>
+                        <div className={styles.formLabel}>Categoria</div>
                         <select className={styles.formSelect} value={newRecipeCategory} onChange={(e) => setNewRecipeCategory(e.target.value)}>
                           <option value="">Selecione</option>
-                          {categoriesPretty.map((c) => (
+                          {recipeCategories.map((c) => (
                             <option key={c} value={c}>
                               {c}
                             </option>
@@ -3064,7 +2890,7 @@ export default function PrePreparoClient() {
                       setRows((prev) => [
                         {
                           id: nextId,
-                          categoria: newRecipeCategory.toUpperCase(),
+                          categoria: newRecipeCategory,
                           receita: newRecipeName.trim(),
                           custoTotal: totalLabel,
                           rendimento: rendimentoLabel,
@@ -3084,136 +2910,6 @@ export default function PrePreparoClient() {
                   }}
                 >
                   {newRecipeStep === 3 ? "Salvar" : "Próximo"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {isCategoriesOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsCategoriesOpen(false)}>
-            <div
-              className={`${insumosStyles.modal} ${insumosStyles.categoriesModal}`}
-              role="dialog"
-              aria-modal="true"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className={insumosStyles.modalHeader}>
-                <div className={insumosStyles.modalTitle}>Categorias de Itens</div>
-                <button type="button" className={insumosStyles.modalClose} aria-label="Fechar" onClick={() => setIsCategoriesOpen(false)}>
-                  ×
-                </button>
-              </div>
-
-              <div className={insumosStyles.categoriesBody}>
-                <div className={insumosStyles.categoriesLabel}>Nome da Categoria</div>
-                <div className={insumosStyles.categoriesRow}>
-                  <input
-                    className={insumosStyles.categoriesInput}
-                    placeholder="Ex: Proteínas"
-                    value={categoryNewDraft}
-                    onChange={(e) => setCategoryNewDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") addCategory();
-                    }}
-                  />
-                  <button type="button" className={insumosStyles.categoriesAddBtn} onClick={addCategory} disabled={!normalizeCategoryName(categoryNewDraft)}>
-                    <IconPlus /> ADD
-                  </button>
-                </div>
-                <div className={insumosStyles.categoriesDivider} />
-
-                <div className={insumosStyles.categoriesList}>
-                  {categoriesSorted.map((c) => {
-                    const isLocked = lockedCategoryKeys.has(c.toLowerCase());
-                    return (
-                      <div key={c} className={insumosStyles.categoryItem}>
-                        {editingCategoryOriginal === c ? (
-                          <>
-                            <input
-                              className={insumosStyles.categoryInlineInput}
-                              value={editingCategoryDraft}
-                              onChange={(e) => setEditingCategoryDraft(e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === "Enter") confirmEditCategory();
-                                if (e.key === "Escape") cancelEditCategory();
-                              }}
-                              autoFocus
-                            />
-                            <div className={insumosStyles.categoryCount} />
-                            <div className={insumosStyles.categoryActions}>
-                              <button
-                                type="button"
-                                className={`${insumosStyles.categoryIconBtn} ${insumosStyles.categoryIconBtnConfirm}`}
-                                aria-label="Confirmar edição"
-                                onClick={confirmEditCategory}
-                                disabled={!normalizeCategoryName(editingCategoryDraft)}
-                              >
-                                <IconCheck />
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className={insumosStyles.categoryName}>{c}</div>
-                            <div className={insumosStyles.categoryCount}>{categoryCounts.get(c) ?? 0}</div>
-                            <div className={insumosStyles.categoryActions}>
-                              <button
-                                type="button"
-                                className={insumosStyles.categoryIconBtn}
-                                aria-label="Editar categoria"
-                                onClick={() => editCategory(c)}
-                                disabled={isLocked}
-                              >
-                                <IconEdit />
-                              </button>
-                              <button
-                                type="button"
-                                className={insumosStyles.categoryIconBtn}
-                                aria-label="Excluir categoria"
-                                onClick={() => openDeleteCategory(c)}
-                                disabled={isLocked}
-                              >
-                                <IconTrash />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          </div>
-        ) : null}
-
-        {isDeleteCategoryOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={cancelDeleteCategory}>
-            <div className={insumosStyles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-              <div className={insumosStyles.modalHeader}>
-                <div className={insumosStyles.modalTitle}>Excluir Categoria?</div>
-                <button type="button" className={insumosStyles.modalClose} aria-label="Fechar" onClick={cancelDeleteCategory}>
-                  ×
-                </button>
-              </div>
-
-              <div className={insumosStyles.confirmBody}>
-                <div className={insumosStyles.confirmIcon}>
-                  <IconTrash />
-                </div>
-                <div className={insumosStyles.confirmText}>
-                  {`Excluir a categoria "${deletingCategoryName}"?`}
-                  {deletingCategoryCount ? ` Ela está usada em ${deletingCategoryCount} receita(s).` : ""}
-                </div>
-              </div>
-
-              <div className={insumosStyles.confirmActions}>
-                <button type="button" className={insumosStyles.confirmCancel} onClick={cancelDeleteCategory}>
-                  Cancelar
-                </button>
-                <button type="button" className={insumosStyles.confirmDelete} onClick={confirmDeleteCategory}>
-                  Excluir
                 </button>
               </div>
             </div>
