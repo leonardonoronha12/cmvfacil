@@ -1105,9 +1105,34 @@ export default function PrePreparoClient() {
     return out;
   }, [rows]);
 
+  const insumoCategories = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const i of insumosStore) {
+      if (i.ocultar) continue;
+      const key = String(i.categoria ?? "").trim();
+      if (!key || key === "-") continue;
+      const name = toTitleCase(key);
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(name);
+    }
+    return out;
+  }, [insumosStore]);
+
   const categoriesPretty = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
+    for (const c of insumoCategories) {
+      const name = toTitleCase(c);
+      if (!name) continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(name);
+    }
     for (const c of categories) {
       const name = toTitleCase(c);
       if (!name) continue;
@@ -1125,7 +1150,7 @@ export default function PrePreparoClient() {
       out.push(name);
     }
     return out;
-  }, [categories, customCategories]);
+  }, [categories, customCategories, insumoCategories]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
