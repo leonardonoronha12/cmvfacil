@@ -527,40 +527,39 @@ export default function FornecedoresClient() {
       equivalenteUnidade,
     };
     const oldName = originalName;
+
     const curProdutos = produtosMap[fornecedorKey] ?? [];
     const hasNomeNaNota = curProdutos.some((x) => x.toLowerCase() === nomeNaNota.toLowerCase());
+    let nextProdutos = produtosMap;
+
     if (!oldName && !hasNomeNaNota) {
-      setProdutosMap((prev) => {
-        const cur = prev[fornecedorKey] ?? [];
-        const next: FornecedorProdutos = { ...prev, [fornecedorKey]: [...cur, nomeNaNota] };
-        writeFornecedorProdutosMap(next);
-        return next;
-      });
+      const nextList = [...curProdutos, nomeNaNota];
+      nextProdutos = { ...produtosMap, [fornecedorKey]: nextList };
+      writeFornecedorProdutosMap(nextProdutos);
+      setProdutosMap(nextProdutos);
       setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === fornecedorKey ? { ...r, itens: r.itens + 1 } : r)));
+    } else if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
+      const replaced = curProdutos.map((x) => (x.toLowerCase() === oldName.toLowerCase() ? nomeNaNota : x));
+      const dedup: string[] = [];
+      for (const n of replaced) {
+        if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
+      }
+      nextProdutos = { ...produtosMap, [fornecedorKey]: dedup };
+      writeFornecedorProdutosMap(nextProdutos);
+      setProdutosMap(nextProdutos);
     }
-    if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
-      setProdutosMap((prev) => {
-        const cur = prev[fornecedorKey] ?? [];
-        const nextList = cur.map((x) => (x.toLowerCase() === oldName.toLowerCase() ? nomeNaNota : x));
-        const dedup: string[] = [];
-        for (const n of nextList) {
-          if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
-        }
-        const next: FornecedorProdutos = { ...prev, [fornecedorKey]: dedup };
-        writeFornecedorProdutosMap(next);
-        return next;
-      });
-    }
-    setEquivalenciasMap((prev) => {
-      const cur = prev[fornecedorKey] ?? [];
-      const filtered = cur.filter(
-        (x) =>
-          x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
-      );
-      const next = { ...prev, [fornecedorKey]: [...filtered, nextItem] };
-      writeFornecedorEquivalenciasMap(next);
-      return next;
-    });
+
+    const curEq = equivalenciasMap[fornecedorKey] ?? [];
+    const filtered = curEq.filter(
+      (x) => x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
+    );
+    const nextEq = { ...equivalenciasMap, [fornecedorKey]: [...filtered, nextItem] };
+    writeFornecedorEquivalenciasMap(nextEq);
+    setEquivalenciasMap(nextEq);
+
+    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq }).catch(() =>
+      showToast("Erro ao salvar no banco de dados.", "error"),
+    );
     setVincNomeOriginal(nomeNaNota);
     setIsVincOpen(false);
   }
@@ -597,12 +596,12 @@ export default function FornecedoresClient() {
       openVinculacao(curList.find((x) => x.toLowerCase() === item.toLowerCase()) ?? item);
       return;
     }
-    setProdutosMap((prev) => {
-      const cur = prev[key] ?? [];
-      const next: FornecedorProdutos = { ...prev, [key]: [...cur, item] };
-      writeFornecedorProdutosMap(next);
-      return next;
-    });
+    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: [...curList, item] };
+    writeFornecedorProdutosMap(nextProdutos);
+    setProdutosMap(nextProdutos);
+    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
+      showToast("Erro ao salvar no banco de dados.", "error"),
+    );
     setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: r.itens + 1 } : r)));
     setProdutoDraft("");
     setProdutoQuery("");
@@ -614,13 +613,14 @@ export default function FornecedoresClient() {
   function removeProduto(item: string) {
     const key = (prodFornecedorKey ?? "").trim().toUpperCase();
     if (!key) return;
-    setProdutosMap((prev) => {
-      const cur = prev[key] ?? [];
-      const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
-      const next: FornecedorProdutos = { ...prev, [key]: nextList };
-      writeFornecedorProdutosMap(next);
-      return next;
-    });
+    const cur = produtosMap[key] ?? [];
+    const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
+    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: nextList };
+    writeFornecedorProdutosMap(nextProdutos);
+    setProdutosMap(nextProdutos);
+    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
+      showToast("Erro ao salvar no banco de dados.", "error"),
+    );
     setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: Math.max(0, r.itens - 1) } : r)));
   }
 
