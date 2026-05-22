@@ -628,13 +628,6 @@ export default function EntradasClient() {
     return out;
   }, [fornecedorItemMap, fornecedorModalKey, fornecedorProdutosMap]);
 
-  const filteredInsumos = useMemo(() => {
-    const list = insumosStore.map((i) => i.item);
-    const q = detailItemName.trim().toLowerCase();
-    if (!q) return list.slice(0, 8);
-    return list.filter((n) => n.toLowerCase().includes(q)).slice(0, 8);
-  }, [detailItemName, insumosStore]);
-
   const filteredNotaItems = useMemo(() => {
     const list = fornecedorItensNaNota;
     const q = detailItemName.trim().toLowerCase();
@@ -1736,28 +1729,18 @@ export default function EntradasClient() {
                                     className={styles.itemOption}
                                     onClick={() => {
                                       setDetailItemName(name);
-                                      setDetailUnit(insumosByName.get(name.toLowerCase())?.medida ?? "Und");
+                                      const fornecedorKey = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
+                                      const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
+                                      const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+                                      setDetailUnit(existing?.unidadeNaNota || "Und");
                                       setIsItemMenuOpen(false);
                                     }}
                                   >
                                     {name}
                                   </button>
                                 ))}
-                              {(filteredInsumos[0] ? filteredInsumos : []).map((name) => (
-                                <button
-                                  key={name}
-                                  type="button"
-                                  className={styles.itemOption}
-                                  onClick={() => {
-                                    setDetailItemName(name);
-                                    setIsItemMenuOpen(false);
-                                  }}
-                                >
-                                  {name}
-                                </button>
-                              ))}
-                              {!filteredInsumos[0] && !filteredNotaItems[0] && !filteredFornecedorProdutos[0] ? (
-                                <div className={styles.itemEmpty}>Nenhum insumo encontrado</div>
+                              {!filteredNotaItems[0] && !filteredFornecedorProdutos[0] ? (
+                                <div className={styles.itemEmpty}>Nenhum item do fornecedor encontrado</div>
                               ) : null}
                             </div>
 
