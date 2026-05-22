@@ -602,6 +602,10 @@ export default function PrePreparoClient() {
   const [rowEditQty, setRowEditQty] = useState("0,000");
   const [isEditingPrep, setIsEditingPrep] = useState(false);
   const [prepDraft, setPrepDraft] = useState("");
+  const [isEditingYield, setIsEditingYield] = useState(false);
+  const [yieldDraftQty, setYieldDraftQty] = useState("0,000");
+  const [yieldDraftUnit, setYieldDraftUnit] = useState("Kg");
+  const yieldEditWrapRef = useRef<HTMLDivElement | null>(null);
   const [hiddenMap, setHiddenMap] = useState<Record<string, boolean>>(() => readPrePreparoHiddenMap());
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
@@ -725,7 +729,22 @@ export default function PrePreparoClient() {
     setRowEditQty("0,000");
     setIsEditingPrep(false);
     setPrepDraft("");
+    setIsEditingYield(false);
+    setYieldDraftQty("0,000");
+    setYieldDraftUnit("Kg");
   }, [detailsRecipeId]);
+
+  useEffect(() => {
+    if (!isEditingYield) return;
+    function onDown(e: MouseEvent) {
+      const el = yieldEditWrapRef.current;
+      if (!el) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      saveYieldEdit();
+    }
+    window.addEventListener("mousedown", onDown);
+    return () => window.removeEventListener("mousedown", onDown);
+  }, [isEditingYield, yieldDraftQty, yieldDraftUnit, detailsRow]);
 
   useEffect(() => {
     setEntradasRows(readEntradasFromStore());
@@ -1128,6 +1147,28 @@ export default function PrePreparoClient() {
 
   function updateDetailsRow(next: PrePreparoRow) {
     setRows((prev) => prev.map((r) => (r.id === next.id ? recomputeRowMetrics(next) : r)));
+  }
+
+  function startYieldEdit() {
+    if (!detailsRow) return;
+    const parsed = parseQtyLabel(detailsRow.rendimento);
+    setYieldDraftQty(formatDecimalFixedDraft(String(parsed.qty || 0), 3));
+    setYieldDraftUnit((parsed.unit || "Und").trim() || "Und");
+    setIsEditingYield(true);
+  }
+
+  function saveYieldEdit() {
+    if (!detailsRow) return;
+    const qty = parseDecimalInput(yieldDraftQty);
+    if (!(qty > 0)) {
+      showToast("Informe um rendimento válido para salvar.", "error");
+      return;
+    }
+    const unit = yieldDraftUnit.trim() || "Und";
+    const nextLabel = `${formatDecimalFixedDraft(yieldDraftQty, 3)} ${unit}`;
+    updateDetailsRow({ ...detailsRow, rendimento: nextLabel });
+    setIsEditingYield(false);
+    showToast("Rendimento salvo.", "success");
   }
 
   function addDetailIngredientRow() {
@@ -1807,9 +1848,46 @@ export default function PrePreparoClient() {
                             <div className={ft.yieldTitle}>Quanto Rende?</div>
                             <div className={ft.yieldHint}>Informe quanto essa receita irá render em média após o preparo.</div>
                           </div>
-                          <div className={ft.detailsYieldMeta}>
-                            <div className={ft.detailsYieldInput}>{formatDecimal3(detailsYield.qty)}</div>
-                            <div className={ft.detailsYieldSuffix}>{detailsYield.unit}</div>
+                          <div
+                            ref={yieldEditWrapRef}
+                            className={ft.detailsYieldMeta}
+                            role="button"
+                            tabIndex={0}
+                            style={!isEditingYield ? { cursor: "pointer" } : undefined}
+                            onClick={() => {
+                              if (isEditingYield) return;
+                              startYieldEdit();
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                if (isEditingYield) saveYieldEdit();
+                                else startYieldEdit();
+                              }
+                            }}
+                          >
+                            {isEditingYield ? (
+                              <>
+                                <input
+                                  className={ft.detailsYieldInput}
+                                  value={yieldDraftQty}
+                                  onChange={(e) => setYieldDraftQty(e.target.value)}
+                                  autoFocus
+                                />
+                                <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => setYieldDraftUnit(e.target.value)}>
+                                  <option value="Kg">Kg</option>
+                                  <option value="g">g</option>
+                                  <option value="L">L</option>
+                                  <option value="ml">ml</option>
+                                  <option value="Un">Un</option>
+                                  <option value="Und">Und</option>
+                                </select>
+                              </>
+                            ) : (
+                              <>
+                                <div className={ft.detailsYieldInput}>{formatDecimal3(detailsYield.qty)}</div>
+                                <div className={ft.detailsYieldSuffix}>{detailsYield.unit}</div>
+                              </>
+                            )}
                           </div>
                         </div>
 
