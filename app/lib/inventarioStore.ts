@@ -5,6 +5,7 @@ export type InventarioItemRow = {
   item: string;
   unidade: string;
   estoqueFinal: string;
+  removido?: boolean;
 };
 
 export type InventarioCategoria = {
@@ -45,6 +46,7 @@ function normalizeItem(input: unknown): InventarioItemRow | null {
     item,
     unidade: String(r.unidade ?? "").trim() || "Und",
     estoqueFinal: String(r.estoqueFinal ?? "").trim(),
+    removido: Boolean(r.removido),
   };
 }
 

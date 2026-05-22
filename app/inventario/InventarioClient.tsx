@@ -114,6 +114,10 @@ function normalizeContagens(list: InventarioContagem[]) {
           byId.set(id, { it, index: i });
           continue;
         }
+        if (it.removido) {
+          if (!existing.it.removido) byId.set(id, { it, index: existing.index });
+          continue;
+        }
         const existingHas = Boolean(String(existing.it.estoqueFinal ?? "").trim());
         const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
         if (!existingHas && nextHas) byId.set(id, { it, index: existing.index });
@@ -127,23 +131,7 @@ function normalizeContagens(list: InventarioContagem[]) {
   });
 }
 
-const initialContagens: InventarioContagem[] = [
-  {
-    id: "c1",
-    data: "28/03/2026",
-    categorias: [
-      {
-        id: "cat2",
-        nome: "MATÉRIA PRIMA",
-        status: "pendente",
-        itens: [
-          { id: "i1", item: "Tomate", unidade: "Kg", estoqueFinal: "" },
-          { id: "i2", item: "Alface", unidade: "Kg", estoqueFinal: "" },
-        ],
-      },
-    ],
-  },
-];
+const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -188,6 +176,7 @@ export default function InventarioClient() {
     const seen = new Set<string>();
     for (const cat of list) {
       for (const it of cat.itens ?? []) {
+        if (it.removido) continue;
         const id = String(it.id ?? "");
         if (!id) continue;
         if (seen.has(id)) continue;
@@ -261,6 +250,10 @@ export default function InventarioClient() {
           const prevIt = dedupeById.get(id);
           if (!prevIt) {
             dedupeById.set(id, it);
+            continue;
+          }
+          if (it.removido) {
+            if (!prevIt.removido) dedupeById.set(id, it);
             continue;
           }
           const prevHas = Boolean(String(prevIt.estoqueFinal ?? "").trim());
@@ -392,7 +385,7 @@ export default function InventarioClient() {
       return;
     }
     const id = `c-${Date.now()}`;
-    const itens: InventarioItemRow[] = (insumosStore[0] ? insumosStore : [{ id: "i1", item: "Tomate", medida: "Kg" }]).map((i) => ({
+    const itens: InventarioItemRow[] = (insumosStore[0] ? insumosStore : []).map((i) => ({
       id: i.id,
       item: i.item,
       unidade: i.medida,
@@ -444,7 +437,10 @@ export default function InventarioClient() {
     setContagens((prev) => {
       const next = prev.map((c) => {
         if (c.id !== cId) return c;
-        const categorias = (c.categorias ?? []).map((cat) => ({ ...cat, itens: (cat.itens ?? []).filter((it) => it.id !== itemId) }));
+        const categorias = (c.categorias ?? []).map((cat) => ({
+          ...cat,
+          itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, removido: true, estoqueFinal: "" } : it)),
+        }));
         return { ...c, categorias };
       });
       const updated = next.find((x) => x.id === cId);

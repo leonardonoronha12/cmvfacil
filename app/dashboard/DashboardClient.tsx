@@ -829,6 +829,10 @@ export default function DashboardClient() {
   const inventoryOptions = useMemo(() => {
     const out: Array<{ iso: string; label: string; t: number }> = [];
     for (const c of contagens) {
+      const hasAnyCountedItem = (c.categorias ?? []).some((cat) =>
+        (cat.itens ?? []).some((it) => !Boolean((it as any).removido) && Boolean(String((it as any).estoqueFinal ?? "").trim())),
+      );
+      if (!hasAnyCountedItem) continue;
       const d = parseDateDDMMYYYY(c.data);
       if (!d) continue;
       const iso = toIsoDate(d);
@@ -896,10 +900,16 @@ export default function DashboardClient() {
     const initialById = new Map<string, number>();
     const finalById = new Map<string, number>();
     for (const cat of contagemStart.categorias ?? []) {
-      for (const it of cat.itens ?? []) initialById.set(it.id, parsePtNumber(it.estoqueFinal || "0"));
+      for (const it of cat.itens ?? []) {
+        if (Boolean((it as any).removido)) continue;
+        initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+      }
     }
     for (const cat of contagemEnd.categorias ?? []) {
-      for (const it of cat.itens ?? []) finalById.set(it.id, parsePtNumber(it.estoqueFinal || "0"));
+      for (const it of cat.itens ?? []) {
+        if (Boolean((it as any).removido)) continue;
+        finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+      }
     }
 
     const insumoIdByKey = new Map<string, string>();

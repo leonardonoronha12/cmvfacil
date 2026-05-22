@@ -368,6 +368,10 @@ export default function ListaDeComprasClient() {
     const fornecedorFallback = buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
     const contagemOptions = contagens
       .map((contagem) => {
+        const hasAnyCountedItem = (contagem.categorias ?? []).some((cat) =>
+          (cat.itens ?? []).some((it) => !Boolean((it as any).removido) && Boolean(String((it as any).estoqueFinal ?? "").trim())),
+        );
+        if (!hasAnyCountedItem) return null;
         const t = parseDateLoose(contagem.data);
         if (!t) return null;
         const date = new Date(t);
@@ -390,10 +394,16 @@ export default function ListaDeComprasClient() {
     const initialById = new Map<string, number>();
     const finalById = new Map<string, number>();
     for (const cat of contagemStart?.categorias ?? []) {
-      for (const item of cat.itens ?? []) initialById.set(item.id, parsePtNumber(item.estoqueFinal || "0"));
+      for (const item of cat.itens ?? []) {
+        if (Boolean((item as any).removido)) continue;
+        initialById.set(item.id, parsePtNumber((item as any).estoqueFinal || "0"));
+      }
     }
     for (const cat of contagemEnd?.categorias ?? []) {
-      for (const item of cat.itens ?? []) finalById.set(item.id, parsePtNumber(item.estoqueFinal || "0"));
+      for (const item of cat.itens ?? []) {
+        if (Boolean((item as any).removido)) continue;
+        finalById.set(item.id, parsePtNumber((item as any).estoqueFinal || "0"));
+      }
     }
 
     const insumoIdByKey = new Map<string, string>();
