@@ -517,13 +517,13 @@ export default function InventarioClient() {
     const html = `<!doctype html><html><head><meta charset="utf-8" />
       <title>${esc(`Inventário ${c.data}`)}</title>
       <style>
-        @page { margin: 18mm; }
+        @page { margin: 0; }
         @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
         :root { --text:#111827; --muted:#6b7280; --border:#cfd3d7; --head:#f3f4f6; }
         *{box-sizing:border-box;}
         html,body{height:100%;}
-        body{font-family: Arial, sans-serif; color:var(--text); margin:0; background:#fff;}
-        .wrap{width:100%;}
+        body{font-family: Arial, sans-serif; color:var(--text); margin:0; padding:18mm; background:#fff;}
+        .wrap{width:100%; max-width: 190mm; margin: 0 auto;}
         .top{display:flex; align-items:flex-start; justify-content:space-between; gap:18px;}
         .brandRow{display:flex; align-items:center; gap:10px;}
         .logo{height:24px; width:auto; display:block;}
