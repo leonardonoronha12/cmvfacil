@@ -86,14 +86,14 @@ function parseDateNumericLoose(value: string) {
   return d;
 }
 
-function sortContagensAsc(list: InventarioContagem[]) {
+function sortContagensDesc(list: InventarioContagem[]) {
   const decorated = list.map((c, index) => ({
     c,
     index,
     t: parseDateNumericLoose(c.data)?.getTime() ?? Number.POSITIVE_INFINITY,
   }));
   decorated.sort((a, b) => {
-    const cmp = a.t - b.t;
+    const cmp = b.t - a.t;
     if (cmp) return cmp;
     return a.index - b.index;
   });
@@ -211,7 +211,7 @@ export default function InventarioClient() {
       try {
         const db = await loadInventarioFromSupabase();
         if (db[0]) {
-          const sorted = sortContagensAsc(normalizeContagens(db));
+          const sorted = sortContagensDesc(normalizeContagens(db));
           setContagens(sorted);
           setSelectedContagemId(sorted[0]?.id ?? null);
           contagensReadyRef.current = true;
@@ -219,7 +219,7 @@ export default function InventarioClient() {
         }
       } catch {}
       const stored = readInventarioFromStore(initialContagens);
-      const sortedStored = sortContagensAsc(normalizeContagens(stored));
+      const sortedStored = sortContagensDesc(normalizeContagens(stored));
       setContagens(sortedStored);
       setSelectedContagemId(sortedStored[0]?.id ?? null);
       contagensReadyRef.current = true;
@@ -376,7 +376,7 @@ export default function InventarioClient() {
         const next = prev.map((c) => (c.id === id ? { ...c, data } : c));
         const updated = next.find((x) => x.id === id);
         if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-        return sortContagensAsc(next);
+        return sortContagensDesc(next);
       });
       setSelectedContagemId(id);
       setQuery("");
@@ -396,7 +396,7 @@ export default function InventarioClient() {
       data,
       categorias: [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente", itens }],
     };
-    setContagens((prev) => sortContagensAsc([...prev, next]));
+    setContagens((prev) => sortContagensDesc([...prev, next]));
     setSelectedContagemId(id);
     setQuery("");
     setIsNewOpen(false);
