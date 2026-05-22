@@ -1524,7 +1524,20 @@ export default function PrePreparoClient() {
 
   const detailsEtiquetas = useMemo(() => {
     if (!detailsRecipeId) return [];
-    return etiquetasRows.filter((e) => e.recipeId === detailsRecipeId);
+    return etiquetasRows
+      .filter((e) => e.recipeId === detailsRecipeId)
+      .slice()
+      .sort((a, b) => {
+        const ad = parseDateLabelLoose(String(a.dataProducao ?? "")) ?? parseDateLabelLoose(String(a.dataValidade ?? ""));
+        const bd = parseDateLabelLoose(String(b.dataProducao ?? "")) ?? parseDateLabelLoose(String(b.dataValidade ?? ""));
+        const at = ad ? new Date(ad.getFullYear(), ad.getMonth(), ad.getDate()).getTime() : 0;
+        const bt = bd ? new Date(bd.getFullYear(), bd.getMonth(), bd.getDate()).getTime() : 0;
+        if (bt !== at) return bt - at;
+        const aid = Number.parseInt(String(a.id ?? ""), 10);
+        const bid = Number.parseInt(String(b.id ?? ""), 10);
+        if (Number.isFinite(bid) && Number.isFinite(aid) && bid !== aid) return bid - aid;
+        return String(b.id ?? "").localeCompare(String(a.id ?? ""), "pt-BR");
+      });
   }, [detailsRecipeId, etiquetasRows]);
 
   const ingredientOptions = useMemo(() => insumosStore.filter((row) => !row.ocultar), [insumosStore]);
