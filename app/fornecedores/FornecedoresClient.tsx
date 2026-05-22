@@ -246,6 +246,8 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 }
 
 export default function FornecedoresClient() {
+  const toastTimerRef = useRef<number | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [rows, setRows] = useState<FornecedorRow[]>([]);
   const [query, setQuery] = useState("");
 
@@ -295,6 +297,21 @@ export default function FornecedoresClient() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
+    setToast({ message, type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   function toggleSort(key: ColumnKey) {
     if (sortKey !== key) {
@@ -684,10 +701,42 @@ export default function FornecedoresClient() {
   function confirmDelete() {
     const id = deleteId;
     if (!id) return;
+    const key = deleteName.trim().toUpperCase();
     setRows((prev) => prev.filter((r) => r.id !== id));
+    if (key) {
+      setInfoMap((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        writeFornecedorInfoMap(next);
+        return next;
+      });
+      setProdutosMap((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        writeFornecedorProdutosMap(next);
+        return next;
+      });
+      setEquivalenciasMap((prev) => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        writeFornecedorEquivalenciasMap(next);
+        return next;
+      });
+      if (prodFornecedorKey === key) {
+        setIsProdutosOpen(false);
+        setProdFornecedorKey(null);
+        setProdFornecedorLabel("");
+        setProdVendedor("");
+        setProdEndereco("");
+      }
+    }
     setIsDeleteOpen(false);
     setDeleteId(null);
     setDeleteName("");
+    showToast("Fornecedor excluído.", "success");
   }
 
   const resultsText = `${visibleRows.length} resultado(s) encontrado(s)`;
@@ -954,7 +1003,7 @@ export default function FornecedoresClient() {
                   type="button"
                   className={styles.modalPrimaryWide}
                   onClick={saveForm}
-                  disabled={!draftFornecedor.trim() || !draftVendedorNome.trim() || !draftWhatsapp.trim() || !draftEndereco.trim()}
+                  disabled={!draftFornecedor.trim()}
                 >
                   Salvar
                 </button>
@@ -1294,6 +1343,12 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {toast ? (
+          <div className={styles.toastWrap} role="status" aria-live="polite">
+            <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
           </div>
         ) : null}
       </main>
