@@ -382,6 +382,7 @@ export default function InsumosClient() {
           rowsReadyRef.current = true;
           prevIdsRef.current = new Set(mapped.map((r) => r.id));
           setDataRows(mapped);
+          setCategories(getUniqueCategoriesFromRows(mapped));
           writeInsumosToStore(dbRows);
           return;
         }
@@ -401,12 +402,14 @@ export default function InsumosClient() {
         rowsReadyRef.current = true;
         prevIdsRef.current = new Set(mapped.map((r) => r.id));
         setDataRows(mapped);
+        setCategories(getUniqueCategoriesFromRows(mapped));
         return;
       }
 
       rowsReadyRef.current = true;
       prevIdsRef.current = new Set(initialRows.map((r) => r.id));
       setDataRows(initialRows);
+      setCategories(getUniqueCategoriesFromRows(initialRows));
     })();
   }, []);
 
@@ -932,6 +935,9 @@ export default function InsumosClient() {
     return ["ocultar", ...columnOrder, "acoes"].map((k) => widths[k as keyof typeof widths]).join(" ");
   }, [columnOrder]);
 
+  const totalItens = useMemo(() => dataRows.length, [dataRows.length]);
+  const totalOcultados = useMemo(() => dataRows.filter((r) => Boolean(r.ocultar)).length, [dataRows]);
+
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="insumos" />
@@ -953,7 +959,7 @@ export default function InsumosClient() {
               <IconCube />
             </div>
             <div className={styles.kpiBody}>
-              <div className={styles.kpiValue}>85</div>
+              <div className={styles.kpiValue}>{totalItens}</div>
               <div className={styles.kpiLabel}>TOTAL ITENS</div>
             </div>
           </div>
@@ -969,7 +975,7 @@ export default function InsumosClient() {
               </svg>
             </div>
             <div className={styles.kpiBody}>
-              <div className={styles.kpiValue}>34</div>
+              <div className={styles.kpiValue}>{totalOcultados}</div>
               <div className={styles.kpiLabel}>OCULTADOS DO CMV</div>
             </div>
           </div>
