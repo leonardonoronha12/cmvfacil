@@ -1458,15 +1458,47 @@ export default function PrePreparoClient() {
     const now = new Date();
     const updated = `Última Atualização: ${formatDateNumeric(now)} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
 
+    function wrapText(value: string, maxWidth: number, size: number) {
+      const safe = String(value ?? "").replaceAll("\r\n", "\n").replaceAll("\r", "\n");
+      const paragraphs = safe.split("\n");
+      const lines: string[] = [];
+      for (const p of paragraphs) {
+        const raw = p.trim();
+        if (!raw) {
+          lines.push("");
+          continue;
+        }
+        const words = raw.split(/\s+/g);
+        let current = "";
+        for (const w of words) {
+          const next = current ? `${current} ${w}` : w;
+          if (font.widthOfTextAtSize(next, size) <= maxWidth) {
+            current = next;
+            continue;
+          }
+          if (current) lines.push(current);
+          current = w;
+        }
+        if (current) lines.push(current);
+      }
+      while (lines.length && lines[lines.length - 1] === "") lines.pop();
+      return lines;
+    }
+
     const title = row.receita;
     const validade = row.validadeDias ?? 7;
-    const categoria = toTitleCase(row.categoria);
+    const categoria = toTitleCase(normalizeCategoryName(String(row.categoria ?? "")));
     const totalCents = row.ingredientes?.length ? row.ingredientes.reduce((s, i) => s + clampNonNegativeInt(i.custoCents), 0) : parseCurrencyBRLToCents(row.custoTotal);
     const totalStr = formatCurrencyBRLFromCents(totalCents);
-    const rendimentoNum = parsePtNumber(row.rendimento);
-    const rendeStr = `${formatPtQty(rendimentoNum || 0)} porções`;
-    const unitCents = rendimentoNum ? Math.round(totalCents / rendimentoNum) : 0;
-    const unitStr = `${formatCurrencyBRLFromCents(unitCents)} /porção`;
+    const rendimentoLabel = String(row.rendimento ?? "").trim();
+    const rendimentoNum = parsePtNumber(rendimentoLabel.replace(/[^\d,.-]/g, ""));
+    const rendeStr = rendimentoLabel || `${formatPtQty(rendimentoNum || 0)} porções`;
+    const unitStr = String(row.custoUnitario ?? "").trim()
+      ? String(row.custoUnitario ?? "").trim()
+      : rendimentoNum
+        ? `${formatCurrencyBRLFromCents(Math.round(totalCents / rendimentoNum))} /porção`
+        : `${formatCurrencyBRLFromCents(0)} /porção`;
+    const modoPreparoText = String(row.modoPreparo ?? "").trim() || "-";
 
     const ingredientes = (row.ingredientes && row.ingredientes[0] ? row.ingredientes : [
       { id: "1", item: "-", quantidade: "-", unidade: "-", custoCents: totalCents },
@@ -1520,10 +1552,27 @@ export default function PrePreparoClient() {
 
     page.drawText("Modo de Preparo:", { x: marginX, y: height - 340, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
 
-    page.drawText(`Ingredientes (Rende: ${rendeStr}):`, { x: marginX, y: height - 400, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+    const prepFontSize = 10;
+    const prepLineH = 14;
+    const prepMaxWidth = width - marginX * 2;
+    const prepLinesAll = wrapText(modoPreparoText, prepMaxWidth, prepFontSize);
+    const prepMaxLines = 6;
+    const prepLines = prepLinesAll.length > prepMaxLines ? [...prepLinesAll.slice(0, prepMaxLines - 1), "…"] : prepLinesAll;
+    let prepY = height - 360;
+    for (const line of prepLines) {
+      if (!line) {
+        prepY -= prepLineH;
+        continue;
+      }
+      page.drawText(line, { x: marginX, y: prepY, size: prepFontSize, font, color: rgb(0.2, 0.2, 0.2) });
+      prepY -= prepLineH;
+    }
+
+    const ingredientsTitleY = prepY - 18;
+    page.drawText(`Ingredientes (Rende: ${rendeStr}):`, { x: marginX, y: ingredientsTitleY, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
 
     const tableX = marginX;
-    const tableY = height - 430;
+    const tableY = ingredientsTitleY - 30;
     const tableW = width - marginX * 2;
     const colItem = tableW * 0.45;
     const colQtd = tableW * 0.27;
