@@ -4,13 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
-import { deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
-import { readDesperdiciosFromStore, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
-import { getExpiredPrePreparoEtiquetaDesperdicioSync } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
@@ -1562,18 +1559,11 @@ export default function PrePreparoClient() {
       custo: formatCurrencyBRLFromCents(custoCents),
       dataProducao: formatDateLabel(dataProducao),
       dataValidade: formatDateLabel(dataValidade),
+      wasteStatus: "pending" as const,
     };
     const existing = readPrePreparoEtiquetasFromStore([]);
     const nextEtiquetas = [next, ...existing];
     writePrePreparoEtiquetasToStore(nextEtiquetas);
-    const desperdiciosAtualizados = getExpiredPrePreparoEtiquetaDesperdicioSync(readDesperdiciosFromStore([]), nextEtiquetas);
-    writeDesperdiciosToStore(desperdiciosAtualizados.merged);
-    for (const row of desperdiciosAtualizados.upserts) {
-      void upsertDesperdicioToSupabase(row).catch(() => {});
-    }
-    for (const row of desperdiciosAtualizados.deletes) {
-      void deleteDesperdicioFromSupabase(row.id).catch(() => {});
-    }
     setIsEtiquetaOpen(false);
     void downloadEtiquetaPdf(next)
       .then(() => showToast("Etiqueta salva e PDF baixado.", "success"))

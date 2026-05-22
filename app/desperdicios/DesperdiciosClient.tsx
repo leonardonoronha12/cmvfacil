@@ -350,9 +350,7 @@ export default function DesperdiciosClient() {
     return list[0] ? list : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
   }, [motivosStore]);
 
-  const integratedRows = useMemo(() => {
-    return getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas).merged;
-  }, [prePreparoEtiquetas, rows]);
+  const integratedRows = useMemo(() => rows, [rows]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -472,13 +470,36 @@ export default function DesperdiciosClient() {
     return <div className={styles.muted}>{row.motivo || "-"}</div>;
   }
 
+  const etiquetaWasteSummary = useMemo(() => {
+    const now = new Date();
+    const todayT = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const pending: PrePreparoEtiquetaRow[] = [];
+    const launched: PrePreparoEtiquetaRow[] = [];
+    let totalNotIgnored = 0;
+    for (const e of prePreparoEtiquetas) {
+      const validade = parseDateLabelLoose(e.dataValidade);
+      if (!validade) continue;
+      const t = new Date(validade.getFullYear(), validade.getMonth(), validade.getDate()).getTime();
+      if (t >= todayT) continue;
+      const status = (e.wasteStatus ?? "pending") as "pending" | "launched" | "ignored";
+      if (status === "ignored") continue;
+      totalNotIgnored += 1;
+      if (status === "launched") launched.push(e);
+      else pending.push(e);
+    }
+    const keyT = (row: PrePreparoEtiquetaRow) => {
+      const d = parseDateLabelLoose(row.dataValidade);
+      if (!d) return 0;
+      return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    };
+    pending.sort((a, b) => keyT(b) - keyT(a));
+    return { totalNotIgnored, pending, launched };
+  }, [prePreparoEtiquetas]);
+
   const totalCents = useMemo(() => visible.reduce((acc, r) => acc + parseBrlToCents(r.custo), 0), [visible]);
   const totalItems = useMemo(() => visible.length, [visible]);
   const totalMotivos = useMemo(() => new Set(visible.map((r) => r.motivo || "Sem motivo")).size, [visible]);
-  const etiquetasVencidas = useMemo(
-    () => visible.filter((r) => (r.motivo || "").toLowerCase().includes("validade")).length,
-    [visible],
-  );
+  const etiquetasVencidas = useMemo(() => etiquetaWasteSummary.totalNotIgnored, [etiquetaWasteSummary.totalNotIgnored]);
 
   const motivoCounts = useMemo(() => {
     const map = new Map<string, number>();
@@ -606,6 +627,29 @@ export default function DesperdiciosClient() {
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
+    const wasteEtiquetaIds = new Set<string>();
+    for (const r of rows) {
+      if (!isPrePreparoEtiquetaWasteId(r.id)) continue;
+      const etiquetaId = getEtiquetaIdFromWasteId(r.id);
+      if (etiquetaId) wasteEtiquetaIds.add(etiquetaId);
+    }
+    if (wasteEtiquetaIds.size) {
+      const needs = prePreparoEtiquetas.some((e) => wasteEtiquetaIds.has(e.id) && e.wasteStatus !== "launched");
+      if (needs) {
+        setPrePreparoEtiquetas((prev) => {
+          let changed = false;
+          const next = prev.map((e) => {
+            if (!wasteEtiquetaIds.has(e.id)) return e;
+            if (e.wasteStatus === "launched") return e;
+            changed = true;
+            return { ...e, wasteStatus: "launched" as const };
+          });
+          if (changed) writePrePreparoEtiquetasToStore(next);
+          return changed ? next : prev;
+        });
+        return;
+      }
+    }
     const sync = getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas);
     const changed =
       sync.merged.length !== rows.length ||
@@ -699,6 +743,34 @@ export default function DesperdiciosClient() {
     setIsDataCalOpen(false);
     setDataCalMonth(startOfMonth(new Date()));
     setIsFormOpen(true);
+  }
+
+  function setEtiquetaWasteStatus(etiquetaId: string, status: "pending" | "launched" | "ignored") {
+    setPrePreparoEtiquetas((prev) => {
+      const next = prev.map((e) => (e.id === etiquetaId ? { ...e, wasteStatus: status } : e));
+      writePrePreparoEtiquetasToStore(next);
+      return next;
+    });
+  }
+
+  function launchAllEtiquetasPendentes() {
+    if (!etiquetaWasteSummary.pending.length) return;
+    const ids = new Set(etiquetaWasteSummary.pending.map((e) => e.id));
+    setPrePreparoEtiquetas((prev) => {
+      const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "launched" as const } : e));
+      writePrePreparoEtiquetasToStore(next);
+      return next;
+    });
+  }
+
+  function ignoreAllEtiquetasPendentes() {
+    if (!etiquetaWasteSummary.pending.length) return;
+    const ids = new Set(etiquetaWasteSummary.pending.map((e) => e.id));
+    setPrePreparoEtiquetas((prev) => {
+      const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "ignored" as const } : e));
+      writePrePreparoEtiquetasToStore(next);
+      return next;
+    });
   }
 
   function openMotivosModal(targetMotivo?: string | null) {
@@ -799,13 +871,7 @@ export default function DesperdiciosClient() {
       if (confirmDesperdicio) {
         if (isPrePreparoEtiquetaWasteId(confirmDesperdicio.id)) {
           const etiquetaId = getEtiquetaIdFromWasteId(confirmDesperdicio.id);
-          if (etiquetaId) {
-            setPrePreparoEtiquetas((prev) => {
-              const next = prev.filter((e) => e.id !== etiquetaId);
-              writePrePreparoEtiquetasToStore(next);
-              return next;
-            });
-          }
+          if (etiquetaId) setEtiquetaWasteStatus(etiquetaId, "ignored");
           setRows((prev) => prev.filter((r) => r.id !== confirmDesperdicio.id));
           void deleteDesperdicioFromSupabase(confirmDesperdicio.id).catch(() => {});
         } else {
@@ -861,7 +927,7 @@ export default function DesperdiciosClient() {
       setPrePreparoEtiquetas((prev) => {
         const next = prev.map((e) =>
           e.id === etiquetaId
-            ? { ...e, quantidade: draftQty.trim(), unidade: qtyUnit, custo, dataValidade: formatDateLabelLowerPT(parsedValidade) }
+            ? { ...e, quantidade: draftQty.trim(), unidade: qtyUnit, custo, dataValidade: formatDateLabelLowerPT(parsedValidade), wasteStatus: "launched" as const }
             : e,
         );
         writePrePreparoEtiquetasToStore(next);
@@ -973,6 +1039,43 @@ export default function DesperdiciosClient() {
             </div>
           </div>
         </section>
+
+        {etiquetaWasteSummary.pending.length ? (
+          <section className={styles.etiquetaPrompt}>
+            <div className={styles.etiquetaPromptTop}>
+              <div className={styles.etiquetaPromptTitle}>Etiquetas vencidas pendentes</div>
+              <div className={styles.etiquetaPromptText}>
+                {`Você tem ${etiquetaWasteSummary.pending.length} etiqueta(s) vencida(s) que ainda não foram lançadas em desperdícios. Deseja lançar?`}
+              </div>
+            </div>
+            <div className={styles.etiquetaPromptActions}>
+              <button type="button" className={styles.etiquetaPromptPrimary} onClick={launchAllEtiquetasPendentes}>
+                Lançar todas
+              </button>
+              <button type="button" className={styles.etiquetaPromptGhost} onClick={ignoreAllEtiquetasPendentes}>
+                Ignorar
+              </button>
+            </div>
+            <div className={styles.etiquetaPromptList}>
+              {etiquetaWasteSummary.pending.slice(0, 6).map((e) => (
+                <div key={e.id} className={styles.etiquetaPromptRow}>
+                  <div className={styles.etiquetaPromptMain}>
+                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
+                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Validade: ${e.dataValidade}`}</div>
+                  </div>
+                  <div className={styles.etiquetaPromptRowActions}>
+                    <button type="button" className={styles.etiquetaPromptMini} onClick={() => setEtiquetaWasteStatus(e.id, "launched")}>
+                      Lançar
+                    </button>
+                    <button type="button" className={styles.etiquetaPromptMiniGhost} onClick={() => setEtiquetaWasteStatus(e.id, "ignored")}>
+                      Ignorar
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className={styles.filters}>
           <div className={styles.filtersLeft}>

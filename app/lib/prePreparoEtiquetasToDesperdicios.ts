@@ -96,6 +96,7 @@ export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEti
   const today = startOfDay(referenceDate).getTime();
   const out: Array<DesperdicioRow & { t: number }> = [];
   for (const label of labels) {
+    if ((label as any).wasteStatus !== "launched") continue;
     const validade = parseDateLabelLoose(label.dataValidade);
     if (!validade) continue;
     const validadeTime = startOfDay(validade).getTime();

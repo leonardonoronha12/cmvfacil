@@ -10,6 +10,7 @@ export type PrePreparoEtiquetaRow = {
   custo: string;
   dataProducao: string;
   dataValidade: string;
+  wasteStatus?: "pending" | "launched" | "ignored";
 };
 
 const KEY = "cmvfacil.prepreparo.etiquetas.v1";
@@ -37,6 +38,8 @@ function normalizeRow(input: unknown): PrePreparoEtiquetaRow | null {
   const dataProducao = String(r.dataProducao ?? "").trim();
   const dataValidade = String(r.dataValidade ?? "").trim();
   if (!id || !recipeId || !receita || !quantidade || !unidade || !dataValidade) return null;
+  const wsRaw = String(r.wasteStatus ?? "").trim().toLowerCase();
+  const wasteStatus: "pending" | "launched" | "ignored" = wsRaw === "launched" ? "launched" : wsRaw === "ignored" ? "ignored" : "pending";
   return {
     id,
     recipeId,
@@ -47,6 +50,7 @@ function normalizeRow(input: unknown): PrePreparoEtiquetaRow | null {
     custo,
     dataProducao,
     dataValidade,
+    wasteStatus,
   };
 }
 
