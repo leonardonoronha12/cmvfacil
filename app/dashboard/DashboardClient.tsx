@@ -5,10 +5,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
-import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
-import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
+import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow, writeEntradasToStore } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow } from "../lib/desperdiciosStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
@@ -761,7 +762,12 @@ export default function DashboardClient() {
       writeFornecedorEquivalenciasMap(equivalenciasRows);
 
       const contagensRows = readInventarioFromStore([]);
-      const entradasRows = readEntradasFromStore([]);
+      let entradasRows: EntradaStoreRow[] = [];
+      try {
+        const dbEntradas = await loadEntradasFromSupabase();
+        if (dbEntradas.length) entradasRows = dbEntradas;
+      } catch {}
+      writeEntradasToStore(entradasRows);
       const desperdiciosRows = readDesperdiciosFromStore([]);
       const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
 
@@ -914,12 +920,23 @@ export default function DashboardClient() {
       if (t < minT || t > maxT) continue;
 
       if (e.itensNota?.length) {
+        const fornecedorKey = String(e.fornecedor ?? "").trim().toUpperCase();
+        const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
         for (const it of e.itensNota) {
-          const key = normalizeKey(it.nome);
-          const id = insumoIdByKey.get(key);
+          const rawKey = normalizeKey(it.nome);
+          let mappedKey = rawKey;
+          let fator = 1;
+          const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+          if (eq) {
+            mappedKey = normalizeKey(eq.insumoEquivalente);
+            const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+            if (Number.isFinite(f) && f > 0) fator = f;
+          }
+          const id = insumoIdByKey.get(mappedKey);
           const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
           const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-          if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qty);
+          const qtyEq = qty * fator;
+          if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
           const sub = parseBrlToCents(it.subtotalLabel ?? "");
           if (sub && (!id || !isHidden)) comprasCents += sub;
         }
@@ -1357,8 +1374,13 @@ export default function DashboardClient() {
       const d = parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
+      const fornecedorKey = String(e.fornecedor ?? "").trim().toUpperCase();
+      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
       for (const it of e.itensNota) {
-        if (normalizeKey(it.nome) !== key) continue;
+        const rawKey = normalizeKey(it.nome);
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
+        if (mappedKey !== key) continue;
         out.push({
           t,
           data: e.dataLancamento,
@@ -1372,7 +1394,7 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, historyItem]);
+  }, [entradas, fornecedorEquivalenciasMap, historyItem]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
@@ -1457,6 +1479,7 @@ export default function DashboardClient() {
     const nextRows = insumos.map((i) => (i.id === selectedInsumo.id ? { ...i, ocultar: nextOcultar } : i));
     setInsumos(nextRows);
     writeInsumosToStore(nextRows);
+    void syncInsumosToSupabase(nextRows, []).catch(() => {});
     setHideAlert({ item: selectedInsumo.item, tone: nextOcultar ? "hide" : "show" });
     if (nextOcultar) {
       setHistoryItem(null);
