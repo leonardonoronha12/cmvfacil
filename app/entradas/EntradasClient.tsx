@@ -1005,6 +1005,18 @@ export default function EntradasClient() {
     setIsDetailsOpen(false);
   }
 
+  function openConfigurarVinculacao(nomeNaNota: string) {
+    const fornecedorKey = (fornecedorModalKey || (detailsRow?.fornecedor ?? "")).trim().toUpperCase();
+    const name = nomeNaNota.trim();
+    if (!fornecedorKey) return;
+    const existing = fornecedorItemMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    setMapNomeNota(name);
+    setMapUnidadeNota(existing?.unidadeNaNota || "CX");
+    setMapInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? "").trim());
+    setMapEqQtd(existing?.equivalenteQuantidade || "");
+    setIsAddFornecedorItemOpen(true);
+  }
+
   function addProdutoToFornecedor(nome: string) {
     const fornecedor = (fornecedorModalKey ?? "").trim().toUpperCase();
     const item = nome.trim();
@@ -2188,7 +2200,7 @@ export default function EntradasClient() {
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
             <div className={`${styles.modal} ${styles.mapItemModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>Adicionar Item do Fornecedor</div>
+                <div className={styles.modalTitle}>Configurar Vinculação</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsAddFornecedorItemOpen(false)}>
                   ×
                 </button>
@@ -2231,9 +2243,12 @@ export default function EntradasClient() {
                 </div>
               </div>
 
-              <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={!mapNomeNota.trim() || !mapInsumoEq.trim()} onClick={confirmAddItemFornecedor}>
-                  Salvar vínculo
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsAddFornecedorItemOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className={styles.confirmSave} disabled={!mapNomeNota.trim() || !mapInsumoEq.trim()} onClick={confirmAddItemFornecedor}>
+                  Salvar
                 </button>
               </div>
             </div>
@@ -2320,7 +2335,9 @@ export default function EntradasClient() {
                     onClick={() => {
                       const q = fornecedorProdutosSearch.trim();
                       const pick = fornecedorProdutosPick.trim();
-                      addProdutoToFornecedor(q || pick);
+                      const name = q || pick;
+                      addProdutoToFornecedor(name);
+                      if (name) openConfigurarVinculacao(name);
                       setFornecedorProdutosSearch("");
                     }}
                   >
@@ -2338,13 +2355,7 @@ export default function EntradasClient() {
                           className={styles.fornecedorItemOpenBtn}
                           aria-label="Configurar vinculação"
                           onClick={() => {
-                            const key = (fornecedorModalKey ?? "").trim().toUpperCase();
-                            const existing = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
-                            setMapNomeNota(name);
-                            setMapUnidadeNota(existing?.unidadeNaNota || "CX");
-                            setMapInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? "").trim());
-                            setMapEqQtd(existing?.equivalenteQuantidade || "");
-                            setIsAddFornecedorItemOpen(true);
+                            openConfigurarVinculacao(name);
                           }}
                         >
                           <div className={styles.fornecedorItemNameWrap}>
