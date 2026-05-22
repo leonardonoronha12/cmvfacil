@@ -1584,6 +1584,13 @@ export default function DashboardClient() {
     setInsumos(nextRows);
     writeInsumosToStore(nextRows);
     setHideAlert({ item: selectedInsumo.item, tone: nextOcultar ? "hide" : "show" });
+    if (nextOcultar) {
+      setHistoryItem(null);
+      setCalc((prev) => (prev ? { ...prev, rows: prev.rows.filter((r) => r.insumoId !== selectedInsumo.id) } : prev));
+    }
+    window.setTimeout(() => {
+      if (canCalculate) handleCalculate();
+    }, 0);
   }
 
   function openEditSelected() {
