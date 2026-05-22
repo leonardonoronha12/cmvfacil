@@ -1623,6 +1623,91 @@ export default function PrePreparoClient() {
     return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
   }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeSpec, newRecipeUnit, recipeYieldValue]);
 
+  async function downloadEtiquetaPdf(label: {
+    receita: string;
+    responsavel: string;
+    quantidade: string;
+    unidade: string;
+    dataProducao: string;
+    dataValidade: string;
+  }) {
+    const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
+    const doc = await PDFDocument.create();
+
+    const pageW = 420;
+    const pageH = 260;
+    const page = doc.addPage([pageW, pageH]);
+
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+
+    const margin = 22;
+    const title = String(label.receita ?? "").trim() || "Etiqueta";
+    const qtyLabel = `${String(label.quantidade ?? "").trim() || "0"} ${String(label.unidade ?? "").trim() || "Und"}`.trim();
+    const responsavel = String(label.responsavel ?? "").trim() || "-";
+    const prod = parseDateLabelLoose(String(label.dataProducao ?? "")) ?? null;
+    const val = parseDateLabelLoose(String(label.dataValidade ?? "")) ?? null;
+    const prodLabel = prod ? formatDateNumeric(prod) : "-";
+    const valLabel = val ? formatDateNumeric(val) : "-";
+
+    page.drawRectangle({
+      x: margin,
+      y: margin,
+      width: pageW - margin * 2,
+      height: pageH - margin * 2,
+      borderColor: rgb(0.78, 0.8, 0.82),
+      borderWidth: 1.2,
+    });
+
+    const headerY = pageH - margin - 32;
+    page.drawText(title, { x: margin + 16, y: headerY, size: 18, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+    page.drawText(qtyLabel, {
+      x: pageW - margin - 16 - fontBold.widthOfTextAtSize(qtyLabel, 16),
+      y: headerY + 2,
+      size: 16,
+      font: fontBold,
+      color: rgb(0.06, 0.09, 0.16),
+    });
+
+    const lineY = headerY - 14;
+    page.drawLine({ start: { x: margin + 16, y: lineY }, end: { x: pageW - margin - 16, y: lineY }, thickness: 1.2, color: rgb(0.82, 0.84, 0.86) });
+
+    let y = lineY - 28;
+    const labelSize = 12;
+    const valueSize = 12;
+    const leftX = margin + 16;
+    const rightX = pageW - margin - 16;
+
+    function drawRow(name: string, value: string) {
+      page.drawText(name, { x: leftX, y, size: labelSize, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+      const v = String(value ?? "").trim() || "-";
+      page.drawText(v, { x: rightX - font.widthOfTextAtSize(v, valueSize), y, size: valueSize, font: fontBold, color: rgb(0.06, 0.09, 0.16) });
+      y -= 22;
+    }
+
+    drawRow("Responsável:", responsavel);
+    drawRow("Data Produção:", prodLabel);
+    drawRow("Data de Validade:", valLabel);
+
+    page.drawLine({ start: { x: margin + 16, y: y + 6 }, end: { x: pageW - margin - 16, y: y + 6 }, thickness: 1.2, color: rgb(0.82, 0.84, 0.86) });
+
+    const now = new Date();
+    const footer = `Impresso em ${formatDateNumeric(now)} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · Por CMV Fácil`;
+    page.drawText(footer, { x: margin + 16, y: margin + 12, size: 9, font, color: rgb(0.4, 0.43, 0.46) });
+
+    const bytes = await doc.save();
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const safeName = title.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/(^-|-$)/g, "") || "etiqueta";
+    a.download = `etiqueta-${safeName}.pdf`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
   function saveEtiqueta() {
     if (!etiquetaSelectedRecipe) return;
     const quantidade = parsePtNumber(etiquetaQtd);
@@ -1653,6 +1738,9 @@ export default function PrePreparoClient() {
       void deleteDesperdicioFromSupabase(row.id).catch(() => {});
     }
     setIsEtiquetaOpen(false);
+    void downloadEtiquetaPdf(next)
+      .then(() => showToast("Etiqueta salva e PDF baixado.", "success"))
+      .catch(() => showToast("Etiqueta salva, mas não foi possível gerar o PDF.", "error"));
   }
 
   async function downloadFichaTecnica(row: PrePreparoRow) {
