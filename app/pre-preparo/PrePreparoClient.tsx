@@ -1145,6 +1145,18 @@ export default function PrePreparoClient() {
     return { ...row, custoTotal: totalLabel, custoUnitario: unitCostLabel };
   }
 
+  function getPdfRow(base: PrePreparoRow) {
+    if (detailsRecipeId && base.id === detailsRecipeId) {
+      const rendimento =
+        isEditingYield && parseDecimalInput(yieldDraftQty) > 0
+          ? `${formatDecimalFixedDraft(yieldDraftQty, 3)} ${yieldDraftUnit.trim() || "Und"}`
+          : base.rendimento;
+      const modoPreparo = isEditingPrep ? prepDraft : base.modoPreparo;
+      return recomputeRowMetrics({ ...base, rendimento, modoPreparo });
+    }
+    return recomputeRowMetrics(base);
+  }
+
   function updateDetailsRow(next: PrePreparoRow) {
     setRows((prev) => prev.map((r) => (r.id === next.id ? recomputeRowMetrics(next) : r)));
   }
@@ -1532,13 +1544,11 @@ export default function PrePreparoClient() {
     const totalCents = row.ingredientes?.length ? row.ingredientes.reduce((s, i) => s + clampNonNegativeInt(i.custoCents), 0) : parseCurrencyBRLToCents(row.custoTotal);
     const totalStr = formatCurrencyBRLFromCents(totalCents);
     const rendimentoLabel = String(row.rendimento ?? "").trim();
-    const rendimentoNum = parsePtNumber(rendimentoLabel.replace(/[^\d,.-]/g, ""));
-    const rendeStr = rendimentoLabel || `${formatPtQty(rendimentoNum || 0)} porções`;
-    const unitStr = String(row.custoUnitario ?? "").trim()
-      ? String(row.custoUnitario ?? "").trim()
-      : rendimentoNum
-        ? `${formatCurrencyBRLFromCents(Math.round(totalCents / rendimentoNum))} /porção`
-        : `${formatCurrencyBRLFromCents(0)} /porção`;
+    const rendimentoParsed = parseQtyLabel(rendimentoLabel);
+    const rendimentoQty = rendimentoParsed.qty;
+    const rendimentoUnit = (rendimentoParsed.unit || "Und").trim() || "Und";
+    const unitCost = rendimentoQty > 0 ? totalCents / 100 / rendimentoQty : 0;
+    const unitStr = `${unitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${rendimentoUnit}`;
     const modoPreparoText = String(row.modoPreparo ?? "").trim() || "-";
 
     const ingredientes = (row.ingredientes && row.ingredientes[0] ? row.ingredientes : [
@@ -1610,15 +1620,21 @@ export default function PrePreparoClient() {
     }
 
     const ingredientsTitleY = prepY - 18;
-    page.drawText(`Ingredientes (Rende: ${rendeStr}):`, { x: marginX, y: ingredientsTitleY, size: 11, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+    page.drawText(`Ingredientes (Rende: ${formatDecimal3(rendimentoQty)} ${rendimentoUnit}):`, {
+      x: marginX,
+      y: ingredientsTitleY,
+      size: 11,
+      font: fontBold,
+      color: rgb(0.01, 0.01, 0.01),
+    });
 
     const tableX = marginX;
-    const tableY = ingredientsTitleY - 30;
+    const rowH = 28;
+    const tableY = ingredientsTitleY - rowH - 12;
     const tableW = width - marginX * 2;
     const colItem = tableW * 0.45;
     const colQtd = tableW * 0.27;
     const colCost = tableW - colItem - colQtd;
-    const rowH = 28;
 
     page.drawRectangle({ x: tableX, y: tableY, width: tableW, height: rowH, color: rgb(0.95, 0.95, 0.95), borderColor: rgb(0.35, 0.35, 0.35), borderWidth: 1 });
     page.drawText("Item", { x: tableX + 10, y: tableY + 9, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
@@ -1974,7 +1990,7 @@ export default function PrePreparoClient() {
                       </button>
                     </div>
 
-                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void downloadFichaTecnica(detailsRow)}>
+                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void downloadFichaTecnica(getPdfRow(detailsRow))}>
                       <DetailsPdfIcon />
                       Baixar Ficha Técnica
                     </button>
@@ -2129,7 +2145,7 @@ export default function PrePreparoClient() {
                               role="menuitem"
                               onClick={() => {
                                 setOpenMenuId(null);
-                                void downloadFichaTecnica(r);
+                                void downloadFichaTecnica(getPdfRow(r));
                               }}
                             >
                               <span className={styles.menuIcon} aria-hidden>
