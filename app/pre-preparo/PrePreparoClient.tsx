@@ -2115,7 +2115,10 @@ export default function PrePreparoClient() {
                       <div className={ft.detailsList}>
                         {detailsEtiquetas.map((e) => (
                           <div key={e.id} className={ft.detailsListRow}>
-                            <div className={ft.detailsListItem}>{e.dataValidade}</div>
+                            <div className={ft.detailsListItem}>
+                              <div>{`Produção: ${e.dataProducao || "-"}`}</div>
+                              <div>{`Validade: ${e.dataValidade || "-"}`}</div>
+                            </div>
                             <div className={ft.detailsListQty}>{`${e.quantidade} ${e.unidade}`}</div>
                             <div className={ft.detailsListCost}>{e.responsavel || "-"}</div>
                             <div />
