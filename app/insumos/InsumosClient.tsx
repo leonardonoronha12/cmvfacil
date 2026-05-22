@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
+import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
 import styles from "./insumos.module.css";
 
@@ -268,6 +269,7 @@ export default function InsumosClient() {
   const prevIdsRef = useRef<Set<string>>(new Set());
   const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const syncTimeoutRef = useRef<number | null>(null);
+  const categoriesReadyRef = useRef(false);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -297,7 +299,20 @@ export default function InsumosClient() {
           rowsReadyRef.current = true;
           prevIdsRef.current = new Set(mapped.map((r) => r.id));
           setDataRows(mapped);
-          setCategories(getUniqueCategoriesFromRows(mapped));
+          const saved = readInsumoCategoriasFromStore();
+          const fromRows = getUniqueCategoriesFromRows(mapped);
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const c of [...saved, ...fromRows]) {
+            const name = normalizeCategoryName(c);
+            if (!name || name === "-") continue;
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(name);
+          }
+          setCategories(merged);
+          categoriesReadyRef.current = true;
           writeInsumosToStore(dbRows);
           return;
         }
@@ -317,16 +332,35 @@ export default function InsumosClient() {
         rowsReadyRef.current = true;
         prevIdsRef.current = new Set(mapped.map((r) => r.id));
         setDataRows(mapped);
-        setCategories(getUniqueCategoriesFromRows(mapped));
+        const saved = readInsumoCategoriasFromStore();
+        const fromRows = getUniqueCategoriesFromRows(mapped);
+        const merged: string[] = [];
+        const seen = new Set<string>();
+        for (const c of [...saved, ...fromRows]) {
+          const name = normalizeCategoryName(c);
+          if (!name || name === "-") continue;
+          const key = name.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(name);
+        }
+        setCategories(merged);
+        categoriesReadyRef.current = true;
         return;
       }
 
       rowsReadyRef.current = true;
       prevIdsRef.current = new Set();
       setDataRows([]);
-      setCategories([]);
+      setCategories(readInsumoCategoriasFromStore());
+      categoriesReadyRef.current = true;
     })();
   }, []);
+
+  useEffect(() => {
+    if (!categoriesReadyRef.current) return;
+    writeInsumoCategoriasToStore(categories);
+  }, [categories]);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
