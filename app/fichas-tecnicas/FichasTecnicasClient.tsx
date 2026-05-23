@@ -865,7 +865,7 @@ export default function FichasTecnicasClient() {
           setIsSupabaseFichasEnabled(false);
           if (!missingTablesShownRef.current) {
             missingTablesShownRef.current = true;
-            showToast("Tabela fichas_tecnicas_state não existe no Supabase. Salvando localmente neste navegador.", "error", 9000);
+            showToast("Tabela fichas_tecnicas_state não existe no Supabase. Abra /setup-supabase e rode o SQL (passo 3).", "error", 9000);
           }
           return;
         }
@@ -890,7 +890,7 @@ export default function FichasTecnicasClient() {
           setIsSupabaseEtiquetasEnabled(false);
           if (!missingTablesShownRef.current) {
             missingTablesShownRef.current = true;
-            showToast("Tabela fichas_tecnicas_etiquetas_state não existe no Supabase. Salvando localmente neste navegador.", "error", 9000);
+            showToast("Tabela fichas_tecnicas_etiquetas_state não existe no Supabase. Abra /setup-supabase e rode o SQL (passo 3).", "error", 9000);
           }
           return;
         }

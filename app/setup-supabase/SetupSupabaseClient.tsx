@@ -59,6 +59,79 @@ export default function SetupSupabaseClient() {
     ].join("\n");
   }, [url, anon]);
 
+  const tablesSql = useMemo(() => {
+    return [
+      "create or replace function public.cmvfacil_set_updated_at()",
+      "returns trigger as $$",
+      "begin",
+      "  new.updated_at = now();",
+      "  return new;",
+      "end;",
+      "$$ language plpgsql;",
+      "",
+      "create table if not exists public.fichas_tecnicas_state (",
+      "  id text primary key,",
+      "  payload jsonb not null default '[]'::jsonb,",
+      "  created_at timestamptz not null default now(),",
+      "  updated_at timestamptz not null default now()",
+      ");",
+      "",
+      "drop trigger if exists cmvfacil_set_updated_at on public.fichas_tecnicas_state;",
+      "create trigger cmvfacil_set_updated_at",
+      "before update on public.fichas_tecnicas_state",
+      "for each row execute procedure public.cmvfacil_set_updated_at();",
+      "",
+      "alter table public.fichas_tecnicas_state enable row level security;",
+      "",
+      "drop policy if exists fichas_tecnicas_state_select_own on public.fichas_tecnicas_state;",
+      "create policy fichas_tecnicas_state_select_own on public.fichas_tecnicas_state",
+      "for select to authenticated",
+      "using (id = ('user:' || auth.uid()::text));",
+      "",
+      "drop policy if exists fichas_tecnicas_state_insert_own on public.fichas_tecnicas_state;",
+      "create policy fichas_tecnicas_state_insert_own on public.fichas_tecnicas_state",
+      "for insert to authenticated",
+      "with check (id = ('user:' || auth.uid()::text));",
+      "",
+      "drop policy if exists fichas_tecnicas_state_update_own on public.fichas_tecnicas_state;",
+      "create policy fichas_tecnicas_state_update_own on public.fichas_tecnicas_state",
+      "for update to authenticated",
+      "using (id = ('user:' || auth.uid()::text))",
+      "with check (id = ('user:' || auth.uid()::text));",
+      "",
+      "create table if not exists public.fichas_tecnicas_etiquetas_state (",
+      "  id text primary key,",
+      "  payload jsonb not null default '[]'::jsonb,",
+      "  created_at timestamptz not null default now(),",
+      "  updated_at timestamptz not null default now()",
+      ");",
+      "",
+      "drop trigger if exists cmvfacil_set_updated_at on public.fichas_tecnicas_etiquetas_state;",
+      "create trigger cmvfacil_set_updated_at",
+      "before update on public.fichas_tecnicas_etiquetas_state",
+      "for each row execute procedure public.cmvfacil_set_updated_at();",
+      "",
+      "alter table public.fichas_tecnicas_etiquetas_state enable row level security;",
+      "",
+      "drop policy if exists fichas_tecnicas_etiquetas_state_select_own on public.fichas_tecnicas_etiquetas_state;",
+      "create policy fichas_tecnicas_etiquetas_state_select_own on public.fichas_tecnicas_etiquetas_state",
+      "for select to authenticated",
+      "using (id = ('user:' || auth.uid()::text));",
+      "",
+      "drop policy if exists fichas_tecnicas_etiquetas_state_insert_own on public.fichas_tecnicas_etiquetas_state;",
+      "create policy fichas_tecnicas_etiquetas_state_insert_own on public.fichas_tecnicas_etiquetas_state",
+      "for insert to authenticated",
+      "with check (id = ('user:' || auth.uid()::text));",
+      "",
+      "drop policy if exists fichas_tecnicas_etiquetas_state_update_own on public.fichas_tecnicas_etiquetas_state;",
+      "create policy fichas_tecnicas_etiquetas_state_update_own on public.fichas_tecnicas_etiquetas_state",
+      "for update to authenticated",
+      "using (id = ('user:' || auth.uid()::text))",
+      "with check (id = ('user:' || auth.uid()::text));",
+      "",
+    ].join("\n");
+  }, []);
+
   async function copy(text: string, key: string) {
     try {
       await navigator.clipboard.writeText(text);
@@ -158,8 +231,37 @@ export default function SetupSupabaseClient() {
             </button>
           </div>
         </div>
+
+        <div className="cmv-card">
+          <div style={{ fontWeight: 900 }}>3) Crie as tabelas no Supabase (SQL)</div>
+          <div className="cmv-help" style={{ marginTop: 8 }}>
+            Supabase Dashboard → SQL Editor → New query → Run
+          </div>
+
+          <div style={{ marginTop: 14, display: "grid", gap: 10 }}>
+            <div style={{ fontWeight: 900 }}>SQL para colar</div>
+            <pre
+              style={{
+                margin: 0,
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                padding: 12,
+                borderRadius: 12,
+                border: "1px solid var(--cmv-border)",
+                background: "var(--cmv-surface-2)",
+                fontFamily: "var(--cmv-font-mono)",
+                fontSize: 12,
+                lineHeight: "18px",
+              }}
+            >
+              {tablesSql}
+            </pre>
+            <button type="button" className="cmv-button cmv-button-primary" onClick={() => void copy(tablesSql, "sql")}>
+              {copied === "sql" ? "Copiado" : "Copiar SQL"}
+            </button>
+          </div>
+        </div>
       </section>
     </main>
   );
 }
-

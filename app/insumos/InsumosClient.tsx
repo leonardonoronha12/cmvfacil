@@ -1463,8 +1463,19 @@ export default function InsumosClient() {
                       value={newInitialCost}
                       onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                       onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onClick={(e) => e.currentTarget.select()}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
+                      onFocus={(e) => {
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
+                      onClick={(e) => {
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
                     />
                   </div>
                 </div>
@@ -1556,8 +1567,19 @@ export default function InsumosClient() {
                       value={newInitialCost}
                       onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                       onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
-                      onFocus={(e) => e.currentTarget.select()}
-                      onClick={(e) => e.currentTarget.select()}
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
+                      onFocus={(e) => {
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
+                      onClick={(e) => {
+                        const el = e.currentTarget;
+                        requestAnimationFrame(() => el.select());
+                      }}
                     />
                   </div>
                 </div>
