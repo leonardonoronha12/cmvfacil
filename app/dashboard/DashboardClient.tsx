@@ -1147,7 +1147,7 @@ export default function DashboardClient() {
 
   const baseRows = useMemo(() => {
     if (calc?.rows?.length) return calc.rows;
-    return [...insumos]
+    return [...insumos.filter((i) => !i.ocultar)]
       .sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }))
       .map((i, index) => {
         const unit = i.medida || "Und";

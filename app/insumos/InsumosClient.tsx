@@ -250,6 +250,7 @@ function IconCheck() {
 }
 
 export default function InsumosClient() {
+  const toastTimerRef = useRef<number | null>(null);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
@@ -269,6 +270,7 @@ export default function InsumosClient() {
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const categoriesReadyRef = useRef(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -280,6 +282,21 @@ export default function InsumosClient() {
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
+
+  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
+    setToast({ message, type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -398,6 +415,19 @@ export default function InsumosClient() {
   function toggleOcultar(id: string) {
     setDataRows((prev) => {
       const nextRows = prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r));
+      const changed = nextRows.find((r) => r.id === id) ?? null;
+      if (changed) showToast(changed.ocultar ? "Item ocultado do CMV Real." : "Item incluído no CMV Real.", "success");
+      writeInsumosToStore(
+        nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+      );
       void saveInsumosStateToSupabase({
         rows: nextRows.map((r) => ({
           id: r.id,
@@ -412,7 +442,7 @@ export default function InsumosClient() {
       }).catch(() => {
         if (saveErrorShownRef.current) return;
         saveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
+        showToast("Não foi possível salvar no Supabase.", "error");
       });
       return nextRows;
     });
@@ -546,6 +576,17 @@ export default function InsumosClient() {
     const row: InsumoRow = { id, ocultar: false, item, medida, custoMedio, categoria, especificacao };
     setDataRows((prev) => {
       const nextRows = [row, ...prev];
+      writeInsumosToStore(
+        nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+      );
       void saveInsumosStateToSupabase({
         rows: nextRows.map((r) => ({
           id: r.id,
@@ -560,8 +601,9 @@ export default function InsumosClient() {
       }).catch(() => {
         if (saveErrorShownRef.current) return;
         saveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
+        showToast("Não foi possível salvar no Supabase.", "error");
       });
+      showToast("Insumo cadastrado!", "success");
       return nextRows;
     });
     setIsNewItemOpen(false);
@@ -877,6 +919,11 @@ export default function InsumosClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="insumos" />
+      {toast ? (
+        <div className={styles.toastWrap} role="alert" aria-live="assertive">
+          <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
+        </div>
+      ) : null}
 
       <main className={dash.content}>
         <section className={styles.header}>
