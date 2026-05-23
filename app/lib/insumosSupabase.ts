@@ -57,7 +57,7 @@ export async function loadInsumosFromSupabase() {
 export async function loadInsumosStateFromSupabase(): Promise<InsumosStatePayload> {
   const res = await fetch("/api/insumos", { method: "GET" });
   const json = (await res.json().catch(() => null)) as { rows?: unknown[]; categories?: unknown[]; error?: string } | null;
-  if (!res.ok || !json) throw new Error(json?.error || "failed_to_load");
+  if (!res.ok || !json) throw new Error(json?.error || `failed_to_load_${res.status}`);
   return { rows: normalizeRows(json.rows), categories: normalizeCategories(json.categories) };
 }
 
@@ -68,5 +68,5 @@ export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreIte
     body: JSON.stringify(payload),
   });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
+  if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_save_${res.status}`);
 }

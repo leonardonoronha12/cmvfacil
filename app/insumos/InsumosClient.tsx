@@ -292,6 +292,14 @@ export default function InsumosClient() {
     }, durationMs);
   }
 
+  function saveErrorMessage(err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+    if (!msg) return "Não foi possível salvar no Supabase.";
+    if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+    if (msg.includes("insumos_state") && msg.toLowerCase().includes("does not exist")) return "Tabela insumos_state não existe no Supabase.";
+    return `Não foi possível salvar no Supabase (${msg}).`;
+  }
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -373,11 +381,15 @@ export default function InsumosClient() {
         especificacao: r.especificacao,
         ocultar: r.ocultar,
       }));
-      void saveInsumosStateToSupabase({ rows: storeRows as any, categories }).catch(() => {
-        if (saveErrorShownRef.current) return;
-        saveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
-      });
+      void saveInsumosStateToSupabase({ rows: storeRows as any, categories })
+        .then(() => {
+          saveErrorShownRef.current = false;
+        })
+        .catch((err) => {
+          if (saveErrorShownRef.current) return;
+          saveErrorShownRef.current = true;
+          showToast(saveErrorMessage(err), "error");
+        });
     }, 650);
   }, [dataRows, categories]);
 
@@ -439,11 +451,50 @@ export default function InsumosClient() {
           ocultar: r.ocultar,
         })) as any,
         categories,
-      }).catch(() => {
-        if (saveErrorShownRef.current) return;
-        saveErrorShownRef.current = true;
-        showToast("Não foi possível salvar no Supabase.", "error");
-      });
+      })
+        .then(() => {
+          saveErrorShownRef.current = false;
+        })
+        .catch((err) => {
+          const desired = changed?.ocultar;
+          void (async () => {
+            try {
+              await new Promise((r) => window.setTimeout(r, 700));
+              await saveInsumosStateToSupabase({
+                rows: nextRows.map((r) => ({
+                  id: r.id,
+                  item: r.item,
+                  medida: r.medida,
+                  custoMedio: r.custoMedio,
+                  categoria: r.categoria,
+                  especificacao: r.especificacao,
+                  ocultar: r.ocultar,
+                })) as any,
+                categories,
+              });
+              saveErrorShownRef.current = false;
+            } catch (err2) {
+              if (typeof desired === "boolean") {
+                setDataRows((cur) => {
+                  const reverted = cur.map((r) => (r.id === id && r.ocultar === desired ? { ...r, ocultar: !desired } : r));
+                  writeInsumosToStore(
+                    reverted.map((r) => ({
+                      id: r.id,
+                      item: r.item,
+                      medida: r.medida,
+                      custoMedio: r.custoMedio,
+                      categoria: r.categoria,
+                      especificacao: r.especificacao,
+                      ocultar: r.ocultar,
+                    })),
+                  );
+                  return reverted;
+                });
+              }
+              showToast(saveErrorMessage(err2), "error");
+            }
+          })();
+        });
       return nextRows;
     });
   }
@@ -598,11 +649,13 @@ export default function InsumosClient() {
           ocultar: r.ocultar,
         })) as any,
         categories: nextCategories,
-      }).catch(() => {
-        if (saveErrorShownRef.current) return;
-        saveErrorShownRef.current = true;
-        showToast("Não foi possível salvar no Supabase.", "error");
-      });
+      })
+        .then(() => {
+          saveErrorShownRef.current = false;
+        })
+        .catch((err) => {
+          showToast(saveErrorMessage(err), "error");
+        });
       showToast("Insumo cadastrado!", "success");
       return nextRows;
     });
