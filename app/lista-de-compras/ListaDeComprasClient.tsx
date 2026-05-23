@@ -414,15 +414,38 @@ export default function ListaDeComprasClient() {
     }
 
     const entradasQtyById = new Map<string, number>();
+    const entradasCentsById = new Map<string, number>();
+    const fornecedorKeyLookup = new Map<string, string>();
+    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
+      const nk = normalizeText(key);
+      if (!nk || fornecedorKeyLookup.has(nk)) continue;
+      fornecedorKeyLookup.set(nk, key);
+    }
     for (const entrada of entradas) {
       const t = parseDateLoose(entrada.dataLancamento);
       if (!t || t < minT || t > maxT) continue;
+      const fornecedorKey = fornecedorKeyLookup.get(normalizeText(entrada.fornecedor)) ?? entrada.fornecedor.trim().toUpperCase();
+      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
       for (const item of entrada.itensNota ?? []) {
-        const key = normalizeText(item.nome);
-        const id = insumoIdByKey.get(key);
+        const rawKey = normalizeText(item.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normalizeText(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normalizeText(eq.insumoEquivalente);
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = insumoIdByKey.get(mappedKey);
         if (!id) continue;
-        const qty = parseQtyLabel(item.quantidadeLabel ?? "");
-        entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qty);
+        const qtyEq = parseQtyLabel(item.quantidadeLabel ?? "") * fator;
+        entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
+        let sub = Math.round(parseMoney(item.subtotalLabel ?? "") * 100);
+        if (!sub) {
+          const unitCents = Math.round(parseMoney(item.custoUnitarioLabel ?? "") * 100);
+          if (unitCents && qtyEq > 0) sub = Math.round(unitCents * qtyEq);
+        }
+        if (sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
       }
     }
 
@@ -484,6 +507,12 @@ export default function ListaDeComprasClient() {
         const saidasQty = initialQty + entradasQty - finalQty;
         const consumoDiario = saidasQty / periodDays;
         const comprar = Math.max(consumoDiario * (parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1)) - finalQty, 0);
+        const custoInicialCents = Math.round(parseMoney(row.custoMedio ?? "") * 100);
+        const entradasCents = entradasCentsById.get(row.id) ?? 0;
+        const initialValCents = Math.round(initialQty * custoInicialCents);
+        const denomQty = initialQty + entradasQty;
+        const custoMedioCents = denomQty > 0 ? Math.round((initialValCents + entradasCents) / denomQty) : custoInicialCents;
+        const custoMedioValue = custoMedioCents / 100;
         return {
           id: row.id,
           item: row.item,
@@ -491,8 +520,8 @@ export default function ListaDeComprasClient() {
           itemMetaLabel,
           categoria: row.categoria?.trim() || "-",
           medida: row.medida?.trim() || "Und",
-          custoMedio: parseMoney(row.custoMedio ?? ""),
-          custoMedioLabel: row.custoMedio?.trim() || "R$0,00",
+          custoMedio: custoMedioValue,
+          custoMedioLabel: formatMoney(custoMedioValue),
           fornecedor,
           fornecedorMedida: supplierMeta?.unit || row.medida?.trim() || "Und",
           fornecedorFator: supplierMeta?.factor && supplierMeta.factor > 0 ? supplierMeta.factor : 1,

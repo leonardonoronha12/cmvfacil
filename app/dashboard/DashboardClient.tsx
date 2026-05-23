@@ -121,7 +121,12 @@ function PieChart({ slices, size = 220 }: { slices: PieSlice[]; size?: number })
           const end = start + sweep;
           const d = donutPath(cx, cy, rOuter, rInner, start, end);
           start = end;
-          return <path key={s.label} d={d} fill={s.color} stroke="#f1f3f3" strokeWidth="2" />;
+          const pct = (s.value / total) * 100;
+          return (
+            <path key={s.label} d={d} fill={s.color} stroke="#f1f3f3" strokeWidth="2">
+              <title>{`${s.label}: ${formatBrlFromCents(s.value)} (${pct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`}</title>
+            </path>
+          );
         })}
       </g>
       <circle cx={cx} cy={cy} r={rInner} fill="#f1f3f3" />
@@ -944,6 +949,7 @@ export default function DashboardClient() {
     }
 
     const entradasQtyById = new Map<string, number>();
+    const entradasCentsById = new Map<string, number>();
     let comprasCents = 0;
     for (const e of entradas) {
       const d = parseDateLabelLoose(e.dataLancamento);
@@ -968,8 +974,15 @@ export default function DashboardClient() {
           const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
           const qtyEq = qty * fator;
           if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
-          const sub = parseBrlToCents(it.subtotalLabel ?? "");
+
+          let sub = parseBrlToCents(it.subtotalLabel ?? "");
+          if (!sub) {
+            const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+            if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+          }
+
           if (sub && (!id || !isHidden)) comprasCents += sub;
+          if (id && !isHidden && sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
         }
       } else {
         comprasCents += parseBrlToCents(e.valorNota ?? "");
@@ -988,11 +1001,14 @@ export default function DashboardClient() {
       const finalQty = finalById.get(i.id) ?? 0;
       const entradasQty = entradasQtyById.get(i.id) ?? 0;
       const saidasQty = initialQty + entradasQty - finalQty;
-      const custoMedioCents = parseBrlToCents(String(i.custoMedio ?? ""));
-      const itemInitialCents = Math.round(initialQty * custoMedioCents);
+      const custoInicialCents = parseBrlToCents(String(i.custoMedio ?? ""));
+      const entradasCents = entradasCentsById.get(i.id) ?? 0;
+      const initialValCents = Math.round(initialQty * custoInicialCents);
+      const denomQty = initialQty + entradasQty;
+      const custoMedioCents = denomQty > 0 ? Math.round((initialValCents + entradasCents) / denomQty) : custoInicialCents;
       const itemFinalCents = Math.round(finalQty * custoMedioCents);
-      const itemSaidasCents = Math.round(saidasQty * custoMedioCents);
-      initialCents += itemInitialCents;
+      const itemSaidasCents = initialValCents + entradasCents - itemFinalCents;
+      initialCents += initialValCents;
       finalCents += itemFinalCents;
       saidasCents += itemSaidasCents;
 
