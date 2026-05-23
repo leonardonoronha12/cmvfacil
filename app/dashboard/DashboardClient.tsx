@@ -13,6 +13,7 @@ import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow } from "../lib/desperdiciosStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -659,10 +660,10 @@ export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [revenue, setRevenue] = useState("");
-  const [targetCmv, setTargetCmv] = useState("");
+  const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
+  const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
+  const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
+  const [targetCmv, setTargetCmv] = useState(() => readDashboardCmvPrefsFromStore().targetCmv);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
@@ -856,6 +857,10 @@ export default function DashboardClient() {
     setStartDate((prev) => (prev ? prev : periodOptions[periodOptions.length - 1]!.iso));
     setEndDate((prev) => (prev ? prev : periodOptions[0]!.iso));
   }, [periodOptions]);
+
+  useEffect(() => {
+    writeDashboardCmvPrefsToStore({ startDate, endDate, revenue, targetCmv });
+  }, [endDate, revenue, startDate, targetCmv]);
 
   const canCalculate =
     inventoryOptions.length > 0 &&
