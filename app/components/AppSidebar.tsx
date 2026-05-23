@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
-import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readDesperdiciosSeenIdsFromStore, writeDesperdiciosSeenIdsToStore } from "../lib/desperdiciosBadgeStore";
 
 type SidebarKey =
@@ -152,8 +153,16 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [seenIds, setSeenIds] = useState<string[]>(() => readDesperdiciosSeenIdsFromStore());
 
   useEffect(() => {
-    setEtiquetas(readPrePreparoEtiquetasFromStore([]));
-    return subscribePrePreparoEtiquetas((next) => setEtiquetas(next));
+    void (async () => {
+      try {
+        const dbRows = await loadPrePreparoEtiquetasFromSupabase();
+        setEtiquetas(dbRows);
+        writePrePreparoEtiquetasToStore(dbRows);
+      } catch {
+        setEtiquetas([]);
+        writePrePreparoEtiquetasToStore([]);
+      }
+    })();
   }, []);
 
   const etiquetasVencidas = useMemo(() => buildExpiredPrePreparoEtiquetaDesperdicios(etiquetas), [etiquetas]);

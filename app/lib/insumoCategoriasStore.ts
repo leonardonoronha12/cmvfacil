@@ -1,16 +1,7 @@
 "use client";
 
-const KEY = "cmvfacil.insumos.categorias.v1";
 const EVENT = "cmvfacil:insumos:categorias";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: string[] = [];
 
 function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -32,14 +23,13 @@ function normalizeRows(input: unknown): string[] {
 }
 
 export function readInsumoCategoriasFromStore(): string[] {
-  if (typeof window === "undefined") return [];
-  return normalizeRows(safeParse(window.localStorage.getItem(KEY)));
+  return cache;
 }
 
 export function writeInsumoCategoriasToStore(rows: string[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 
@@ -52,4 +42,3 @@ export function subscribeInsumoCategorias(listener: (rows: string[]) => void) {
   window.addEventListener(EVENT, onEvent);
   return () => window.removeEventListener(EVENT, onEvent);
 }
-

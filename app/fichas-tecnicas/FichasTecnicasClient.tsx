@@ -5,7 +5,8 @@ import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
-import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
+import { writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
+import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
 import styles from "./fichas-tecnicas.module.css";
 
 type BcgType = "estrela" | "cavalo" | "quebra-cabeca" | "abacaxi";
@@ -738,7 +739,8 @@ function badgeClass(type: BcgType) {
 export default function FichasTecnicasClient() {
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
-  const [tableRows, setTableRows] = useState<RecipeRow[]>(() => readFichasTecnicasFromStore([]));
+  const saveTimeoutRef = useRef<number | null>(null);
+  const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
   const [query, setQuery] = useState("");
   const [quadrante, setQuadrante] = useState("Quadrante");
   const [columnOrder, setColumnOrder] = useState<FichaTableColumn[]>([
@@ -785,10 +787,24 @@ export default function FichasTecnicasClient() {
     return subscribeInsumos(setInsumos);
   }, []);
 
+  useEffect(() => {
+    void (async () => {
+      try {
+        const rows = await loadFichasTecnicasFromSupabase();
+        setTableRows(rows as unknown as RecipeRow[]);
+        writeFichasTecnicasToStore(rows as any);
+      } catch {}
+    })();
+  }, []);
+
   function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
     setTableRows((prev) => {
       const next = updater(prev);
       writeFichasTecnicasToStore(next);
+      if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = window.setTimeout(() => {
+        void saveFichasTecnicasToSupabase(next as any).catch(() => {});
+      }, 600);
       return next;
     });
   }

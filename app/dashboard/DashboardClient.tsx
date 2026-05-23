@@ -13,8 +13,9 @@ import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow, writeEn
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
 import { loadDesperdiciosFromSupabase } from "../lib/desperdiciosSupabase";
-import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
 import {
   readFornecedorEquivalenciasMap,
@@ -786,7 +787,11 @@ export default function DashboardClient() {
         desperdiciosRows = await loadDesperdiciosFromSupabase();
       } catch {}
       writeDesperdiciosToStore(desperdiciosRows);
-      const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
+      let etiquetasRows: PrePreparoEtiquetaRow[] = [];
+      try {
+        etiquetasRows = await loadPrePreparoEtiquetasFromSupabase();
+      } catch {}
+      writePrePreparoEtiquetasToStore(etiquetasRows);
 
       setInsumos(insumosRows);
       setContagens(contagensRows);

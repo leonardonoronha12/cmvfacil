@@ -9,7 +9,9 @@ import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
-import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { loadPrePreparoFromSupabase, savePrePreparoToSupabase } from "../lib/prePreparoSupabase";
+import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -562,6 +564,8 @@ function IconChevronDownDouble() {
 
 export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
+  const savePrePreparoTimeoutRef = useRef<number | null>(null);
+  const saveEtiquetasTimeoutRef = useRef<number | null>(null);
   const [isMounted, setIsMounted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
@@ -671,18 +675,46 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    const stored = readPrePreparoFromStore([] as any);
-    setRows(stored as any);
+    void (async () => {
+      try {
+        const dbRows = await loadPrePreparoFromSupabase();
+        setRows(dbRows as any);
+        writePrePreparoToStore(dbRows as any);
+      } catch {
+        setRows([]);
+        writePrePreparoToStore([] as any);
+      }
+    })();
   }, []);
 
   useEffect(() => {
-    setEtiquetasRows(readPrePreparoEtiquetasFromStore([]));
-    return subscribePrePreparoEtiquetas((next) => setEtiquetasRows(next));
+    void (async () => {
+      try {
+        const dbRows = await loadPrePreparoEtiquetasFromSupabase();
+        setEtiquetasRows(dbRows);
+        writePrePreparoEtiquetasToStore(dbRows);
+      } catch {
+        setEtiquetasRows([]);
+        writePrePreparoEtiquetasToStore([]);
+      }
+    })();
   }, []);
 
   useEffect(() => {
     writePrePreparoToStore(rows as any);
+    if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
+    savePrePreparoTimeoutRef.current = window.setTimeout(() => {
+      void savePrePreparoToSupabase(rows as any).catch(() => {});
+    }, 700);
   }, [rows]);
+
+  useEffect(() => {
+    writePrePreparoEtiquetasToStore(etiquetasRows);
+    if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
+    saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
+      void savePrePreparoEtiquetasToSupabase(etiquetasRows).catch(() => {});
+    }, 700);
+  }, [etiquetasRows]);
 
   useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);
