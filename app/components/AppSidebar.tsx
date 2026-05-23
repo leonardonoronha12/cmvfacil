@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { readDesperdiciosSeenIdsFromStore, writeDesperdiciosSeenIdsToStore } from "../lib/desperdiciosBadgeStore";
 
 type SidebarKey =
   | "dashboard"
@@ -148,13 +149,26 @@ function IconChat() {
 
 export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
+  const [seenIds, setSeenIds] = useState<string[]>(() => readDesperdiciosSeenIdsFromStore());
 
   useEffect(() => {
     setEtiquetas(readPrePreparoEtiquetasFromStore([]));
     return subscribePrePreparoEtiquetas((next) => setEtiquetas(next));
   }, []);
 
-  const etiquetasVencidas = useMemo(() => buildExpiredPrePreparoEtiquetaDesperdicios(etiquetas).length, [etiquetas]);
+  const etiquetasVencidas = useMemo(() => buildExpiredPrePreparoEtiquetaDesperdicios(etiquetas), [etiquetas]);
+  const etiquetasVencidasNaoVistas = useMemo(() => {
+    const seen = new Set(seenIds);
+    return etiquetasVencidas.filter((row) => !seen.has(row.id));
+  }, [etiquetasVencidas, seenIds]);
+
+  useEffect(() => {
+    if (active !== "desperdicios") return;
+    if (!etiquetasVencidasNaoVistas.length) return;
+    const merged = [...seenIds, ...etiquetasVencidasNaoVistas.map((row) => row.id)];
+    writeDesperdiciosSeenIdsToStore(merged);
+    setSeenIds(readDesperdiciosSeenIdsFromStore());
+  }, [active, etiquetasVencidasNaoVistas, seenIds]);
 
   return (
     <aside className={dash.menuLateral}>
@@ -218,7 +232,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           <a className={navClass(active, "desperdicios")} href="/desperdicios">
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
-            {etiquetasVencidas > 0 ? <span className={dash.navBadge}>{etiquetasVencidas}</span> : null}
+            {etiquetasVencidasNaoVistas.length > 0 ? <span className={dash.navBadge}>{etiquetasVencidasNaoVistas.length}</span> : null}
           </a>
         </div>
 

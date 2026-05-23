@@ -444,6 +444,7 @@ async function fetchSvgAsDataUrl(path: string) {
 async function renderSvgMarkupToPngDataUrl(svgMarkup: string, width: number, height: number, scale = 2) {
   return new Promise<string>((resolve, reject) => {
     const img = new Image();
+    img.crossOrigin = "anonymous";
     img.onload = () => {
       const canvas = document.createElement("canvas");
       canvas.width = width * scale;
@@ -457,7 +458,11 @@ async function renderSvgMarkupToPngDataUrl(svgMarkup: string, width: number, hei
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, width, height);
       ctx.drawImage(img, 0, 0, width, height);
-      resolve(canvas.toDataURL("image/png"));
+      try {
+        resolve(canvas.toDataURL("image/png"));
+      } catch {
+        reject(new Error("Nao foi possivel gerar a imagem do PDF."));
+      }
     };
     img.onerror = () => reject(new Error("Nao foi possivel renderizar o layout do PDF."));
     img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
@@ -1367,62 +1372,84 @@ export default function FichasTecnicasClient() {
   async function downloadFichaTecnicaPdf(recipeArg?: SavedRecipeDetails) {
     const recipe = recipeArg ?? detailsRecipe;
     if (!recipe) return;
+    const filename = `ficha-tecnica-${recipe.recipeName.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/(^-|-$)/g, "") || "receita"}.pdf`;
+    const previewTab = window.open("about:blank", "_blank");
+    if (previewTab) {
+      previewTab.document.title = "Gerando PDF...";
+      previewTab.document.body.style.fontFamily = "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif";
+      previewTab.document.body.style.padding = "24px";
+      previewTab.document.body.innerText = "Gerando o PDF da ficha técnica...";
+    }
 
-    const { PDFDocument } = await import("pdf-lib");
-    const logoSrc = await fetchSvgAsDataUrl("/dashboard/ml7hdudz-jry958l.svg");
-    const now = new Date();
-    const updatedAt = `Última Atualização: ${formatPdfDate(now)} às ${now.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
-    })}`;
-    const recipeYieldLabel = `${formatDecimal3(recipe.recipeYield)} porções`;
-    const metrics = calcRecipeMetrics(recipe.ingredientsTotal, recipe.recipeYield, recipe.precoVenda, recipe.cmvMeta);
+    try {
+      const { PDFDocument } = await import("pdf-lib");
+      const logoSrc = await fetchSvgAsDataUrl("/dashboard/ml7hdudz-jry958l.svg");
+      const now = new Date();
+      const updatedAt = `Última Atualização: ${formatPdfDate(now)} às ${now.toLocaleTimeString("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      })}`;
+      const recipeYieldLabel = `${formatDecimal3(recipe.recipeYield)} porções`;
+      const metrics = calcRecipeMetrics(recipe.ingredientsTotal, recipe.recipeYield, recipe.precoVenda, recipe.cmvMeta);
 
-    const markup = buildFichaTecnicaPdfMarkup({
-      logoSrc,
-      recipeName: recipe.recipeName,
-      precoVenda: formatMoney(recipe.precoVenda),
-      previewSrc: recipe.recipeImage,
-      updatedAt,
-      validade: "1 Dia(s)",
-      categoria: popularityLabel(recipe.popularidade),
-      custoTotal: formatMoney(recipe.ingredientsTotal),
-      custoUnitario: `${formatMoney(metrics.custoPorPorcao)}/porção`,
-      precoSugerido: formatMoney(metrics.precoSugerido),
-      cmvMeta: formatPercent2(recipe.cmvMeta),
-      modoPreparo: recipe.modoPreparo || "-",
-      rendimento: recipeYieldLabel,
-      ingredients: recipe.ingredientRows.map((row) => ({
-        item: row.item,
-        qtd: formatQtyLabel(row.quantidade, row.unidade),
-        custo: formatMoney(row.custoTotal),
-      })),
-    });
+      const markup = buildFichaTecnicaPdfMarkup({
+        logoSrc,
+        recipeName: recipe.recipeName,
+        precoVenda: formatMoney(recipe.precoVenda),
+        previewSrc: recipe.recipeImage,
+        updatedAt,
+        validade: "1 Dia(s)",
+        categoria: popularityLabel(recipe.popularidade),
+        custoTotal: formatMoney(recipe.ingredientsTotal),
+        custoUnitario: `${formatMoney(metrics.custoPorPorcao)}/porção`,
+        precoSugerido: formatMoney(metrics.precoSugerido),
+        cmvMeta: formatPercent2(recipe.cmvMeta),
+        modoPreparo: recipe.modoPreparo || "-",
+        rendimento: recipeYieldLabel,
+        ingredients: recipe.ingredientRows.map((row) => ({
+          item: row.item,
+          qtd: formatQtyLabel(row.quantidade, row.unidade),
+          custo: formatMoney(row.custoTotal),
+        })),
+      });
 
-    const svgMarkup = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="595" height="842" viewBox="0 0 595 842">
-        <foreignObject x="0" y="0" width="595" height="842">${markup}</foreignObject>
-      </svg>
-    `;
+      const svgMarkup = `
+        <svg xmlns="http://www.w3.org/2000/svg" width="595" height="842" viewBox="0 0 595 842">
+          <foreignObject x="0" y="0" width="595" height="842">${markup}</foreignObject>
+        </svg>
+      `;
 
-    const pngDataUrl = await renderSvgMarkupToPngDataUrl(svgMarkup, 595, 842, 2);
-    const pngBytes = await dataUrlToUint8Array(pngDataUrl);
+      const pngDataUrl = await renderSvgMarkupToPngDataUrl(svgMarkup, 595, 842, 2);
+      const pngBytes = await dataUrlToUint8Array(pngDataUrl);
 
-    const doc = await PDFDocument.create();
-    const page = doc.addPage([595.28, 841.89]);
-    const image = await doc.embedPng(pngBytes);
-    page.drawImage(image, { x: 0, y: 0, width: 595.28, height: 841.89 });
+      const doc = await PDFDocument.create();
+      const page = doc.addPage([595.28, 841.89]);
+      const image = await doc.embedPng(pngBytes);
+      page.drawImage(image, { x: 0, y: 0, width: 595.28, height: 841.89 });
 
-    const bytes = await doc.save();
-    const blob = new Blob([bytes], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `ficha-tecnica-${recipe.recipeName.toLowerCase().replace(/[^a-z0-9]+/gi, "-").replace(/(^-|-$)/g, "") || "receita"}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      const bytes = await doc.save();
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+
+      if (previewTab) {
+        previewTab.document.title = filename;
+        previewTab.location.href = url;
+      }
+
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+    } catch {
+      if (previewTab) {
+        previewTab.document.title = "Erro ao gerar PDF";
+        previewTab.document.body.innerText = "Não foi possível gerar o PDF da ficha técnica. Tente novamente.";
+      }
+      window.alert("Não foi possível gerar o PDF da ficha técnica. Tente novamente.");
+    }
   }
 
   return (
