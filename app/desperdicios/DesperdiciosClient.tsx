@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { loadDesperdiciosFromSupabase, deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
 import { readDesperdiciosFromStore, writeDesperdiciosToStore, type DesperdicioRow } from "../lib/desperdiciosStore";
 import {
@@ -318,6 +319,7 @@ export default function DesperdiciosClient() {
   const loadErrorShownRef = useRef(false);
   const saveErrorShownRef = useRef(false);
   const deleteErrorShownRef = useRef(false);
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [rows, setRows] = useState<DesperdicioRow[]>([]);
   const rowsReadyRef = useRef(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
@@ -631,6 +633,7 @@ export default function DesperdiciosClient() {
         if (dbRows[0]) {
           setRows(dbRows);
           rowsReadyRef.current = true;
+          setIsLoadingTable(false);
           return;
         }
       } catch (err) {
@@ -641,6 +644,7 @@ export default function DesperdiciosClient() {
       }
       setRows(readDesperdiciosFromStore([]));
       rowsReadyRef.current = true;
+      setIsLoadingTable(false);
     })();
   }, []);
 
@@ -1350,7 +1354,12 @@ export default function DesperdiciosClient() {
           </div>
         </section>
 
-        <section className={styles.tableCard}>
+        <section className={styles.tableCard} style={{ position: "relative" }}>
+          {isLoadingTable ? (
+            <div className={dash.loadingOverlay}>
+              <LoadingSpinner />
+            </div>
+          ) : null}
           <div className={styles.tableHead} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
             {columnOrder.map((column) => {
               const label =

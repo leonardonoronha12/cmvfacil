@@ -5,6 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
@@ -252,6 +253,7 @@ function IconCheck() {
 
 export default function InsumosClient() {
   const toastTimerRef = useRef<number | null>(null);
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
@@ -345,6 +347,8 @@ export default function InsumosClient() {
         setCategories([]);
         categoriesReadyRef.current = true;
         window.alert("Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.");
+      } finally {
+        setIsLoadingTable(false);
       }
     })();
   }, []);
@@ -601,10 +605,11 @@ export default function InsumosClient() {
       .filter((c) => c && c !== "-")
       .slice(0, 50)
       .map((c) => c.replaceAll('"', "").replaceAll(",", " "));
+    const categoryList = categoryOptions.length ? categoryOptions : ["-"];
     const listMax = Math.max(unitOptions.length, categoryOptions.length, 1);
     const listRows: (string | null)[][] = [["Medidas", "Categorias"]];
     for (let i = 0; i < listMax; i++) {
-      listRows.push([unitOptions[i] ?? "", categoryOptions[i] ?? ""]);
+      listRows.push([unitOptions[i] ?? "", categoryList[i] ?? ""]);
     }
     const rows = [
       ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
@@ -617,10 +622,16 @@ export default function InsumosClient() {
     XLSX.utils.book_append_sheet(wb, ws, "Insumos");
     XLSX.utils.book_append_sheet(wb, wsLists, "Listas");
     const unitRef = `Listas!$A$2:$A$${unitOptions.length + 1}`;
-    const catRef = categoryOptions.length ? `Listas!$B$2:$B$${categoryOptions.length + 1}` : '"-"';
+    const catRef = `Listas!$B$2:$B$${categoryList.length + 1}`;
+    (wb as any).Workbook = {
+      Names: [
+        { Name: "Medidas", Ref: unitRef },
+        { Name: "Categorias", Ref: catRef },
+      ],
+    };
     (ws as any)["!dataValidation"] = [
-      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: [unitRef] },
-      { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: [catRef] },
+      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ["Medidas"] },
+      { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: ["Categorias"] },
       { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
@@ -1129,7 +1140,12 @@ export default function InsumosClient() {
         </section>
 
         <div className={styles.tableWrap}>
-          <section className={styles.table}>
+          <section className={styles.table} style={{ position: "relative" }}>
+            {isLoadingTable ? (
+              <div className={dash.loadingOverlay}>
+                <LoadingSpinner />
+              </div>
+            ) : null}
             <div className={styles.tableHead} style={{ gridTemplateColumns }}>
               <div className={styles.thSmall}>Ocultar</div>
 

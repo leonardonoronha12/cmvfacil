@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
+import LoadingSpinner from "../components/LoadingSpinner";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -248,6 +249,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 }
 
 export default function FornecedoresClient() {
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const toastTimerRef = useRef<number | null>(null);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [rows, setRows] = useState<FornecedorRow[]>([]);
@@ -383,6 +385,7 @@ export default function FornecedoresClient() {
       setProdutosMap(nextProdutos);
       setEquivalenciasMap(nextEq);
       fornecedoresReadyRef.current = true;
+      setIsLoadingTable(false);
     })();
 
     const u1 = subscribeFornecedorInfo((m) => setInfoMap(m));
@@ -846,7 +849,12 @@ export default function FornecedoresClient() {
         </section>
 
         <div className={styles.tableWrap}>
-          <section className={styles.table}>
+          <section className={styles.table} style={{ position: "relative" }}>
+            {isLoadingTable ? (
+              <div className={dash.loadingOverlay}>
+                <LoadingSpinner />
+              </div>
+            ) : null}
             <div className={styles.tableHead} style={{ gridTemplateColumns }}>
               {columnOrder.map((col) => {
                 const label = col === "fornecedor" ? "Fornecedor" : col === "itens" ? "Itens" : col === "whatsapp" ? "Vendedor" : "Endereço";

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
+import LoadingSpinner from "../components/LoadingSpinner";
 import dash from "../dashboard/dashboard.module.css";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
@@ -303,6 +304,7 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 }
 
 export default function ListaDeComprasClient() {
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
@@ -331,12 +333,19 @@ export default function ListaDeComprasClient() {
     setInsumos(readInsumosFromStore());
     setEntradas(readEntradasFromStore([]));
     setContagens(readInventarioFromStore([]));
+    let doneInsumos = false;
+    let doneFornecedores = false;
+    const finalize = () => {
+      if (doneInsumos && doneFornecedores) setIsLoadingTable(false);
+    };
     void (async () => {
       try {
         const state = await loadInsumosStateFromSupabase();
         if (state.rows.length) writeInsumosToStore(state.rows);
         setInsumoCategorias(state.categories ?? []);
       } catch {}
+      doneInsumos = true;
+      finalize();
     })();
     (async () => {
       let nextInfo: FornecedorInfoMap = {};
@@ -357,6 +366,8 @@ export default function ListaDeComprasClient() {
       setFornecedorInfoMap(nextInfo);
       setFornecedorProdutosMap(nextProdutos);
       setFornecedorEquivalenciasMap(nextEq);
+      doneFornecedores = true;
+      finalize();
     })();
 
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
@@ -884,7 +895,6 @@ export default function ListaDeComprasClient() {
   }
 
   function toggleSelectAll() {
-    if (!isPeriodReady) return;
     setSelectedIds((prev) => {
       const next = { ...prev };
       if (allVisibleSelected) {
@@ -897,7 +907,6 @@ export default function ListaDeComprasClient() {
   }
 
   function toggleRow(id: string) {
-    if (!isPeriodReady) return;
     setSelectedIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
@@ -1091,10 +1100,15 @@ export default function ListaDeComprasClient() {
             </article>
           </section>
 
-          <section className={styles.tableCard}>
+          <section className={styles.tableCard} style={{ position: "relative" }}>
+            {isLoadingTable ? (
+              <div className={dash.loadingOverlay}>
+                <LoadingSpinner />
+              </div>
+            ) : null}
             <div className={styles.tableHeader} style={{ gridTemplateColumns }}>
               <label className={styles.checkCell}>
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} disabled={!isPeriodReady} />
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
               </label>
               {columnOrder.map((column) => {
                 const label =
@@ -1144,7 +1158,7 @@ export default function ListaDeComprasClient() {
                   return (
                     <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }}>
                       <label className={styles.checkCell}>
-                        <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} disabled={!isPeriodReady} />
+                        <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} />
                       </label>
                       {columnOrder.map((column) => {
                         if (column === "item") {

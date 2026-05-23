@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
@@ -108,34 +109,67 @@ function donutPath(cx: number, cy: number, rOuter: number, rInner: number, start
 }
 
 function PieChart({ slices, size = 220 }: { slices: PieSlice[]; size?: number }) {
-  const validSlices = slices.filter((slice) => slice.value > 0);
-  if (!validSlices.length) return null;
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [hover, setHover] = useState<{ label: string; value: number; pct: number; x: number; y: number } | null>(null);
+
+  const list = slices.length ? slices : [];
+  if (!list.length) return null;
   const view = 240;
   const cx = view / 2;
   const cy = view / 2;
   const rOuter = 92;
   const rInner = 44;
-  const total = validSlices.reduce((acc, s) => acc + s.value, 0) || 1;
+  const totalValue = list.reduce((acc, s) => acc + Math.max(0, s.value), 0);
+  const totalWeight = totalValue > 0 ? totalValue : list.length;
 
   let start = 0;
   return (
-    <svg width={size} height={size} viewBox={`0 0 ${view} ${view}`} role="img" aria-label="Distribuição por categoria">
-      <g>
-        {validSlices.map((s) => {
-          const sweep = (s.value / total) * 360;
-          const end = start + sweep;
-          const d = donutPath(cx, cy, rOuter, rInner, start, end);
-          start = end;
-          const pct = (s.value / total) * 100;
-          return (
-            <path key={s.label} d={d} fill={s.color} stroke="#f1f3f3" strokeWidth="2">
-              <title>{`${s.label}: ${formatBrlFromCents(s.value)} (${pct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%)`}</title>
-            </path>
-          );
-        })}
-      </g>
-      <circle cx={cx} cy={cy} r={rInner} fill="#f1f3f3" />
-    </svg>
+    <div ref={wrapRef} className={styles.pieWrap} style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${view} ${view}`} role="img" aria-label="Distribuição por categoria">
+        <g>
+          {list.map((s) => {
+            const weight = totalValue > 0 ? Math.max(0, s.value) : 1;
+            const sweep = (weight / totalWeight) * 360;
+            const end = start + sweep;
+            const d = donutPath(cx, cy, rOuter, rInner, start, end);
+            start = end;
+            const pct = (weight / totalWeight) * 100;
+            return (
+              <path
+                key={s.label}
+                d={d}
+                fill={s.color}
+                stroke="#f1f3f3"
+                strokeWidth="2"
+                onMouseMove={(e) => {
+                  const el = wrapRef.current;
+                  if (!el) return;
+                  const rect = el.getBoundingClientRect();
+                  setHover({
+                    label: s.label,
+                    value: Math.max(0, s.value),
+                    pct,
+                    x: e.clientX - rect.left,
+                    y: e.clientY - rect.top,
+                  });
+                }}
+                onMouseLeave={() => setHover(null)}
+              />
+            );
+          })}
+        </g>
+        <circle cx={cx} cy={cy} r={rInner} fill="#f1f3f3" />
+      </svg>
+      {hover ? (
+        <div className={styles.pieTooltip} style={{ left: hover.x + 10, top: hover.y + 10 }}>
+          <div className={styles.pieTooltipTitle}>{hover.label}</div>
+          <div className={styles.pieTooltipValue}>
+            {formatBrlFromCents(hover.value)} •{" "}
+            {hover.pct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -698,6 +732,7 @@ export default function DashboardClient() {
   const [isVariacaoOpen, setIsVariacaoOpen] = useState(false);
   const [lastCalc, setLastCalc] = useState<LastCalc | null>(null);
   const [calcError, setCalcError] = useState<string>("");
+  const [isLoadingTables, setIsLoadingTables] = useState(true);
   const [historyItem, setHistoryItem] = useState<{ insumoId: string; item: string } | null>(null);
   const [detailsTab, setDetailsTab] = useState<"entradas" | "fornecedores">("entradas");
   const [hideAlert, setHideAlert] = useState<{ item: string; tone: "hide" | "show" } | null>(null);
@@ -819,6 +854,7 @@ export default function DashboardClient() {
       setFornecedorProdutosMap(produtosRows);
       setFornecedorEquivalenciasMap(equivalenciasRows);
       setLastCalc(readLastCalc());
+      setIsLoadingTables(false);
     })();
     const refreshTimeout = window.setTimeout(() => {
       void (async () => {
@@ -1420,11 +1456,12 @@ export default function DashboardClient() {
       };
     }
     return {
-      slices: [] as PieSlice[],
-      legend: legendItems.map((item) => ({
+      slices: legendItems.map((item) => ({
         label: item.label,
-        tone: item.tone,
+        value: 0,
+        color: toneColors[item.tone],
       })),
+      legend: legendItems.map((item) => ({ label: item.label, tone: item.tone })),
     };
   }, [categoriaChart]);
 
@@ -2011,7 +2048,7 @@ export default function DashboardClient() {
             <div className={styles.chartCard}>
               <div className={styles.chartCanvas}>
                 <div className={styles.chartArea}>
-                  {chartDisplay.slices.some((slice) => slice.value > 0) ? <PieChart slices={chartDisplay.slices} size={148} /> : <div className={styles.chartEmpty} aria-hidden />}
+                  <PieChart slices={chartDisplay.slices} size={148} />
                 </div>
               </div>
               <div className={styles.chartLegend}>
@@ -2255,6 +2292,11 @@ export default function DashboardClient() {
             </div>
           ) : (
             <div className={styles.tableWrapper}>
+              {isLoadingTables ? (
+                <div className={styles.loadingOverlay}>
+                  <LoadingSpinner />
+                </div>
+              ) : null}
               <div className={styles.tableHeader} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
                 {tableColumnOrder.map((column) => {
                   const label =

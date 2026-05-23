@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
+import LoadingSpinner from "../components/LoadingSpinner";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -374,6 +375,7 @@ function IconPlusCircle() {
 }
 
 export default function EntradasClient() {
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [query, setQuery] = useState("");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
@@ -793,12 +795,14 @@ export default function EntradasClient() {
         if (dbRows[0]) {
           setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
           rowsReadyRef.current = true;
+          setIsLoadingTable(false);
           return;
         }
       } catch {}
       const stored = readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[];
       setRows(stored.map((r) => ({ ...r, dataLancamento: normalizeDateLabelPT(r.dataLancamento) })));
       rowsReadyRef.current = true;
+      setIsLoadingTable(false);
     })();
   }, []);
 
@@ -1453,7 +1457,12 @@ export default function EntradasClient() {
           </button>
         </section>
 
-        <section className={styles.tableCard}>
+        <section className={styles.tableCard} style={{ position: "relative" }}>
+          {isLoadingTable ? (
+            <div className={dash.loadingOverlay}>
+              <LoadingSpinner />
+            </div>
+          ) : null}
           <div className={styles.tableHead} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
             {columnOrder.map((column) => {
               const label =

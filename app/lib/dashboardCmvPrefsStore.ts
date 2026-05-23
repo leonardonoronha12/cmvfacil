@@ -8,6 +8,7 @@ export type DashboardCmvPrefs = {
 };
 
 let cache: DashboardCmvPrefs = { startDate: "", endDate: "", revenue: "", targetCmv: "" };
+const STORAGE_KEY = "cmvfacil:dashboardCmvPrefs";
 
 function normalize(input: unknown): DashboardCmvPrefs {
   if (!input || typeof input !== "object") return { startDate: "", endDate: "", revenue: "", targetCmv: "" };
@@ -21,6 +22,14 @@ function normalize(input: unknown): DashboardCmvPrefs {
 }
 
 export function readDashboardCmvPrefsFromStore(): DashboardCmvPrefs {
+  if (typeof window !== "undefined") {
+    try {
+      if (!cache.startDate && !cache.endDate && !cache.revenue && !cache.targetCmv) {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) cache = normalize(JSON.parse(raw) as unknown);
+      }
+    } catch {}
+  }
   return cache;
 }
 
@@ -28,4 +37,7 @@ export function writeDashboardCmvPrefsToStore(prefs: DashboardCmvPrefs) {
   if (typeof window === "undefined") return;
   const normalized = normalize(prefs);
   cache = normalized;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {}
 }
