@@ -396,7 +396,26 @@ export default function InsumosClient() {
   const [draggingColumn, setDraggingColumn] = useState<null | "item" | "medida" | "custoMedio" | "categoria" | "especificacao">(null);
 
   function toggleOcultar(id: string) {
-    setDataRows((prev) => prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r)));
+    setDataRows((prev) => {
+      const nextRows = prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r));
+      void saveInsumosStateToSupabase({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })) as any,
+        categories,
+      }).catch(() => {
+        if (saveErrorShownRef.current) return;
+        saveErrorShownRef.current = true;
+        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
+      });
+      return nextRows;
+    });
   }
 
   async function onImport() {
