@@ -9,7 +9,8 @@ import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
-import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
+import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoFromSupabase, savePrePreparoToSupabase } from "../lib/prePreparoSupabase";
@@ -594,6 +595,7 @@ export default function PrePreparoClient() {
   const yieldEditWrapRef = useRef<HTMLDivElement | null>(null);
   const [hiddenMap, setHiddenMap] = useState<Record<string, boolean>>(() => readPrePreparoHiddenMap());
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [etiquetasRows, setEtiquetasRows] = useState(() => readPrePreparoEtiquetasFromStore([]));
@@ -692,14 +694,24 @@ export default function PrePreparoClient() {
   }, [draftValidityUnit]);
 
   useEffect(() => {
+    setInsumosStore(readInsumosFromStore());
+    setInsumoCategorias(readInsumoCategoriasFromStore());
     void (async () => {
       try {
-        const dbRows = await loadInsumosFromSupabase();
-        writeInsumosToStore(dbRows);
+        const state = await loadInsumosStateFromSupabase();
+        if (state.rows.length) writeInsumosToStore(state.rows);
+        if (state.categories.length) writeInsumoCategoriasToStore(state.categories);
+        setInsumoCategorias(state.categories);
       } catch {}
       setInsumosStore(readInsumosFromStore());
+      setInsumoCategorias(readInsumoCategoriasFromStore());
     })();
-    return subscribeInsumos((rows) => setInsumosStore(rows));
+    const unsubInsumos = subscribeInsumos((rows) => setInsumosStore(rows));
+    const unsubCats = subscribeInsumoCategorias((rows) => setInsumoCategorias(rows));
+    return () => {
+      unsubInsumos();
+      unsubCats();
+    };
   }, []);
 
   useEffect(() => {
@@ -1378,18 +1390,20 @@ export default function PrePreparoClient() {
   const insumoCategories = useMemo(() => {
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const i of insumosStore) {
-      const key = String(i.categoria ?? "").trim();
-      if (!key || key === "-") continue;
+    const push = (raw: string) => {
+      const key = String(raw ?? "").trim();
+      if (!key || key === "-") return;
       const name = toTitleCase(normalizeCategoryName(key));
-      if (!name) continue;
+      if (!name) return;
       const k = name.toLowerCase();
-      if (seen.has(k)) continue;
+      if (seen.has(k)) return;
       seen.add(k);
       out.push(name);
-    }
+    };
+    for (const c of insumoCategorias) push(c);
+    for (const i of insumosStore) push(String(i.categoria ?? ""));
     return out;
-  }, [insumosStore]);
+  }, [insumoCategorias, insumosStore]);
 
   const recipeCategories = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
