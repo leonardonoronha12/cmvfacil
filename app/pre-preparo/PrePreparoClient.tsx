@@ -259,6 +259,13 @@ function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
     : `0,${"0".repeat(maxDecimals)}`;
 }
 
+function formatDecimalShiftedDraft(input: string, decimals = 3) {
+  const digits = String(input ?? "").replace(/\D/g, "");
+  const n = digits ? Number.parseInt(digits, 10) : 0;
+  const value = n / Math.pow(10, decimals);
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+}
+
 function parseMoneyLabel(value?: string) {
   const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
@@ -1998,7 +2005,16 @@ export default function PrePreparoClient() {
                                 <input
                                   className={ft.detailsYieldInput}
                                   value={yieldDraftQty}
-                                  onChange={(e) => setYieldDraftQty(e.target.value)}
+                                  onChange={(e) => setYieldDraftQty(formatDecimalShiftedDraft(e.target.value, 3))}
+                                  onMouseDown={(e) => {
+                                    const el = e.currentTarget;
+                                    if (document.activeElement !== el) {
+                                      e.preventDefault();
+                                      el.focus();
+                                      el.select();
+                                    }
+                                  }}
+                                  onFocus={(e) => e.currentTarget.select()}
                                   autoFocus
                                 />
                                 <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => setYieldDraftUnit(e.target.value)}>
@@ -2851,7 +2867,21 @@ export default function PrePreparoClient() {
                         <div className={styles.yieldSubtitle}>Informe quanto essa receita irá render em média após o preparo.</div>
                       </div>
                       <div className={styles.yieldInputWrap}>
-                        <input className={styles.yieldInput} value={newRecipeYield} onChange={(e) => setNewRecipeYield(e.target.value)} />
+                        <input
+                          className={styles.yieldInput}
+                          value={newRecipeYield}
+                          onChange={(e) => setNewRecipeYield(formatDecimalShiftedDraft(e.target.value, 3))}
+                          onMouseDown={(e) => {
+                            const el = e.currentTarget;
+                            if (document.activeElement !== el) {
+                              e.preventDefault();
+                              el.focus();
+                              el.select();
+                            }
+                          }}
+                          onFocus={(e) => e.currentTarget.select()}
+                          inputMode="numeric"
+                        />
                         <div className={styles.yieldUnit}>{newRecipeYieldUnit}</div>
                       </div>
                     </div>

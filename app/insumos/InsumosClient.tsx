@@ -519,27 +519,32 @@ export default function InsumosClient() {
     const especificacao = newSpec.trim() || "-";
     const custoMedio = newInitialCost.trim() ? (newInitialCost.trim().startsWith("R$") ? newInitialCost.trim() : `R$${newInitialCost.trim()}`) : "-";
 
-    if (categoria !== "-") {
-      setCategories((prev) => {
-        const key = categoria.toLowerCase();
-        if (prev.some((c) => c.toLowerCase() === key)) return prev;
-        return [...prev, categoria];
-      });
-    }
+    const nextCategories =
+      categoria !== "-" && !categories.some((c) => c.toLowerCase() === categoria.toLowerCase()) ? [...categories, categoria] : categories;
+    if (nextCategories !== categories) setCategories(nextCategories);
 
     const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : String(Date.now());
-    setDataRows((prev) => [
-      {
-        id,
-        ocultar: false,
-        item,
-        medida,
-        custoMedio,
-        categoria,
-        especificacao,
-      },
-      ...prev,
-    ]);
+    const row: InsumoRow = { id, ocultar: false, item, medida, custoMedio, categoria, especificacao };
+    setDataRows((prev) => {
+      const nextRows = [row, ...prev];
+      void saveInsumosStateToSupabase({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })) as any,
+        categories: nextCategories,
+      }).catch(() => {
+        if (saveErrorShownRef.current) return;
+        saveErrorShownRef.current = true;
+        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
+      });
+      return nextRows;
+    });
     setIsNewItemOpen(false);
   }
 

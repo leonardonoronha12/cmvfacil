@@ -830,6 +830,18 @@ export default function DashboardClient() {
     return [...generated, ...desperdicios.filter((row) => !generatedIds.has(row.id))];
   }, [desperdicios, prePreparoEtiquetas]);
 
+  useEffect(() => {
+    if (!calc) return;
+    const hiddenIds = new Set(insumos.filter((i) => Boolean(i.ocultar)).map((i) => i.id));
+    const hiddenKeys = new Set(insumos.filter((i) => Boolean(i.ocultar)).map((i) => normalizeKey(i.item)));
+    setCalc((prev) => {
+      if (!prev) return prev;
+      const nextRows = prev.rows.filter((r) => !hiddenIds.has(r.insumoId) && !hiddenKeys.has(normalizeKey(r.item)));
+      if (nextRows.length === prev.rows.length) return prev;
+      return { ...prev, rows: nextRows };
+    });
+  }, [calc, insumos]);
+
   const fornecedorKeyLookup = useMemo(() => {
     const out = new Map<string, string>();
     for (const key of Object.keys(fornecedorEquivalenciasMap)) {
