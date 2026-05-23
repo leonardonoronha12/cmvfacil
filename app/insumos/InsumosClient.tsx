@@ -267,6 +267,7 @@ export default function InsumosClient() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowsReadyRef = useRef(false);
   const syncTimeoutRef = useRef<number | null>(null);
+  const saveErrorShownRef = useRef(false);
   const categoriesReadyRef = useRef(false);
 
   const [newItemName, setNewItemName] = useState("");
@@ -355,7 +356,11 @@ export default function InsumosClient() {
         especificacao: r.especificacao,
         ocultar: r.ocultar,
       }));
-      void saveInsumosStateToSupabase({ rows: storeRows as any, categories }).catch(() => {});
+      void saveInsumosStateToSupabase({ rows: storeRows as any, categories }).catch(() => {
+        if (saveErrorShownRef.current) return;
+        saveErrorShownRef.current = true;
+        window.alert("Não foi possível salvar os insumos no Supabase. Verifique se a tabela insumos_state existe e se você está logado.");
+      });
     }, 650);
   }, [dataRows, categories]);
 
