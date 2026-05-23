@@ -189,7 +189,11 @@ export default function InventarioClient() {
   }, [query, selectedContagem?.categorias]);
 
   const pendentes = useMemo(() => allItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [allItems]);
-  const contabilizados = useMemo(() => allItems.filter((r) => String(r.estoqueFinal ?? "").trim()), [allItems]);
+  const contabilizados = useMemo(() => {
+    const list = allItems.filter((r) => String(r.estoqueFinal ?? "").trim());
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    return [...list].sort((a, b) => collator.compare(a.item, b.item));
+  }, [allItems]);
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
