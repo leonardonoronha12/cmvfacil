@@ -488,7 +488,8 @@ function normalizeKey(value: string) {
     .trim()
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
 }
 
 function parsePtNumber(input: string) {
@@ -809,6 +810,22 @@ export default function DashboardClient() {
     return [...generated, ...desperdicios.filter((row) => !generatedIds.has(row.id))];
   }, [desperdicios, prePreparoEtiquetas]);
 
+  const fornecedorKeyLookup = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
+      const nk = normalizeKey(key);
+      if (!nk || out.has(nk)) continue;
+      out.set(nk, key);
+    }
+    return out;
+  }, [fornecedorEquivalenciasMap]);
+
+  function getEquivalenciasForFornecedor(fornecedor: string) {
+    const k = normalizeKey(fornecedor);
+    const mapped = fornecedorKeyLookup.get(k);
+    return mapped ? fornecedorEquivalenciasMap[mapped] ?? [] : fornecedorEquivalenciasMap[fornecedor.trim().toUpperCase()] ?? [];
+  }
+
   useEffect(() => {
     const itemId = searchParams.get("itemId")?.trim() ?? "";
     const itemName = searchParams.get("item")?.trim() ?? "";
@@ -935,8 +952,7 @@ export default function DashboardClient() {
       if (t < minT || t > maxT) continue;
 
       if (e.itensNota?.length) {
-        const fornecedorKey = String(e.fornecedor ?? "").trim().toUpperCase();
-        const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
+        const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
         for (const it of e.itensNota) {
           const rawKey = normalizeKey(it.nome);
           let mappedKey = rawKey;
@@ -1389,8 +1405,7 @@ export default function DashboardClient() {
       const d = parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
-      const fornecedorKey = String(e.fornecedor ?? "").trim().toUpperCase();
-      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
+      const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
         const rawKey = normalizeKey(it.nome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
@@ -1409,7 +1424,7 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, fornecedorEquivalenciasMap, historyItem]);
+  }, [entradas, fornecedorKeyLookup, fornecedorEquivalenciasMap, historyItem]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
