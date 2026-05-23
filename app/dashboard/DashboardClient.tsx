@@ -803,6 +803,15 @@ export default function DashboardClient() {
       setFornecedorEquivalenciasMap(equivalenciasRows);
       setLastCalc(readLastCalc());
     })();
+    const refreshTimeout = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const rows = await loadInsumosFromSupabase();
+          writeInsumosToStore(rows);
+          setInsumos(rows);
+        } catch {}
+      })();
+    }, 1200);
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
     const unsubInv = subscribeInventario((rows) => setContagens(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));
@@ -812,6 +821,7 @@ export default function DashboardClient() {
     const unsubFornecedorProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
     const unsubFornecedorEquivalencias = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
     return () => {
+      window.clearTimeout(refreshTimeout);
       unsubInsumos();
       unsubInv();
       unsubEntradas();
