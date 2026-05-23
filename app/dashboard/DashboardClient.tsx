@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
-import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
+import { loadInsumosFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem, writeInventarioToStore } from "../lib/inventarioStore";
 import { loadInventarioFromSupabase } from "../lib/inventarioSupabase";
@@ -1540,7 +1540,7 @@ export default function DashboardClient() {
     const nextRows = insumos.map((i) => (i.id === selectedInsumo.id ? { ...i, ocultar: nextOcultar } : i));
     setInsumos(nextRows);
     writeInsumosToStore(nextRows);
-    void syncInsumosToSupabase(nextRows, []).catch(() => {});
+    void saveInsumosStateToSupabase({ rows: nextRows }).catch(() => {});
     setHideAlert({ item: selectedInsumo.item, tone: nextOcultar ? "hide" : "show" });
     if (nextOcultar) {
       setHistoryItem(null);

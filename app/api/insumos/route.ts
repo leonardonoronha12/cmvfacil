@@ -24,72 +24,54 @@ function parseJwtSub(jwt: string) {
   }
 }
 
-function getUserScope(req: NextRequest) {
+function getUserScopedId(req: NextRequest) {
   const accessToken = (req.cookies.get(SUPABASE_AT_COOKIE)?.value ?? "").trim();
   const userId = accessToken ? parseJwtSub(accessToken) : null;
-  return { accessToken, userId, prefix: userId ? `user:${userId}:` : null };
+  if (!userId) return { accessToken, id: null as string | null };
+  return { accessToken, id: `user:${userId}` };
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const { accessToken, prefix } = getUserScope(req);
-    if (!prefix) return json({ rows: [] }, { status: 200 });
+    const { accessToken, id } = getUserScopedId(req);
+    if (!id) return json({ rows: [], categories: [] }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
-    const { data, error } = await supabase.from("insumos").select("*").like("id", `${prefix}%`).order("updated_at", { ascending: false });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ rows: data ?? [] }, { status: 200 });
+    const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
+    if (error) return json({ error: error.message }, { status: 500 });
+    const payload = (data as any)?.payload;
+    const rows = Array.isArray(payload?.rows) ? (payload.rows as unknown[]) : [];
+    const categories = Array.isArray(payload?.categories) ? (payload.categories as unknown[]) : [];
+    return json({ rows, categories }, { status: 200 });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => null)) as unknown;
-    if (!body || typeof body !== "object") return NextResponse.json({ error: "invalid_body" }, { status: 400 });
-    const { accessToken, prefix } = getUserScope(req);
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
+    const { accessToken, id } = getUserScopedId(req);
+    if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
 
-    const deleteIds = Array.isArray((body as any).deleteIds) ? ((body as any).deleteIds as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
-    const invalidDelete = deleteIds.find((id) => !id.startsWith(prefix));
-    if (invalidDelete) return json({ error: "invalid_id_scope" }, { status: 400 });
-
-    if (deleteIds.length) {
-      const { error } = await supabase.from("insumos").delete().in("id", deleteIds);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    const rows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : null;
+    if (!rows) return json({ error: "missing_rows" }, { status: 400 });
+    const categoriesProvided = (body as any).categories;
+    let categories: unknown[] = [];
+    if (typeof categoriesProvided === "undefined") {
+      const { data } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
+      const prevPayload = (data as any)?.payload;
+      categories = Array.isArray(prevPayload?.categories) ? (prevPayload.categories as unknown[]) : [];
+    } else {
+      categories = Array.isArray(categoriesProvided) ? (categoriesProvided as unknown[]) : [];
     }
 
-    const rowsRaw = (body as any).rows;
-    const rows = Array.isArray(rowsRaw) ? rowsRaw : Array.isArray(body) ? (body as any) : [body];
-    const payload = (rows as any[]).filter(Boolean);
-    const invalidRow = payload.find((r) => !String(r?.id ?? "").trim().startsWith(prefix));
-    if (invalidRow) return json({ error: "invalid_id_scope" }, { status: 400 });
-
-    if (payload.length) {
-      const { error } = await supabase.from("insumos").upsert(payload as any, { onConflict: "id" });
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ ok: true }, { status: 200 });
+    const payload = { rows, categories };
+    const { error } = await supabase.from("insumos_state").upsert({ id, payload } as any, { onConflict: "id" });
+    if (error) return json({ error: error.message }, { status: 500 });
+    return json({ ok: true }, { status: 200 });
   } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
-  }
-}
-
-export async function DELETE(req: NextRequest) {
-  try {
-    const url = new URL(req.url);
-    const id = (url.searchParams.get("id") ?? "").trim();
-    if (!id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
-    const { accessToken, prefix } = getUserScope(req);
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
-    if (!id.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
-    const supabase = getSupabaseServerClient(accessToken);
-    const { error } = await supabase.from("insumos").delete().eq("id", id);
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-    return NextResponse.json({ ok: true }, { status: 200 });
-  } catch (err) {
-    return NextResponse.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

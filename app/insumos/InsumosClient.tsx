@@ -6,8 +6,7 @@ import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
-import { buildUserScopedId } from "../lib/userScope";
+import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -267,8 +266,6 @@ export default function InsumosClient() {
   const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowsReadyRef = useRef(false);
-  const prevIdsRef = useRef<Set<string>>(new Set());
-  const pendingDeleteIdsRef = useRef<Set<string>>(new Set());
   const syncTimeoutRef = useRef<number | null>(null);
   const categoriesReadyRef = useRef(false);
 
@@ -286,42 +283,8 @@ export default function InsumosClient() {
   useEffect(() => {
     (async () => {
       try {
-        const dbRows = await loadInsumosFromSupabase();
-        if (dbRows.length) {
-          const mapped = dbRows.map((s, idx) => ({
-            id: String(s.id || idx + 1),
-            ocultar: Boolean(s.ocultar),
-            item: String(s.item ?? "").trim(),
-            medida: String(s.medida ?? "").trim() || "Und",
-            custoMedio: String(s.custoMedio ?? "").trim() || "-",
-            categoria: String(s.categoria ?? "").trim() || "-",
-            especificacao: String(s.especificacao ?? "").trim() || "-",
-          }));
-          rowsReadyRef.current = true;
-          prevIdsRef.current = new Set(mapped.map((r) => r.id));
-          setDataRows(mapped);
-          const saved = readInsumoCategoriasFromStore();
-          const fromRows = getUniqueCategoriesFromRows(mapped);
-          const merged: string[] = [];
-          const seen = new Set<string>();
-          for (const c of [...saved, ...fromRows]) {
-            const name = normalizeCategoryName(c);
-            if (!name || name === "-") continue;
-            const key = name.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-            merged.push(name);
-          }
-          setCategories(merged);
-          categoriesReadyRef.current = true;
-          writeInsumosToStore(dbRows);
-          return;
-        }
-      } catch {}
-
-      const stored = readInsumosFromStore();
-      if (stored.length) {
-        const mapped = stored.map((s, idx) => ({
+        const state = await loadInsumosStateFromSupabase();
+        const mapped = (state.rows ?? []).map((s, idx) => ({
           id: String(s.id || idx + 1),
           ocultar: Boolean(s.ocultar),
           item: String(s.item ?? "").trim(),
@@ -331,13 +294,12 @@ export default function InsumosClient() {
           especificacao: String(s.especificacao ?? "").trim() || "-",
         }));
         rowsReadyRef.current = true;
-        prevIdsRef.current = new Set(mapped.map((r) => r.id));
         setDataRows(mapped);
-        const saved = readInsumoCategoriasFromStore();
+
         const fromRows = getUniqueCategoriesFromRows(mapped);
         const merged: string[] = [];
         const seen = new Set<string>();
-        for (const c of [...saved, ...fromRows]) {
+        for (const c of [...(state.categories ?? []), ...fromRows]) {
           const name = normalizeCategoryName(c);
           if (!name || name === "-") continue;
           const key = name.toLowerCase();
@@ -347,14 +309,16 @@ export default function InsumosClient() {
         }
         setCategories(merged);
         categoriesReadyRef.current = true;
-        return;
-      }
 
-      rowsReadyRef.current = true;
-      prevIdsRef.current = new Set();
-      setDataRows([]);
-      setCategories(readInsumoCategoriasFromStore());
-      categoriesReadyRef.current = true;
+        writeInsumosToStore(state.rows ?? []);
+        writeInsumoCategoriasToStore(merged);
+      } catch (err) {
+        rowsReadyRef.current = true;
+        setDataRows([]);
+        setCategories([]);
+        categoriesReadyRef.current = true;
+        window.alert("Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.");
+      }
     })();
   }, []);
 
@@ -379,21 +343,9 @@ export default function InsumosClient() {
   }, [dataRows]);
 
   useEffect(() => {
-    if (!rowsReadyRef.current) return;
-
-    const nextIds = new Set(dataRows.map((r) => r.id));
-    for (const id of prevIdsRef.current) {
-      if (!nextIds.has(id)) pendingDeleteIdsRef.current.add(id);
-    }
-    for (const id of nextIds) {
-      if (pendingDeleteIdsRef.current.has(id)) pendingDeleteIdsRef.current.delete(id);
-    }
-    prevIdsRef.current = nextIds;
-
+    if (!rowsReadyRef.current || !categoriesReadyRef.current) return;
     if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = window.setTimeout(() => {
-      const deleteIds = Array.from(pendingDeleteIdsRef.current);
-      pendingDeleteIdsRef.current.clear();
       const storeRows = dataRows.map((r) => ({
         id: r.id,
         item: r.item,
@@ -403,9 +355,9 @@ export default function InsumosClient() {
         especificacao: r.especificacao,
         ocultar: r.ocultar,
       }));
-      void syncInsumosToSupabase(storeRows, deleteIds).catch(() => {});
-    }, 450);
-  }, [dataRows]);
+      void saveInsumosStateToSupabase({ rows: storeRows as any, categories }).catch(() => {});
+    }, 650);
+  }, [dataRows, categories]);
 
   useEffect(() => {
     const fromRows = getUniqueCategoriesFromRows(dataRows);
@@ -472,9 +424,10 @@ export default function InsumosClient() {
 
       const importedRaw = parseRowsFromTable(table);
       if (!importedRaw.length) throw new Error("Nenhum item encontrado na planilha.");
-      const imported = await Promise.all(
-        importedRaw.map(async (row, idx) => ({ ...row, id: await buildUserScopedId(`${Date.now()}-${idx}`) })),
-      );
+      const imported = importedRaw.map((row, idx) => ({
+        ...row,
+        id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${idx}`,
+      }));
       setDataRows(imported);
       setCategories((prev) => {
         const seen = new Set(prev.map((c) => c.toLowerCase()));
@@ -569,22 +522,20 @@ export default function InsumosClient() {
       });
     }
 
-    void (async () => {
-      const id = await buildUserScopedId(String(Date.now()));
-      setDataRows((prev) => [
-        {
-          id,
-          ocultar: false,
-          item,
-          medida,
-          custoMedio,
-          categoria,
-          especificacao,
-        },
-        ...prev,
-      ]);
-      setIsNewItemOpen(false);
-    })();
+    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : String(Date.now());
+    setDataRows((prev) => [
+      {
+        id,
+        ocultar: false,
+        item,
+        medida,
+        custoMedio,
+        categoria,
+        especificacao,
+      },
+      ...prev,
+    ]);
+    setIsNewItemOpen(false);
   }
 
   function openEditItem(row: InsumoRow) {
