@@ -1531,7 +1531,11 @@ export default function DashboardClient() {
 
   const selectedInsumo = useMemo(() => {
     if (!historyItem) return null;
-    return insumos.find((i) => i.id === historyItem.insumoId) ?? null;
+    const direct = insumos.find((i) => i.id === historyItem.insumoId) ?? null;
+    if (direct) return direct;
+    const key = normalizeKey(historyItem.item);
+    if (!key) return null;
+    return insumos.find((i) => normalizeKey(i.item) === key) ?? null;
   }, [historyItem, insumos]);
 
   function toggleOcultarSelecionado() {
