@@ -801,6 +801,7 @@ export default function FichasTecnicasClient() {
   const [detailsViewTab, setDetailsViewTab] = useState<"ingredientes" | "preparo">("ingredientes");
   const [detailIngredientId, setDetailIngredientId] = useState("");
   const [detailIngredientQty, setDetailIngredientQty] = useState("0,000");
+  const [detailsYieldDraft, setDetailsYieldDraft] = useState("1,000");
   const [rowEditId, setRowEditId] = useState<string | null>(null);
   const [rowEditIngredientId, setRowEditIngredientId] = useState("");
   const [rowEditQty, setRowEditQty] = useState("0,000");
@@ -814,6 +815,27 @@ export default function FichasTecnicasClient() {
     setInsumos(readInsumosFromStore());
     return subscribeInsumos(setInsumos);
   }, []);
+
+  useEffect(() => {
+    if (!detailsRecipe) {
+      setDetailsYieldDraft("1,000");
+      return;
+    }
+    setDetailsYieldDraft(formatDecimal3(detailsRecipe.recipeYield));
+  }, [detailsRecipe]);
+
+  function commitDetailsYield(nextValue: string) {
+    if (!detailsRecipe) return;
+    const yieldValue = parseDecimalInput(nextValue);
+    const safeYield = yieldValue > 0 ? yieldValue : 1;
+    const nextMetrics = calcRecipeMetrics(detailsRecipe.ingredientsTotal, safeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
+    setDetailsRecipe({
+      ...detailsRecipe,
+      recipeYield: safeYield,
+      cmvAtual: nextMetrics.cmvAtual,
+    });
+    setDetailsYieldDraft(formatDecimal3(safeYield));
+  }
 
   useEffect(() => {
     if (openedFromQueryRef.current) return;
@@ -1597,7 +1619,28 @@ export default function FichasTecnicasClient() {
                             <div className={styles.yieldHint}>Informe quanto essa receita irá render em média após o preparo.</div>
                           </div>
                           <div className={styles.detailsYieldMeta}>
-                            <div className={styles.detailsYieldInput}>{formatDecimal3(detailsRecipe.recipeYield)}</div>
+                            <input
+                              type="text"
+                              className={styles.detailsYieldInput}
+                              inputMode="decimal"
+                              value={detailsYieldDraft}
+                              onMouseDown={(e) => {
+                                if (document.activeElement !== e.currentTarget) {
+                                  e.preventDefault();
+                                  e.currentTarget.focus();
+                                  e.currentTarget.select();
+                                }
+                              }}
+                              onFocus={(e) => {
+                                if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailsYieldDraft("");
+                                e.currentTarget.select();
+                              }}
+                              onChange={(e) => setDetailsYieldDraft(formatDecimalDraft(e.target.value, 3))}
+                              onBlur={(e) => commitDetailsYield(formatDecimalFixedDraft(e.target.value, 3))}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur();
+                              }}
+                            />
                             <div className={styles.detailsYieldSuffix}>Porções</div>
                           </div>
                         </div>

@@ -1077,6 +1077,9 @@
   background: #ffffff;
   color: #2a3133;
   font-weight: 500;
+  width: 100%;
+  outline: none;
+  font-family: inherit;
 }
 
 .detailsYieldSuffix {
