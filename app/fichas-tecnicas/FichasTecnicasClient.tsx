@@ -1470,8 +1470,19 @@ export default function FichasTecnicasClient() {
                               className={styles.detailsInlineInput}
                               value={detailIngredientQty}
                               inputMode="decimal"
+                              onMouseDown={(e) => {
+                                if (document.activeElement !== e.currentTarget) {
+                                  e.preventDefault();
+                                  e.currentTarget.focus();
+                                  e.currentTarget.select();
+                                }
+                              }}
+                              onFocus={(e) => {
+                                if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailIngredientQty("");
+                                e.currentTarget.select();
+                              }}
                               onChange={(e) => setDetailIngredientQty(formatDecimalDraft(e.target.value, 3))}
-                          onBlur={(e) => setDetailIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
+                              onBlur={(e) => setDetailIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
                             />
                             <span className={styles.detailsInlineSuffix}>{selectedDetailIngredient?.medida || "Und"}</span>
                           </span>
@@ -1524,6 +1535,17 @@ export default function FichasTecnicasClient() {
                                   className={styles.detailsInlineInput}
                                   value={rowEditQty}
                                   inputMode="decimal"
+                                  onMouseDown={(e) => {
+                                    if (document.activeElement !== e.currentTarget) {
+                                      e.preventDefault();
+                                      e.currentTarget.focus();
+                                      e.currentTarget.select();
+                                    }
+                                  }}
+                                  onFocus={(e) => {
+                                    if (/^0,0+$/.test(e.currentTarget.value.trim())) setRowEditQty("");
+                                    e.currentTarget.select();
+                                  }}
                                   onChange={(e) => setRowEditQty(formatDecimalDraft(e.target.value, 3))}
                                   onBlur={(e) => setRowEditQty(formatDecimalFixedDraft(e.target.value, 3))}
                                 />
@@ -1974,6 +1996,17 @@ export default function FichasTecnicasClient() {
                             className={styles.groupInput}
                             inputMode="decimal"
                             value={precoVenda}
+                            onMouseDown={(e) => {
+                              if (document.activeElement !== e.currentTarget) {
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
+                              }
+                            }}
+                            onFocus={(e) => {
+                              if (e.currentTarget.value.trim() === "0,00") setPrecoVenda("");
+                              e.currentTarget.select();
+                            }}
                             onChange={(e) => setPrecoVenda(formatMoneyDraft(e.target.value))}
                           />
                         </div>
@@ -1987,6 +2020,17 @@ export default function FichasTecnicasClient() {
                             className={styles.groupInput}
                             inputMode="decimal"
                             value={cmvMetaDraft}
+                            onMouseDown={(e) => {
+                              if (document.activeElement !== e.currentTarget) {
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
+                              }
+                            }}
+                            onFocus={(e) => {
+                              if (e.currentTarget.value.trim() === "0,00") setCmvMetaDraft("");
+                              e.currentTarget.select();
+                            }}
                             onChange={(e) => setCmvMetaDraft(formatPercentDraft(e.target.value))}
                           />
                           <span className={styles.inputSuffix}>%</span>
@@ -2040,6 +2084,17 @@ export default function FichasTecnicasClient() {
                           className={styles.inlineInput}
                           value={ingredientQty}
                           inputMode="decimal"
+                          onMouseDown={(e) => {
+                            if (document.activeElement !== e.currentTarget) {
+                              e.preventDefault();
+                              e.currentTarget.focus();
+                              e.currentTarget.select();
+                            }
+                          }}
+                          onFocus={(e) => {
+                            if (/^0,0+$/.test(e.currentTarget.value.trim())) setIngredientQty("");
+                            e.currentTarget.select();
+                          }}
                           onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
                           onBlur={(e) => setIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
                         />
@@ -2170,7 +2225,25 @@ export default function FichasTecnicasClient() {
                     <div className={styles.yieldHint}>Informe quanto essa receita irá render em média após o preparo.</div>
                   </div>
                   <span className={styles.yieldInputWrap}>
-                    <input type="text" className={styles.yieldInput} inputMode="decimal" value={recipeYield} onChange={(e) => setRecipeYield(formatDecimalDraft(e.target.value, 3))} />
+                    <input
+                      type="text"
+                      className={styles.yieldInput}
+                      inputMode="decimal"
+                      value={recipeYield}
+                      onMouseDown={(e) => {
+                        if (document.activeElement !== e.currentTarget) {
+                          e.preventDefault();
+                          e.currentTarget.focus();
+                          e.currentTarget.select();
+                        }
+                      }}
+                      onFocus={(e) => {
+                        if (/^0,0+$/.test(e.currentTarget.value.trim())) setRecipeYield("");
+                        e.currentTarget.select();
+                      }}
+                      onChange={(e) => setRecipeYield(formatDecimalDraft(e.target.value, 3))}
+                      onBlur={(e) => setRecipeYield(formatDecimalFixedDraft(e.target.value, 3))}
+                    />
                     <span className={styles.yieldSuffix}>Porções</span>
                   </span>
                 </div>
@@ -2248,6 +2321,17 @@ export default function FichasTecnicasClient() {
                         className={styles.groupInput}
                         inputMode="decimal"
                         value={editDraft.precoVenda}
+                        onMouseDown={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
+                        onFocus={(e) => {
+                          if (e.currentTarget.value.trim() === "0,00") setEditDraft((prev) => (prev ? { ...prev, precoVenda: "" } : prev));
+                          e.currentTarget.select();
+                        }}
                         onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, precoVenda: formatMoneyDraft(e.target.value) } : prev))}
                       />
                     </div>
@@ -2261,6 +2345,17 @@ export default function FichasTecnicasClient() {
                         className={styles.groupInput}
                         inputMode="decimal"
                         value={editDraft.cmvMeta}
+                        onMouseDown={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
+                        onFocus={(e) => {
+                          if (e.currentTarget.value.trim() === "0,00") setEditDraft((prev) => (prev ? { ...prev, cmvMeta: "" } : prev));
+                          e.currentTarget.select();
+                        }}
                         onChange={(e) => setEditDraft((prev) => (prev ? { ...prev, cmvMeta: formatPercentDraft(e.target.value) } : prev))}
                       />
                       <span className={styles.inputSuffix}>%</span>

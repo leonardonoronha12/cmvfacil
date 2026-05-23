@@ -694,9 +694,10 @@ export default function ListaDeComprasClient() {
     setIsExportingXlsx(true);
     try {
       const XLSX = await import("xlsx");
-      const header = mode === "fornecedor"
-        ? ["Item", "Fornecedor", "Qtd Comprar", "Unidade", "Qtd Insumo", "Unidade Insumo", "Categoria", "Custo Médio (Insumo)"]
-        : ["Item", "Categoria", "Fornecedor", "Qtd Comprar", "Unidade", "Custo Médio"];
+      const header =
+        mode === "fornecedor"
+          ? ["Item", "Qtd Comprar", "Unidade", "Qtd Insumo", "Unidade Insumo", "Categoria", "Custo Médio (Insumo)"]
+          : ["Item", "Categoria", "Qtd Comprar", "Unidade", "Custo Médio"];
       const table = [
         header,
         ...exportRows.map((row) => {
@@ -704,7 +705,6 @@ export default function ListaDeComprasClient() {
           if (mode === "fornecedor") {
             return [
               row.displayItem,
-              row.fornecedor,
               Number(calc.compraFornecedor.toFixed(3)),
               calc.unidadeComprar,
               Number(calc.comprarCalculado.toFixed(3)),
@@ -716,7 +716,6 @@ export default function ListaDeComprasClient() {
           return [
             row.displayItem,
             row.categoria,
-            row.fornecedor,
             Number(calc.comprarCalculado.toFixed(3)),
             calc.unidadeComprar,
             row.custoMedioLabel,
@@ -744,10 +743,7 @@ export default function ListaDeComprasClient() {
 
       const pageSize: [number, number] = [595.28, 841.89];
       const margin = 40;
-      const rowH = 18;
-      const colItemPct = 0.52;
-      const colQtyPct = 0.16;
-      const colUnitPct = 0.12;
+      const rowH = 34;
 
       function clipText(text: string, maxWidth: number, size: number) {
         const raw = String(text ?? "");
@@ -761,7 +757,7 @@ export default function ListaDeComprasClient() {
       let y = pageSize[1] - margin;
 
       function drawHeader() {
-        const title = "Lista de Compras";
+        const title = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? `Lista de Compras - ${fornecedorFilter}` : "Lista de Compras";
         const now = new Date();
         const meta = `Período: ${effectiveStartDate || "-"} até ${effectiveEndDate || "-"} • Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
         page.drawText(title, { x: margin, y, size: 16, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
@@ -770,23 +766,30 @@ export default function ListaDeComprasClient() {
         y -= 18;
 
         const tableW = pageSize[0] - margin * 2;
-        const colItem = tableW * colItemPct;
-        const colQty = tableW * colQtyPct;
-        const colUnit = tableW * colUnitPct;
-        const colFornecedor = tableW - colItem - colQty - colUnit;
+        const checkW = 18;
+        const gridW = tableW - checkW;
+        const frTotal = 4.8;
+        const colItem = gridW * (1.8 / frTotal);
+        const colCusto = gridW * (0.7 / frTotal);
+        const colConsumo = gridW * (0.7 / frTotal);
+        const colEstoque = gridW * (0.8 / frTotal);
+        const colComprar = gridW * (0.8 / frTotal);
 
-        page.drawRectangle({ x: margin, y: y - 12, width: tableW, height: 16, color: rgb(0.93, 0.94, 0.94), borderRadius: 6 } as any);
-        page.drawText("Item", { x: margin + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
-        page.drawText("Qtd", { x: margin + colItem + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
-        page.drawText("Un", { x: margin + colItem + colQty + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
-        page.drawText("Fornecedor", { x: margin + colItem + colQty + colUnit + 8, y: y - 8, size: 10, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
-        y -= 20;
+        page.drawRectangle({ x: margin, y: y - 14, width: tableW, height: 20, color: rgb(0, 0.157, 0.176), borderRadius: 6 } as any);
+        page.drawText("✓", { x: margin + 6, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("Item", { x: margin + checkW + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("Custo Médio", { x: margin + checkW + colItem + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("Consumo", { x: margin + checkW + colItem + colCusto + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("Estoque", { x: margin + checkW + colItem + colCusto + colConsumo + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("Comprar", { x: margin + checkW + colItem + colCusto + colConsumo + colEstoque + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        y -= 28;
 
-        return { tableW, colItem, colQty, colUnit, colFornecedor };
+        return { tableW, checkW, colItem, colCusto, colConsumo, colEstoque, colComprar };
       }
 
       let cols = drawHeader();
       const fontSize = 10;
+      const subFontSize = 9;
 
       for (const row of exportRows) {
         if (y < margin + 40) {
@@ -796,21 +799,60 @@ export default function ListaDeComprasClient() {
         }
 
         const calc = computeCompra(row);
-        const qty = mode === "fornecedor" ? calc.compraFornecedor : calc.comprarCalculado;
-        const qtyLabel = formatDecimalUpTo3(qty);
-        const itemLabel = clipText(row.displayItem, cols.colItem - 12, fontSize);
-        const fornecedorLabel = clipText(row.fornecedor, cols.colFornecedor - 12, fontSize);
+        const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+        const consumo = mode === "fornecedor" ? row.consumoDiario / fornecedorFactor : row.consumoDiario;
+        const consumoUnit = mode === "fornecedor" ? row.fornecedorMedida : row.medida;
+        const custoFornecedor = row.custoMedio * fornecedorFactor;
+        const custoMain = mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel;
+        const custoSub = mode === "fornecedor" ? row.custoMedioLabel : "";
+        const estoqueFinalValue = estoqueFinalMap[row.id] ?? "0,000";
+        const comprar = mode === "fornecedor" ? calc.compraFornecedor : calc.comprarCalculado;
+        const comprarLabel = `${formatDecimalUpTo3(comprar)} ${calc.unidadeComprar}`.trim();
 
-        page.drawText(itemLabel, { x: margin + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
-        page.drawText(qtyLabel, { x: margin + cols.colItem + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
-        page.drawText(calc.unidadeComprar, { x: margin + cols.colItem + cols.colQty + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
-        page.drawText(fornecedorLabel, { x: margin + cols.colItem + cols.colQty + cols.colUnit + 8, y, size: fontSize, font, color: rgb(0.12, 0.12, 0.12) });
+        page.drawRectangle({ x: margin + 3, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.88, 0.9, 0.9) } as any);
+
+        const itemLabel = clipText(row.displayItem, cols.colItem - 12, fontSize);
+        const metaLabel = clipText(row.itemMetaLabel, cols.colItem - 12, subFontSize);
+        page.drawText(itemLabel, { x: margin + cols.checkW + 8, y, size: fontSize, font: fontBold, color: rgb(0.12, 0.12, 0.12) });
+        page.drawText(metaLabel, { x: margin + cols.checkW + 8, y: y - 12, size: subFontSize, font, color: rgb(0.43, 0.5, 0.49) });
+
+        const custoLabel = clipText(custoMain, cols.colCusto - 12, fontSize);
+        page.drawText(custoLabel, { x: margin + cols.checkW + cols.colItem + 8, y, size: fontSize, font: fontBold, color: rgb(0.12, 0.12, 0.12) });
+        if (custoSub) {
+          const sub = clipText(custoSub, cols.colCusto - 12, subFontSize);
+          page.drawText(sub, { x: margin + cols.checkW + cols.colItem + 8, y: y - 12, size: subFontSize, font, color: rgb(0.43, 0.5, 0.49) });
+        }
+
+        page.drawText(clipText(`${formatDecimalUpTo3(consumo)} ${consumoUnit}`, cols.colConsumo - 12, fontSize), {
+          x: margin + cols.checkW + cols.colItem + cols.colCusto + 8,
+          y,
+          size: fontSize,
+          font,
+          color: rgb(0.12, 0.12, 0.12),
+        });
+
+        page.drawText(clipText(`${estoqueFinalValue} ${row.medida}`, cols.colEstoque - 12, fontSize), {
+          x: margin + cols.checkW + cols.colItem + cols.colCusto + cols.colConsumo + 8,
+          y,
+          size: fontSize,
+          font,
+          color: rgb(0.12, 0.12, 0.12),
+        });
+
+        page.drawText(clipText(comprarLabel, cols.colComprar - 12, fontSize), {
+          x: margin + cols.checkW + cols.colItem + cols.colCusto + cols.colConsumo + cols.colEstoque + 8,
+          y,
+          size: fontSize,
+          font,
+          color: rgb(0.12, 0.12, 0.12),
+        });
 
         y -= rowH;
       }
 
       const bytes = await doc.save();
-      downloadBlob(new Blob([bytes], { type: "application/pdf" }), `lista-de-compras-${effectiveStartDate}-ate-${effectiveEndDate}.pdf`);
+      const suffix = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? `-${fornecedorFilter.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}` : "";
+      downloadBlob(new Blob([bytes], { type: "application/pdf" }), `lista-de-compras${suffix}-${effectiveStartDate}-ate-${effectiveEndDate}.pdf`);
     } finally {
       setIsExportingPdf(false);
     }
@@ -1094,7 +1136,7 @@ export default function ListaDeComprasClient() {
                           return (
                             <div key={column} className={styles.costCell}>
                               <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
-                              <div className={styles.costSub}>{mode === "fornecedor" ? row.custoMedioLabel : row.fornecedor}</div>
+                              {mode === "fornecedor" ? <div className={styles.costSub}>{row.custoMedioLabel}</div> : null}
                             </div>
                           );
                         }
