@@ -13,17 +13,8 @@ export type PrePreparoEtiquetaRow = {
   wasteStatus?: "pending" | "launched" | "ignored";
 };
 
-const KEY = "cmvfacil.prepreparo.etiquetas.v1";
 const EVENT = "cmvfacil:prepreparo:etiquetas";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: PrePreparoEtiquetaRow[] = [];
 
 function normalizeRow(input: unknown): PrePreparoEtiquetaRow | null {
   if (!input || typeof input !== "object") return null;
@@ -65,16 +56,13 @@ function normalizeRows(input: unknown): PrePreparoEtiquetaRow[] {
 }
 
 export function readPrePreparoEtiquetasFromStore(fallback: PrePreparoEtiquetaRow[] = []): PrePreparoEtiquetaRow[] {
-  if (typeof window === "undefined") return fallback;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === null) return fallback;
-  return normalizeRows(safeParse(raw));
+  return cache.length ? cache : fallback;
 }
 
 export function writePrePreparoEtiquetasToStore(rows: PrePreparoEtiquetaRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

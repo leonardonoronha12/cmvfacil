@@ -9,17 +9,8 @@ export type DesperdicioRow = {
   motivo: string;
 };
 
-const KEY = "cmvfacil.desperdicios.rows.v1";
 const EVENT = "cmvfacil:desperdicios:rows";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: DesperdicioRow[] = [];
 
 function normalizeRow(input: unknown): DesperdicioRow | null {
   if (!input || typeof input !== "object") return null;
@@ -45,16 +36,13 @@ function normalizeRows(input: unknown): DesperdicioRow[] {
 }
 
 export function readDesperdiciosFromStore(fallback: DesperdicioRow[] = []): DesperdicioRow[] {
-  if (typeof window === "undefined") return fallback;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === null) return fallback;
-  return normalizeRows(safeParse(raw));
+  return cache.length ? cache : fallback;
 }
 
 export function writeDesperdiciosToStore(rows: DesperdicioRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

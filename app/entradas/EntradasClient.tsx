@@ -24,6 +24,7 @@ import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } fr
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
 import { deleteEntradaFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { buildUserScopedId } from "../lib/userScope";
 import styles from "./entradas.module.css";
 
 type EntradaRow = {
@@ -698,24 +699,12 @@ export default function EntradasClient() {
     }
     if (isCreatingNota) return;
     const now = new Date();
-    const id = String(Date.now());
     let maxN = 0;
     for (const r of rows) {
       const n = Number.parseInt(r.numero.replace(/[^\d]/g, "") || "0", 10);
       if (n > maxN) maxN = n;
     }
     const numero = `#${maxN + 1 || 1}`;
-    const newRow: EntradaRow = {
-      id,
-      numero,
-      dataLancamento: dataReceb,
-      fornecedor: fornecedor.toUpperCase(),
-      valorNota: "R$0,00",
-      itens: "0 Itens",
-      responsavel: "",
-      dataCriacao: formatDateLabelPT(now),
-      itensNota: [],
-    };
     setQuery("");
     showToast("Salvando nota...", "success", 6000);
     const d = parseDateLabelLoose(dataReceb);
@@ -725,12 +714,24 @@ export default function EntradasClient() {
       if (currentStart && d.getTime() < currentStart.getTime()) setDateStart(formatDateLabelNoCommaPT(d));
       if (currentEnd && d.getTime() > currentEnd.getTime()) setDateEnd(formatDateLabelNoCommaPT(d));
     }
-    setRows((prev) => [newRow, ...prev]);
-    setIsNewOpen(false);
-    openDetailsModal(newRow);
-    setIsCreatingNota(true);
     void (async () => {
       try {
+        const id = await buildUserScopedId(String(Date.now()));
+        const newRow: EntradaRow = {
+          id,
+          numero,
+          dataLancamento: dataReceb,
+          fornecedor: fornecedor.toUpperCase(),
+          valorNota: "R$0,00",
+          itens: "0 Itens",
+          responsavel: "",
+          dataCriacao: formatDateLabelPT(now),
+          itensNota: [],
+        };
+        setRows((prev) => [newRow, ...prev]);
+        setIsNewOpen(false);
+        openDetailsModal(newRow);
+        setIsCreatingNota(true);
         await upsertEntradaToSupabase(newRow as unknown as any);
         try {
           const dbRows = await loadEntradasFromSupabase();

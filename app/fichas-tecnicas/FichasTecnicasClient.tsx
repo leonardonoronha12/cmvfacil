@@ -1847,167 +1847,192 @@ export default function FichasTecnicasClient() {
             </select>
           </section>
 
-          <section className={styles.matrixSection}>
-            <p className={styles.matrixTitle}>Entenda os status da matriz BCG</p>
-            <div className={styles.matrixGrid}>
-              {bcgInfo.map((card) => (
-                <article
-                  key={card.key}
-                  className={`${styles.matrixCard} ${quadrante === card.key ? styles.matrixCardActive : ""}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-pressed={quadrante === card.key}
-                  onClick={() => toggleQuadranteFilter(card.key)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      toggleQuadranteFilter(card.key);
-                    }
-                  }}
-                >
-                  <div className={styles.matrixHead}>
-                    <span className={`${styles.matrixIcon} ${badgeClass(card.key)}`}>
-                      <BcgIcon type={card.icon} />
-                    </span>
-                    <span className={styles.matrixName}>{`${card.title} (${counts[card.key]})`}</span>
-                  </div>
-                  <p className={styles.matrixDescription}>{card.description}</p>
-                  <ul className={styles.matrixList}>
-                    {card.bullets.map((bullet) => (
-                      <li key={bullet}>{bullet}</li>
-                    ))}
-                  </ul>
-                  <div className={styles.matrixTags}>
-                    <span className={styles.tagGreen}>↑ Popularidade</span>
-                    <span className={styles.tagPink}>{card.key === "estrela" || card.key === "quebra-cabeca" ? "↓ CMV" : "↑ CMV"}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
-          <section className={styles.tableCard}>
-            <div className={styles.tableHeader} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
-              {columnOrder.map((column) => {
-                const label =
-                  column === "receita"
-                    ? "Receita"
-                    : column === "precoVenda"
-                      ? "Preço de Venda"
-                      : column === "custoUnitario"
-                        ? "Custo Unitário"
-                        : column === "cmvMeta"
-                          ? "CMV Meta"
-                          : column === "cmvAtual"
-                            ? "CMV Atual"
-                            : "Matriz BCG";
-                return (
-                  <div
-                    key={column}
-                    className={styles.tableHeadDrag}
-                    draggable
-                    onDragStart={(e) => {
-                      setDraggingColumn(column);
-                      e.dataTransfer.effectAllowed = "move";
-                      e.dataTransfer.setData("text/plain", column);
-                    }}
-                    onDragEnd={() => setDraggingColumn(null)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => onColumnDrop(column)}
-                  >
-                    <button type="button" className={styles.tableHeadBtn} onClick={() => toggleSort(column)}>
-                      {label} {sortKey === column ? <SortMark dir={sortDir} /> : null}
-                    </button>
-                  </div>
-                );
-              })}
-              <div className={styles.tableActionsHead}>Ações</div>
-            </div>
-
-            <div className={styles.tableBody}>
-              {pageRows.map((row) => (
-                <div
-                  key={row.id}
-                  className={styles.tableRow}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openRowDetails(row)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openRowDetails(row);
-                    }
-                  }}
-                  style={{ gridTemplateColumns: tableGridTemplateColumns }}
-                >
-                  {columnOrder.map((column) => (
-                    <div key={column} className={styles.tableCellWrap}>
-                      {renderTableCell(row, column)}
-                    </div>
-                  ))}
-                  <div className={styles.actionsCell} data-ft-action-menu onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      className={styles.actionBtn}
-                      aria-label={`Ações da receita ${row.receita}`}
-                      aria-expanded={actionMenuRowId === row.id}
-                      onClick={() => setActionMenuRowId((prev) => (prev === row.id ? null : row.id))}
+          {tableRows.length === 0 ? (
+            <section className={styles.emptyState}>
+              <div className={styles.emptyStateCard}>
+                <div className={styles.emptyStateTitle}>Nenhuma ficha técnica cadastrada</div>
+                <div className={styles.emptyStateText}>Cadastre sua primeira ficha técnica para acompanhar custos e CMV do cardápio.</div>
+                <button type="button" className={styles.newButton} onClick={openCreateModal}>
+                  <PlusIcon />
+                  Nova Ficha Técnica
+                </button>
+              </div>
+            </section>
+          ) : (
+            <>
+              <section className={styles.matrixSection}>
+                <p className={styles.matrixTitle}>Entenda os status da matriz BCG</p>
+                <div className={styles.matrixGrid}>
+                  {bcgInfo.map((card) => (
+                    <article
+                      key={card.key}
+                      className={`${styles.matrixCard} ${quadrante === card.key ? styles.matrixCardActive : ""}`}
+                      role="button"
+                      tabIndex={0}
+                      aria-pressed={quadrante === card.key}
+                      onClick={() => toggleQuadranteFilter(card.key)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          toggleQuadranteFilter(card.key);
+                        }
+                      }}
                     >
-                      <DotsIcon />
-                    </button>
-                    {actionMenuRowId === row.id ? (
-                      <div className={styles.actionMenu}>
-                        <button type="button" className={styles.actionMenuItem} onClick={() => openEditModal(row)}>
-                          <span className={styles.actionMenuIcon}>
-                            <EditIcon />
-                          </span>
-                          <span>Editar</span>
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.actionMenuItem}
-                          onClick={() => {
-                            setActionMenuRowId(null);
-                            void downloadFichaTecnicaPdf(buildDetailsRecipeFromRow(row));
-                          }}
-                        >
-                          <span className={styles.actionMenuIcon}>
-                            <PdfIcon />
-                          </span>
-                          <span>Ficha Técnica</span>
-                        </button>
-                        <button type="button" className={styles.actionMenuItem} onClick={() => openDeleteModal(row)}>
-                          <span className={styles.actionMenuIcon}>
-                            <TrashIcon />
-                          </span>
-                          <span>Excluir</span>
+                      <div className={styles.matrixHead}>
+                        <span className={`${styles.matrixIcon} ${badgeClass(card.key)}`}>
+                          <BcgIcon type={card.icon} />
+                        </span>
+                        <span className={styles.matrixName}>{`${card.title} (${counts[card.key]})`}</span>
+                      </div>
+                      <p className={styles.matrixDescription}>{card.description}</p>
+                      <ul className={styles.matrixList}>
+                        {card.bullets.map((bullet) => (
+                          <li key={bullet}>{bullet}</li>
+                        ))}
+                      </ul>
+                      <div className={styles.matrixTags}>
+                        <span className={styles.tagGreen}>↑ Popularidade</span>
+                        <span className={styles.tagPink}>{card.key === "estrela" || card.key === "quebra-cabeca" ? "↓ CMV" : "↑ CMV"}</span>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+
+              <section className={styles.tableCard}>
+                <div className={styles.tableHeader} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+                  {columnOrder.map((column) => {
+                    const label =
+                      column === "receita"
+                        ? "Receita"
+                        : column === "precoVenda"
+                          ? "Preço de Venda"
+                          : column === "custoUnitario"
+                            ? "Custo Unitário"
+                            : column === "cmvMeta"
+                              ? "CMV Meta"
+                              : column === "cmvAtual"
+                                ? "CMV Atual"
+                                : "Matriz BCG";
+                    return (
+                      <div
+                        key={column}
+                        className={styles.tableHeadDrag}
+                        draggable
+                        onDragStart={(e) => {
+                          setDraggingColumn(column);
+                          e.dataTransfer.effectAllowed = "move";
+                          e.dataTransfer.setData("text/plain", column);
+                        }}
+                        onDragEnd={() => setDraggingColumn(null)}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={() => onColumnDrop(column)}
+                      >
+                        <button type="button" className={styles.tableHeadBtn} onClick={() => toggleSort(column)}>
+                          {label} {sortKey === column ? <SortMark dir={sortDir} /> : null}
                         </button>
                       </div>
-                    ) : null}
-                  </div>
+                    );
+                  })}
+                  <div className={styles.tableActionsHead}>Ações</div>
                 </div>
-              ))}
-            </div>
-          </section>
 
-          <section className={styles.footerRow}>
-            <div className={styles.resultsText}>{`${filteredRows.length} resultado(s) encontrado(s)`}</div>
-            <div className={styles.pagination}>
-              <button type="button" className={styles.pageBtn} disabled={currentPage === 1} onClick={() => setPage(1)}>
-                {"<<"}
-              </button>
-              <button type="button" className={styles.pageBtn} disabled={currentPage === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
-                {"<"}
-              </button>
-              <span className={styles.pageInfo}>{`${currentPage} de ${totalPages}`}</span>
-              <button type="button" className={styles.pageBtn} disabled={currentPage === totalPages} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
-                {">"}
-              </button>
-              <button type="button" className={styles.pageBtn} disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
-                {">>"}
-              </button>
-            </div>
-          </section>
+                <div className={styles.tableBody}>
+                  {pageRows.map((row) => (
+                    <div
+                      key={row.id}
+                      className={styles.tableRow}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openRowDetails(row)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openRowDetails(row);
+                        }
+                      }}
+                      style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                    >
+                      {columnOrder.map((column) => (
+                        <div key={column} className={styles.tableCellWrap}>
+                          {renderTableCell(row, column)}
+                        </div>
+                      ))}
+                      <div className={styles.actionsCell} data-ft-action-menu onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className={styles.actionBtn}
+                          aria-label={`Ações da receita ${row.receita}`}
+                          aria-expanded={actionMenuRowId === row.id}
+                          onClick={() => setActionMenuRowId((prev) => (prev === row.id ? null : row.id))}
+                        >
+                          <DotsIcon />
+                        </button>
+                        {actionMenuRowId === row.id ? (
+                          <div className={styles.actionMenu}>
+                            <button type="button" className={styles.actionMenuItem} onClick={() => openEditModal(row)}>
+                              <span className={styles.actionMenuIcon}>
+                                <EditIcon />
+                              </span>
+                              <span>Editar</span>
+                            </button>
+                            <button
+                              type="button"
+                              className={styles.actionMenuItem}
+                              onClick={() => {
+                                setActionMenuRowId(null);
+                                void downloadFichaTecnicaPdf(buildDetailsRecipeFromRow(row));
+                              }}
+                            >
+                              <span className={styles.actionMenuIcon}>
+                                <PdfIcon />
+                              </span>
+                              <span>Ficha Técnica</span>
+                            </button>
+                            <button type="button" className={styles.actionMenuItem} onClick={() => openDeleteModal(row)}>
+                              <span className={styles.actionMenuIcon}>
+                                <TrashIcon />
+                              </span>
+                              <span>Excluir</span>
+                            </button>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className={styles.footerRow}>
+                <div className={styles.resultsText}>{`${filteredRows.length} resultado(s) encontrado(s)`}</div>
+                <div className={styles.pagination}>
+                  <button type="button" className={styles.pageBtn} disabled={currentPage === 1} onClick={() => setPage(1)}>
+                    {"<<"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.pageBtn}
+                    disabled={currentPage === 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    {"<"}
+                  </button>
+                  <span className={styles.pageInfo}>{`${currentPage} de ${totalPages}`}</span>
+                  <button
+                    type="button"
+                    className={styles.pageBtn}
+                    disabled={currentPage === totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    {">"}
+                  </button>
+                  <button type="button" className={styles.pageBtn} disabled={currentPage === totalPages} onClick={() => setPage(totalPages)}>
+                    {">>"}
+                  </button>
+                </div>
+              </section>
+            </>
+          )}
             </>
           )}
           </div>

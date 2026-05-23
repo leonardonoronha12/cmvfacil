@@ -18,17 +18,8 @@ export type PrePreparoStoreRow = {
   modoPreparo?: string;
 };
 
-const KEY = "cmvfacil.prepreparo.v1";
 const EVENT = "cmvfacil:prepreparo";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: PrePreparoStoreRow[] = [];
 
 function normalizeRows(input: unknown): PrePreparoStoreRow[] {
   if (!Array.isArray(input)) return [];
@@ -63,16 +54,13 @@ function normalizeRows(input: unknown): PrePreparoStoreRow[] {
 }
 
 export function readPrePreparoFromStore(fallback: PrePreparoStoreRow[] = []): PrePreparoStoreRow[] {
-  if (typeof window === "undefined") return fallback;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === null) return fallback;
-  return normalizeRows(safeParse(raw));
+  return cache.length ? cache : fallback;
 }
 
 export function writePrePreparoToStore(rows: PrePreparoStoreRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

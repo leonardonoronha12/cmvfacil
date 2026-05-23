@@ -7,16 +7,7 @@ export type DashboardCmvPrefs = {
   targetCmv: string;
 };
 
-const KEY = "cmvfacil.dashboard.cmv_prefs.v1";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: DashboardCmvPrefs = { startDate: "", endDate: "", revenue: "", targetCmv: "" };
 
 function normalize(input: unknown): DashboardCmvPrefs {
   if (!input || typeof input !== "object") return { startDate: "", endDate: "", revenue: "", targetCmv: "" };
@@ -30,13 +21,11 @@ function normalize(input: unknown): DashboardCmvPrefs {
 }
 
 export function readDashboardCmvPrefsFromStore(): DashboardCmvPrefs {
-  if (typeof window === "undefined") return { startDate: "", endDate: "", revenue: "", targetCmv: "" };
-  return normalize(safeParse(window.localStorage.getItem(KEY)));
+  return cache;
 }
 
 export function writeDashboardCmvPrefsToStore(prefs: DashboardCmvPrefs) {
   if (typeof window === "undefined") return;
   const normalized = normalize(prefs);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
 }
-

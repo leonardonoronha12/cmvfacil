@@ -6,6 +6,7 @@ import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase } from "../lib/inventarioSupabase";
+import { buildUserScopedId } from "../lib/userScope";
 import styles from "./inventario.module.css";
 
 function IconBox() {
@@ -388,23 +389,25 @@ export default function InventarioClient() {
       setEditingContagemId(null);
       return;
     }
-    const id = `c-${Date.now()}`;
-    const itens: InventarioItemRow[] = (insumosStore[0] ? insumosStore : []).map((i) => ({
-      id: i.id,
-      item: i.item,
-      unidade: i.medida,
-      estoqueFinal: "",
-    }));
-    const next: InventarioContagem = {
-      id,
-      data,
-      categorias: [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente", itens }],
-    };
-    setContagens((prev) => sortContagensDesc([...prev, next]));
-    setSelectedContagemId(id);
-    setQuery("");
-    setIsNewOpen(false);
-    void upsertInventarioToSupabase(next).catch(() => {});
+    void (async () => {
+      const id = await buildUserScopedId(`c-${Date.now()}`);
+      const itens: InventarioItemRow[] = (insumosStore[0] ? insumosStore : []).map((i) => ({
+        id: i.id,
+        item: i.item,
+        unidade: i.medida,
+        estoqueFinal: "",
+      }));
+      const next: InventarioContagem = {
+        id,
+        data,
+        categorias: [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente", itens }],
+      };
+      setContagens((prev) => sortContagensDesc([...prev, next]));
+      setSelectedContagemId(id);
+      setQuery("");
+      setIsNewOpen(false);
+      void upsertInventarioToSupabase(next).catch(() => {});
+    })();
   }
 
   function updateItemQty(itemId: string, value: string) {

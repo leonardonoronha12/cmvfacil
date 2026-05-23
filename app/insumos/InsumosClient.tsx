@@ -7,6 +7,7 @@ import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
+import { buildUserScopedId } from "../lib/userScope";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -469,8 +470,11 @@ export default function InsumosClient() {
         throw new Error("Formato não suportado. Use .xlsx, .xls ou .csv");
       }
 
-      const imported = parseRowsFromTable(table);
-      if (!imported.length) throw new Error("Nenhum item encontrado na planilha.");
+      const importedRaw = parseRowsFromTable(table);
+      if (!importedRaw.length) throw new Error("Nenhum item encontrado na planilha.");
+      const imported = await Promise.all(
+        importedRaw.map(async (row, idx) => ({ ...row, id: await buildUserScopedId(`${Date.now()}-${idx}`) })),
+      );
       setDataRows(imported);
       setCategories((prev) => {
         const seen = new Set(prev.map((c) => c.toLowerCase()));
@@ -565,19 +569,22 @@ export default function InsumosClient() {
       });
     }
 
-    setDataRows((prev) => [
-      {
-        id: String(prev.length + 1),
-        ocultar: false,
-        item,
-        medida,
-        custoMedio,
-        categoria,
-        especificacao,
-      },
-      ...prev,
-    ]);
-    setIsNewItemOpen(false);
+    void (async () => {
+      const id = await buildUserScopedId(String(Date.now()));
+      setDataRows((prev) => [
+        {
+          id,
+          ocultar: false,
+          item,
+          medida,
+          custoMedio,
+          categoria,
+          especificacao,
+        },
+        ...prev,
+      ]);
+      setIsNewItemOpen(false);
+    })();
   }
 
   function openEditItem(row: InsumoRow) {

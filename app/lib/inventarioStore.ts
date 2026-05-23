@@ -23,17 +23,8 @@ export type InventarioContagem = {
   updated_at?: string;
 };
 
-const KEY = "cmvfacil.inventario.contagens.v1";
 const EVENT = "cmvfacil:inventario:contagens";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: InventarioContagem[] = [];
 
 function normalizeItem(input: unknown): InventarioItemRow | null {
   if (!input || typeof input !== "object") return null;
@@ -87,16 +78,13 @@ function normalizeContagens(input: unknown): InventarioContagem[] {
 }
 
 export function readInventarioFromStore(fallback: InventarioContagem[] = []): InventarioContagem[] {
-  if (typeof window === "undefined") return fallback;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === null) return fallback;
-  return normalizeContagens(safeParse(raw));
+  return cache.length ? cache : fallback;
 }
 
 export function writeInventarioToStore(rows: InventarioContagem[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeContagens(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

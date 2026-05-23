@@ -145,6 +145,38 @@
   width: 100%;
 }
 
+.emptyState {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 36px 0;
+}
+
+.emptyStateCard {
+  width: 100%;
+  max-width: 520px;
+  border: 1px solid #e4e8e7;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.emptyStateTitle {
+  color: #101214;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.emptyStateText {
+  color: #5d6a68;
+  font-size: 11px;
+  line-height: 16px;
+}
+
 .matrixTitle {
   margin: 0;
   color: #101214;

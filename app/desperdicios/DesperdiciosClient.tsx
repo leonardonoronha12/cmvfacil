@@ -15,6 +15,7 @@ import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "..
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { buildUserScopedId } from "../lib/userScope";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -941,12 +942,15 @@ export default function DesperdiciosClient() {
     }
 
     if (!editingId) {
-      const r: DesperdicioRow = { id: String(Date.now()), data, item, quantidade, custo, motivo };
-      setRows((prev) => [r, ...prev]);
-      void upsertDesperdicioToSupabase(r).catch(() => {});
-      setIsFormOpen(false);
-      setQuery("");
-      setMotivoFilter("Motivo");
+      void (async () => {
+        const id = await buildUserScopedId(String(Date.now()));
+        const r: DesperdicioRow = { id, data, item, quantidade, custo, motivo };
+        setRows((prev) => [r, ...prev]);
+        void upsertDesperdicioToSupabase(r).catch(() => {});
+        setIsFormOpen(false);
+        setQuery("");
+        setMotivoFilter("Motivo");
+      })();
       return;
     }
 

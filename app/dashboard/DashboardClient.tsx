@@ -7,10 +7,12 @@ import AppSidebar from "../components/AppSidebar";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosFromSupabase, syncInsumosToSupabase } from "../lib/insumosSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
-import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
+import { readInventarioFromStore, subscribeInventario, type InventarioContagem, writeInventarioToStore } from "../lib/inventarioStore";
+import { loadInventarioFromSupabase } from "../lib/inventarioSupabase";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow, writeEntradasToStore } from "../lib/entradasStore";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
-import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow } from "../lib/desperdiciosStore";
+import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
+import { loadDesperdiciosFromSupabase } from "../lib/desperdiciosSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
@@ -768,14 +770,22 @@ export default function DashboardClient() {
       writeFornecedorProdutosMap(produtosRows);
       writeFornecedorEquivalenciasMap(equivalenciasRows);
 
-      const contagensRows = readInventarioFromStore([]);
+      let contagensRows: InventarioContagem[] = [];
+      try {
+        contagensRows = await loadInventarioFromSupabase();
+      } catch {}
+      writeInventarioToStore(contagensRows);
       let entradasRows: EntradaStoreRow[] = [];
       try {
         const dbEntradas = await loadEntradasFromSupabase();
         if (dbEntradas.length) entradasRows = dbEntradas;
       } catch {}
       writeEntradasToStore(entradasRows);
-      const desperdiciosRows = readDesperdiciosFromStore([]);
+      let desperdiciosRows: DesperdicioRow[] = [];
+      try {
+        desperdiciosRows = await loadDesperdiciosFromSupabase();
+      } catch {}
+      writeDesperdiciosToStore(desperdiciosRows);
       const etiquetasRows = readPrePreparoEtiquetasFromStore([]);
 
       setInsumos(insumosRows);

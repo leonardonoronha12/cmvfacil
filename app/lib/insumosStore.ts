@@ -10,17 +10,8 @@ export type InsumoStoreItem = {
   ocultar?: boolean;
 };
 
-const STORAGE_KEY = "cmvfacil.insumos.v1";
 const EVENT_NAME = "cmvfacil:insumos";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: InsumoStoreItem[] = [];
 
 function normalizeRows(input: unknown): InsumoStoreItem[] {
   if (!Array.isArray(input)) return [];
@@ -49,15 +40,13 @@ function normalizeRows(input: unknown): InsumoStoreItem[] {
 }
 
 export function readInsumosFromStore(): InsumoStoreItem[] {
-  if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  return normalizeRows(safeParse(raw));
+  return cache;
 }
 
 export function writeInsumosToStore(rows: InsumoStoreItem[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: normalized }));
 }
 

@@ -20,17 +20,8 @@ export type EntradaStoreRow = {
   itensNota?: NotaItem[];
 };
 
-const KEY = "cmvfacil.entradas.rows.v1";
 const EVENT = "cmvfacil:entradas:rows";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let cache: EntradaStoreRow[] = [];
 
 function normalizeRow(input: unknown): EntradaStoreRow | null {
   if (!input || typeof input !== "object") return null;
@@ -76,16 +67,13 @@ function normalizeRows(input: unknown): EntradaStoreRow[] {
 }
 
 export function readEntradasFromStore(fallback: EntradaStoreRow[] = []): EntradaStoreRow[] {
-  if (typeof window === "undefined") return fallback;
-  const raw = window.localStorage.getItem(KEY);
-  if (raw === null) return fallback;
-  return normalizeRows(safeParse(raw));
+  return cache.length ? cache : fallback;
 }
 
 export function writeEntradasToStore(rows: EntradaStoreRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
-  window.localStorage.setItem(KEY, JSON.stringify(normalized));
+  cache = normalized;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 
