@@ -7,7 +7,7 @@ import dash from "../dashboard/dashboard.module.css";
 import SystemToast from "../components/SystemToast";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
-import { writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
+import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
 import {
   readFichasTecnicasEtiquetasFromStore,
@@ -17,6 +17,12 @@ import {
 } from "../lib/fichasTecnicasEtiquetasStore";
 import { loadFichasTecnicasEtiquetasFromSupabase, saveFichasTecnicasEtiquetasToSupabase } from "../lib/fichasTecnicasEtiquetasSupabase";
 import styles from "./fichas-tecnicas.module.css";
+
+function isMissingTableError(err: unknown, table: string) {
+  const msg = (err instanceof Error ? err.message : String(err ?? "")).toLowerCase();
+  const t = table.toLowerCase();
+  return msg.includes("could not find the table") && msg.includes(t);
+}
 
 type BcgType = "estrela" | "cavalo" | "quebra-cabeca" | "abacaxi";
 type ThumbType = "burger" | "duplo" | "triplo";
@@ -765,6 +771,9 @@ export default function FichasTecnicasClient() {
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const loadErrorShownRef = useRef(false);
+  const missingTablesShownRef = useRef(false);
+  const [isSupabaseFichasEnabled, setIsSupabaseFichasEnabled] = useState(true);
+  const [isSupabaseEtiquetasEnabled, setIsSupabaseEtiquetasEnabled] = useState(true);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
   const [query, setQuery] = useState("");
@@ -849,7 +858,17 @@ export default function FichasTecnicasClient() {
         const rows = await loadFichasTecnicasFromSupabase();
         setTableRows(rows as unknown as RecipeRow[]);
         writeFichasTecnicasToStore(rows as any);
+        setIsSupabaseFichasEnabled(true);
       } catch (err) {
+        setTableRows(readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
+        if (isMissingTableError(err, "fichas_tecnicas_state")) {
+          setIsSupabaseFichasEnabled(false);
+          if (!missingTablesShownRef.current) {
+            missingTablesShownRef.current = true;
+            showToast("Tabela fichas_tecnicas_state não existe no Supabase. Salvando localmente neste navegador.", "error", 9000);
+          }
+          return;
+        }
         if (!loadErrorShownRef.current) {
           loadErrorShownRef.current = true;
           showToast(err instanceof Error ? err.message : "Não foi possível carregar as fichas técnicas.", "error", 8000);
@@ -864,7 +883,17 @@ export default function FichasTecnicasClient() {
         const rows = await loadFichasTecnicasEtiquetasFromSupabase();
         setEtiquetasRows(rows);
         writeFichasTecnicasEtiquetasToStore(rows);
+        setIsSupabaseEtiquetasEnabled(true);
       } catch (err) {
+        setEtiquetasRows(readFichasTecnicasEtiquetasFromStore([]));
+        if (isMissingTableError(err, "fichas_tecnicas_etiquetas_state")) {
+          setIsSupabaseEtiquetasEnabled(false);
+          if (!missingTablesShownRef.current) {
+            missingTablesShownRef.current = true;
+            showToast("Tabela fichas_tecnicas_etiquetas_state não existe no Supabase. Salvando localmente neste navegador.", "error", 9000);
+          }
+          return;
+        }
         showToast(err instanceof Error ? err.message : "Não foi possível carregar as etiquetas.", "error");
       }
     })();
@@ -873,13 +902,14 @@ export default function FichasTecnicasClient() {
 
   useEffect(() => {
     writeFichasTecnicasEtiquetasToStore(etiquetasRows);
+    if (!isSupabaseEtiquetasEnabled) return;
     if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
       void saveFichasTecnicasEtiquetasToSupabase(etiquetasRows).catch((err) => {
         showToast(err instanceof Error ? err.message : "Não foi possível salvar as etiquetas.", "error");
       });
     }, 700);
-  }, [etiquetasRows]);
+  }, [etiquetasRows, isSupabaseEtiquetasEnabled]);
 
   function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
     setTableRows((prev) => {
@@ -887,6 +917,7 @@ export default function FichasTecnicasClient() {
       writeFichasTecnicasToStore(next);
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = window.setTimeout(() => {
+        if (!isSupabaseFichasEnabled) return;
         void saveFichasTecnicasToSupabase(next as any).catch((err) => {
           if (!saveErrorShownRef.current) {
             saveErrorShownRef.current = true;

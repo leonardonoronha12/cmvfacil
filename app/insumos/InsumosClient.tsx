@@ -1463,6 +1463,8 @@ export default function InsumosClient() {
                       value={newInitialCost}
                       onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                       onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onClick={(e) => e.currentTarget.select()}
                     />
                   </div>
                 </div>
@@ -1554,6 +1556,8 @@ export default function InsumosClient() {
                       value={newInitialCost}
                       onChange={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
                       onBlur={(e) => setNewInitialCost(formatMoneyDraft(e.target.value))}
+                      onFocus={(e) => e.currentTarget.select()}
+                      onClick={(e) => e.currentTarget.select()}
                     />
                   </div>
                 </div>

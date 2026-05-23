@@ -15,6 +15,7 @@ export type FichaTecnicaRow = {
 
 const EVENT = "cmvfacil:fichas_tecnicas:rows";
 let cache: FichaTecnicaRow[] = [];
+const STORAGE_KEY = "cmvfacil:fichas_tecnicas:rows:v1";
 
 function normalizeRow(input: unknown): FichaTecnicaRow | null {
   if (!input || typeof input !== "object") return null;
@@ -53,6 +54,14 @@ function normalizeRows(input: unknown): FichaTecnicaRow[] {
 }
 
 export function readFichasTecnicasFromStore(fallback: FichaTecnicaRow[] = []): FichaTecnicaRow[] {
+  if (typeof window !== "undefined") {
+    try {
+      if (!cache.length) {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) cache = normalizeRows(JSON.parse(raw) as unknown);
+      }
+    } catch {}
+  }
   return cache.length ? cache : fallback;
 }
 
@@ -60,6 +69,9 @@ export function writeFichasTecnicasToStore(rows: FichaTecnicaRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {}
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 
