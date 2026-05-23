@@ -259,13 +259,6 @@ function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
     : `0,${"0".repeat(maxDecimals)}`;
 }
 
-function formatDecimalShiftedDraft(input: string, decimals = 3) {
-  const digits = String(input ?? "").replace(/\D/g, "");
-  const n = digits ? Number.parseInt(digits, 10) : 0;
-  const value = n / Math.pow(10, decimals);
-  return value.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-}
-
 function parseMoneyLabel(value?: string) {
   const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
@@ -2061,16 +2054,15 @@ export default function PrePreparoClient() {
                                 <input
                                   className={ft.detailsYieldInput}
                                   value={yieldDraftQty}
-                                  onChange={(e) => setYieldDraftQty(formatDecimalShiftedDraft(e.target.value, 3))}
-                                  onMouseDown={(e) => {
-                                    const el = e.currentTarget;
-                                    if (document.activeElement !== el) {
-                                      e.preventDefault();
-                                      el.focus();
-                                      el.select();
-                                    }
+                                  onChange={(e) => setYieldDraftQty(formatDecimalDraft(e.target.value, 3))}
+                                  onBlur={(e) => setYieldDraftQty(formatDecimalFixedDraft(e.target.value, 3))}
+                                  onPointerDown={(e) => {
+                                    e.preventDefault();
+                                    e.currentTarget.focus();
+                                    e.currentTarget.select();
                                   }}
                                   onFocus={(e) => e.currentTarget.select()}
+                                  inputMode="numeric"
                                   autoFocus
                                 />
                                 <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => setYieldDraftUnit(e.target.value)}>
@@ -2578,14 +2570,12 @@ export default function PrePreparoClient() {
                     <input
                       className={styles.qtyInput}
                       value={etiquetaQtd}
-                      onChange={(e) => setEtiquetaQtd(formatDecimalShiftedDraft(e.target.value, 3))}
-                      onMouseDown={(e) => {
-                        const el = e.currentTarget;
-                        if (document.activeElement !== el) {
-                          e.preventDefault();
-                          el.focus();
-                          el.select();
-                        }
+                      onChange={(e) => setEtiquetaQtd(formatDecimalDraft(e.target.value, 3))}
+                      onBlur={(e) => setEtiquetaQtd(formatDecimalFixedDraft(e.target.value, 3))}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        e.currentTarget.focus();
+                        e.currentTarget.select();
                       }}
                       onFocus={(e) => e.currentTarget.select()}
                       inputMode="numeric"
@@ -2876,14 +2866,12 @@ export default function PrePreparoClient() {
                           <input
                             className={styles.ingredientQtyInput}
                             value={ingredientQty}
-                            onChange={(e) => setIngredientQty(formatDecimalShiftedDraft(e.target.value, 3))}
-                            onMouseDown={(e) => {
-                              const el = e.currentTarget;
-                              if (document.activeElement !== el) {
-                                e.preventDefault();
-                                el.focus();
-                                el.select();
-                              }
+                            onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
+                            onBlur={(e) => setIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
+                            onPointerDown={(e) => {
+                              e.preventDefault();
+                              e.currentTarget.focus();
+                              e.currentTarget.select();
                             }}
                             onFocus={(e) => e.currentTarget.select()}
                             inputMode="numeric"
@@ -2954,14 +2942,12 @@ export default function PrePreparoClient() {
                         <input
                           className={styles.yieldInput}
                           value={newRecipeYield}
-                          onChange={(e) => setNewRecipeYield(formatDecimalShiftedDraft(e.target.value, 3))}
-                          onMouseDown={(e) => {
-                            const el = e.currentTarget;
-                            if (document.activeElement !== el) {
-                              e.preventDefault();
-                              el.focus();
-                              el.select();
-                            }
+                          onChange={(e) => setNewRecipeYield(formatDecimalDraft(e.target.value, 3))}
+                          onBlur={(e) => setNewRecipeYield(formatDecimalFixedDraft(e.target.value, 3))}
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
                           }}
                           onFocus={(e) => e.currentTarget.select()}
                           inputMode="numeric"
