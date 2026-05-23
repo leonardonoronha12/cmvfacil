@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { SUPABASE_AT_COOKIE } from "../../lib/supabaseAuthCookies";
 import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getUserIdFromRequest } from "../../lib/requestUserId";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -8,25 +8,8 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
-function parseJwtSub(jwt: string) {
-  const parts = jwt.split(".");
-  if (parts.length < 2) return null;
-  const payloadB64 = parts[1] ?? "";
-  if (!payloadB64) return null;
-  const padded = payloadB64.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (payloadB64.length % 4)) % 4);
-  try {
-    const jsonStr = Buffer.from(padded, "base64").toString("utf8");
-    const obj = JSON.parse(jsonStr) as { sub?: string };
-    const sub = String(obj.sub ?? "").trim();
-    return sub || null;
-  } catch {
-    return null;
-  }
-}
-
 function getUserScopedId(req: NextRequest) {
-  const accessToken = (req.cookies.get(SUPABASE_AT_COOKIE)?.value ?? "").trim();
-  const userId = accessToken ? parseJwtSub(accessToken) : null;
+  const { accessToken, userId } = getUserIdFromRequest(req);
   if (!userId) return { accessToken, id: null as string | null };
   return { accessToken, id: `user:${userId}` };
 }

@@ -11,7 +11,8 @@ import {
   writeDesperdicioMotivosToStore,
   type DesperdicioMotivoRow,
 } from "../lib/desperdiciosMotivosStore";
-import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
@@ -540,6 +541,12 @@ export default function DesperdiciosClient() {
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
+    void (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) writeInsumosToStore(dbRows);
+      } catch {}
+    })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
   }, []);
 

@@ -13,6 +13,8 @@ import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow, writeEn
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readDesperdiciosFromStore, subscribeDesperdicios, type DesperdicioRow, writeDesperdiciosToStore } from "../lib/desperdiciosStore";
 import { loadDesperdiciosFromSupabase } from "../lib/desperdiciosSupabase";
+import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow, writePrePreparoToStore } from "../lib/prePreparoStore";
+import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
@@ -523,6 +525,14 @@ function parseBrlToCents(input: string) {
   return neg ? -cents : cents;
 }
 
+function parseUnitFromQtyLabel(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "Und";
+  const matches = raw.match(/[A-Za-zÀ-ÿ]+/g);
+  if (!matches || !matches[0]) return "Und";
+  return matches[matches.length - 1] ?? "Und";
+}
+
 function formatBrlFromCents(cents: number) {
   const v = Math.abs(cents);
   const intPart = Math.floor(v / 100);
@@ -677,6 +687,7 @@ export default function DashboardClient() {
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [desperdicios, setDesperdicios] = useState<DesperdicioRow[]>([]);
+  const [prePreparo, setPrePreparo] = useState<PrePreparoStoreRow[]>([]);
   const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
   const [tableQuery, setTableQuery] = useState("");
   const [tableCategoria, setTableCategoria] = useState("todas");
@@ -787,6 +798,11 @@ export default function DashboardClient() {
         desperdiciosRows = await loadDesperdiciosFromSupabase();
       } catch {}
       writeDesperdiciosToStore(desperdiciosRows);
+      let prePreparoRows: PrePreparoStoreRow[] = [];
+      try {
+        prePreparoRows = await loadPrePreparoFromSupabase();
+      } catch {}
+      writePrePreparoToStore(prePreparoRows);
       let etiquetasRows: PrePreparoEtiquetaRow[] = [];
       try {
         etiquetasRows = await loadPrePreparoEtiquetasFromSupabase();
@@ -797,6 +813,7 @@ export default function DashboardClient() {
       setContagens(contagensRows);
       setEntradas(entradasRows);
       setDesperdicios(desperdiciosRows);
+      setPrePreparo(prePreparoRows);
       setPrePreparoEtiquetas(etiquetasRows);
       setFornecedorInfoMap(infoRows);
       setFornecedorProdutosMap(produtosRows);
@@ -816,6 +833,7 @@ export default function DashboardClient() {
     const unsubInv = subscribeInventario((rows) => setContagens(rows));
     const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));
     const unsubDesp = subscribeDesperdicios((rows) => setDesperdicios(rows));
+    const unsubPrePreparo = subscribePrePreparo((rows) => setPrePreparo(rows));
     const unsubEtiquetas = subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
     const unsubFornecedorInfo = subscribeFornecedorInfo((rows) => setFornecedorInfoMap(rows));
     const unsubFornecedorProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
@@ -826,6 +844,7 @@ export default function DashboardClient() {
       unsubInv();
       unsubEntradas();
       unsubDesp();
+      unsubPrePreparo();
       unsubEtiquetas();
       unsubFornecedorInfo();
       unsubFornecedorProdutos();
@@ -1145,9 +1164,27 @@ export default function DashboardClient() {
     return map;
   }, [editCategories, insumos]);
 
+  const prePreparoAsInsumos = useMemo(() => {
+    return prePreparo.map((r) => {
+      const unit = parseUnitFromQtyLabel(r.rendimento);
+      return {
+        id: `pp:${r.id}`,
+        item: r.receita,
+        medida: unit || "Und",
+        custoMedio: r.custoUnitario,
+        categoria: r.categoria ?? "-",
+        especificacao: "Pré-Preparo",
+        ocultar: false,
+      } as InsumoStoreItem;
+    });
+  }, [prePreparo]);
+
+  const cmvItems = useMemo(() => {
+    return [...insumos, ...prePreparoAsInsumos];
+  }, [insumos, prePreparoAsInsumos]);
+
   const baseRows = useMemo(() => {
-    if (calc?.rows?.length) return calc.rows;
-    return [...insumos.filter((i) => !i.ocultar)]
+    const base = [...cmvItems.filter((i) => !i.ocultar)]
       .sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }))
       .map((i, index) => {
         const unit = i.medida || "Und";
@@ -1166,7 +1203,19 @@ export default function DashboardClient() {
           cmvTone: "green" as const,
         };
       });
-  }, [calc?.rows, insumos]);
+    if (!calc?.rows?.length) return base;
+    const calcMap = new Map(calc.rows.map((r) => [r.insumoId, r] as const));
+    const baseIds = new Set(base.map((r) => r.insumoId));
+    const merged = base.map((r) => {
+      const c = calcMap.get(r.insumoId);
+      if (!c) return r;
+      return { ...r, initial: c.initial, entradas: c.entradas, final: c.final, saidas: c.saidas, custo: c.custo, cmv: c.cmv, cmvTone: c.cmvTone };
+    });
+    const extras = calc.rows.filter((r) => !baseIds.has(r.insumoId));
+    if (!extras.length) return merged;
+    const start = merged.length;
+    return [...merged, ...extras.map((r, idx) => ({ ...r, index: start + idx + 1 }))];
+  }, [calc?.rows, cmvItems]);
 
   const visibleRows = useMemo(() => {
     const base = baseRows;

@@ -23,7 +23,8 @@ import {
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
 import { deleteEntradaFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
-import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
 import styles from "./entradas.module.css";
 
@@ -775,6 +776,12 @@ export default function EntradasClient() {
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
+    void (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) writeInsumosToStore(dbRows);
+      } catch {}
+    })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
   }, []);
 
