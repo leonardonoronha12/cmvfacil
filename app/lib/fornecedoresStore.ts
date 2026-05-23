@@ -19,22 +19,12 @@ export type FornecedorItemEquivalencia = {
 };
 export type FornecedorEquivalenciasMap = Record<string, FornecedorItemEquivalencia[]>;
 
-const INFO_KEY = "cmvfacil.fornecedores.info.v1";
-const PROD_KEY = "cmvfacil.fornecedores.produtos.v1";
-const MAP_KEY = "cmvfacil.fornecedores.mapa.v1";
-
 const INFO_EVENT = "cmvfacil:fornecedores:info";
 const PROD_EVENT = "cmvfacil:fornecedores:produtos";
 const MAP_EVENT = "cmvfacil:fornecedores:mapa";
-
-function safeParse(json: string | null): unknown {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+let infoCache: FornecedorInfoMap = {};
+let prodCache: FornecedorProdutos = {};
+let mapCache: FornecedorEquivalenciasMap = {};
 
 function normName(value: string) {
   return value.trim();
@@ -104,14 +94,13 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
 }
 
 export function readFornecedorInfoMap(): FornecedorInfoMap {
-  if (typeof window === "undefined") return {};
-  return normalizeInfoMap(safeParse(window.localStorage.getItem(INFO_KEY)));
+  return infoCache;
 }
 
 export function writeFornecedorInfoMap(map: FornecedorInfoMap) {
   if (typeof window === "undefined") return;
   const normalized = normalizeInfoMap(map);
-  window.localStorage.setItem(INFO_KEY, JSON.stringify(normalized));
+  infoCache = normalized;
   window.dispatchEvent(new CustomEvent(INFO_EVENT, { detail: normalized }));
 }
 
@@ -126,14 +115,13 @@ export function subscribeFornecedorInfo(listener: (map: FornecedorInfoMap) => vo
 }
 
 export function readFornecedorProdutosMap(): FornecedorProdutos {
-  if (typeof window === "undefined") return {};
-  return normalizeProdutosMap(safeParse(window.localStorage.getItem(PROD_KEY)));
+  return prodCache;
 }
 
 export function writeFornecedorProdutosMap(map: FornecedorProdutos) {
   if (typeof window === "undefined") return;
   const normalized = normalizeProdutosMap(map);
-  window.localStorage.setItem(PROD_KEY, JSON.stringify(normalized));
+  prodCache = normalized;
   window.dispatchEvent(new CustomEvent(PROD_EVENT, { detail: normalized }));
 }
 
@@ -148,14 +136,13 @@ export function subscribeFornecedorProdutos(listener: (map: FornecedorProdutos) 
 }
 
 export function readFornecedorEquivalenciasMap(): FornecedorEquivalenciasMap {
-  if (typeof window === "undefined") return {};
-  return normalizeEquivalenciasMap(safeParse(window.localStorage.getItem(MAP_KEY)));
+  return mapCache;
 }
 
 export function writeFornecedorEquivalenciasMap(map: FornecedorEquivalenciasMap) {
   if (typeof window === "undefined") return;
   const normalized = normalizeEquivalenciasMap(map);
-  window.localStorage.setItem(MAP_KEY, JSON.stringify(normalized));
+  mapCache = normalized;
   window.dispatchEvent(new CustomEvent(MAP_EVENT, { detail: normalized }));
 }
 
