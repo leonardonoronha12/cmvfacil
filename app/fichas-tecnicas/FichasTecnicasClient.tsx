@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import styles from "./fichas-tecnicas.module.css";
 
 type BcgType = "estrela" | "cavalo" | "quebra-cabeca" | "abacaxi";
@@ -56,43 +57,6 @@ type EditRecipeDraft = {
 };
 
 type FichaTableColumn = "receita" | "precoVenda" | "custoUnitario" | "cmvMeta" | "cmvAtual" | "bcg";
-
-const allRows: RecipeRow[] = [
-  { id: "1", receita: "Chicken Gold", precoVenda: "R$25,90", custoUnitario: "R$6,62", cmvMeta: "30 %", cmvAtual: "25,6%", cmvDelta: "4,4% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "2", receita: "Chicken Gold Duplo", precoVenda: "R$31,89", precoVendaSub: "R$31,98", custoUnitario: "R$9,59", cmvMeta: "30 %", cmvAtual: "30,1%", cmvDelta: "0,1% Maior", bcg: "abacaxi", thumb: "duplo" },
-  { id: "3", receita: "Chicken Gold Triplo", precoVenda: "R$35,89", precoVendaSub: "R$35,74", custoUnitario: "R$12,52", cmvMeta: "30 %", cmvAtual: "34,9%", cmvDelta: "4,9% Maior", bcg: "abacaxi", thumb: "triplo" },
-  { id: "4", receita: "Gold Bacon", precoVenda: "R$28,90", custoUnitario: "R$5,42", cmvMeta: "30 %", cmvAtual: "18,8%", cmvDelta: "11,2% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "5", receita: "Gold Bacon Duplo", precoVenda: "R$35,89", custoUnitario: "R$10,60", cmvMeta: "30 %", cmvAtual: "29,5%", cmvDelta: "0,5% Menor", bcg: "estrela", thumb: "duplo" },
-  { id: "6", receita: "Gold Bacon Triplo", precoVenda: "R$39,89", custoUnitario: "R$10,60", cmvMeta: "30 %", cmvAtual: "26,6%", cmvDelta: "3,4% Menor", bcg: "estrela", thumb: "triplo" },
-  { id: "7", receita: "Gold Burger", precoVenda: "R$21,90", custoUnitario: "R$4,72", cmvMeta: "25 %", cmvAtual: "21,5%", cmvDelta: "3,5% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "8", receita: "Gold Burger Duplo", precoVenda: "R$27,89", custoUnitario: "R$7,54", cmvMeta: "30 %", cmvAtual: "27,0%", cmvDelta: "3,0% Menor", bcg: "quebra-cabeca", thumb: "duplo" },
-  { id: "9", receita: "Gold Burger Triplo", precoVenda: "R$31,89", precoVendaSub: "R$33,97", custoUnitario: "R$10,19", cmvMeta: "30 %", cmvAtual: "32,0%", cmvDelta: "2,0% Maior", bcg: "abacaxi", thumb: "triplo" },
-  { id: "10", receita: "Gold Cheddar Melt", precoVenda: "R$27,90", custoUnitario: "R$8,21", cmvMeta: "30 %", cmvAtual: "22,3%", cmvDelta: "7,7% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "11", receita: "Gold Cheddar Melt Duplo", precoVenda: "R$33,89", custoUnitario: "R$8,20", cmvMeta: "30 %", cmvAtual: "24,2%", cmvDelta: "5,8% Menor", bcg: "estrela", thumb: "duplo" },
-  { id: "12", receita: "Gold Cheddar Melt Triplo", precoVenda: "R$37,89", custoUnitario: "R$10,77", cmvMeta: "30 %", cmvAtual: "28,4%", cmvDelta: "1,6% Menor", bcg: "quebra-cabeca", thumb: "triplo" },
-  { id: "13", receita: "Abacaxi Supreme", precoVenda: "R$29,90", custoUnitario: "R$10,42", cmvMeta: "30 %", cmvAtual: "34,8%", cmvDelta: "4,8% Maior", bcg: "abacaxi", thumb: "burger" },
-  { id: "14", receita: "Abacaxi Supreme Duplo", precoVenda: "R$34,90", custoUnitario: "R$11,80", cmvMeta: "30 %", cmvAtual: "33,8%", cmvDelta: "3,8% Maior", bcg: "abacaxi", thumb: "duplo" },
-  { id: "15", receita: "Abacaxi Supreme Triplo", precoVenda: "R$39,90", custoUnitario: "R$13,94", cmvMeta: "30 %", cmvAtual: "34,9%", cmvDelta: "4,9% Maior", bcg: "abacaxi", thumb: "triplo" },
-  { id: "16", receita: "Abacaxi Bacon", precoVenda: "R$31,90", custoUnitario: "R$10,95", cmvMeta: "30 %", cmvAtual: "34,3%", cmvDelta: "4,3% Maior", bcg: "abacaxi", thumb: "burger" },
-  { id: "17", receita: "Abacaxi Melt", precoVenda: "R$32,90", custoUnitario: "R$11,15", cmvMeta: "30 %", cmvAtual: "33,9%", cmvDelta: "3,9% Maior", bcg: "abacaxi", thumb: "burger" },
-  { id: "18", receita: "Cavalo Especial", precoVenda: "R$30,90", custoUnitario: "R$9,54", cmvMeta: "30 %", cmvAtual: "30,8%", cmvDelta: "0,8% Maior", bcg: "cavalo", thumb: "burger" },
-  { id: "19", receita: "Smash Gold", precoVenda: "R$24,90", custoUnitario: "R$6,10", cmvMeta: "30 %", cmvAtual: "24,5%", cmvDelta: "5,5% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "20", receita: "Smash Bacon", precoVenda: "R$27,90", custoUnitario: "R$7,38", cmvMeta: "30 %", cmvAtual: "26,4%", cmvDelta: "3,6% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "21", receita: "Smash Melt", precoVenda: "R$29,90", custoUnitario: "R$8,05", cmvMeta: "30 %", cmvAtual: "26,9%", cmvDelta: "3,1% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "22", receita: "Veggie Gold", precoVenda: "R$26,90", custoUnitario: "R$7,00", cmvMeta: "30 %", cmvAtual: "26,0%", cmvDelta: "4,0% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "23", receita: "Veggie Gold Duplo", precoVenda: "R$31,90", custoUnitario: "R$8,63", cmvMeta: "30 %", cmvAtual: "27,1%", cmvDelta: "2,9% Menor", bcg: "estrela", thumb: "duplo" },
-  { id: "24", receita: "Veggie Gold Triplo", precoVenda: "R$36,90", custoUnitario: "R$9,81", cmvMeta: "30 %", cmvAtual: "26,6%", cmvDelta: "3,4% Menor", bcg: "estrela", thumb: "triplo" },
-  { id: "25", receita: "Barbecue Gold", precoVenda: "R$28,90", custoUnitario: "R$8,02", cmvMeta: "30 %", cmvAtual: "27,7%", cmvDelta: "2,3% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "26", receita: "Barbecue Bacon", precoVenda: "R$31,90", custoUnitario: "R$9,04", cmvMeta: "30 %", cmvAtual: "28,3%", cmvDelta: "1,7% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "27", receita: "Barbecue Duplo", precoVenda: "R$36,90", custoUnitario: "R$10,62", cmvMeta: "30 %", cmvAtual: "28,8%", cmvDelta: "1,2% Menor", bcg: "quebra-cabeca", thumb: "duplo" },
-  { id: "28", receita: "Barbecue Triplo", precoVenda: "R$41,90", custoUnitario: "R$12,70", cmvMeta: "30 %", cmvAtual: "30,3%", cmvDelta: "0,3% Maior", bcg: "quebra-cabeca", thumb: "triplo" },
-  { id: "29", receita: "Cheese Onion", precoVenda: "R$28,90", custoUnitario: "R$8,26", cmvMeta: "30 %", cmvAtual: "28,6%", cmvDelta: "1,4% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "30", receita: "Cheese Onion Duplo", precoVenda: "R$33,90", custoUnitario: "R$9,58", cmvMeta: "30 %", cmvAtual: "28,2%", cmvDelta: "1,8% Menor", bcg: "quebra-cabeca", thumb: "duplo" },
-  { id: "31", receita: "Cheese Onion Triplo", precoVenda: "R$38,90", custoUnitario: "R$11,90", cmvMeta: "30 %", cmvAtual: "30,6%", cmvDelta: "0,6% Maior", bcg: "quebra-cabeca", thumb: "triplo" },
-  { id: "32", receita: "Crispy Gold", precoVenda: "R$27,90", custoUnitario: "R$7,12", cmvMeta: "30 %", cmvAtual: "25,5%", cmvDelta: "4,5% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "33", receita: "Crispy Bacon", precoVenda: "R$30,90", custoUnitario: "R$8,80", cmvMeta: "30 %", cmvAtual: "28,4%", cmvDelta: "1,6% Menor", bcg: "estrela", thumb: "burger" },
-  { id: "34", receita: "Crispy Melt", precoVenda: "R$32,90", custoUnitario: "R$9,62", cmvMeta: "30 %", cmvAtual: "29,2%", cmvDelta: "0,8% Menor", bcg: "quebra-cabeca", thumb: "burger" },
-];
 
 const bcgInfo: Array<{
   key: BcgType;
@@ -769,7 +733,7 @@ function badgeClass(type: BcgType) {
 export default function FichasTecnicasClient() {
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
-  const [tableRows, setTableRows] = useState<RecipeRow[]>(allRows);
+  const [tableRows, setTableRows] = useState<RecipeRow[]>(() => readFichasTecnicasFromStore([]));
   const [query, setQuery] = useState("");
   const [quadrante, setQuadrante] = useState("Quadrante");
   const [columnOrder, setColumnOrder] = useState<FichaTableColumn[]>([
@@ -815,6 +779,25 @@ export default function FichasTecnicasClient() {
     setInsumos(readInsumosFromStore());
     return subscribeInsumos(setInsumos);
   }, []);
+
+  function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
+    setTableRows((prev) => {
+      const next = updater(prev);
+      writeFichasTecnicasToStore(next);
+      return next;
+    });
+  }
+
+  function formatPercent1(value: number) {
+    return value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  }
+
+  function buildCmvDeltaLabel(cmvAtual: number, cmvMeta: number) {
+    const diff = cmvAtual - cmvMeta;
+    const abs = Math.abs(diff);
+    const suffix = diff > 0 ? "Maior" : diff < 0 ? "Menor" : "Igual";
+    return `${formatPercent1(abs)}% ${suffix}`;
+  }
 
   useEffect(() => {
     if (!detailsRecipe) {
@@ -1111,6 +1094,27 @@ export default function FichasTecnicasClient() {
 
   function openSavedRecipeDetails() {
     const metrics = calcRecipeMetrics(ingredientsTotal, recipeYieldValue, priceValue, cmvMetaValue);
+    const id = String(Date.now());
+    const bcg: BcgType = popularidade === "alta" ? "estrela" : "abacaxi";
+    const cmvAtualLabel = `${formatPercent1(metrics.cmvAtual)}%`;
+    const cmvMetaLabel = `${cmvMetaValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
+    const custoUnitarioLabel = formatMoney(metrics.custoPorPorcao);
+    const precoSugeridoLabel = metrics.precoSugerido > 0 ? formatMoney(metrics.precoSugerido) : undefined;
+    setAndPersistTableRows((prev) => [
+      {
+        id,
+        receita: recipeName.trim() || "Sem nome",
+        precoVenda: formatMoney(priceValue),
+        precoVendaSub: precoSugeridoLabel,
+        custoUnitario: custoUnitarioLabel,
+        cmvMeta: cmvMetaLabel,
+        cmvAtual: cmvAtualLabel,
+        cmvDelta: buildCmvDeltaLabel(metrics.cmvAtual, cmvMetaValue),
+        bcg,
+        thumb: "burger",
+      },
+      ...prev,
+    ]);
     setDetailsRecipe({
       recipeName: recipeName.trim() || "Sem nome",
       recipeImage,
@@ -1303,7 +1307,7 @@ export default function FichasTecnicasClient() {
   }
 
   function removeTableRow(rowId: string) {
-    setTableRows((prev) => prev.filter((row) => row.id !== rowId));
+    setAndPersistTableRows((prev) => prev.filter((row) => row.id !== rowId));
     setActionMenuRowId(null);
   }
 
@@ -1314,7 +1318,7 @@ export default function FichasTecnicasClient() {
     const bcgFromPopularity: BcgType = editDraft.popularidade === "Alta" ? "estrela" : "abacaxi";
     const precoSugeridoValue = cmvMetaValue > 0 ? editDraft.custoUnitario / (cmvMetaValue / 100) : 0;
 
-    setTableRows((prev) =>
+    setAndPersistTableRows((prev) =>
       prev.map((row) =>
         row.id === editDraft.rowId
           ? {
