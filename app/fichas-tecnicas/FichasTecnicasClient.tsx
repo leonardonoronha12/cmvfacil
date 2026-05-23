@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import SystemToast from "../components/SystemToast";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
@@ -774,6 +775,7 @@ export default function FichasTecnicasClient() {
   const missingTablesShownRef = useRef(false);
   const [isSupabaseFichasEnabled, setIsSupabaseFichasEnabled] = useState(true);
   const [isSupabaseEtiquetasEnabled, setIsSupabaseEtiquetasEnabled] = useState(true);
+  const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
   const [query, setQuery] = useState("");
@@ -873,6 +875,8 @@ export default function FichasTecnicasClient() {
           loadErrorShownRef.current = true;
           showToast(err instanceof Error ? err.message : "Não foi possível carregar as fichas técnicas.", "error", 8000);
         }
+      } finally {
+        setIsLoadingTable(false);
       }
     })();
   }, []);
@@ -2116,7 +2120,12 @@ export default function FichasTecnicasClient() {
                 </div>
               </section>
 
-              <section className={styles.tableCard}>
+              <section className={styles.tableCard} style={{ position: "relative" }}>
+                {isLoadingTable ? (
+                  <div className={dash.loadingOverlay}>
+                    <LoadingSpinner />
+                  </div>
+                ) : null}
                 <div className={styles.tableHeader} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
                   {columnOrder.map((column) => {
                     const label =
