@@ -574,6 +574,10 @@ export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
+  const prePreparoSaveErrorShownRef = useRef(false);
+  const etiquetasSaveErrorShownRef = useRef(false);
+  const prePreparoLoadErrorShownRef = useRef(false);
+  const etiquetasLoadErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
@@ -607,6 +611,22 @@ export default function PrePreparoClient() {
       setToast(null);
       toastTimerRef.current = null;
     }, durationMs);
+  }
+
+  function supabaseSaveErrorMessage(err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+    if (!msg) return "Não foi possível salvar no Supabase.";
+    if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+    if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
+    return `Não foi possível salvar no Supabase (${msg}).`;
+  }
+
+  function supabaseLoadErrorMessage(err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+    if (!msg) return "Não foi possível carregar do Supabase.";
+    if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+    if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
+    return `Não foi possível carregar do Supabase (${msg}).`;
   }
 
   const [isNewRecipeOpen, setIsNewRecipeOpen] = useState(false);
@@ -694,9 +714,12 @@ export default function PrePreparoClient() {
         const dbRows = await loadPrePreparoFromSupabase();
         setRows(dbRows as any);
         writePrePreparoToStore(dbRows as any);
-      } catch {
-        setRows([]);
-        writePrePreparoToStore([] as any);
+        prePreparoLoadErrorShownRef.current = false;
+      } catch (err) {
+        if (!prePreparoLoadErrorShownRef.current) {
+          prePreparoLoadErrorShownRef.current = true;
+          showToast(supabaseLoadErrorMessage(err), "error");
+        }
       }
     })();
   }, []);
@@ -707,9 +730,12 @@ export default function PrePreparoClient() {
         const dbRows = await loadPrePreparoEtiquetasFromSupabase();
         setEtiquetasRows(dbRows);
         writePrePreparoEtiquetasToStore(dbRows);
-      } catch {
-        setEtiquetasRows([]);
-        writePrePreparoEtiquetasToStore([]);
+        etiquetasLoadErrorShownRef.current = false;
+      } catch (err) {
+        if (!etiquetasLoadErrorShownRef.current) {
+          etiquetasLoadErrorShownRef.current = true;
+          showToast(supabaseLoadErrorMessage(err), "error");
+        }
       }
     })();
   }, []);
@@ -718,7 +744,22 @@ export default function PrePreparoClient() {
     writePrePreparoToStore(rows as any);
     if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
     savePrePreparoTimeoutRef.current = window.setTimeout(() => {
-      void savePrePreparoToSupabase(rows as any).catch(() => {});
+      void savePrePreparoToSupabase(rows as any)
+        .then(() => {
+          prePreparoSaveErrorShownRef.current = false;
+        })
+        .catch(async () => {
+          try {
+            await new Promise((r) => window.setTimeout(r, 700));
+            await savePrePreparoToSupabase(rows as any);
+            prePreparoSaveErrorShownRef.current = false;
+          } catch (err2) {
+            if (!prePreparoSaveErrorShownRef.current) {
+              prePreparoSaveErrorShownRef.current = true;
+              showToast(supabaseSaveErrorMessage(err2), "error");
+            }
+          }
+        });
     }, 700);
   }, [rows]);
 
@@ -726,7 +767,22 @@ export default function PrePreparoClient() {
     writePrePreparoEtiquetasToStore(etiquetasRows);
     if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
-      void savePrePreparoEtiquetasToSupabase(etiquetasRows).catch(() => {});
+      void savePrePreparoEtiquetasToSupabase(etiquetasRows)
+        .then(() => {
+          etiquetasSaveErrorShownRef.current = false;
+        })
+        .catch(async () => {
+          try {
+            await new Promise((r) => window.setTimeout(r, 700));
+            await savePrePreparoEtiquetasToSupabase(etiquetasRows);
+            etiquetasSaveErrorShownRef.current = false;
+          } catch (err2) {
+            if (!etiquetasSaveErrorShownRef.current) {
+              etiquetasSaveErrorShownRef.current = true;
+              showToast(supabaseSaveErrorMessage(err2), "error");
+            }
+          }
+        });
     }, 700);
   }, [etiquetasRows]);
 
@@ -2519,7 +2575,21 @@ export default function PrePreparoClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Qtd. Produzida</div>
                   <div className={styles.qtyWrap}>
-                    <input className={styles.qtyInput} value={etiquetaQtd} onChange={(e) => setEtiquetaQtd(e.target.value)} />
+                    <input
+                      className={styles.qtyInput}
+                      value={etiquetaQtd}
+                      onChange={(e) => setEtiquetaQtd(formatDecimalShiftedDraft(e.target.value, 3))}
+                      onMouseDown={(e) => {
+                        const el = e.currentTarget;
+                        if (document.activeElement !== el) {
+                          e.preventDefault();
+                          el.focus();
+                          el.select();
+                        }
+                      }}
+                      onFocus={(e) => e.currentTarget.select()}
+                      inputMode="numeric"
+                    />
                     <div className={styles.qtyUnit}>{etiquetaUnidade}</div>
                   </div>
                 </div>
@@ -2803,7 +2873,21 @@ export default function PrePreparoClient() {
                         </div>
 
                         <div className={styles.ingredientQtyWrap}>
-                          <input className={styles.ingredientQtyInput} value={ingredientQty} onChange={(e) => setIngredientQty(e.target.value)} />
+                          <input
+                            className={styles.ingredientQtyInput}
+                            value={ingredientQty}
+                            onChange={(e) => setIngredientQty(formatDecimalShiftedDraft(e.target.value, 3))}
+                            onMouseDown={(e) => {
+                              const el = e.currentTarget;
+                              if (document.activeElement !== el) {
+                                e.preventDefault();
+                                el.focus();
+                                el.select();
+                              }
+                            }}
+                            onFocus={(e) => e.currentTarget.select()}
+                            inputMode="numeric"
+                          />
                           <div className={styles.ingredientQtyUnit}>{ingredientUnit}</div>
                         </div>
 
