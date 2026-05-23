@@ -9,7 +9,7 @@ import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
-import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
+import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
@@ -642,6 +642,10 @@ export default function PrePreparoClient() {
   const [newRecipeYield, setNewRecipeYield] = useState("0,000");
   const [newRecipeYieldUnit, setNewRecipeYieldUnit] = useState("Kg");
 
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+  const [addCategoryTarget, setAddCategoryTarget] = useState<"new" | "edit">("new");
+  const [addCategoryDraft, setAddCategoryDraft] = useState("");
+
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState("");
@@ -678,6 +682,39 @@ export default function PrePreparoClient() {
   useEffect(() => {
     if (newRecipeValidityUnit !== "Dia(s)") setNewRecipeValidityUnit("Dia(s)");
   }, [newRecipeValidityUnit]);
+
+  function openAddCategory(target: "new" | "edit") {
+    setAddCategoryTarget(target);
+    setAddCategoryDraft("");
+    setIsAddCategoryOpen(true);
+  }
+
+  async function confirmAddCategory() {
+    const name = toTitleCase(normalizeCategoryName(addCategoryDraft.trim()));
+    if (!name || name === "-") return;
+
+    const next = (() => {
+      const seen = new Set(insumoCategorias.map((c) => c.toLowerCase()));
+      if (seen.has(name.toLowerCase())) return insumoCategorias;
+      return [...insumoCategorias, name];
+    })();
+
+    setInsumoCategorias(next);
+    writeInsumoCategoriasToStore(next);
+    setIsAddCategoryOpen(false);
+
+    if (addCategoryTarget === "new") setNewRecipeCategory(name);
+    else setDraftCategory(name);
+
+    try {
+      const latest = await loadInsumosStateFromSupabase().catch(() => null);
+      const rows = latest?.rows?.length ? latest.rows : readInsumosFromStore();
+      await saveInsumosStateToSupabase({ rows, categories: next });
+      showToast("Categoria adicionada!", "success");
+    } catch (err) {
+      showToast(supabaseSaveErrorMessage(err), "error");
+    }
+  }
 
   useEffect(() => {
     setIsMounted(true);
@@ -2439,7 +2476,12 @@ export default function PrePreparoClient() {
                 </div>
 
                 <div className={styles.formField}>
-                  <div className={styles.formLabel}>Categoria</div>
+                  <div className={styles.formLabelRow}>
+                    <div className={styles.formLabel}>Categoria</div>
+                    <button type="button" className={styles.addCategoryBtn} onClick={() => openAddCategory("edit")}>
+                      Add categoria
+                    </button>
+                  </div>
                   <select className={styles.formSelect} value={draftCategory} onChange={(e) => setDraftCategory(e.target.value)}>
                     {!recipeCategories.length ? (
                       <option value="">Sem categorias</option>
@@ -2777,7 +2819,12 @@ export default function PrePreparoClient() {
 
                     <div className={styles.grid2}>
                       <div className={styles.formField}>
-                        <div className={styles.formLabel}>Categoria</div>
+                        <div className={styles.formLabelRow}>
+                          <div className={styles.formLabel}>Categoria</div>
+                          <button type="button" className={styles.addCategoryBtn} onClick={() => openAddCategory("new")}>
+                            Add categoria
+                          </button>
+                        </div>
                         <select className={styles.formSelect} value={newRecipeCategory} onChange={(e) => setNewRecipeCategory(e.target.value)}>
                           <option value="">Selecione</option>
                           {recipeCategories.map((c) => (
@@ -3062,6 +3109,36 @@ export default function PrePreparoClient() {
                   }}
                 >
                   {newRecipeStep === 3 ? "Salvar" : "Próximo"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isAddCategoryOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddCategoryOpen(false)}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Adicionar categoria</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsAddCategoryOpen(false)}>
+                  ×
+                </button>
+              </div>
+              <div className={styles.modalBody}>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Nome da categoria</div>
+                  <input
+                    className={styles.formInput}
+                    placeholder="Ex: Proteínas"
+                    value={addCategoryDraft}
+                    onChange={(e) => setAddCategoryDraft(e.target.value)}
+                    autoFocus
+                  />
+                </div>
+              </div>
+              <div className={styles.modalFooter}>
+                <button type="button" className={styles.saveBtn} onClick={() => void confirmAddCategory()} disabled={!addCategoryDraft.trim()}>
+                  Adicionar
                 </button>
               </div>
             </div>
