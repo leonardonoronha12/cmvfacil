@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
@@ -572,7 +573,7 @@ export default function PrePreparoClient() {
   const prePreparoLoadErrorShownRef = useRef(false);
   const etiquetasLoadErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>([]);
@@ -598,7 +599,7 @@ export default function PrePreparoClient() {
   const [etiquetasRows, setEtiquetasRows] = useState(() => readPrePreparoEtiquetasFromStore([]));
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ message, type });
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -1838,9 +1839,7 @@ export default function PrePreparoClient() {
       <AppSidebar active="pre-preparo" />
       {isMounted && toast
         ? createPortal(
-            <div className={styles.toastWrap} aria-live="polite">
-              <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-            </div>,
+            <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
             document.body
           )
         : null}

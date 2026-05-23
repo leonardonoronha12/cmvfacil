@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
@@ -270,7 +271,7 @@ export default function InsumosClient() {
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const categoriesReadyRef = useRef(false);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -284,7 +285,7 @@ export default function InsumosClient() {
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ message, type });
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -972,11 +973,7 @@ export default function InsumosClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="insumos" />
-      {toast ? (
-        <div className={styles.toastWrap} role="alert" aria-live="assertive">
-          <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-        </div>
-      ) : null}
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={dash.content}>
         <section className={styles.header}>

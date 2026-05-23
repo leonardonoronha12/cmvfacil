@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -18,7 +19,8 @@ import {
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
-import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./fornecedores.module.css";
 
 type FornecedorRow = {
@@ -247,7 +249,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 
 export default function FornecedoresClient() {
   const toastTimerRef = useRef<number | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [rows, setRows] = useState<FornecedorRow[]>([]);
   const [query, setQuery] = useState("");
 
@@ -301,7 +303,7 @@ export default function FornecedoresClient() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ message, type });
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -445,6 +447,12 @@ export default function FornecedoresClient() {
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
+    void (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) writeInsumosToStore(dbRows);
+      } catch {}
+    })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
   }, []);
 
@@ -1356,11 +1364,7 @@ export default function FornecedoresClient() {
           </div>
         ) : null}
 
-        {toast ? (
-          <div className={styles.toastWrap} role="status" aria-live="polite">
-            <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-          </div>
-        ) : null}
+        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       </main>
     </div>
   );

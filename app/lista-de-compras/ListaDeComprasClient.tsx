@@ -21,7 +21,8 @@ import {
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
-import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./lista-de-compras.module.css";
 
 type CompraRow = {
@@ -325,6 +326,12 @@ export default function ListaDeComprasClient() {
     setInsumos(readInsumosFromStore());
     setEntradas(readEntradasFromStore([]));
     setContagens(readInventarioFromStore([]));
+    void (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) writeInsumosToStore(dbRows);
+      } catch {}
+    })();
     (async () => {
       let nextInfo: FornecedorInfoMap = {};
       let nextProdutos: FornecedorProdutos = {};

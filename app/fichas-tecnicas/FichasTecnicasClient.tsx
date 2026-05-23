@@ -4,7 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
-import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem } from "../lib/insumosStore";
+import SystemToast from "../components/SystemToast";
+import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
 import {
@@ -761,7 +763,7 @@ export default function FichasTecnicasClient() {
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
   const [query, setQuery] = useState("");
   const [quadrante, setQuadrante] = useState("Quadrante");
@@ -812,7 +814,7 @@ export default function FichasTecnicasClient() {
   const [deleteRow, setDeleteRow] = useState<RecipeRow | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ message, type });
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -830,6 +832,12 @@ export default function FichasTecnicasClient() {
 
   useEffect(() => {
     setInsumos(readInsumosFromStore());
+    void (async () => {
+      try {
+        const dbRows = await loadInsumosFromSupabase();
+        if (dbRows.length) writeInsumosToStore(dbRows);
+      } catch {}
+    })();
     return subscribeInsumos(setInsumos);
   }, []);
 
@@ -1583,11 +1591,7 @@ export default function FichasTecnicasClient() {
     <>
       <div className={dash.dashboard}>
         <AppSidebar active="fichas-tecnicas" />
-        {toast ? (
-          <div className={styles.toastWrap} role="alert" aria-live="assertive">
-            <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-          </div>
-        ) : null}
+        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
         <main className={dash.content}>
           <div className={styles.pageFrameWide}>
           {detailsRecipe ? (

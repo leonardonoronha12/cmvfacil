@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -387,7 +388,7 @@ export default function EntradasClient() {
   const [rows, setRows] = useState<EntradaRow[]>([]);
   const rowsReadyRef = useRef(false);
   const [customFornecedores, setCustomFornecedores] = useState<string[]>([]);
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -438,7 +439,7 @@ export default function EntradasClient() {
   const [isMounted, setIsMounted] = useState(false);
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
-    setToast({ message, type });
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -1198,9 +1199,7 @@ export default function EntradasClient() {
       <AppSidebar active="entradas" />
       {isMounted && toast
         ? createPortal(
-            <div className={styles.toastWrap} aria-live="polite">
-              <div className={`${styles.toast} ${toast.type === "success" ? styles.toastSuccess : styles.toastError}`}>{toast.message}</div>
-            </div>,
+            <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
             document.body,
           )
         : null}
