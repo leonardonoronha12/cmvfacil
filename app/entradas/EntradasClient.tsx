@@ -432,6 +432,8 @@ export default function EntradasClient() {
   const [fornecedorProdutosPick, setFornecedorProdutosPick] = useState("");
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
+  const fornecedoresLoadErrorShownRef = useRef(false);
+  const fornecedoresSaveErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
@@ -810,7 +812,12 @@ export default function EntradasClient() {
           nextProdutos = db.produtos;
           nextEq = db.equivalencias;
         }
-      } catch {}
+      } catch {
+        if (!fornecedoresLoadErrorShownRef.current) {
+          fornecedoresLoadErrorShownRef.current = true;
+          window.alert("Não foi possível carregar fornecedores do Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+        }
+      }
 
       writeFornecedorInfoMap(nextInfo);
       writeFornecedorProdutosMap(nextProdutos);
@@ -819,7 +826,6 @@ export default function EntradasClient() {
       setFornecedorProdutosMap(nextProdutos);
       setFornecedorItemMap(nextEq);
       fornecedoresReadyRef.current = true;
-      void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => {});
     })();
 
     const u1 = subscribeFornecedorInfo((m) => setFornecedorInfoMap(m));
@@ -836,7 +842,11 @@ export default function EntradasClient() {
     if (!fornecedoresReadyRef.current) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {});
+      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
+        if (fornecedoresSaveErrorShownRef.current) return;
+        fornecedoresSaveErrorShownRef.current = true;
+        window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+      });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap]);
 
