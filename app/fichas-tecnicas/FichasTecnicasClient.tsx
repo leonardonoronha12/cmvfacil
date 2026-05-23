@@ -763,6 +763,8 @@ export default function FichasTecnicasClient() {
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
+  const saveErrorShownRef = useRef(false);
+  const loadErrorShownRef = useRef(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
   const [query, setQuery] = useState("");
@@ -847,7 +849,12 @@ export default function FichasTecnicasClient() {
         const rows = await loadFichasTecnicasFromSupabase();
         setTableRows(rows as unknown as RecipeRow[]);
         writeFichasTecnicasToStore(rows as any);
-      } catch {}
+      } catch (err) {
+        if (!loadErrorShownRef.current) {
+          loadErrorShownRef.current = true;
+          showToast(err instanceof Error ? err.message : "Não foi possível carregar as fichas técnicas.", "error", 8000);
+        }
+      }
     })();
   }, []);
 
@@ -880,7 +887,12 @@ export default function FichasTecnicasClient() {
       writeFichasTecnicasToStore(next);
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = window.setTimeout(() => {
-        void saveFichasTecnicasToSupabase(next as any).catch(() => {});
+        void saveFichasTecnicasToSupabase(next as any).catch((err) => {
+          if (!saveErrorShownRef.current) {
+            saveErrorShownRef.current = true;
+            showToast(err instanceof Error ? err.message : "Não foi possível salvar as fichas técnicas.", "error", 8000);
+          }
+        });
       }, 600);
       return next;
     });

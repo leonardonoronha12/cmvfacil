@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import { loadDesperdiciosFromSupabase, deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
 import { readDesperdiciosFromStore, writeDesperdiciosToStore, type DesperdicioRow } from "../lib/desperdiciosStore";
 import {
@@ -122,6 +123,15 @@ function formatDateNumericPT(d: Date) {
   const month = String(d.getMonth() + 1).padStart(2, "0");
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+}
+
+function supabaseErrorMessage(err: unknown, action: "salvar" | "carregar" | "excluir") {
+  const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+  const base = action === "carregar" ? "Não foi possível carregar do Supabase." : action === "excluir" ? "Não foi possível excluir no Supabase." : "Não foi possível salvar no Supabase.";
+  if (!msg) return base;
+  if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+  if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
+  return `${base} (${msg}).`;
 }
 
 function parseDateNumericLoose(value: string) {
@@ -304,8 +314,13 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 }
 
 export default function DesperdiciosClient() {
+  const toastTimerRef = useRef<number | null>(null);
+  const loadErrorShownRef = useRef(false);
+  const saveErrorShownRef = useRef(false);
+  const deleteErrorShownRef = useRef(false);
   const [rows, setRows] = useState<DesperdicioRow[]>([]);
   const rowsReadyRef = useRef(false);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [motivoFilter, setMotivoFilter] = useState("Motivo");
   const [periodo, setPeriodo] = useState("");
@@ -343,6 +358,21 @@ export default function DesperdiciosClient() {
   const [isPeriodoCalOpen, setIsPeriodoCalOpen] = useState(false);
   const [periodoCalMonth, setPeriodoCalMonth] = useState(() => startOfMonth(new Date()));
   const periodoCalWrapRef = useRef<HTMLDivElement | null>(null);
+
+  function showToast(message: string, type: "success" | "error", durationMs = 6000) {
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
   const [periodoRangeStart, setPeriodoRangeStart] = useState<Date | null>(null);
   const [periodoRangeEnd, setPeriodoRangeEnd] = useState<Date | null>(null);
   const editMotivoInputRef = useRef<HTMLInputElement | null>(null);
@@ -603,7 +633,12 @@ export default function DesperdiciosClient() {
           rowsReadyRef.current = true;
           return;
         }
-      } catch {}
+      } catch (err) {
+        if (!loadErrorShownRef.current) {
+          loadErrorShownRef.current = true;
+          showToast(supabaseErrorMessage(err, "carregar"), "error", 8000);
+        }
+      }
       setRows(readDesperdiciosFromStore([]));
       rowsReadyRef.current = true;
     })();
@@ -668,10 +703,20 @@ export default function DesperdiciosClient() {
     if (!changed) return;
     setRows(sync.merged);
     for (const row of sync.upserts) {
-      void upsertDesperdicioToSupabase(row).catch(() => {});
+      void upsertDesperdicioToSupabase(row).catch((err) => {
+        if (!saveErrorShownRef.current) {
+          saveErrorShownRef.current = true;
+          showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
+        }
+      });
     }
     for (const row of sync.deletes) {
-      void deleteDesperdicioFromSupabase(row.id).catch(() => {});
+      void deleteDesperdicioFromSupabase(row.id).catch((err) => {
+        if (!deleteErrorShownRef.current) {
+          deleteErrorShownRef.current = true;
+          showToast(supabaseErrorMessage(err, "excluir"), "error", 8000);
+        }
+      });
     }
   }, [prePreparoEtiquetas, rows]);
 
@@ -953,7 +998,12 @@ export default function DesperdiciosClient() {
         const id = await buildUserScopedId(String(Date.now()));
         const r: DesperdicioRow = { id, data, item, quantidade, custo, motivo };
         setRows((prev) => [r, ...prev]);
-        void upsertDesperdicioToSupabase(r).catch(() => {});
+        void upsertDesperdicioToSupabase(r).catch((err) => {
+          if (!saveErrorShownRef.current) {
+            saveErrorShownRef.current = true;
+            showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
+          }
+        });
         setIsFormOpen(false);
         setQuery("");
         setMotivoFilter("Motivo");
@@ -963,7 +1013,12 @@ export default function DesperdiciosClient() {
 
     const id = editingId;
     setRows((prev) => prev.map((x) => (x.id === id ? { ...x, data, item, quantidade, custo, motivo } : x)));
-    void upsertDesperdicioToSupabase({ id, data, item, quantidade, custo, motivo }).catch(() => {});
+    void upsertDesperdicioToSupabase({ id, data, item, quantidade, custo, motivo }).catch((err) => {
+      if (!saveErrorShownRef.current) {
+        saveErrorShownRef.current = true;
+        showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
+      }
+    });
     setIsFormOpen(false);
     setEditingId(null);
     setEditingEtiquetaId(null);
@@ -972,7 +1027,12 @@ export default function DesperdiciosClient() {
 
   function removeRow(row: DesperdicioRow) {
     setRows((prev) => prev.filter((r) => r.id !== row.id));
-    void deleteDesperdicioFromSupabase(row.id).catch(() => {});
+    void deleteDesperdicioFromSupabase(row.id).catch((err) => {
+      if (!deleteErrorShownRef.current) {
+        deleteErrorShownRef.current = true;
+        showToast(supabaseErrorMessage(err, "excluir"), "error", 8000);
+      }
+    });
   }
 
   const unitCostLabel = (row: DesperdicioRow) => {
@@ -997,6 +1057,7 @@ export default function DesperdiciosClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="desperdicios" />
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={dash.content}>
         <section className={styles.header}>
