@@ -21,7 +21,7 @@ import {
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
-import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./lista-de-compras.module.css";
 
@@ -75,6 +75,10 @@ function parseMoney(value: string) {
   const cleaned = raw.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
   const num = Number(cleaned);
   return Number.isFinite(num) ? num : 0;
+}
+
+function normalizeCategoryName(value: string) {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
 }
 
 function formatMoney(value: number) {
@@ -305,6 +309,7 @@ export default function ListaDeComprasClient() {
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [insumoCategorias, setInsumoCategorias] = useState<string[]>([]);
   const [mode, setMode] = useState<"categoria" | "fornecedor">("categoria");
   const [categoriaFilter, setCategoriaFilter] = useState("Categoria");
   const [fornecedorFilter, setFornecedorFilter] = useState("Fornecedor");
@@ -328,8 +333,9 @@ export default function ListaDeComprasClient() {
     setContagens(readInventarioFromStore([]));
     void (async () => {
       try {
-        const dbRows = await loadInsumosFromSupabase();
-        if (dbRows.length) writeInsumosToStore(dbRows);
+        const state = await loadInsumosStateFromSupabase();
+        if (state.rows.length) writeInsumosToStore(state.rows);
+        setInsumoCategorias(state.categories ?? []);
       } catch {}
     })();
     (async () => {
@@ -553,9 +559,21 @@ export default function ListaDeComprasClient() {
   ]);
 
   const categorias = useMemo(() => {
-    const list = Array.from(new Set(baseRows.map((row) => row.categoria.trim()).filter((value) => value && value !== "-")));
-    return ["Categoria", ...list];
-  }, [baseRows]);
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const push = (raw: string) => {
+      const name = normalizeCategoryName(raw);
+      if (!name || name === "-") return;
+      const key = name.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(name);
+    };
+    for (const c of insumoCategorias) push(c);
+    for (const i of insumos) push(i.categoria ?? "");
+    out.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+    return ["Categoria", ...out];
+  }, [insumoCategorias, insumos]);
 
   const fornecedores = useMemo(() => {
     const labels = new Set<string>();

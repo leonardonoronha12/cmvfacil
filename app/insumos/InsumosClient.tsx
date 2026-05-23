@@ -573,24 +573,54 @@ export default function InsumosClient() {
 
   async function downloadTemplateXlsx() {
     const XLSX = await import("xlsx");
-    const unitOptions = ["Und", "Kg", "g", "L", "ml"];
+    const unitOptions = [
+      "Und",
+      "Un",
+      "Kg",
+      "g",
+      "mg",
+      "L",
+      "ml",
+      "Cx",
+      "Pc",
+      "Pct",
+      "Fardo",
+      "Saco",
+      "Lata",
+      "Garrafa",
+      "Pote",
+      "Balde",
+      "Galão",
+      "Caixa",
+      "Pacote",
+      "Bandeja",
+      "Dúzia",
+    ];
     const categoryOptions = categories
       .map((c) => normalizeCategoryName(c))
       .filter((c) => c && c !== "-")
       .slice(0, 50)
       .map((c) => c.replaceAll('"', "").replaceAll(",", " "));
-    const categoryFormula = categoryOptions.length ? `"${categoryOptions.join(",")}"` : '"-"';
+    const listMax = Math.max(unitOptions.length, categoryOptions.length, 1);
+    const listRows: (string | null)[][] = [["Medidas", "Categorias"]];
+    for (let i = 0; i < listMax; i++) {
+      listRows.push([unitOptions[i] ?? "", categoryOptions[i] ?? ""]);
+    }
     const rows = [
       ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
       ["Álcool", "L", "4,39", "Limpeza", "-", false],
       ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", false],
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
+    const wsLists = XLSX.utils.aoa_to_sheet(listRows);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Insumos");
+    XLSX.utils.book_append_sheet(wb, wsLists, "Listas");
+    const unitRef = `Listas!$A$2:$A$${unitOptions.length + 1}`;
+    const catRef = categoryOptions.length ? `Listas!$B$2:$B$${categoryOptions.length + 1}` : '"-"';
     (ws as any)["!dataValidation"] = [
-      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: [`"${unitOptions.join(",")}"`] },
-      { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: [categoryFormula] },
+      { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: [unitRef] },
+      { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: [catRef] },
       { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
