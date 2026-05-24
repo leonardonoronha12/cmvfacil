@@ -709,6 +709,27 @@ function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeUnit(value: string) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "un" || v === "und" || v === "unid" || v === "unidade") return "und";
+  return v;
+}
+
+function convertQty(qty: number, fromUnit: string, toUnit: string) {
+  const from = normalizeUnit(fromUnit);
+  const to = normalizeUnit(toUnit);
+  if (!from || !to || from === to) return qty;
+  if (from === "g" && to === "kg") return qty / 1000;
+  if (from === "kg" && to === "g") return qty * 1000;
+  if (from === "ml" && to === "l") return qty / 1000;
+  if (from === "l" && to === "ml") return qty * 1000;
+  return NaN;
+}
+
+function prePreparoInventoryId(id: string) {
+  return `prep:${id}`;
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -1040,6 +1061,44 @@ export default function DashboardClient() {
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
     }
 
+    const avgTotalsQtyById = new Map<string, number>();
+    const avgTotalsCentsById = new Map<string, number>();
+    for (const e of entradas) {
+      if (!e.itensNota?.length) continue;
+      const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
+      for (const it of e.itensNota) {
+        const rawKey = normalizeKey(it.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normalizeKey(eq.insumoEquivalente);
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = insumoIdByKey.get(mappedKey);
+        if (!id) continue;
+        const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qtyEq = qty * fator;
+        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+
+        let sub = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!sub) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+        }
+        if (!sub) continue;
+        avgTotalsQtyById.set(id, (avgTotalsQtyById.get(id) ?? 0) + qtyEq);
+        avgTotalsCentsById.set(id, (avgTotalsCentsById.get(id) ?? 0) + sub);
+      }
+    }
+    const avgCostCentsById = new Map<string, number>();
+    for (const [id, qty] of avgTotalsQtyById.entries()) {
+      const cents = avgTotalsCentsById.get(id) ?? 0;
+      if (!qty || !cents) continue;
+      avgCostCentsById.set(id, Math.round(cents / qty));
+    }
+
     const entradasQtyById = new Map<string, number>();
     const entradasCentsById = new Map<string, number>();
     let comprasCents = 0;
@@ -1086,20 +1145,50 @@ export default function DashboardClient() {
     let finalCents = 0;
     let saidasCents = 0;
 
-    const list = insumos.filter((i) => !i.ocultar).sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
+    const prePreparoItems = prePreparo.map((r) => {
+      const { qty: yieldQty, unit: yieldUnit } = parseQtyLabel(String(r.rendimento ?? ""));
+      let totalCents = 0;
+      for (const ing of r.ingredientes ?? []) {
+        const itemKey = normalizeKey(String(ing.item ?? ""));
+        if (!itemKey) continue;
+        const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
+        if (!ins) continue;
+        const unitCost = avgCostCentsById.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
+        if (!unitCost) continue;
+        const qty = parsePtNumber(String(ing.quantidade ?? ""));
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        const fromUnit = String(ing.unidade ?? "").trim() || String(ins.medida ?? "Und").trim() || "Und";
+        const toUnit = String(ins.medida ?? "Und").trim() || "Und";
+        const qtyInBase = fromUnit ? convertQty(qty, fromUnit, toUnit) : qty;
+        const finalQty = Number.isFinite(qtyInBase) && qtyInBase > 0 ? qtyInBase : qty;
+        totalCents += Math.round(unitCost * finalQty);
+      }
+      const unitCents = yieldQty > 0 && totalCents > 0 ? Math.round(totalCents / yieldQty) : 0;
+      return {
+        id: prePreparoInventoryId(r.id),
+        item: r.receita,
+        categoria: r.categoria ?? "-",
+        medida: (yieldUnit || "Und").trim() || "Und",
+        custoUnitCents: unitCents,
+      };
+    });
+
+    const list = [
+      ...insumos.filter((i) => !i.ocultar).map((i) => ({ kind: "insumo" as const, id: i.id, item: i.item, categoria: i.categoria ?? "-", medida: i.medida || "Und", custoInicial: String(i.custoMedio ?? "") })),
+      ...prePreparoItems.map((p) => ({ kind: "prepreparo" as const, id: p.id, item: p.item, categoria: p.categoria, medida: p.medida, custoUnitCents: p.custoUnitCents })),
+    ].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
+
     for (const i of list) {
       const unit = i.medida || "Und";
       const initialQty = initialById.get(i.id) ?? 0;
       const finalQty = finalById.get(i.id) ?? 0;
-      const entradasQty = entradasQtyById.get(i.id) ?? 0;
+      const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
       const saidasQty = initialQty + entradasQty - finalQty;
-      const custoInicialCents = parseBrlToCents(String(i.custoMedio ?? ""));
-      const entradasCents = entradasCentsById.get(i.id) ?? 0;
-      const initialValCents = Math.round(initialQty * custoInicialCents);
-      const denomQty = initialQty + entradasQty;
-      const custoMedioCents = denomQty > 0 ? Math.round((initialValCents + entradasCents) / denomQty) : custoInicialCents;
+      const custoInicialCents = i.kind === "insumo" ? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
+      const custoMedioCents = i.kind === "insumo" ? avgCostCentsById.get(i.id) ?? custoInicialCents : i.custoUnitCents;
+      const initialValCents = Math.round(initialQty * custoMedioCents);
       const itemFinalCents = Math.round(finalQty * custoMedioCents);
-      const itemSaidasCents = initialValCents + entradasCents - itemFinalCents;
+      const itemSaidasCents = Math.round(saidasQty * custoMedioCents);
       initialCents += initialValCents;
       finalCents += itemFinalCents;
       saidasCents += itemSaidasCents;
@@ -1204,7 +1293,7 @@ export default function DashboardClient() {
     return prePreparo.map((r) => {
       const unit = parseUnitFromQtyLabel(r.rendimento);
       return {
-        id: `pp:${r.id}`,
+        id: prePreparoInventoryId(r.id),
         item: r.receita,
         medida: unit || "Und",
         custoMedio: r.custoUnitario,

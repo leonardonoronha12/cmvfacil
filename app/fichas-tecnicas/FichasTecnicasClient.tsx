@@ -8,6 +8,10 @@ import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
+import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
 import {
@@ -413,6 +417,39 @@ function parseMoneyLabel(value?: string) {
   return parseDecimalInput(raw);
 }
 
+function parseBrlToCents(value: string) {
+  const s = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const neg = s.includes("-");
+  const cleaned = s.replace(/-/g, "");
+  const parts = cleaned.split(",");
+  const intPart = (parts[0] ?? "").replace(/\./g, "").replace(/[^\d]/g, "") || "0";
+  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "").slice(0, 2).padEnd(2, "0");
+  const cents = Number.parseInt(intPart, 10) * 100 + Number.parseInt(decPart || "0", 10);
+  return neg ? -cents : cents;
+}
+
+function parseQtyLabel(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return { qty: 0, unit: "" };
+  const m = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
+  if (!m) return { qty: parseDecimalInput(raw), unit: "" };
+  const qty = parseDecimalInput(m[1] ?? "");
+  const unit = String(m[2] ?? "").trim();
+  return { qty, unit };
+}
+
+function normalizeKey(value: string) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function formatQtyLabel(value: string, unidade: string) {
   const qty = parseDecimalInput(value);
   if (!Number.isFinite(qty)) return `0 ${unidade}`;
@@ -793,6 +830,8 @@ export default function FichasTecnicasClient() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
+  const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
+  const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createStep, setCreateStep] = useState<1 | 2 | 3>(1);
   const [recipeName, setRecipeName] = useState("");
@@ -852,6 +891,33 @@ export default function FichasTecnicasClient() {
       } catch {}
     })();
     return subscribeInsumos(setInsumos);
+  }, []);
+
+  useEffect(() => {
+    setEntradas(readEntradasFromStore([]));
+    void (async () => {
+      try {
+        const db = await loadEntradasFromSupabase();
+        if (db.length) writeEntradasToStore(db);
+      } catch {}
+      setEntradas(readEntradasFromStore([]));
+    })();
+    return subscribeEntradas(setEntradas);
+  }, []);
+
+  useEffect(() => {
+    setFornecedorEquivalenciasMap(readFornecedorEquivalenciasMap());
+    void (async () => {
+      let nextEq: FornecedorEquivalenciasMap = {};
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) nextEq = db.equivalencias;
+      } catch {}
+      writeFornecedorEquivalenciasMap(nextEq);
+      setFornecedorEquivalenciasMap(nextEq);
+    })();
+    return subscribeFornecedorEquivalencias(setFornecedorEquivalenciasMap);
   }, []);
 
   useEffect(() => {
@@ -1096,6 +1162,57 @@ export default function FichasTecnicasClient() {
   }, [tableRows]);
 
   const ingredientOptions = useMemo(() => insumos.filter((row) => !row.ocultar), [insumos]);
+  const avgUnitCostCentsById = useMemo(() => {
+    const idByKey = new Map<string, string>();
+    for (const i of insumos) {
+      const k = normalizeKey(i.item);
+      if (!k || idByKey.has(k)) continue;
+      idByKey.set(k, i.id);
+    }
+    const keyLookup = new Map<string, string>();
+    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
+      const nk = normalizeKey(key);
+      if (!nk || keyLookup.has(nk)) continue;
+      keyLookup.set(nk, key);
+    }
+    const qtyById = new Map<string, number>();
+    const centsById = new Map<string, number>();
+    for (const e of entradas) {
+      const fornecedorKey = keyLookup.get(normalizeKey(String(e.fornecedor ?? ""))) ?? String(e.fornecedor ?? "").trim().toUpperCase();
+      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
+      for (const it of e.itensNota ?? []) {
+        const rawKey = normalizeKey(it.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normalizeKey(eq.insumoEquivalente);
+          const f = parseDecimalInput(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = idByKey.get(mappedKey);
+        if (!id) continue;
+        const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qtyEq = qty * fator;
+        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+        let sub = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!sub) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+        }
+        if (!sub) continue;
+        qtyById.set(id, (qtyById.get(id) ?? 0) + qtyEq);
+        centsById.set(id, (centsById.get(id) ?? 0) + sub);
+      }
+    }
+    const out = new Map<string, number>();
+    for (const [id, q] of qtyById.entries()) {
+      const c = centsById.get(id) ?? 0;
+      if (!q || !c) continue;
+      out.set(id, Math.round(c / q));
+    }
+    return out;
+  }, [entradas, fornecedorEquivalenciasMap, insumos]);
   const selectedIngredient = useMemo(
     () => ingredientOptions.find((row) => row.id === selectedIngredientId) ?? null,
     [ingredientOptions, selectedIngredientId]
@@ -1110,16 +1227,19 @@ export default function FichasTecnicasClient() {
   );
   const ingredientCost = useMemo(() => {
     if (!selectedIngredient) return 0;
-    return parseDecimalInput(ingredientQty) * parseMoneyLabel(selectedIngredient.custoMedio);
-  }, [ingredientQty, selectedIngredient]);
+    const unitCents = avgUnitCostCentsById.get(selectedIngredient.id) ?? Math.round(parseMoneyLabel(selectedIngredient.custoMedio) * 100);
+    return (parseDecimalInput(ingredientQty) * unitCents) / 100;
+  }, [avgUnitCostCentsById, ingredientQty, selectedIngredient]);
   const detailIngredientCost = useMemo(() => {
     if (!selectedDetailIngredient) return 0;
-    return parseDecimalInput(detailIngredientQty) * parseMoneyLabel(selectedDetailIngredient.custoMedio);
-  }, [detailIngredientQty, selectedDetailIngredient]);
+    const unitCents = avgUnitCostCentsById.get(selectedDetailIngredient.id) ?? Math.round(parseMoneyLabel(selectedDetailIngredient.custoMedio) * 100);
+    return (parseDecimalInput(detailIngredientQty) * unitCents) / 100;
+  }, [avgUnitCostCentsById, detailIngredientQty, selectedDetailIngredient]);
   const rowEditCost = useMemo(() => {
     if (!selectedRowEditIngredient) return 0;
-    return parseDecimalInput(rowEditQty) * parseMoneyLabel(selectedRowEditIngredient.custoMedio);
-  }, [rowEditQty, selectedRowEditIngredient]);
+    const unitCents = avgUnitCostCentsById.get(selectedRowEditIngredient.id) ?? Math.round(parseMoneyLabel(selectedRowEditIngredient.custoMedio) * 100);
+    return (parseDecimalInput(rowEditQty) * unitCents) / 100;
+  }, [avgUnitCostCentsById, rowEditQty, selectedRowEditIngredient]);
   const ingredientsTotal = useMemo(() => ingredientRows.reduce((sum, row) => sum + row.custoTotal, 0), [ingredientRows]);
   const priceValue = useMemo(() => parseDecimalInput(precoVenda), [precoVenda]);
   const cmvMetaValue = useMemo(() => parseDecimalInput(cmvMetaDraft), [cmvMetaDraft]);

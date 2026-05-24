@@ -1129,30 +1129,28 @@ export default function PrePreparoClient() {
       setIngredientCost("0,00");
       return;
     }
-    const insUnitCostCents = clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
-    if (insUnitCostCents > 0) {
-      const baseUnit = String(ins.medida ?? "Und").trim() || "Und";
-      const qtyInBase = ingredientUnit ? convertQty(qty, ingredientUnit, baseUnit) : qty;
-      if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
-        setIngredientCost("0,00");
+    const stats = averageCostByInsumo.get(ins.item.toLowerCase());
+    if (stats && stats.sumQty > 0 && stats.sumCents > 0) {
+      const qtyInTarget = ingredientUnit ? convertQty(qty, ingredientUnit, stats.unit) : qty;
+      if (Number.isFinite(qtyInTarget) && qtyInTarget > 0) {
+        const cents = clampNonNegativeInt(Math.round((stats.sumCents * qtyInTarget) / stats.sumQty));
+        setIngredientCost(formatBRLValueFromCents(cents));
         return;
       }
-      const cents = clampNonNegativeInt(Math.round(insUnitCostCents * qtyInBase));
-      setIngredientCost(formatBRLValueFromCents(cents));
-      return;
     }
 
-    const stats = averageCostByInsumo.get(ins.item.toLowerCase());
-    if (!stats || stats.sumQty <= 0 || stats.sumCents <= 0) {
+    const insUnitCostCents = clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
+    if (insUnitCostCents <= 0) {
       setIngredientCost("0,00");
       return;
     }
-    const qtyInTarget = ingredientUnit ? convertQty(qty, ingredientUnit, stats.unit) : qty;
-    if (!Number.isFinite(qtyInTarget) || qtyInTarget <= 0) {
+    const baseUnit = String(ins.medida ?? "Und").trim() || "Und";
+    const qtyInBase = ingredientUnit ? convertQty(qty, ingredientUnit, baseUnit) : qty;
+    if (!Number.isFinite(qtyInBase) || qtyInBase <= 0) {
       setIngredientCost("0,00");
       return;
     }
-    const cents = clampNonNegativeInt(Math.round((stats.sumCents * qtyInTarget) / stats.sumQty));
+    const cents = clampNonNegativeInt(Math.round(insUnitCostCents * qtyInBase));
     setIngredientCost(formatBRLValueFromCents(cents));
   }, [averageCostByInsumo, ingredientQty, ingredientQuery, ingredientUnit, resolveInsumoFromQuery]);
 
@@ -1479,8 +1477,10 @@ export default function PrePreparoClient() {
     const qty = parseDecimalInput(rowEditQty);
     if (!(qty > 0)) return;
     const nextQty = formatDecimalFixedDraft(rowEditQty, 3);
-    const cost = qty * parseMoneyLabel(selected.custoMedio);
-    const costCents = clampNonNegativeInt(Math.round(cost * 100));
+    const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
+    const unitCents =
+      stats && stats.sumQty > 0 && stats.sumCents > 0 ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty)) : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio) * 100));
+    const costCents = clampNonNegativeInt(Math.round(unitCents * qty));
     const prevList = detailsRow.ingredientes ?? [];
     const nextList = prevList.map((r) =>
       r.id === id ? { ...r, item: selected.item, quantidade: nextQty, unidade: selected.medida || "Und", custoCents: costCents } : r
@@ -1620,8 +1620,11 @@ export default function PrePreparoClient() {
 
   const detailIngredientCost = useMemo(() => {
     if (!selectedDetailIngredient) return 0;
-    return parseDecimalInput(detailIngredientQty) * parseMoneyLabel(selectedDetailIngredient.custoMedio);
-  }, [detailIngredientQty, selectedDetailIngredient]);
+    const qty = parseDecimalInput(detailIngredientQty);
+    const stats = averageCostByInsumo.get(selectedDetailIngredient.item.toLowerCase()) ?? null;
+    const unit = stats && stats.sumQty > 0 && stats.sumCents > 0 ? stats.sumCents / stats.sumQty / 100 : parseMoneyLabel(selectedDetailIngredient.custoMedio);
+    return qty * unit;
+  }, [averageCostByInsumo, detailIngredientQty, selectedDetailIngredient]);
 
   const selectedRowEditIngredient = useMemo(
     () => ingredientOptions.find((row) => row.id === rowEditIngredientId) ?? null,
@@ -1630,8 +1633,11 @@ export default function PrePreparoClient() {
 
   const rowEditCost = useMemo(() => {
     if (!selectedRowEditIngredient) return 0;
-    return parseDecimalInput(rowEditQty) * parseMoneyLabel(selectedRowEditIngredient.custoMedio);
-  }, [rowEditQty, selectedRowEditIngredient]);
+    const qty = parseDecimalInput(rowEditQty);
+    const stats = averageCostByInsumo.get(selectedRowEditIngredient.item.toLowerCase()) ?? null;
+    const unit = stats && stats.sumQty > 0 && stats.sumCents > 0 ? stats.sumCents / stats.sumQty / 100 : parseMoneyLabel(selectedRowEditIngredient.custoMedio);
+    return qty * unit;
+  }, [averageCostByInsumo, rowEditQty, selectedRowEditIngredient]);
 
   const detailsIngredientsTotalCents = useMemo(() => {
     return (detailsRow?.ingredientes ?? []).reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
