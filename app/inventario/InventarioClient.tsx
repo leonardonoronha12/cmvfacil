@@ -6,6 +6,8 @@ import AppSidebar from "../components/AppSidebar";
 import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
+import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
+import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
@@ -93,6 +95,20 @@ function normCatName(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function prepInventoryId(id: string) {
+  return `prep:${id}`;
+}
+
+function parseUnitFromPrePreparo(row: PrePreparoStoreRow) {
+  const rendimento = String(row.rendimento ?? "").trim();
+  const m1 = rendimento.match(/([A-Za-zÀ-ÿ]+)\s*$/);
+  if (m1?.[1]) return m1[1].trim();
+  const custoUnitario = String(row.custoUnitario ?? "").trim();
+  const m2 = custoUnitario.match(/\/\s*([A-Za-zÀ-ÿ]+)\s*$/);
+  if (m2?.[1]) return m2[1].trim();
+  return "Und";
+}
+
 function sortContagensDesc(list: InventarioContagem[]) {
   const decorated = list.map((c, index) => ({
     c,
@@ -143,6 +159,7 @@ const initialContagens: InventarioContagem[] = [];
 export default function InventarioClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
+  const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
   const [contagens, setContagens] = useState<InventarioContagem[]>(initialContagens);
   const contagensReadyRef = useRef(false);
 
@@ -257,6 +274,18 @@ export default function InventarioClient() {
   }, []);
 
   useEffect(() => {
+    setPrePreparoStore(readPrePreparoFromStore([]));
+    void (async () => {
+      try {
+        const dbRows = await loadPrePreparoFromSupabase();
+        if (dbRows.length) writePrePreparoToStore(dbRows as any);
+      } catch {}
+      setPrePreparoStore(readPrePreparoFromStore([]));
+    })();
+    return subscribePrePreparo((rows) => setPrePreparoStore(rows));
+  }, []);
+
+  useEffect(() => {
     pendingDraftsRef.current = pendingDrafts;
   }, [pendingDrafts]);
 
@@ -293,7 +322,7 @@ export default function InventarioClient() {
 
   useEffect(() => {
     if (!contagensReadyRef.current) return;
-    if (!insumosStore.length && !insumoCategorias.length) return;
+    if (!insumosStore.length && !insumoCategorias.length && !prePreparoStore.length) return;
     setContagens((prev) => {
       let changed = false;
       const next = prev.map((c) => {
@@ -321,7 +350,7 @@ export default function InventarioClient() {
           }
         }
 
-        const insumoById = new Map<string, { item: string; unidade: string; categoria: string }>();
+        const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
         const desiredCatSet = new Set<string>();
         for (const c0 of insumoCategorias) {
           const name = normCatName(String(c0 ?? ""));
@@ -330,7 +359,12 @@ export default function InventarioClient() {
         }
         for (const ins of insumosStore) {
           const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
-          insumoById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
+          sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
+          desiredCatSet.add(catName);
+        }
+        for (const prep of prePreparoStore) {
+          const catName = normCatName(String(prep.categoria ?? "")) || "Sem categoria";
+          sourceById.set(prepInventoryId(String(prep.id)), { item: String(prep.receita ?? ""), unidade: parseUnitFromPrePreparo(prep), categoria: catName });
           desiredCatSet.add(catName);
         }
 
@@ -347,18 +381,18 @@ export default function InventarioClient() {
 
         const allIds = new Set<string>();
         for (const id of existingById.keys()) allIds.add(id);
-        for (const id of insumoById.keys()) allIds.add(id);
+        for (const id of sourceById.keys()) allIds.add(id);
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
-          const ins = insumoById.get(id) ?? null;
+          const src = sourceById.get(id) ?? null;
           const prevIt = existingById.get(id) ?? null;
-          const categoria = ins?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
+          const categoria = src?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
           const catKey = categoria.toLowerCase();
           const nextRow: InventarioItemRow = {
             id,
-            item: ins?.item ?? String(prevIt?.item ?? ""),
-            unidade: (ins?.unidade ?? String(prevIt?.unidade ?? "")) || "Und",
+            item: src?.item ?? String(prevIt?.item ?? ""),
+            unidade: (src?.unidade ?? String(prevIt?.unidade ?? "")) || "Und",
             estoqueFinal: String(prevIt?.estoqueFinal ?? ""),
             removido: prevIt?.removido,
           };
@@ -395,7 +429,7 @@ export default function InventarioClient() {
       if (sel) void upsertInventarioToSupabase(sel).catch(() => {});
       return next;
     });
-  }, [insumoCategorias, insumosStore, selectedContagemId]);
+  }, [insumoCategorias, insumosStore, prePreparoStore, selectedContagemId]);
 
   useEffect(() => {
     if (!menuContagemId) return;
@@ -502,10 +536,20 @@ export default function InventarioClient() {
     }
     void (async () => {
       const id = await buildUserScopedId(`c-${Date.now()}`);
-      const itens: InventarioItemRow[] = (insumosStore[0] ? insumosStore : []).map((i) => ({
-        id: i.id,
-        item: i.item,
-        unidade: i.medida,
+      const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
+      for (const ins of insumosStore) {
+        const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
+        sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
+      }
+      for (const prep of prePreparoStore) {
+        const catName = normCatName(String(prep.categoria ?? "")) || "Sem categoria";
+        sourceById.set(prepInventoryId(String(prep.id)), { item: String(prep.receita ?? ""), unidade: parseUnitFromPrePreparo(prep), categoria: catName });
+      }
+
+      const itens: InventarioItemRow[] = Array.from(sourceById.entries()).map(([rowId, src]) => ({
+        id: rowId,
+        item: src.item,
+        unidade: src.unidade,
         estoqueFinal: "",
       }));
       const byCat = new Map<string, InventarioItemRow[]>();
@@ -516,8 +560,7 @@ export default function InventarioClient() {
         catSet.add(name);
       }
       for (const it of itens) {
-        const ins = insumosStore.find((x) => x.id === it.id) ?? null;
-        const cat = normCatName(String(ins?.categoria ?? "")) || "Sem categoria";
+        const cat = sourceById.get(String(it.id))?.categoria ?? "Sem categoria";
         catSet.add(cat);
         const key = cat.toLowerCase();
         const list = byCat.get(key) ?? [];
@@ -635,8 +678,10 @@ export default function InventarioClient() {
     const c = selectedContagem;
     if (!c) return;
     const itens = pendentes;
-    const byId = new Map(insumosStore.map((i) => [String(i.id), i]));
-    const byName = new Map(insumosStore.map((i) => [String(i.item ?? "").toLowerCase(), i]));
+    const insById = new Map(insumosStore.map((i) => [String(i.id), i]));
+    const insByName = new Map(insumosStore.map((i) => [String(i.item ?? "").toLowerCase(), i]));
+    const prepById = new Map(prePreparoStore.map((r) => [prepInventoryId(String(r.id)), r]));
+    const prepByName = new Map(prePreparoStore.map((r) => [String(r.receita ?? "").toLowerCase(), r]));
     const win = window.open("", "_blank");
     if (!win) return;
     const logoPath = "/dashboard/ml7hdudz-jry958l.svg";
@@ -708,8 +753,10 @@ export default function InventarioClient() {
           <tbody>
             ${itens
               .map((i) => {
-                const ins = byId.get(String(i.id)) ?? byName.get(String(i.item ?? "").toLowerCase()) ?? null;
-                const cat = String(ins?.categoria ?? "").trim() || "-";
+                const keyId = String(i.id ?? "");
+                const keyName = String(i.item ?? "").toLowerCase();
+                const src = insById.get(keyId) ?? prepById.get(keyId) ?? insByName.get(keyName) ?? prepByName.get(keyName) ?? null;
+                const cat = normCatName(String((src as any)?.categoria ?? "")) || "-";
                 const unit = String(i.unidade ?? "").trim() || "Und";
                 return `<tr><td>${esc(i.item)}</td><td>${esc(cat)}</td><td></td><td>${esc(unit)}</td></tr>`;
               })
