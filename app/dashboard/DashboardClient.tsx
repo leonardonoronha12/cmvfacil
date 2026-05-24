@@ -994,6 +994,10 @@ export default function DashboardClient() {
   }, [periodOptions]);
 
   useEffect(() => {
+    if (inventoryOptions.length >= 2 && calcError.includes("Cadastre pelo menos 2 inventários")) setCalcError("");
+  }, [calcError, inventoryOptions.length]);
+
+  useEffect(() => {
     writeDashboardCmvPrefsToStore({ startDate, endDate, revenue, targetCmv });
   }, [endDate, revenue, startDate, targetCmv]);
 
@@ -1011,8 +1015,8 @@ export default function DashboardClient() {
       return;
     }
     setCalcError("");
-    const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? null;
-    const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? null;
+    const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? inventoryOptions.find((o) => o.label === startDate) ?? null;
+    const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? inventoryOptions.find((o) => o.label === endDate) ?? null;
     if (!startOpt || !endOpt) {
       setCalcError("Cadastre pelo menos 2 inventários para calcular o CMV.");
       return;
@@ -1039,18 +1043,27 @@ export default function DashboardClient() {
 
     const initialById = new Map<string, number>();
     const finalById = new Map<string, number>();
+    const unitStartById = new Map<string, string>();
+    const unitEndById = new Map<string, string>();
     for (const cat of contagemStart.categorias ?? []) {
       for (const it of cat.itens ?? []) {
         if (Boolean((it as any).removido)) continue;
         initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+        const u = String((it as any).unidade ?? "").trim();
+        if (u) unitStartById.set(it.id, u);
       }
     }
     for (const cat of contagemEnd.categorias ?? []) {
       for (const it of cat.itens ?? []) {
         if (Boolean((it as any).removido)) continue;
         finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+        const u = String((it as any).unidade ?? "").trim();
+        if (u) unitEndById.set(it.id, u);
       }
     }
+    const unitById = new Map<string, string>();
+    for (const [id, u] of unitEndById.entries()) unitById.set(id, u);
+    for (const [id, u] of unitStartById.entries()) if (!unitById.has(id)) unitById.set(id, u);
 
     const insumoIdByKey = new Map<string, string>();
     const ocultarByInsumoId = new Map<string, boolean>();
@@ -1169,6 +1182,7 @@ export default function DashboardClient() {
         item: r.receita,
         categoria: r.categoria ?? "-",
         medida: (yieldUnit || "Und").trim() || "Und",
+        yieldUnit: (yieldUnit || "Und").trim() || "Und",
         custoUnitCents: unitCents,
       };
     });
@@ -1179,16 +1193,20 @@ export default function DashboardClient() {
     ].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
 
     for (const i of list) {
-      const unit = i.medida || "Und";
+      const inventoryUnit = (unitById.get(i.id) ?? "").trim();
+      const unit = inventoryUnit || i.medida || "Und";
       const initialQty = initialById.get(i.id) ?? 0;
       const finalQty = finalById.get(i.id) ?? 0;
       const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
       const saidasQty = initialQty + entradasQty - finalQty;
-      const custoInicialCents = i.kind === "insumo" ? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
-      const custoMedioCents = i.kind === "insumo" ? avgCostCentsById.get(i.id) ?? custoInicialCents : i.custoUnitCents;
-      const initialValCents = Math.round(initialQty * custoMedioCents);
-      const itemFinalCents = Math.round(finalQty * custoMedioCents);
-      const itemSaidasCents = Math.round(saidasQty * custoMedioCents);
+      const baseCostCents =
+        i.kind === "insumo" ? avgCostCentsById.get(i.id) ?? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
+      const baseUnit = i.medida || "Und";
+      const qtyInBaseForOne = unit ? convertQty(1, unit, baseUnit) : 1;
+      const unitCostCents = Number.isFinite(qtyInBaseForOne) && qtyInBaseForOne > 0 ? Math.round(baseCostCents * qtyInBaseForOne) : baseCostCents;
+      const initialValCents = Math.round(initialQty * unitCostCents);
+      const itemFinalCents = Math.round(finalQty * unitCostCents);
+      const itemSaidasCents = Math.round(saidasQty * unitCostCents);
       initialCents += initialValCents;
       finalCents += itemFinalCents;
       saidasCents += itemSaidasCents;
@@ -1204,8 +1222,8 @@ export default function DashboardClient() {
         entradas: formatQty(entradasQty, unit),
         final: formatQty(finalQty, unit),
         saidas: formatQty(saidasQty, unit),
-        custo: custoMedioCents ? formatBrlFromCents(custoMedioCents) : "-",
-        cmv: custoMedioCents ? formatBrlFromCents(itemSaidasCents) : "-",
+        custo: unitCostCents ? formatBrlFromCents(unitCostCents) : "-",
+        cmv: unitCostCents ? formatBrlFromCents(itemSaidasCents) : "-",
         cmvTone,
       });
     }
