@@ -15,6 +15,10 @@ import {
 } from "../lib/desperdiciosMotivosStore";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
+import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
@@ -332,6 +336,8 @@ export default function DesperdiciosClient() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
+  const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>([]);
   const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
   const [motivosStore, setMotivosStore] = useState<DesperdicioMotivoRow[]>([]);
@@ -583,6 +589,33 @@ export default function DesperdiciosClient() {
   }, []);
 
   useEffect(() => {
+    setEntradasRows(readEntradasFromStore([]));
+    void (async () => {
+      try {
+        const db = await loadEntradasFromSupabase();
+        if (db.length) writeEntradasToStore(db);
+      } catch {}
+      setEntradasRows(readEntradasFromStore([]));
+    })();
+    return subscribeEntradas((rows) => setEntradasRows(rows));
+  }, []);
+
+  useEffect(() => {
+    setEquivalenciasMap(readFornecedorEquivalenciasMap());
+    void (async () => {
+      let nextEq: FornecedorEquivalenciasMap = {};
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) nextEq = db.equivalencias;
+      } catch {}
+      writeFornecedorEquivalenciasMap(nextEq);
+      setEquivalenciasMap(nextEq);
+    })();
+    return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+  }, []);
+
+  useEffect(() => {
     setPrePreparoStore(readPrePreparoFromStore());
     return subscribePrePreparo((rows) => setPrePreparoStore(rows));
   }, []);
@@ -604,12 +637,75 @@ export default function DesperdiciosClient() {
     });
   }, []);
 
+  const avgUnitCostCentsByInsumoId = useMemo(() => {
+    const normItemKey = (value: string) =>
+      normalizeKey(String(value ?? ""))
+        .replace(/[^a-z0-9]+/g, " ")
+        .trim()
+        .replace(/\s+/g, " ");
+    const idByKey = new Map<string, string>();
+    for (const i of insumosStore) {
+      const k = normItemKey(i.item);
+      if (!k || idByKey.has(k)) continue;
+      idByKey.set(k, i.id);
+    }
+    const fornecedorKeyLookup = new Map<string, string>();
+    for (const key of Object.keys(equivalenciasMap)) {
+      const nk = normItemKey(key);
+      if (!nk || fornecedorKeyLookup.has(nk)) continue;
+      fornecedorKeyLookup.set(nk, key);
+    }
+    const qtyById = new Map<string, number>();
+    const centsById = new Map<string, number>();
+    for (const e of entradasRows) {
+      const fornecedorKey = fornecedorKeyLookup.get(normItemKey(String(e.fornecedor ?? ""))) ?? String(e.fornecedor ?? "").trim().toUpperCase();
+      const equivalencias = equivalenciasMap[fornecedorKey] ?? [];
+      for (const it of e.itensNota ?? []) {
+        const rawKey = normItemKey(it.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normItemKey(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normItemKey(eq.insumoEquivalente);
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = idByKey.get(mappedKey);
+        if (!id) continue;
+        const qtyEq = parsePtNumber(it.quantidadeLabel ?? "") * fator;
+        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+        let sub = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!sub) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+        }
+        if (!sub) continue;
+        qtyById.set(id, (qtyById.get(id) ?? 0) + qtyEq);
+        centsById.set(id, (centsById.get(id) ?? 0) + sub);
+      }
+    }
+    const out = new Map<string, number>();
+    for (const [id, qty] of qtyById.entries()) {
+      const cents = centsById.get(id) ?? 0;
+      if (!qty || !cents) continue;
+      out.set(id, Math.round(cents / qty));
+    }
+    return out;
+  }, [entradasRows, equivalenciasMap, insumosStore]);
+
   useEffect(() => {
     const nameKey = draftItem.trim().toLowerCase();
     if (!nameKey) return;
     const ins = insumosStore.find((i) => i.item.toLowerCase() === nameKey) ?? null;
-    if (ins?.custoMedio) {
-      const raw = String(ins.custoMedio).replace(/^R\$\s?/, "").trim();
+    if (ins) {
+      const avgCents = avgUnitCostCentsByInsumoId.get(ins.id) ?? 0;
+      if (avgCents > 0) {
+        const raw = formatBrlFromCents(avgCents).replace(/^R\$\s?/, "").trim();
+        if (raw) setDraftUnitCost(raw);
+        if (ins.medida) setDraftQtyUnit(String(ins.medida).trim().toUpperCase());
+        return;
+      }
+      const raw = String(ins.custoMedio ?? "").replace(/^R\$\s?/, "").trim();
       if (raw) setDraftUnitCost(raw);
       if (ins.medida) setDraftQtyUnit(String(ins.medida).trim().toUpperCase());
       return;

@@ -9,6 +9,10 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
+import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
+import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
+import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -152,6 +156,59 @@ function parseCurrencyToNumber(value: string) {
   return Number.isFinite(n) ? n : NaN;
 }
 
+function parseBrlToCents(input: string) {
+  const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const neg = s.includes("-");
+  const cleaned = s.replace(/-/g, "");
+  const parts = cleaned.split(",");
+  const intPart = (parts[0] ?? "").replace(/\./g, "").replace(/[^\d]/g, "") || "0";
+  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "").padEnd(2, "0").slice(0, 2);
+  const cents = Number.parseInt(intPart, 10) * 100 + Number.parseInt(decPart || "0", 10);
+  return neg ? -cents : cents;
+}
+
+function formatBrlFromCents(cents: number) {
+  const v = Math.abs(cents);
+  const intPart = Math.floor(v / 100);
+  const dec = String(v % 100).padStart(2, "0");
+  const intLabel = String(intPart).replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${cents < 0 ? "-" : ""}R$${intLabel},${dec}`;
+}
+
+function parsePtNumber(value: string) {
+  const s = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
+  if (!s) return 0;
+  const neg = s.includes("-");
+  const cleaned = s.replace(/-/g, "");
+  const parts = cleaned.split(",");
+  const intPart = (parts[0] ?? "").replace(/\./g, "").replace(/[^\d]/g, "") || "0";
+  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "");
+  const num = Number.parseFloat(`${intPart}.${decPart}`);
+  return neg ? -num : num;
+}
+
+function parseQtyLabel(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return { qty: 0, unit: "" };
+  const m = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
+  if (!m) return { qty: parsePtNumber(raw), unit: "" };
+  const qty = parsePtNumber(m[1] ?? "");
+  const unit = String(m[2] ?? "").trim();
+  return { qty, unit };
+}
+
+function normalizeKey(value: string) {
+  return String(value ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function formatMoneyDraft(input: string) {
   const digits = String(input ?? "").replace(/\D/g, "");
   if (!digits) return "";
@@ -268,6 +325,8 @@ export default function InsumosClient() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
   const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
+  const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
+  const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowsReadyRef = useRef(false);
   const syncTimeoutRef = useRef<number | null>(null);
@@ -351,6 +410,33 @@ export default function InsumosClient() {
         setIsLoadingTable(false);
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    setEntradas(readEntradasFromStore([]));
+    void (async () => {
+      try {
+        const db = await loadEntradasFromSupabase();
+        if (db.length) writeEntradasToStore(db);
+      } catch {}
+      setEntradas(readEntradasFromStore([]));
+    })();
+    return subscribeEntradas((rows) => setEntradas(rows));
+  }, []);
+
+  useEffect(() => {
+    setFornecedorEquivalenciasMap(readFornecedorEquivalenciasMap());
+    void (async () => {
+      let nextEq: FornecedorEquivalenciasMap = {};
+      try {
+        const db = await loadFornecedoresStateFromSupabase();
+        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+        if (hasDb) nextEq = db.equivalencias;
+      } catch {}
+      writeFornecedorEquivalenciasMap(nextEq);
+      setFornecedorEquivalenciasMap(nextEq);
+    })();
+    return subscribeFornecedorEquivalencias((m) => setFornecedorEquivalenciasMap(m));
   }, []);
 
   useEffect(() => {
@@ -957,6 +1043,68 @@ export default function InsumosClient() {
     setDraggingColumn(null);
   }
 
+  const avgUnitCostCentsById = useMemo(() => {
+    const idByKey = new Map<string, string>();
+    for (const row of dataRows) {
+      const k = normalizeKey(row.item);
+      if (!k || idByKey.has(k)) continue;
+      idByKey.set(k, row.id);
+    }
+    const fornecedorKeyLookup = new Map<string, string>();
+    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
+      const nk = normalizeKey(key);
+      if (!nk || fornecedorKeyLookup.has(nk)) continue;
+      fornecedorKeyLookup.set(nk, key);
+    }
+    const qtyById = new Map<string, number>();
+    const centsById = new Map<string, number>();
+    for (const e of entradas) {
+      const fornecedorKey = fornecedorKeyLookup.get(normalizeKey(String(e.fornecedor ?? ""))) ?? String(e.fornecedor ?? "").trim().toUpperCase();
+      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
+      for (const it of e.itensNota ?? []) {
+        const rawKey = normalizeKey(it.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normalizeKey(eq.insumoEquivalente);
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = idByKey.get(mappedKey);
+        if (!id) continue;
+        const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qtyEq = qty * fator;
+        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+        let sub = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!sub) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+        }
+        if (!sub) continue;
+        qtyById.set(id, (qtyById.get(id) ?? 0) + qtyEq);
+        centsById.set(id, (centsById.get(id) ?? 0) + sub);
+      }
+    }
+    const out = new Map<string, number>();
+    for (const [id, qty] of qtyById.entries()) {
+      const cents = centsById.get(id) ?? 0;
+      if (!qty || !cents) continue;
+      out.set(id, Math.round(cents / qty));
+    }
+    return out;
+  }, [dataRows, entradas, fornecedorEquivalenciasMap]);
+
+  const displayCostLabelById = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const r of dataRows) {
+      const avgCents = avgUnitCostCentsById.get(r.id) ?? 0;
+      if (avgCents > 0) out.set(r.id, formatBrlFromCents(avgCents));
+      else out.set(r.id, r.custoMedio);
+    }
+    return out;
+  }, [avgUnitCostCentsById, dataRows]);
+
   const visibleRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const filteredByQuery = q
@@ -976,8 +1124,10 @@ export default function InsumosClient() {
     decorated.sort((a, b) => {
       let cmp = 0;
       if (sortKey === "custoMedio") {
-        const av = parseCurrencyToNumber(a.r.custoMedio);
-        const bv = parseCurrencyToNumber(b.r.custoMedio);
+        const aLabel = displayCostLabelById.get(a.r.id) ?? a.r.custoMedio;
+        const bLabel = displayCostLabelById.get(b.r.id) ?? b.r.custoMedio;
+        const av = parseCurrencyToNumber(aLabel);
+        const bv = parseCurrencyToNumber(bLabel);
         const aBad = Number.isNaN(av);
         const bBad = Number.isNaN(bv);
         if (aBad && bBad) cmp = 0;
@@ -993,7 +1143,7 @@ export default function InsumosClient() {
       return cmp * dir;
     });
     return decorated.map((d) => d.r);
-  }, [categoryFilter, dataRows, searchQuery, sortDir, sortKey]);
+  }, [categoryFilter, dataRows, displayCostLabelById, searchQuery, sortDir, sortKey]);
 
   const gridTemplateColumns = useMemo(() => {
     const widths: Record<"ocultar" | "item" | "medida" | "custoMedio" | "categoria" | "especificacao" | "acoes", string> = {
@@ -1239,7 +1389,7 @@ export default function InsumosClient() {
                       );
                     }
                     if (col === "medida") return <div key={col} className={styles.td}>{r.medida}</div>;
-                    if (col === "custoMedio") return <div key={col} className={styles.tdStrong}>{r.custoMedio}</div>;
+                    if (col === "custoMedio") return <div key={col} className={styles.tdStrong}>{displayCostLabelById.get(r.id) ?? r.custoMedio}</div>;
                     if (col === "categoria") return <div key={col} className={styles.td}>{r.categoria}</div>;
                     return (
                       <div key={col} className={styles.tdMuted}>
