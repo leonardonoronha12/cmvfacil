@@ -12,7 +12,7 @@ import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsu
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
-import { readPrePreparoEtiquetasFromStore, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoFromSupabase, savePrePreparoToSupabase } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
@@ -569,6 +569,7 @@ export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
+  const suppressEtiquetasStoreEventRef = useRef(false);
   const prePreparoSaveErrorShownRef = useRef(false);
   const etiquetasSaveErrorShownRef = useRef(false);
   const prePreparoLoadErrorShownRef = useRef(false);
@@ -875,6 +876,7 @@ export default function PrePreparoClient() {
       try {
         const dbRows = await loadPrePreparoEtiquetasFromSupabase();
         setEtiquetasRows(dbRows);
+        suppressEtiquetasStoreEventRef.current = true;
         writePrePreparoEtiquetasToStore(dbRows);
         etiquetasLoadErrorShownRef.current = false;
       } catch (err) {
@@ -884,6 +886,16 @@ export default function PrePreparoClient() {
         }
       }
     })();
+  }, []);
+
+  useEffect(() => {
+    return subscribePrePreparoEtiquetas((rows) => {
+      if (suppressEtiquetasStoreEventRef.current) {
+        suppressEtiquetasStoreEventRef.current = false;
+        return;
+      }
+      setEtiquetasRows(rows);
+    });
   }, []);
 
   useEffect(() => {
@@ -910,6 +922,7 @@ export default function PrePreparoClient() {
   }, [rows]);
 
   useEffect(() => {
+    suppressEtiquetasStoreEventRef.current = true;
     writePrePreparoEtiquetasToStore(etiquetasRows);
     if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
@@ -1817,9 +1830,7 @@ export default function PrePreparoClient() {
       dataValidade: formatDateLabel(dataValidade),
       wasteStatus: "pending" as const,
     };
-    const existing = readPrePreparoEtiquetasFromStore([]);
-    const nextEtiquetas = [next, ...existing];
-    writePrePreparoEtiquetasToStore(nextEtiquetas);
+    setEtiquetasRows((prev) => [next, ...prev]);
     setIsEtiquetaOpen(false);
     void downloadEtiquetaPdf(next)
       .then(() => showToast("Etiqueta salva e PDF baixado.", "success"))

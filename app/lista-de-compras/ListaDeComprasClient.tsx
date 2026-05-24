@@ -5,7 +5,8 @@ import { useEffect, useMemo, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import LoadingSpinner from "../components/LoadingSpinner";
 import dash from "../dashboard/dashboard.module.css";
-import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
+import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import {
   readFornecedorEquivalenciasMap,
@@ -21,7 +22,8 @@ import {
   type FornecedorInfoMap,
   type FornecedorProdutos,
 } from "../lib/fornecedoresStore";
-import { readInventarioFromStore, subscribeInventario, type InventarioContagem } from "../lib/inventarioStore";
+import { loadInventarioFromSupabase } from "../lib/inventarioSupabase";
+import { readInventarioFromStore, subscribeInventario, writeInventarioToStore, type InventarioContagem } from "../lib/inventarioStore";
 import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import styles from "./lista-de-compras.module.css";
@@ -347,6 +349,21 @@ export default function ListaDeComprasClient() {
       doneInsumos = true;
       finalize();
     })();
+
+    void (async () => {
+      try {
+        const db = await loadEntradasFromSupabase();
+        if (db.length) writeEntradasToStore(db);
+      } catch {}
+    })();
+
+    void (async () => {
+      try {
+        const db = await loadInventarioFromSupabase();
+        if (db.length) writeInventarioToStore(db);
+      } catch {}
+    })();
+
     (async () => {
       let nextInfo: FornecedorInfoMap = {};
       let nextProdutos: FornecedorProdutos = {};
@@ -392,10 +409,6 @@ export default function ListaDeComprasClient() {
     const fornecedorFallback = buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
     const contagemOptions = contagens
       .map((contagem) => {
-        const hasAnyCountedItem = (contagem.categorias ?? []).some((cat) =>
-          (cat.itens ?? []).some((it) => !Boolean((it as any).removido) && Boolean(String((it as any).estoqueFinal ?? "").trim())),
-        );
-        if (!hasAnyCountedItem) return null;
         const t = parseDateLoose(contagem.data);
         if (!t) return null;
         const date = new Date(t);

@@ -19,7 +19,9 @@ import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type En
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
-import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow } from "../lib/prePreparoStore";
+import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
+import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
+import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { buildUserScopedId } from "../lib/userScope";
@@ -617,11 +619,25 @@ export default function DesperdiciosClient() {
 
   useEffect(() => {
     setPrePreparoStore(readPrePreparoFromStore());
+    void (async () => {
+      try {
+        const db = await loadPrePreparoFromSupabase();
+        if (db.length) writePrePreparoToStore(db as any);
+      } catch {}
+      setPrePreparoStore(readPrePreparoFromStore());
+    })();
     return subscribePrePreparo((rows) => setPrePreparoStore(rows));
   }, []);
 
   useEffect(() => {
     setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
+    void (async () => {
+      try {
+        const db = await loadPrePreparoEtiquetasFromSupabase();
+        if (db.length) writePrePreparoEtiquetasToStore(db);
+      } catch {}
+      setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
+    })();
     return subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
   }, []);
 
@@ -902,6 +918,7 @@ export default function DesperdiciosClient() {
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (e.id === etiquetaId ? { ...e, wasteStatus: status } : e));
       writePrePreparoEtiquetasToStore(next);
+      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
       return next;
     });
   }
@@ -912,6 +929,7 @@ export default function DesperdiciosClient() {
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "launched" as const } : e));
       writePrePreparoEtiquetasToStore(next);
+      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
       return next;
     });
   }
@@ -922,6 +940,7 @@ export default function DesperdiciosClient() {
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "ignored" as const } : e));
       writePrePreparoEtiquetasToStore(next);
+      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
       return next;
     });
   }
@@ -1229,7 +1248,7 @@ export default function DesperdiciosClient() {
               </button>
             </div>
             <div className={styles.etiquetaPromptList}>
-              {etiquetaWasteSummary.pending.slice(0, 6).map((e) => (
+              {etiquetaWasteSummary.pending.map((e) => (
                 <div key={e.id} className={styles.etiquetaPromptRow}>
                   <div className={styles.etiquetaPromptMain}>
                     <div className={styles.etiquetaPromptItem}>{e.receita}</div>
