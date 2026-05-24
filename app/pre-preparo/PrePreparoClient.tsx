@@ -642,9 +642,14 @@ export default function PrePreparoClient() {
   const [newRecipeYield, setNewRecipeYield] = useState("0,000");
   const [newRecipeYieldUnit, setNewRecipeYieldUnit] = useState("Kg");
 
-  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
-  const [addCategoryTarget, setAddCategoryTarget] = useState<"new" | "edit">("new");
-  const [addCategoryDraft, setAddCategoryDraft] = useState("");
+  const [isCategoriasOpen, setIsCategoriasOpen] = useState(false);
+  const [categoryModalTarget, setCategoryModalTarget] = useState<"new" | "edit">("new");
+  const [categoryNewDraft, setCategoryNewDraft] = useState("");
+  const [editingCategoryOriginal, setEditingCategoryOriginal] = useState<string | null>(null);
+  const [editingCategoryDraft, setEditingCategoryDraft] = useState("");
+  const [isDeleteCategoryOpen, setIsDeleteCategoryOpen] = useState(false);
+  const [deletingCategoryName, setDeletingCategoryName] = useState("");
+  const [deletingCategoryCount, setDeletingCategoryCount] = useState(0);
 
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -683,34 +688,132 @@ export default function PrePreparoClient() {
     if (newRecipeValidityUnit !== "Dia(s)") setNewRecipeValidityUnit("Dia(s)");
   }, [newRecipeValidityUnit]);
 
-  function openAddCategory(target: "new" | "edit") {
-    setAddCategoryTarget(target);
-    setAddCategoryDraft("");
-    setIsAddCategoryOpen(true);
+  function openCategoriasModal(target: "new" | "edit") {
+    setCategoryModalTarget(target);
+    setCategoryNewDraft("");
+    setEditingCategoryOriginal(null);
+    setEditingCategoryDraft("");
+    setIsDeleteCategoryOpen(false);
+    setDeletingCategoryName("");
+    setDeletingCategoryCount(0);
+    setIsCategoriasOpen(true);
   }
 
-  async function confirmAddCategory() {
-    const name = toTitleCase(normalizeCategoryName(addCategoryDraft.trim()));
+  const categoryCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const r of insumosStore) {
+      const name = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+      if (!name || name === "-") continue;
+      map.set(name, (map.get(name) ?? 0) + 1);
+    }
+    return map;
+  }, [insumosStore]);
+
+  const categoriesSorted = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    return [...insumoCategorias].filter((c) => normalizeCategoryName(c).toLowerCase() !== "todas").sort((a, b) => collator.compare(a, b));
+  }, [insumoCategorias]);
+
+  async function persistInsumosCategories(nextCategories: string[], applyRowRename?: { from: string; to: string }, applyRowDelete?: string) {
+    const latest = await loadInsumosStateFromSupabase().catch(() => null);
+    const baseRows = latest?.rows?.length ? latest.rows : readInsumosFromStore();
+    const rows = baseRows.map((r) => {
+      const cat = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+      if (applyRowRename && cat.toLowerCase() === applyRowRename.from.toLowerCase()) return { ...r, categoria: applyRowRename.to };
+      if (applyRowDelete && cat.toLowerCase() === applyRowDelete.toLowerCase()) return { ...r, categoria: "-" };
+      return r;
+    });
+    writeInsumosToStore(rows as any);
+    setInsumosStore(rows as any);
+    await saveInsumosStateToSupabase({ rows, categories: nextCategories });
+  }
+
+  async function addCategoriaFromModal() {
+    const name = toTitleCase(normalizeCategoryName(categoryNewDraft.trim()));
     if (!name || name === "-") return;
+    const existsKey = name.toLowerCase();
+    const nextCategories = insumoCategorias.some((c) => c.toLowerCase() === existsKey) ? insumoCategorias : [...insumoCategorias, name];
+    setInsumoCategorias(nextCategories);
+    writeInsumoCategoriasToStore(nextCategories);
+    setCategoryNewDraft("");
 
-    const next = (() => {
-      const seen = new Set(insumoCategorias.map((c) => c.toLowerCase()));
-      if (seen.has(name.toLowerCase())) return insumoCategorias;
-      return [...insumoCategorias, name];
-    })();
-
-    setInsumoCategorias(next);
-    writeInsumoCategoriasToStore(next);
-    setIsAddCategoryOpen(false);
-
-    if (addCategoryTarget === "new") setNewRecipeCategory(name);
+    if (categoryModalTarget === "new") setNewRecipeCategory(name);
     else setDraftCategory(name);
 
     try {
-      const latest = await loadInsumosStateFromSupabase().catch(() => null);
-      const rows = latest?.rows?.length ? latest.rows : readInsumosFromStore();
-      await saveInsumosStateToSupabase({ rows, categories: next });
+      await persistInsumosCategories(nextCategories);
       showToast("Categoria adicionada!", "success");
+    } catch (err) {
+      showToast(supabaseSaveErrorMessage(err), "error");
+    }
+  }
+
+  function editCategoria(name: string) {
+    setEditingCategoryOriginal(name);
+    setEditingCategoryDraft(name);
+  }
+
+  function cancelEditCategoria() {
+    setEditingCategoryOriginal(null);
+    setEditingCategoryDraft("");
+  }
+
+  async function confirmEditCategoria() {
+    const from = editingCategoryOriginal;
+    if (!from) return;
+    const name = toTitleCase(normalizeCategoryName(editingCategoryDraft.trim()));
+    if (!name) return;
+
+    const existsKey = name.toLowerCase();
+    const fromKey = from.toLowerCase();
+    if (fromKey !== existsKey && insumoCategorias.some((c) => c.toLowerCase() === existsKey)) {
+      window.alert("Já existe uma categoria com esse nome.");
+      return;
+    }
+
+    const nextCategories = insumoCategorias.map((c) => (c === from ? name : c));
+    setInsumoCategorias(nextCategories);
+    writeInsumoCategoriasToStore(nextCategories);
+    setRows((prev) => prev.map((r) => (r.categoria === from ? { ...r, categoria: name } : r)));
+    if (draftCategory === from) setDraftCategory(name);
+    if (newRecipeCategory === from) setNewRecipeCategory(name);
+    cancelEditCategoria();
+
+    try {
+      await persistInsumosCategories(nextCategories, { from, to: name });
+      showToast("Categoria atualizada!", "success");
+    } catch (err) {
+      showToast(supabaseSaveErrorMessage(err), "error");
+    }
+  }
+
+  function openDeleteCategoria(name: string) {
+    setDeletingCategoryName(name);
+    setDeletingCategoryCount(categoryCounts.get(name) ?? 0);
+    setIsDeleteCategoryOpen(true);
+  }
+
+  function cancelDeleteCategoria() {
+    setIsDeleteCategoryOpen(false);
+    setDeletingCategoryName("");
+    setDeletingCategoryCount(0);
+  }
+
+  async function confirmDeleteCategoria() {
+    const name = deletingCategoryName;
+    if (!name) return;
+    const nextCategories = insumoCategorias.filter((c) => c !== name);
+    setInsumoCategorias(nextCategories);
+    writeInsumoCategoriasToStore(nextCategories);
+    setRows((prev) => prev.map((r) => (r.categoria === name ? { ...r, categoria: "-" } : r)));
+    if (draftCategory === name) setDraftCategory("");
+    if (newRecipeCategory === name) setNewRecipeCategory("");
+    if (editingCategoryOriginal === name) cancelEditCategoria();
+    cancelDeleteCategoria();
+
+    try {
+      await persistInsumosCategories(nextCategories, undefined, name);
+      showToast("Categoria excluída!", "success");
     } catch (err) {
       showToast(supabaseSaveErrorMessage(err), "error");
     }
@@ -2478,7 +2581,7 @@ export default function PrePreparoClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabelRow}>
                     <div className={styles.formLabel}>Categoria</div>
-                    <button type="button" className={styles.addCategoryBtn} onClick={() => openAddCategory("edit")}>
+                    <button type="button" className={styles.addCategoryBtn} onClick={() => openCategoriasModal("edit")}>
                       Add categoria
                     </button>
                   </div>
@@ -2821,7 +2924,7 @@ export default function PrePreparoClient() {
                       <div className={styles.formField}>
                         <div className={styles.formLabelRow}>
                           <div className={styles.formLabel}>Categoria</div>
-                          <button type="button" className={styles.addCategoryBtn} onClick={() => openAddCategory("new")}>
+                          <button type="button" className={styles.addCategoryBtn} onClick={() => openCategoriasModal("new")}>
                             Add categoria
                           </button>
                         </div>
@@ -3115,30 +3218,112 @@ export default function PrePreparoClient() {
           </div>
         ) : null}
 
-        {isAddCategoryOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddCategoryOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-              <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>Adicionar categoria</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsAddCategoryOpen(false)}>
+        {isCategoriasOpen ? (
+          <div className={insumosStyles.modalOverlay} role="presentation" onClick={() => setIsCategoriasOpen(false)}>
+            <div className={`${insumosStyles.modal} ${insumosStyles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={insumosStyles.modalHeader}>
+                <div className={insumosStyles.modalTitle}>Categorias de Itens</div>
+                <button type="button" className={insumosStyles.modalClose} aria-label="Fechar" onClick={() => setIsCategoriasOpen(false)}>
                   ×
                 </button>
               </div>
-              <div className={styles.modalBody}>
-                <div className={styles.formField}>
-                  <div className={styles.formLabel}>Nome da categoria</div>
+
+              <div className={insumosStyles.categoriesBody}>
+                <div className={insumosStyles.categoriesLabel}>Nome da Categoria</div>
+                <div className={insumosStyles.categoriesRow}>
                   <input
-                    className={styles.formInput}
+                    className={insumosStyles.categoriesInput}
                     placeholder="Ex: Proteínas"
-                    value={addCategoryDraft}
-                    onChange={(e) => setAddCategoryDraft(e.target.value)}
-                    autoFocus
+                    value={categoryNewDraft}
+                    onChange={(e) => setCategoryNewDraft(e.target.value)}
                   />
+                  <button type="button" className={insumosStyles.categoriesAddBtn} onClick={() => void addCategoriaFromModal()} disabled={!normalizeCategoryName(categoryNewDraft)}>
+                    <IconPlus /> ADD
+                  </button>
+                </div>
+                <div className={insumosStyles.categoriesDivider} />
+
+                <div className={insumosStyles.categoriesList}>
+                  {categoriesSorted.map((c) => (
+                    <div key={c} className={insumosStyles.categoryItem}>
+                      {editingCategoryOriginal === c ? (
+                        <>
+                          <input
+                            className={insumosStyles.categoryInlineInput}
+                            value={editingCategoryDraft}
+                            onChange={(e) => setEditingCategoryDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") void confirmEditCategoria();
+                              if (e.key === "Escape") cancelEditCategoria();
+                            }}
+                            autoFocus
+                          />
+                          <div className={insumosStyles.categoryCount} />
+                          <div className={insumosStyles.categoryActions}>
+                            <button
+                              type="button"
+                              className={`${insumosStyles.categoryIconBtn} ${insumosStyles.categoryIconBtnConfirm}`}
+                              aria-label="Confirmar edição"
+                              onClick={() => void confirmEditCategoria()}
+                              disabled={!normalizeCategoryName(editingCategoryDraft)}
+                            >
+                              <IconCheck />
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className={insumosStyles.categoryName}>{c}</div>
+                          <div className={insumosStyles.categoryCount}>{categoryCounts.get(c) ?? 0}</div>
+                          <div className={insumosStyles.categoryActions}>
+                            <button type="button" className={insumosStyles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategoria(c)}>
+                              <IconEdit />
+                            </button>
+                            <button type="button" className={insumosStyles.categoryIconBtn} aria-label="Excluir categoria" onClick={() => openDeleteCategoria(c)}>
+                              <IconTrash />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} onClick={() => void confirmAddCategory()} disabled={!addCategoryDraft.trim()}>
-                  Adicionar
+            </div>
+          </div>
+        ) : null}
+
+        {isDeleteCategoryOpen ? (
+          <div className={insumosStyles.modalOverlay} role="presentation" onClick={cancelDeleteCategoria}>
+            <div className={insumosStyles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={insumosStyles.modalHeader}>
+                <div className={insumosStyles.modalTitle}>Excluir Categoria?</div>
+                <button type="button" className={insumosStyles.modalClose} aria-label="Fechar" onClick={cancelDeleteCategoria}>
+                  ×
+                </button>
+              </div>
+
+              <div className={insumosStyles.confirmBody}>
+                <div className={insumosStyles.confirmIcon}>
+                  <IconTrash />
+                </div>
+                <div className={insumosStyles.confirmText}>
+                  Caso exclua a categoria <strong>“{deletingCategoryName}”</strong> não poderá recuperá-la.
+                  {deletingCategoryCount ? (
+                    <>
+                      <br />
+                      Existem <strong>{deletingCategoryCount}</strong> itens nessa categoria; eles ficarão sem categoria.
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={insumosStyles.confirmActions}>
+                <button type="button" className={insumosStyles.confirmDelete} onClick={() => void confirmDeleteCategoria()}>
+                  Excluir
+                </button>
+                <button type="button" className={insumosStyles.confirmCancel} onClick={cancelDeleteCategoria}>
+                  Cancelar
                 </button>
               </div>
             </div>
