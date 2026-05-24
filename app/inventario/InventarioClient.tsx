@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
-import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
+import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
@@ -88,6 +89,10 @@ function parseDateNumericLoose(value: string) {
   return d;
 }
 
+function normCatName(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function sortContagensDesc(list: InventarioContagem[]) {
   const decorated = list.map((c, index) => ({
     c,
@@ -137,6 +142,7 @@ const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [contagens, setContagens] = useState<InventarioContagem[]>(initialContagens);
   const contagensReadyRef = useRef(false);
 
@@ -170,7 +176,37 @@ export default function InventarioClient() {
 
   const selectedContagem = useMemo(() => (selectedContagemId ? contagens.find((c) => c.id === selectedContagemId) ?? null : null), [contagens, selectedContagemId]);
 
-  const categorias = useMemo(() => ["Categorias pendentes"], []);
+  const categorias = useMemo(() => {
+    const base = ["Categorias pendentes"];
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    const names = (selectedContagem?.categorias ?? [])
+      .map((c) => normCatName(String(c.nome ?? "")))
+      .filter(Boolean)
+      .filter((c) => c.toLowerCase() !== "todas");
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const n of names) {
+      const k = n.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(n);
+    }
+    out.sort((a, b) => collator.compare(a, b));
+    return [...base, ...out];
+  }, [selectedContagem?.categorias]);
+
+  const itemCategoryMap = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const cat of selectedContagem?.categorias ?? []) {
+      const name = normCatName(String(cat.nome ?? "")) || "Sem categoria";
+      for (const it of cat.itens ?? []) {
+        const id = String(it.id ?? "");
+        if (!id) continue;
+        map.set(id, name);
+      }
+    }
+    return map;
+  }, [selectedContagem?.categorias]);
 
   const allItems = useMemo(() => {
     const list = selectedContagem?.categorias ?? [];
@@ -187,8 +223,12 @@ export default function InventarioClient() {
       }
     }
     const q = query.trim().toLowerCase();
-    return q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
-  }, [query, selectedContagem?.categorias]);
+    const afterQuery = q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
+    if (categoriaFilter !== "Categorias pendentes") {
+      return afterQuery.filter((r) => (itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria") === categoriaFilter);
+    }
+    return afterQuery;
+  }, [categoriaFilter, itemCategoryMap, query, selectedContagem?.categorias]);
 
   const pendentes = useMemo(() => allItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [allItems]);
   const contabilizados = useMemo(() => {
@@ -199,13 +239,21 @@ export default function InventarioClient() {
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
+    setInsumoCategorias(readInsumoCategoriasFromStore());
     void (async () => {
       try {
-        const dbRows = await loadInsumosFromSupabase();
-        if (dbRows.length) writeInsumosToStore(dbRows);
+        const state = await loadInsumosStateFromSupabase();
+        if (state.rows.length) writeInsumosToStore(state.rows);
+        if (state.categories.length) writeInsumoCategoriasToStore(state.categories);
+        setInsumoCategorias(state.categories);
       } catch {}
     })();
-    return subscribeInsumos((rows) => setInsumosStore(rows));
+    const u1 = subscribeInsumos((rows) => setInsumosStore(rows));
+    const u2 = subscribeInsumoCategorias((rows) => setInsumoCategorias(rows));
+    return () => {
+      u1();
+      u2();
+    };
   }, []);
 
   useEffect(() => {
@@ -245,45 +293,101 @@ export default function InventarioClient() {
 
   useEffect(() => {
     if (!contagensReadyRef.current) return;
-    if (!insumosStore.length) return;
+    if (!insumosStore.length && !insumoCategorias.length) return;
     setContagens((prev) => {
       let changed = false;
       const next = prev.map((c) => {
-        const categorias: InventarioCategoria[] = (c.categorias ?? []).length
-          ? c.categorias
-          : [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente" as const, itens: [] }];
-        const catIdx = categorias.findIndex((x) => String(x.nome || "").toUpperCase() === "MATÉRIA PRIMA");
-        const cat: InventarioCategoria =
-          catIdx >= 0 ? categorias[catIdx] : { id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente" as const, itens: [] };
-        const dedupeById = new Map<string, InventarioItemRow>();
-        for (const it of cat.itens ?? []) {
-          const id = String(it.id ?? "");
-          if (!id) continue;
-          const prevIt = dedupeById.get(id);
-          if (!prevIt) {
-            dedupeById.set(id, it);
-            continue;
+        const prevCats: InventarioCategoria[] = Array.isArray(c.categorias) ? c.categorias : [];
+        const existingById = new Map<string, InventarioItemRow>();
+        const existingCatById = new Map<string, string>();
+        for (const cat of prevCats) {
+          const catName = normCatName(String(cat.nome ?? "")) || "Sem categoria";
+          for (const it of cat.itens ?? []) {
+            const id = String(it.id ?? "");
+            if (!id) continue;
+            existingCatById.set(id, catName);
+            const prevIt = existingById.get(id);
+            if (!prevIt) {
+              existingById.set(id, it);
+              continue;
+            }
+            if (it.removido) {
+              if (!prevIt.removido) existingById.set(id, it);
+              continue;
+            }
+            const prevHas = Boolean(String(prevIt.estoqueFinal ?? "").trim());
+            const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
+            if (!prevHas && nextHas) existingById.set(id, it);
           }
-          if (it.removido) {
-            if (!prevIt.removido) dedupeById.set(id, it);
-            continue;
-          }
-          const prevHas = Boolean(String(prevIt.estoqueFinal ?? "").trim());
-          const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
-          if (!prevHas && nextHas) dedupeById.set(id, it);
         }
-        const merged: InventarioItemRow[] = Array.from(dedupeById.values());
-        const existingIds = new Set<string>(merged.map((it) => String(it.id ?? "")).filter(Boolean));
+
+        const insumoById = new Map<string, { item: string; unidade: string; categoria: string }>();
+        const desiredCatSet = new Set<string>();
+        for (const c0 of insumoCategorias) {
+          const name = normCatName(String(c0 ?? ""));
+          if (!name || name === "-") continue;
+          desiredCatSet.add(name);
+        }
         for (const ins of insumosStore) {
-          if (existingIds.has(ins.id)) continue;
-          merged.push({ id: ins.id, item: ins.item, unidade: ins.medida, estoqueFinal: "" });
-          existingIds.add(ins.id);
-          changed = true;
+          const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
+          insumoById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
+          desiredCatSet.add(catName);
         }
-        const nextCat: InventarioCategoria = { ...cat, itens: merged };
-        const nextCats = [...categorias];
-        if (catIdx >= 0) nextCats[catIdx] = nextCat;
-        else nextCats.push(nextCat);
+
+        for (const name of existingCatById.values()) desiredCatSet.add(name);
+        if (!desiredCatSet.size) desiredCatSet.add("Sem categoria");
+
+        const prevCatIdByName = new Map<string, string>();
+        for (const cat of prevCats) {
+          const nm = normCatName(String(cat.nome ?? ""));
+          if (!nm) continue;
+          const k = nm.toLowerCase();
+          if (!prevCatIdByName.has(k)) prevCatIdByName.set(k, String(cat.id ?? ""));
+        }
+
+        const allIds = new Set<string>();
+        for (const id of existingById.keys()) allIds.add(id);
+        for (const id of insumoById.keys()) allIds.add(id);
+
+        const itemsByCat = new Map<string, InventarioItemRow[]>();
+        for (const id of allIds) {
+          const ins = insumoById.get(id) ?? null;
+          const prevIt = existingById.get(id) ?? null;
+          const categoria = ins?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
+          const catKey = categoria.toLowerCase();
+          const nextRow: InventarioItemRow = {
+            id,
+            item: ins?.item ?? String(prevIt?.item ?? ""),
+            unidade: (ins?.unidade ?? String(prevIt?.unidade ?? "")) || "Und",
+            estoqueFinal: String(prevIt?.estoqueFinal ?? ""),
+            removido: prevIt?.removido,
+          };
+          if (prevIt) {
+            const prevCat = (existingCatById.get(id) ?? "Sem categoria").toLowerCase();
+            if (prevCat !== catKey) changed = true;
+            if (String(prevIt.item ?? "") !== nextRow.item || String(prevIt.unidade ?? "") !== nextRow.unidade) changed = true;
+          } else {
+            changed = true;
+          }
+          const list = itemsByCat.get(catKey) ?? [];
+          list.push(nextRow);
+          itemsByCat.set(catKey, list);
+        }
+
+        const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+        const orderedCats = Array.from(desiredCatSet.values()).sort((a, b) => collator.compare(a, b));
+        const nextCats: InventarioCategoria[] = orderedCats.map((name) => {
+          const key = name.toLowerCase();
+          const itens = [...(itemsByCat.get(key) ?? [])].sort((a, b) => collator.compare(a.item, b.item));
+          const hasPending = itens.some((it) => !it.removido && !String(it.estoqueFinal ?? "").trim());
+          return {
+            id: prevCatIdByName.get(key) || `cat-${Date.now()}-${key}`,
+            nome: name,
+            status: hasPending ? "pendente" : "concluida",
+            itens,
+          };
+        });
+
         return { ...c, categorias: nextCats };
       });
       if (!changed) return prev;
@@ -291,7 +395,7 @@ export default function InventarioClient() {
       if (sel) void upsertInventarioToSupabase(sel).catch(() => {});
       return next;
     });
-  }, [insumosStore, selectedContagemId]);
+  }, [insumoCategorias, insumosStore, selectedContagemId]);
 
   useEffect(() => {
     if (!menuContagemId) return;
@@ -404,10 +508,34 @@ export default function InventarioClient() {
         unidade: i.medida,
         estoqueFinal: "",
       }));
+      const byCat = new Map<string, InventarioItemRow[]>();
+      const catSet = new Set<string>();
+      for (const c0 of insumoCategorias) {
+        const name = normCatName(String(c0 ?? ""));
+        if (!name || name === "-") continue;
+        catSet.add(name);
+      }
+      for (const it of itens) {
+        const ins = insumosStore.find((x) => x.id === it.id) ?? null;
+        const cat = normCatName(String(ins?.categoria ?? "")) || "Sem categoria";
+        catSet.add(cat);
+        const key = cat.toLowerCase();
+        const list = byCat.get(key) ?? [];
+        list.push(it);
+        byCat.set(key, list);
+      }
+      const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+      const cats = Array.from(catSet.values()).sort((a, b) => collator.compare(a, b));
+      const categorias: InventarioCategoria[] = cats.map((name) => ({
+        id: `cat-${Date.now()}-${name.toLowerCase()}`,
+        nome: name,
+        status: "pendente",
+        itens: byCat.get(name.toLowerCase()) ?? [],
+      }));
       const next: InventarioContagem = {
         id,
         data,
-        categorias: [{ id: `cat-${Date.now()}`, nome: "MATÉRIA PRIMA", status: "pendente", itens }],
+        categorias,
       };
       setContagens((prev) => sortContagensDesc([...prev, next]));
       setSelectedContagemId(id);
@@ -739,7 +867,7 @@ export default function InventarioClient() {
                         <div className={styles.dotPending} aria-hidden />
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
-                          <div className={styles.itemSub}>MATÉRIA PRIMA</div>
+                            <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
                       <div className={styles.itemRight}>
@@ -804,7 +932,7 @@ export default function InventarioClient() {
                         </div>
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
-                          <div className={styles.itemSub}>MATÉRIA PRIMA</div>
+                            <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
                       <div className={styles.itemRight}>
