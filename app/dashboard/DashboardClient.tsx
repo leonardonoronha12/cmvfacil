@@ -1862,12 +1862,9 @@ export default function DashboardClient() {
       const d = parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
-      const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
         const rawKey = normalizeKey(it.nome);
-        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
-        const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
-        if (mappedKey !== key) continue;
+        if (rawKey !== key) continue;
         out.push({
           t,
           data: e.dataLancamento,
@@ -1881,7 +1878,7 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, fornecedorKeyLookup, fornecedorEquivalenciasMap, historyItem]);
+  }, [entradas, historyItem]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
