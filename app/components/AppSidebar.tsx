@@ -235,6 +235,16 @@ function IconChevronRight() {
   );
 }
 
+function IconMenu() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4.5 7.5H19.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M4.5 12H19.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <path d="M4.5 16.5H19.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconClose() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -300,6 +310,8 @@ const HELP_CENTER_URL = "https://cmv-facil.gitbook.io/cmv-facil";
 export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>(() => readPrePreparoEtiquetasFromStore());
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
   useEffect(() => {
     setEtiquetas(readPrePreparoEtiquetasFromStore());
@@ -319,6 +331,18 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, []);
 
   useEffect(() => {
+    const mq = window.matchMedia("(max-width: 720px)");
+    const apply = () => setIsMobile(Boolean(mq.matches));
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile) setIsDrawerOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
     if (!isSupportOpen) return;
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") setIsSupportOpen(false);
@@ -326,6 +350,24 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isSupportOpen]);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isDrawerOpen]);
+
+  useEffect(() => {
+    if (!isDrawerOpen) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setIsDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isDrawerOpen]);
 
   const etiquetasVencidasPendentes = useMemo(() => {
     const now = new Date();
@@ -347,8 +389,12 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const usersLimit = 3;
   const usersPct = usersLimit > 0 ? Math.min(1, Math.max(0, usersUsed / usersLimit)) : 0;
 
-  return (
-    <aside className={dash.menuLateral}>
+  const closeDrawer = () => {
+    if (isMobile) setIsDrawerOpen(false);
+  };
+
+  const sidebarBody = (
+    <>
       <div className={dash.menuTop}>
         <div className={dash.brand}>
           <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
@@ -366,15 +412,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Relatórios</p>
-          <a className={navClass(active, "dashboard")} href="/dashboard">
+          <a className={navClass(active, "dashboard")} href="/dashboard" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconCmv /></span>
             CMV Real
           </a>
-          <a className={navClass(active, "lista-compras")} href="/lista-de-compras">
+          <a className={navClass(active, "lista-compras")} href="/lista-de-compras" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconChecklist /></span>
             Lista de Compras
           </a>
-          <a className={navClass(active, "fichas-tecnicas")} href="/fichas-tecnicas">
+          <a className={navClass(active, "fichas-tecnicas")} href="/fichas-tecnicas" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconClipboard /></span>
             Fichas Técnicas
           </a>
@@ -382,15 +428,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Cadastros</p>
-          <a className={navClass(active, "insumos")} href="/insumos">
+          <a className={navClass(active, "insumos")} href="/insumos" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconCube /></span>
             Insumos
           </a>
-          <a className={navClass(active, "pre-preparo")} href="/pre-preparo">
+          <a className={navClass(active, "pre-preparo")} href="/pre-preparo" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconBowl /></span>
             Pré-Preparo
           </a>
-          <a className={navClass(active, "fornecedores")} href="/fornecedores">
+          <a className={navClass(active, "fornecedores")} href="/fornecedores" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconStore /></span>
             Fornecedores
           </a>
@@ -398,15 +444,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Rotina</p>
-          <a className={navClass(active, "entradas")} href="/entradas">
+          <a className={navClass(active, "entradas")} href="/entradas" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconBasket /></span>
             Entradas
           </a>
-          <a className={navClass(active, "inventario")} href="/inventario">
+          <a className={navClass(active, "inventario")} href="/inventario" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconLayers /></span>
             Inventário
           </a>
-          <a className={navClass(active, "desperdicios")} href="/desperdicios">
+          <a className={navClass(active, "desperdicios")} href="/desperdicios" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
             {etiquetasVencidasPendentes > 0 ? <span className={dash.navBadge}>{etiquetasVencidasPendentes}</span> : null}
@@ -415,7 +461,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Configurações</p>
-          <a className={navClass(active, "ajustes")} href="/ajustes">
+          <a className={navClass(active, "ajustes")} href="/ajustes" onClick={closeDrawer}>
             <span className={dash.navIcon}><IconGear /></span>
             Ajustes
           </a>
@@ -425,6 +471,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             onClick={(e) => {
               e.preventDefault();
               setIsSupportOpen(true);
+              setIsDrawerOpen(false);
             }}
           >
             <span className={dash.navIcon}><IconChat /></span>
@@ -434,7 +481,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       </div>
 
       <div className={dash.menuBottom}>
-        <a className={dash.usersActiveCard} href="/ajustes?tab=usuarios">
+        <a className={dash.usersActiveCard} href="/ajustes?tab=usuarios" onClick={closeDrawer}>
           <div className={dash.usersActiveRow}>
             <span className={dash.usersActiveIcon} aria-hidden>
               <IconUsers />
@@ -447,7 +494,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           </div>
         </a>
 
-        <a className={dash.userDropdown} href="/ajustes?tab=minha-conta">
+        <a className={dash.userDropdown} href="/ajustes?tab=minha-conta" onClick={closeDrawer}>
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>
               <IconBurgerBadge />
@@ -459,6 +506,48 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           </span>
         </a>
       </div>
+    </>
+  );
+
+  return (
+    <>
+      <div className={dash.mobileTopBar}>
+        <div className={dash.mobileDrawerBrand}>
+          <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
+          <div className={dash.mobileDrawerTitle}>Menu</div>
+        </div>
+        <button type="button" className={dash.mobileMenuBtn} onClick={() => setIsDrawerOpen(true)} aria-label="Abrir menu">
+          <IconMenu />
+        </button>
+      </div>
+
+      {!isMobile ? <aside className={dash.menuLateral}>{sidebarBody}</aside> : null}
+
+      {isMobile && isDrawerOpen
+        ? createPortal(
+            <div
+              className={dash.mobileDrawerOverlay}
+              role="presentation"
+              onClick={(e) => {
+                if (e.target === e.currentTarget) setIsDrawerOpen(false);
+              }}
+            >
+              <aside className={`${dash.menuLateral} ${dash.mobileDrawer}`} role="dialog" aria-modal="true" aria-label="Menu">
+                <div className={dash.mobileDrawerHeader}>
+                  <div className={dash.mobileDrawerBrand}>
+                    <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
+                    <div className={dash.mobileDrawerTitle}>Menu</div>
+                  </div>
+                  <button type="button" className={dash.mobileMenuBtn} onClick={() => setIsDrawerOpen(false)} aria-label="Fechar menu">
+                    <IconClose />
+                  </button>
+                </div>
+                {sidebarBody}
+              </aside>
+            </div>,
+            document.body,
+          )
+        : null}
 
       {isSupportOpen
         ? createPortal(
@@ -532,6 +621,6 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             document.body,
           )
         : null}
-    </aside>
+    </>
   );
 }
