@@ -1730,6 +1730,12 @@ export default function PrePreparoClient() {
     return latest ? formatDateLabel(latest) : "-";
   }, [detailsRow, entradasRows]);
 
+  const detailsUltimaEtiquetaLabel = useMemo(() => {
+    const latest = detailsEtiquetas[0];
+    if (!latest) return "-";
+    return String(latest.dataProducao ?? "").trim() || String(latest.dataValidade ?? "").trim() || "-";
+  }, [detailsEtiquetas]);
+
   const etiquetaRecipeOptions = useMemo(() => {
     const q = etiquetaRecipeQuery.trim().toLowerCase();
     const base = rows;
@@ -2409,6 +2415,15 @@ export default function PrePreparoClient() {
                         <div className={dash.itemAsideKpiText}>
                           <div className={dash.itemAsideKpiLabel}>Última Entrada</div>
                           <div className={dash.itemAsideKpiValue}>{detailsUltimaEntradaLabel}</div>
+                        </div>
+                      </div>
+                      <div className={dash.itemAsideKpi}>
+                        <div className={dash.itemAsideKpiIcon}>
+                          <DetailsIconCalendarSmall />
+                        </div>
+                        <div className={dash.itemAsideKpiText}>
+                          <div className={dash.itemAsideKpiLabel}>Última Etiqueta</div>
+                          <div className={dash.itemAsideKpiValue}>{detailsUltimaEtiquetaLabel}</div>
                         </div>
                       </div>
                     </div>
