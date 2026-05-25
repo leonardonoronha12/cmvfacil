@@ -24,6 +24,10 @@ type StoredTemplate = {
   dataBase64: string;
 };
 
+function defaultFilename(kind: TemplateKind) {
+  return kind === "csv" ? "modelo-planilha-insumos.csv" : "modelo-planilha-insumos.xlsx";
+}
+
 function safeKind(v: string | null): TemplateKind | null {
   if (v === "csv" || v === "xlsx") return v;
   return null;
@@ -54,9 +58,11 @@ function toBinaryResponse(kind: TemplateKind, file: StoredTemplate) {
   const bytes = Buffer.from(file.dataBase64, "base64");
   const headers = new Headers();
   headers.set("content-type", file.mime);
-  headers.set("content-disposition", `attachment; filename="${file.name.replaceAll('"', "")}"`);
+  const filename = defaultFilename(kind);
+  headers.set("content-disposition", `attachment; filename="${filename.replaceAll('"', "")}"`);
   headers.set("x-template-kind", kind);
-  headers.set("x-template-filename", file.name);
+  headers.set("x-template-filename", filename);
+  headers.set("x-template-original-filename", file.name);
   return new NextResponse(bytes, { status: 200, headers });
 }
 
@@ -126,4 +132,3 @@ export async function DELETE(req: NextRequest) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

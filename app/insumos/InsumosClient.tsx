@@ -655,7 +655,7 @@ export default function InsumosClient() {
       const res = await fetch("/api/insumos-templates?kind=csv&download=1", { method: "GET" });
       if (res.ok) {
         const blob = await res.blob();
-        const name = res.headers.get("x-template-filename")?.trim() || "modelo-importacao-insumos.csv";
+        const name = res.headers.get("x-template-filename")?.trim() || "modelo-planilha-insumos.csv";
         downloadBlob(blob, name);
         return;
       }
@@ -667,7 +667,7 @@ export default function InsumosClient() {
       ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", "false"],
     ];
     const csv = "\uFEFF" + rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(sep)).join("\n");
-    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-importacao-insumos.csv");
+    downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-planilha-insumos.csv");
   }
 
   async function downloadTemplateXlsx() {
@@ -675,7 +675,7 @@ export default function InsumosClient() {
       const res = await fetch("/api/insumos-templates?kind=xlsx&download=1", { method: "GET" });
       if (res.ok) {
         const blob = await res.blob();
-        const name = res.headers.get("x-template-filename")?.trim() || "modelo-importacao-insumos.xlsx";
+        const name = res.headers.get("x-template-filename")?.trim() || "modelo-planilha-insumos.xlsx";
         downloadBlob(blob, name);
         return;
       }
@@ -739,7 +739,7 @@ export default function InsumosClient() {
       { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-    downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-importacao-insumos.xlsx");
+    downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-planilha-insumos.xlsx");
   }
 
   function openNewItem() {

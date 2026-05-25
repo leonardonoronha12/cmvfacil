@@ -111,7 +111,7 @@ export default function ModelosImportacaoClient() {
       const res = await fetch(`/api/insumos-templates?kind=${encodeURIComponent(kind)}&download=1`, { method: "GET" });
       if (!res.ok) throw new Error("not_found");
       const blob = await res.blob();
-      const name = res.headers.get("x-template-filename")?.trim() || (kind === "csv" ? "modelo-importacao-insumos.csv" : "modelo-importacao-insumos.xlsx");
+      const name = res.headers.get("x-template-filename")?.trim() || (kind === "csv" ? "modelo-planilha-insumos.csv" : "modelo-planilha-insumos.xlsx");
       downloadBlob(blob, name);
     } catch {
       showToast("Não há modelo salvo para baixar.", "error");
@@ -206,4 +206,3 @@ export default function ModelosImportacaoClient() {
     </div>
   );
 }
-
