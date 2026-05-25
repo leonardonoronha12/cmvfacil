@@ -2949,7 +2949,7 @@ export default function PrePreparoClient() {
         ) : null}
 
         {isNewRecipeOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsNewRecipeOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation">
             <div className={`${styles.modal} ${styles.recipeModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Cadastro de Receita (Pré-preparo)</div>
