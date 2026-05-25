@@ -190,6 +190,7 @@ export default function InventarioClient() {
   const editCancelledRef = useRef(false);
   const [pendingDrafts, setPendingDrafts] = useState<Record<string, string>>({});
   const pendingDraftsRef = useRef<Record<string, string>>({});
+  const pendingColBodyRef = useRef<HTMLDivElement | null>(null);
 
   const selectedContagem = useMemo(() => (selectedContagemId ? contagens.find((c) => c.id === selectedContagemId) ?? null : null), [contagens, selectedContagemId]);
 
@@ -907,7 +908,7 @@ export default function InventarioClient() {
             <div className={styles.cols}>
               <div className={styles.col}>
                 <div className={styles.colHeadPending}>Pendentes</div>
-                <div className={styles.colBody}>
+                <div className={styles.colBody} ref={pendingColBodyRef}>
                   {pendentes.map((r) => (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
@@ -919,6 +920,7 @@ export default function InventarioClient() {
                       </div>
                       <div className={styles.itemRight}>
                         <input
+                          data-inv-pending="1"
                           className={styles.qtyInput}
                           value={pendingDrafts[r.id] ?? r.estoqueFinal}
                           onChange={(e) => setPendingDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
@@ -926,8 +928,18 @@ export default function InventarioClient() {
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
                               e.preventDefault();
+                              const root = pendingColBodyRef.current;
+                              const beforeInputs = Array.from(root?.querySelectorAll<HTMLInputElement>('input[data-inv-pending="1"]') ?? []);
+                              const beforeIndex = beforeInputs.indexOf(e.currentTarget);
                               commitPendingDraft(r.id);
-                              e.currentTarget.blur();
+                              window.setTimeout(() => {
+                                const afterInputs = Array.from(root?.querySelectorAll<HTMLInputElement>('input[data-inv-pending="1"]') ?? []);
+                                if (!afterInputs.length) return;
+                                const nextIndex = Math.max(0, Math.min(beforeIndex, afterInputs.length - 1));
+                                const next = afterInputs[nextIndex];
+                                next.focus();
+                                requestAnimationFrame(() => next.select());
+                              }, 0);
                             }
                             if (e.key === "Escape") {
                               e.preventDefault();
