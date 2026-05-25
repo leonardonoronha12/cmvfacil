@@ -14,13 +14,6 @@ import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, write
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
-import {
-  readFichasTecnicasEtiquetasFromStore,
-  subscribeFichasTecnicasEtiquetas,
-  writeFichasTecnicasEtiquetasToStore,
-  type FichaTecnicaEtiquetaRow,
-} from "../lib/fichasTecnicasEtiquetasStore";
-import { loadFichasTecnicasEtiquetasFromSupabase, saveFichasTecnicasEtiquetasToSupabase } from "../lib/fichasTecnicasEtiquetasSupabase";
 import styles from "./fichas-tecnicas.module.css";
 
 function isMissingTableError(err: unknown, table: string) {
@@ -806,12 +799,10 @@ export default function FichasTecnicasClient() {
   const openedFromQueryRef = useRef(false);
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
-  const saveEtiquetasTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const loadErrorShownRef = useRef(false);
   const missingTablesShownRef = useRef(false);
   const [isSupabaseFichasEnabled, setIsSupabaseFichasEnabled] = useState(true);
-  const [isSupabaseEtiquetasEnabled, setIsSupabaseEtiquetasEnabled] = useState(true);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
@@ -845,7 +836,7 @@ export default function FichasTecnicasClient() {
   const [ingredientRows, setIngredientRows] = useState<ModalIngredientRow[]>([]);
   const [editingIngredientRowId, setEditingIngredientRowId] = useState<string | null>(null);
   const [detailsRecipe, setDetailsRecipe] = useState<SavedRecipeDetails | null>(null);
-  const [detailsViewTab, setDetailsViewTab] = useState<"ingredientes" | "preparo" | "etiquetas">("ingredientes");
+  const [detailsViewTab, setDetailsViewTab] = useState<"ingredientes" | "preparo">("ingredientes");
   const [detailIngredientId, setDetailIngredientId] = useState("");
   const [detailIngredientQty, setDetailIngredientQty] = useState("0,000");
   const [detailsYieldDraft, setDetailsYieldDraft] = useState("1,000");
@@ -854,13 +845,6 @@ export default function FichasTecnicasClient() {
   const [rowEditQty, setRowEditQty] = useState("0,000");
   const [isEditingPrep, setIsEditingPrep] = useState(false);
   const [prepDraft, setPrepDraft] = useState("");
-  const [etiquetasRows, setEtiquetasRows] = useState<FichaTecnicaEtiquetaRow[]>(() => readFichasTecnicasEtiquetasFromStore([]));
-  const [isEtiquetaOpen, setIsEtiquetaOpen] = useState(false);
-  const [etiquetaResponsavel, setEtiquetaResponsavel] = useState("");
-  const [etiquetaQtd, setEtiquetaQtd] = useState("1,000");
-  const [etiquetaUnidade, setEtiquetaUnidade] = useState("Porção");
-  const [etiquetaDataProd, setEtiquetaDataProd] = useState(() => formatDateLabel(new Date()));
-  const [etiquetaDataVal, setEtiquetaDataVal] = useState(() => formatDateLabel(addDays(new Date(), 1)));
   const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<EditRecipeDraft | null>(null);
   const [deleteRow, setDeleteRow] = useState<RecipeRow | null>(null);
@@ -878,7 +862,6 @@ export default function FichasTecnicasClient() {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
-      if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     };
   }, []);
 
@@ -946,40 +929,6 @@ export default function FichasTecnicasClient() {
       }
     })();
   }, []);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const rows = await loadFichasTecnicasEtiquetasFromSupabase();
-        setEtiquetasRows(rows);
-        writeFichasTecnicasEtiquetasToStore(rows);
-        setIsSupabaseEtiquetasEnabled(true);
-      } catch (err) {
-        setEtiquetasRows(readFichasTecnicasEtiquetasFromStore([]));
-        if (isMissingTableError(err, "fichas_tecnicas_etiquetas_state")) {
-          setIsSupabaseEtiquetasEnabled(false);
-          if (!missingTablesShownRef.current) {
-            missingTablesShownRef.current = true;
-            showToast("Tabela fichas_tecnicas_etiquetas_state não existe no Supabase. Abra /setup-supabase e rode o SQL (passo 3).", "error", 9000);
-          }
-          return;
-        }
-        showToast(err instanceof Error ? err.message : "Não foi possível carregar as etiquetas.", "error");
-      }
-    })();
-    return subscribeFichasTecnicasEtiquetas(setEtiquetasRows);
-  }, []);
-
-  useEffect(() => {
-    writeFichasTecnicasEtiquetasToStore(etiquetasRows);
-    if (!isSupabaseEtiquetasEnabled) return;
-    if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
-    saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
-      void saveFichasTecnicasEtiquetasToSupabase(etiquetasRows).catch((err) => {
-        showToast(err instanceof Error ? err.message : "Não foi possível salvar as etiquetas.", "error");
-      });
-    }, 700);
-  }, [etiquetasRows, isSupabaseEtiquetasEnabled]);
 
   function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
     setTableRows((prev) => {
@@ -1249,46 +1198,6 @@ export default function FichasTecnicasClient() {
   const cmvAbaixoMeta = cmvAtualValue <= cmvMetaValue;
   const canGoStep1 = recipeName.trim().length > 0;
   const canGoStep2 = ingredientRows.length > 0 && parseDecimalInput(recipeYield) > 0;
-  const detailsEtiquetas = useMemo(() => {
-    if (!detailsRecipe) return [];
-    return etiquetasRows.filter((e) => e.recipeId === detailsRecipe.rowId);
-  }, [detailsRecipe, etiquetasRows]);
-
-  function openEtiquetaModal() {
-    if (!detailsRecipe) return;
-    setEtiquetaResponsavel("");
-    setEtiquetaQtd("1,000");
-    setEtiquetaUnidade("Porção");
-    const now = new Date();
-    setEtiquetaDataProd(formatDateLabel(now));
-    setEtiquetaDataVal(formatDateLabel(addDays(now, 1)));
-    setIsEtiquetaOpen(true);
-  }
-
-  function confirmSaveEtiqueta() {
-    if (!detailsRecipe) return;
-    const responsavel = etiquetaResponsavel.trim();
-    const quantidade = formatDecimalFixedDraft(etiquetaQtd, 3);
-    const unidade = etiquetaUnidade.trim() || "Porção";
-    if (!responsavel) {
-      showToast("Informe o responsável.", "error");
-      return;
-    }
-    const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : String(Date.now());
-    const next: FichaTecnicaEtiquetaRow = {
-      id,
-      recipeId: detailsRecipe.rowId,
-      receita: detailsRecipe.recipeName,
-      responsavel,
-      quantidade,
-      unidade,
-      dataProducao: etiquetaDataProd.trim(),
-      dataValidade: etiquetaDataVal.trim(),
-    };
-    setEtiquetasRows((prev) => [next, ...prev]);
-    setIsEtiquetaOpen(false);
-    showToast("Etiqueta criada.", "success");
-  }
 
   function renderTableCell(row: RecipeRow, column: FichaTableColumn) {
     if (column === "receita") {
@@ -1686,6 +1595,13 @@ export default function FichasTecnicasClient() {
     try {
       const { PDFDocument } = await import("pdf-lib");
       const logoSrc = await fetchSvgAsDataUrl("/dashboard/ml7hdudz-jry958l.svg");
+      const previewSrcRaw = String(recipe.recipeImage ?? "").trim();
+      const previewSrc =
+        !previewSrcRaw
+          ? ""
+          : previewSrcRaw.startsWith("data:") || previewSrcRaw.startsWith("blob:") || previewSrcRaw.startsWith("/") || previewSrcRaw.startsWith(window.location.origin)
+            ? previewSrcRaw
+            : "";
       const now = new Date();
       const updatedAt = `Última Atualização: ${formatPdfDate(now)} às ${now.toLocaleTimeString("pt-BR", {
         hour: "2-digit",
@@ -1698,7 +1614,7 @@ export default function FichasTecnicasClient() {
         logoSrc,
         recipeName: recipe.recipeName,
         precoVenda: formatMoney(recipe.precoVenda),
-        previewSrc: recipe.recipeImage,
+        previewSrc,
         updatedAt,
         validade: "1 Dia(s)",
         categoria: popularityLabel(recipe.popularidade),
@@ -1745,12 +1661,12 @@ export default function FichasTecnicasClient() {
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 2000);
-    } catch {
+    } catch (err) {
       if (previewTab) {
         previewTab.document.title = "Erro ao gerar PDF";
         previewTab.document.body.innerText = "Não foi possível gerar o PDF da ficha técnica. Tente novamente.";
       }
-      window.alert("Não foi possível gerar o PDF da ficha técnica. Tente novamente.");
+      showToast(`Não foi possível gerar o PDF. (${err instanceof Error ? err.message : String(err)})`, "error", 9000);
     }
   }
 
@@ -1791,13 +1707,6 @@ export default function FichasTecnicasClient() {
                       onClick={() => setDetailsViewTab("preparo")}
                     >
                       Modo de Preparo
-                    </button>
-                    <button
-                      type="button"
-                      className={detailsViewTab === "etiquetas" ? `${dash.itemTabActive} ${styles.detailsTabActive}` : `${dash.itemTab} ${styles.detailsTab}`}
-                      onClick={() => setDetailsViewTab("etiquetas")}
-                    >
-                      Etiquetas
                     </button>
                   </div>
 
@@ -2032,38 +1941,7 @@ export default function FichasTecnicasClient() {
                         </div>
                       )}
                     </div>
-                  ) : (
-                    <div className={`${dash.itemDetailsBody} ${styles.detailsPanel}`}>
-                      <div className={styles.detailsEtiquetasHeader}>
-                        <div className={styles.detailsSectionTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
-                        <button type="button" className={styles.detailsEtiquetaBtn} onClick={openEtiquetaModal}>
-                          Nova Etiqueta
-                        </button>
-                      </div>
-                      {detailsEtiquetas.length ? (
-                        <div className={styles.detailsEtiquetasList}>
-                          {detailsEtiquetas.map((e) => (
-                            <div key={e.id} className={styles.detailsEtiquetaRow}>
-                              <div>
-                                <div className={styles.detailsEtiquetaTitle}>{e.responsavel || "-"}</div>
-                                <div className={styles.detailsEtiquetaMeta}>{e.receita || detailsRecipe.recipeName}</div>
-                              </div>
-                              <div>
-                                <div className={styles.detailsEtiquetaTitle}>{`${e.quantidade || "-"} ${e.unidade || ""}`}</div>
-                                <div className={styles.detailsEtiquetaMeta}>{`Produção: ${e.dataProducao || "-"}`}</div>
-                              </div>
-                              <div>
-                                <div className={styles.detailsEtiquetaTitle}>{e.dataValidade || "-"}</div>
-                                <div className={styles.detailsEtiquetaMeta}>Validade</div>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className={styles.detailsEtiquetasEmpty}>Ops... Nada aqui!</div>
-                      )}
-                    </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <aside className={`${dash.itemDetailsAside} ${styles.detailsSidebar}`}>
@@ -2384,82 +2262,6 @@ export default function FichasTecnicasClient() {
           </div>
         </main>
       </div>
-
-      {isEtiquetaOpen && detailsRecipe ? (
-        <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEtiquetaOpen(false)}>
-          <div className={styles.modalCard} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <h2 className={styles.modalTitle}>Nova Etiqueta</h2>
-              <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsEtiquetaOpen(false)}>
-                ×
-              </button>
-            </div>
-
-            <div className={styles.modalBody}>
-              <div className={styles.formBlock}>
-                <label className={styles.fieldBlock}>
-                  <span className={styles.fieldLabel}>Responsável</span>
-                  <input
-                    type="text"
-                    className={styles.textInput}
-                    placeholder="Digite o nome..."
-                    value={etiquetaResponsavel}
-                    onChange={(e) => setEtiquetaResponsavel(e.target.value)}
-                  />
-                </label>
-
-                <div className={styles.formGrid}>
-                  <label className={styles.fieldBlock}>
-                    <span className={styles.fieldLabel}>Quantidade</span>
-                    <input
-                      type="text"
-                      className={styles.textInput}
-                      value={etiquetaQtd}
-                      inputMode="decimal"
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        e.currentTarget.focus();
-                        e.currentTarget.select();
-                      }}
-                      onChange={(e) => setEtiquetaQtd(formatDecimalDraft(e.target.value, 3))}
-                      onBlur={(e) => setEtiquetaQtd(formatDecimalFixedDraft(e.target.value, 3))}
-                    />
-                  </label>
-                  <label className={styles.fieldBlock}>
-                    <span className={styles.fieldLabel}>Unidade</span>
-                    <input
-                      type="text"
-                      className={styles.textInput}
-                      value={etiquetaUnidade}
-                      onChange={(e) => setEtiquetaUnidade(e.target.value)}
-                    />
-                  </label>
-                </div>
-
-                <div className={styles.formGrid}>
-                  <label className={styles.fieldBlock}>
-                    <span className={styles.fieldLabel}>Data Produção</span>
-                    <input type="text" className={styles.textInput} value={etiquetaDataProd} onChange={(e) => setEtiquetaDataProd(e.target.value)} />
-                  </label>
-                  <label className={styles.fieldBlock}>
-                    <span className={styles.fieldLabel}>Data Validade</span>
-                    <input type="text" className={styles.textInput} value={etiquetaDataVal} onChange={(e) => setEtiquetaDataVal(e.target.value)} />
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <div className={styles.modalFooter}>
-              <button type="button" className={styles.cancelBtn} onClick={() => setIsEtiquetaOpen(false)}>
-                Cancelar
-              </button>
-              <button type="button" className={`${styles.nextBtn} ${styles.nextBtnActive}`} onClick={confirmSaveEtiqueta}>
-                Salvar
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {isCreateOpen ? (
         <div className={styles.modalOverlay} role="presentation">
