@@ -11,10 +11,9 @@ import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { readPrePreparoFromStore, writePrePreparoToStore } from "../lib/prePreparoStore";
-import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoFromSupabase, savePrePreparoToSupabase } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
+import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -569,7 +568,8 @@ export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
-  const suppressEtiquetasStoreEventRef = useRef(false);
+  const prePreparoLoadedRef = useRef(false);
+  const etiquetasLoadedRef = useRef(false);
   const prePreparoSaveErrorShownRef = useRef(false);
   const etiquetasSaveErrorShownRef = useRef(false);
   const prePreparoLoadErrorShownRef = useRef(false);
@@ -599,7 +599,7 @@ export default function PrePreparoClient() {
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
-  const [etiquetasRows, setEtiquetasRows] = useState(() => readPrePreparoEtiquetasFromStore([]));
+  const [etiquetasRows, setEtiquetasRows] = useState<PrePreparoEtiquetaRow[]>([]);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -860,8 +860,8 @@ export default function PrePreparoClient() {
       try {
         const dbRows = await loadPrePreparoFromSupabase();
         setRows(dbRows as any);
-        writePrePreparoToStore(dbRows as any);
         prePreparoLoadErrorShownRef.current = false;
+        prePreparoLoadedRef.current = true;
       } catch (err) {
         if (!prePreparoLoadErrorShownRef.current) {
           prePreparoLoadErrorShownRef.current = true;
@@ -876,9 +876,8 @@ export default function PrePreparoClient() {
       try {
         const dbRows = await loadPrePreparoEtiquetasFromSupabase();
         setEtiquetasRows(dbRows);
-        suppressEtiquetasStoreEventRef.current = true;
-        writePrePreparoEtiquetasToStore(dbRows);
         etiquetasLoadErrorShownRef.current = false;
+        etiquetasLoadedRef.current = true;
       } catch (err) {
         if (!etiquetasLoadErrorShownRef.current) {
           etiquetasLoadErrorShownRef.current = true;
@@ -889,17 +888,7 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    return subscribePrePreparoEtiquetas((rows) => {
-      if (suppressEtiquetasStoreEventRef.current) {
-        suppressEtiquetasStoreEventRef.current = false;
-        return;
-      }
-      setEtiquetasRows(rows);
-    });
-  }, []);
-
-  useEffect(() => {
-    writePrePreparoToStore(rows as any);
+    if (!prePreparoLoadedRef.current) return;
     if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
     savePrePreparoTimeoutRef.current = window.setTimeout(() => {
       void savePrePreparoToSupabase(rows as any)
@@ -922,8 +911,7 @@ export default function PrePreparoClient() {
   }, [rows]);
 
   useEffect(() => {
-    suppressEtiquetasStoreEventRef.current = true;
-    writePrePreparoEtiquetasToStore(etiquetasRows);
+    if (!etiquetasLoadedRef.current) return;
     if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
       void savePrePreparoEtiquetasToSupabase(etiquetasRows)
@@ -1869,6 +1857,10 @@ export default function PrePreparoClient() {
 
   function saveEtiqueta() {
     if (!etiquetaSelectedRecipe) return;
+    if (!etiquetasLoadedRef.current) {
+      showToast("Aguarde carregar as etiquetas do Supabase.", "error");
+      return;
+    }
     const quantidade = parsePtNumber(etiquetaQtd);
     const dataProducao = parseDateLabelLoose(etiquetaDataProd);
     const dataValidade = parseDateLabelLoose(etiquetaDataVal);
@@ -1886,12 +1878,7 @@ export default function PrePreparoClient() {
       dataValidade: formatDateLabel(dataValidade),
       wasteStatus: "pending" as const,
     };
-    setEtiquetasRows((prev) => {
-      const nextRows = [next, ...prev];
-      suppressEtiquetasStoreEventRef.current = true;
-      writePrePreparoEtiquetasToStore(nextRows);
-      return nextRows;
-    });
+    setEtiquetasRows((prev) => [next, ...prev]);
     setIsEtiquetaOpen(false);
     void downloadEtiquetaPdf(next)
       .then(() => showToast("Etiqueta salva e PDF baixado.", "success"))
