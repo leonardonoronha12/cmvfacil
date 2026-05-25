@@ -626,6 +626,24 @@ export default function DesperdiciosClient() {
     return list.filter((n) => n.toLowerCase().includes(q)).slice(0, 6);
   }, [draftItem, fichasTecnicas, insumosStore, prePreparoStore]);
 
+  const itemOptions = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    const uniqSorted = (values: string[]) => {
+      const set = new Set<string>();
+      for (const v of values) {
+        const s = String(v ?? "").trim();
+        if (!s) continue;
+        set.add(s);
+      }
+      return Array.from(set).sort(collator.compare);
+    };
+    return {
+      insumos: uniqSorted(insumosStore.map((i) => i.item)),
+      prePreparo: uniqSorted(prePreparoStore.map((p) => p.receita)),
+      fichas: uniqSorted(fichasTecnicas.map((f) => f.receita)),
+    };
+  }, [fichasTecnicas, insumosStore, prePreparoStore]);
+
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
     void (async () => {
@@ -1651,15 +1669,34 @@ export default function DesperdiciosClient() {
                     <option value="" disabled>
                       Ex: Carne Bovina
                     </option>
-                    {(
-                      insumosStore[0] || prePreparoStore[0] || fichasTecnicas[0]
-                        ? Array.from(new Set([...insumosStore.map((i) => i.item), ...prePreparoStore.map((p) => p.receita), ...fichasTecnicas.map((f) => f.receita)]))
-                        : ["Carne Bovina"]
-                    ).map((s) => (
-                      <option key={s} value={s}>
-                        {s}
-                      </option>
-                    ))}
+                    {itemOptions.insumos.length ? (
+                      <optgroup label="Insumos">
+                        {itemOptions.insumos.map((s) => (
+                          <option key={`insumo:${s}`} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {itemOptions.prePreparo.length ? (
+                      <optgroup label="Pré-preparo">
+                        {itemOptions.prePreparo.map((s) => (
+                          <option key={`prepreparo:${s}`} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {itemOptions.fichas.length ? (
+                      <optgroup label="Fichas técnicas">
+                        {itemOptions.fichas.map((s) => (
+                          <option key={`ficha:${s}`} value={s}>
+                            {s}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
+                    {!itemOptions.insumos.length && !itemOptions.prePreparo.length && !itemOptions.fichas.length ? <option value="Carne Bovina">Carne Bovina</option> : null}
                   </select>
                 </div>
 
