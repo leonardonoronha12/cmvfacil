@@ -4,6 +4,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
+import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
@@ -734,6 +735,7 @@ export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const toastTimerRef = useRef<number | null>(null);
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
@@ -783,6 +785,7 @@ export default function DashboardClient() {
   const [fornecedorModalEndereco, setFornecedorModalEndereco] = useState("");
   const [fornecedorProdutoQuery, setFornecedorProdutoQuery] = useState("");
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
@@ -814,6 +817,21 @@ export default function DashboardClient() {
       router.replace(pathname, { scroll: false });
     }
   }
+
+  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -2058,7 +2076,7 @@ export default function DashboardClient() {
   function openDeleteCategory(name: string) {
     const count = categoryCounts.get(name) ?? 0;
     if (count > 0) {
-      window.alert("Não é possível excluir uma categoria que possui itens vinculados.");
+      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
       return;
     }
     setDeletingCategoryName(name);
@@ -2076,7 +2094,7 @@ export default function DashboardClient() {
     const name = deletingCategoryName;
     if (!name) return;
     if (deletingCategoryCount > 0) {
-      window.alert("Não é possível excluir uma categoria que possui itens vinculados.");
+      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
       cancelDeleteCategory();
       return;
     }
@@ -2189,6 +2207,7 @@ export default function DashboardClient() {
   return (
     <div className={styles.dashboard}>
       <AppSidebar active={historyItem ? "insumos" : "dashboard"} />
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={styles.content}>
         {hideAlert ? (
@@ -2833,7 +2852,6 @@ export default function DashboardClient() {
                                 className={styles.itemCategoryIconBtn}
                                 aria-label="Excluir categoria"
                                 onClick={() => openDeleteCategory(c)}
-                                disabled={(categoryCounts.get(c) ?? 0) > 0}
                                 title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
                               >
                                 <IconTrash />

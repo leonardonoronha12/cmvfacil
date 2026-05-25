@@ -1825,7 +1825,6 @@ export default function InsumosClient() {
                               className={styles.categoryIconBtn}
                               aria-label="Excluir categoria"
                               onClick={() => openDeleteCategory(c)}
-                              disabled={(categoryCounts.get(c) ?? 0) > 0}
                               title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
                             >
                               <IconTrash />
