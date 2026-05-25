@@ -5,7 +5,8 @@ import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
-import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow } from "../lib/entradasStore";
+import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
+import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
@@ -964,7 +965,14 @@ export default function PrePreparoClient() {
   }, [detailsRecipeId, isEditingYield, yieldDraftQty, yieldDraftUnit]);
 
   useEffect(() => {
-    setEntradasRows(readEntradasFromStore());
+    setEntradasRows(readEntradasFromStore([]));
+    void (async () => {
+      try {
+        const db = await loadEntradasFromSupabase();
+        if (db.length) writeEntradasToStore(db);
+      } catch {}
+      setEntradasRows(readEntradasFromStore([]));
+    })();
     return subscribeEntradas((rows) => setEntradasRows(rows));
   }, []);
 
