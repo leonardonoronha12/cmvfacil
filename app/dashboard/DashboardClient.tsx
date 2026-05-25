@@ -1862,9 +1862,12 @@ export default function DashboardClient() {
       const d = parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
+      const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
         const rawKey = normalizeKey(it.nome);
-        if (rawKey !== key) continue;
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
+        if (mappedKey !== key) continue;
         out.push({
           t,
           data: e.dataLancamento,
@@ -1878,7 +1881,7 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, historyItem]);
+  }, [entradas, getEquivalenciasForFornecedor, historyItem]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
@@ -2519,7 +2522,12 @@ export default function DashboardClient() {
                     {detailsTab === "entradas" ? (
                       <>
                         <div className={styles.historyTitle}>Histórico de Entradas</div>
-                        <div className={styles.historyTable}>
+                        <div className={styles.historyTable} style={{ position: "relative" }}>
+                          {isLoadingTables ? (
+                            <div className={styles.loadingOverlay}>
+                              <LoadingSpinner />
+                            </div>
+                          ) : null}
                           <div className={styles.historyHead}>
                             <div className={styles.historyTh}>Data</div>
                             <div className={styles.historyThItem}>Fornecedor</div>
@@ -2528,7 +2536,7 @@ export default function DashboardClient() {
                             <div className={styles.historyThRight}>Subtotal</div>
                           </div>
 
-                          {historicoEntradas.length ? (
+                          {isLoadingTables ? null : historicoEntradas.length ? (
                             historicoEntradas.map((h, idx) => (
                               <div key={`${h.data}-${idx}`} className={styles.historyRow}>
                                 <div className={styles.historyCell}>{h.data}</div>
