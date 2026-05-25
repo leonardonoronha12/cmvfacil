@@ -1886,7 +1886,12 @@ export default function PrePreparoClient() {
       dataValidade: formatDateLabel(dataValidade),
       wasteStatus: "pending" as const,
     };
-    setEtiquetasRows((prev) => [next, ...prev]);
+    setEtiquetasRows((prev) => {
+      const nextRows = [next, ...prev];
+      suppressEtiquetasStoreEventRef.current = true;
+      writePrePreparoEtiquetasToStore(nextRows);
+      return nextRows;
+    });
     setIsEtiquetaOpen(false);
     void downloadEtiquetaPdf(next)
       .then(() => showToast("Etiqueta salva e PDF baixado.", "success"))

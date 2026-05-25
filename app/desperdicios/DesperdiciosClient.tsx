@@ -1231,43 +1231,6 @@ export default function DesperdiciosClient() {
           </div>
         </section>
 
-        {etiquetaWasteSummary.pending.length ? (
-          <section className={styles.etiquetaPrompt}>
-            <div className={styles.etiquetaPromptTop}>
-              <div className={styles.etiquetaPromptTitle}>Etiquetas vencidas pendentes</div>
-              <div className={styles.etiquetaPromptText}>
-                {`Você tem ${etiquetaWasteSummary.pending.length} etiqueta(s) vencida(s) que ainda não foram lançadas em desperdícios. Deseja lançar?`}
-              </div>
-            </div>
-            <div className={styles.etiquetaPromptActions}>
-              <button type="button" className={styles.etiquetaPromptPrimary} onClick={launchAllEtiquetasPendentes}>
-                Lançar todas
-              </button>
-              <button type="button" className={styles.etiquetaPromptGhost} onClick={ignoreAllEtiquetasPendentes}>
-                Ignorar
-              </button>
-            </div>
-            <div className={styles.etiquetaPromptList}>
-              {etiquetaWasteSummary.pending.map((e) => (
-                <div key={e.id} className={styles.etiquetaPromptRow}>
-                  <div className={styles.etiquetaPromptMain}>
-                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
-                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Validade: ${e.dataValidade}`}</div>
-                  </div>
-                  <div className={styles.etiquetaPromptRowActions}>
-                    <button type="button" className={styles.etiquetaPromptMini} onClick={() => setEtiquetaWasteStatus(e.id, "launched")}>
-                      Lançar
-                    </button>
-                    <button type="button" className={styles.etiquetaPromptMiniGhost} onClick={() => setEtiquetaWasteStatus(e.id, "ignored")}>
-                      Ignorar
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
-        ) : null}
-
         <section className={styles.filters}>
           <div className={styles.filtersLeft}>
             <div className={styles.search}>
@@ -1468,6 +1431,57 @@ export default function DesperdiciosClient() {
             </div>
           </div>
         </section>
+
+        {etiquetaWasteSummary.totalNotIgnored ? (
+          <section className={styles.etiquetaPrompt}>
+            <div className={styles.etiquetaPromptTop}>
+              <div className={styles.etiquetaPromptTitle}>Etiquetas vencidas</div>
+              <div className={styles.etiquetaPromptText}>
+                {`${etiquetaWasteSummary.pending.length} pendente(s) • ${etiquetaWasteSummary.launched.length} lançada(s)`}
+              </div>
+            </div>
+
+            {etiquetaWasteSummary.pending.length ? (
+              <div className={styles.etiquetaPromptActions}>
+                <button type="button" className={styles.etiquetaPromptPrimary} onClick={launchAllEtiquetasPendentes}>
+                  Lançar todas
+                </button>
+                <button type="button" className={styles.etiquetaPromptGhost} onClick={ignoreAllEtiquetasPendentes}>
+                  Ignorar todas
+                </button>
+              </div>
+            ) : null}
+
+            <div className={styles.etiquetaPromptList}>
+              {etiquetaWasteSummary.pending.map((e) => (
+                <div key={e.id} className={styles.etiquetaPromptRow}>
+                  <div className={styles.etiquetaPromptMain}>
+                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
+                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Venceu em: ${e.dataValidade}`}</div>
+                  </div>
+                  <div className={styles.etiquetaPromptRowActions}>
+                    <button type="button" className={styles.etiquetaPromptMini} onClick={() => setEtiquetaWasteStatus(e.id, "launched")}>
+                      Lançar
+                    </button>
+                    <button type="button" className={styles.etiquetaPromptMiniGhost} onClick={() => setEtiquetaWasteStatus(e.id, "ignored")}>
+                      Ignorar
+                    </button>
+                  </div>
+                </div>
+              ))}
+
+              {etiquetaWasteSummary.launched.map((e) => (
+                <div key={e.id} className={styles.etiquetaPromptRow}>
+                  <div className={styles.etiquetaPromptMain}>
+                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
+                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Venceu em: ${e.dataValidade} • Lançada`}</div>
+                  </div>
+                  <div className={styles.etiquetaPromptRowActions} />
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
 
         <section className={styles.tableCard} style={{ position: "relative" }}>
           {isLoadingTable ? (
