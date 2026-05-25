@@ -806,6 +806,7 @@ export default function FornecedoresClient() {
       <AppSidebar active="fornecedores" />
 
       <main className={dash.content}>
+        <div className={dash.pageFrame}>
         <section className={styles.header}>
           <div className={styles.headerIcon}>
             <IconBox />
@@ -1372,6 +1373,7 @@ export default function FornecedoresClient() {
           </div>
         ) : null}
 
+        </div>
         {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       </main>
     </div>

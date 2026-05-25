@@ -1209,6 +1209,7 @@ export default function EntradasClient() {
         : null}
 
       <main className={dash.content}>
+        <div className={dash.pageFrame}>
         <section className={styles.header}>
           <div className={styles.headerIcon}>
             <IconEntrada />
@@ -2418,6 +2419,7 @@ export default function EntradasClient() {
             </div>
           </div>
         ) : null}
+        </div>
       </main>
     </div>
   );

@@ -793,6 +793,7 @@ export default function InventarioClient() {
       <AppSidebar active="inventario" />
 
       <main className={dash.content}>
+        <div className={dash.pageFrame}>
         <section className={styles.layout}>
           <div className={styles.left}>
             <button type="button" className={styles.newCountBtn} onClick={openNew}>
@@ -1269,6 +1270,7 @@ export default function InventarioClient() {
             </div>
           </div>
         ) : null}
+        </div>
       </main>
     </div>
   );

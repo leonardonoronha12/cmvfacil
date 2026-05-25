@@ -1280,6 +1280,7 @@ export default function DesperdiciosClient() {
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={dash.content}>
+        <div className={dash.pageFrame}>
         <section className={styles.header}>
           <div className={styles.headerLeft}>
             <div className={styles.headerIcon} aria-hidden>
@@ -2067,6 +2068,7 @@ export default function DesperdiciosClient() {
             </div>
           </div>
         ) : null}
+        </div>
       </main>
     </div>
   );
