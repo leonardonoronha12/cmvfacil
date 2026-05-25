@@ -216,6 +216,20 @@
   background: #ffffff;
   border: 1px solid #e4e8e7;
   padding: 12px 12px 10px;
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.usersActiveCard:hover {
+  background: #ffffff;
+  border-color: #dbe1e0;
+  box-shadow: 0 10px 24px rgba(16, 18, 20, 0.08);
+  transform: translateY(-1px);
 }
 
 .usersActiveRow {
@@ -273,6 +287,18 @@
   padding: 10px 12px;
   text-decoration: none;
   color: inherit;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background 120ms ease;
+}
+
+.userDropdown:hover {
+  background: #ffffff;
+  border-color: #dbe1e0;
+  box-shadow: 0 10px 24px rgba(16, 18, 20, 0.08);
+  transform: translateY(-1px);
 }
 
 .userLeft {
