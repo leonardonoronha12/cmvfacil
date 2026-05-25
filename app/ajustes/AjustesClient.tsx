@@ -241,8 +241,37 @@ export default function AjustesClient() {
                       <span className={styles.label}>Ramo de Atividade</span>
                       <select className={styles.select} value={ramo} onChange={(e) => setRamo(e.target.value)}>
                         <option value="Hamburgueria">Hamburgueria</option>
-                        <option value="Pizzaria">Pizzaria</option>
                         <option value="Restaurante">Restaurante</option>
+                        <option value="Bar">Bar</option>
+                        <option value="Pizzaria">Pizzaria</option>
+                        <option value="Sushi / Japonês">Sushi / Japonês</option>
+                        <option value="Cafeteria">Cafeteria</option>
+                        <option value="Padaria">Padaria</option>
+                        <option value="Confeitaria">Confeitaria</option>
+                        <option value="Açaíteria">Açaíteria</option>
+                        <option value="Sorveteria">Sorveteria</option>
+                        <option value="Churrascaria">Churrascaria</option>
+                        <option value="Steakhouse">Steakhouse</option>
+                        <option value="Lanchonete">Lanchonete</option>
+                        <option value="Fast Food">Fast Food</option>
+                        <option value="Food Truck">Food Truck</option>
+                        <option value="Marmitex">Marmitex</option>
+                        <option value="Delivery / Dark Kitchen">Delivery / Dark Kitchen</option>
+                        <option value="Self-service">Self-service</option>
+                        <option value="Buffet">Buffet</option>
+                        <option value="Pastelaria">Pastelaria</option>
+                        <option value="Casa de Sucos">Casa de Sucos</option>
+                        <option value="Poke">Poke</option>
+                        <option value="Culinária Italiana">Culinária Italiana</option>
+                        <option value="Culinária Mexicana">Culinária Mexicana</option>
+                        <option value="Culinária Árabe">Culinária Árabe</option>
+                        <option value="Culinária Brasileira">Culinária Brasileira</option>
+                        <option value="Culinária Asiática">Culinária Asiática</option>
+                        <option value="Culinária Vegana">Culinária Vegana</option>
+                        <option value="Culinária Fitness">Culinária Fitness</option>
+                        <option value="Bistrô">Bistrô</option>
+                        <option value="Cozinha Industrial">Cozinha Industrial</option>
+                        <option value="Outros">Outros</option>
                       </select>
                     </label>
                   </div>
