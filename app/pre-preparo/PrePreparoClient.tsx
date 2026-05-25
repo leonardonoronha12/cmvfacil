@@ -1126,6 +1126,51 @@ export default function PrePreparoClient() {
   }, [entradasRows, equivalenciasMap, insumosByKey, insumosByName]);
 
   useEffect(() => {
+    if (!insumosStore.length) return;
+    setRows((prev) => {
+      let changed = false;
+      const next = prev.map((row) => {
+        const ingredientes = row.ingredientes ?? [];
+        if (!ingredientes.length) return row;
+        let ingredientesChanged = false;
+        const nextIngredientes = ingredientes.map((ing) => {
+          const byName = insumosByName.get(String(ing.item ?? "").toLowerCase());
+          const byKey = insumosByKey.get(normalizeNameKey(String(ing.item ?? "")));
+          const ins = byName ?? byKey ?? null;
+          if (!ins) return ing;
+          const qty = parseDecimalInput(String(ing.quantidade ?? ""));
+          if (!(qty > 0)) return ing;
+          const stats = averageCostByInsumo.get(ins.item.toLowerCase()) ?? null;
+          const unitForCost = String(stats?.unit ?? ins.medida ?? "Und").trim() || "Und";
+          const unitCents =
+            stats && stats.sumQty > 0 && stats.sumCents > 0
+              ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+              : clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
+          if (unitCents <= 0) return ing;
+          const fromUnit = String(ing.unidade ?? unitForCost).trim() || unitForCost;
+          const qtyInCostUnit = fromUnit && unitForCost ? convertQty(qty, fromUnit, unitForCost) : qty;
+          const finalQty = Number.isFinite(qtyInCostUnit) && qtyInCostUnit > 0 ? qtyInCostUnit : qty;
+          const costCents = clampNonNegativeInt(Math.round(unitCents * finalQty));
+          if (costCents === clampNonNegativeInt(ing.custoCents)) return ing;
+          ingredientesChanged = true;
+          return { ...ing, custoCents: costCents, unidade: fromUnit };
+        });
+        if (!ingredientesChanged) return row;
+        changed = true;
+        const totalCents = nextIngredientes.reduce((sum, r) => sum + clampNonNegativeInt(r.custoCents), 0);
+        const yieldParsed = parseQtyLabel(row.rendimento);
+        const yieldQty = yieldParsed.qty;
+        const yieldUnit = yieldParsed.unit || "Und";
+        const totalLabel = formatCurrencyBRLFromCents(totalCents);
+        const unitCost = yieldQty > 0 ? totalCents / 100 / yieldQty : 0;
+        const unitCostLabel = `${unitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${yieldUnit}`;
+        return { ...row, ingredientes: nextIngredientes, custoTotal: totalLabel, custoUnitario: unitCostLabel };
+      });
+      return changed ? next : prev;
+    });
+  }, [averageCostByInsumo, insumosByKey, insumosByName, insumosStore.length]);
+
+  useEffect(() => {
     const resolved = resolveInsumoFromQuery(ingredientQuery);
     if (resolved) {
       const targetUnit = String(resolved.medida ?? "Und").trim() || "Und";
@@ -1493,7 +1538,10 @@ export default function PrePreparoClient() {
     const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
     const unitCents =
       stats && stats.sumQty > 0 && stats.sumCents > 0 ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty)) : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio) * 100));
-    const costCents = clampNonNegativeInt(Math.round(unitCents * qty));
+    const fromUnit = String(selected.medida ?? "Und").trim() || "Und";
+    const qtyInStatsUnit = stats?.unit ? convertQty(qty, fromUnit, stats.unit) : qty;
+    const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
+    const costCents = clampNonNegativeInt(Math.round(unitCents * finalQty));
     const prevList = detailsRow.ingredientes ?? [];
     const nextList = prevList.map((r) =>
       r.id === id ? { ...r, item: selected.item, quantidade: nextQty, unidade: selected.medida || "Und", custoCents: costCents } : r
@@ -1635,8 +1683,12 @@ export default function PrePreparoClient() {
     if (!selectedDetailIngredient) return 0;
     const qty = parseDecimalInput(detailIngredientQty);
     const stats = averageCostByInsumo.get(selectedDetailIngredient.item.toLowerCase()) ?? null;
-    const unit = stats && stats.sumQty > 0 && stats.sumCents > 0 ? stats.sumCents / stats.sumQty / 100 : parseMoneyLabel(selectedDetailIngredient.custoMedio);
-    return qty * unit;
+    if (stats && stats.sumQty > 0 && stats.sumCents > 0) {
+      const qtyInStatsUnit = stats.unit ? convertQty(qty, String(selectedDetailIngredient.medida ?? "Und"), stats.unit) : qty;
+      const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
+      return (stats.sumCents / stats.sumQty / 100) * finalQty;
+    }
+    return qty * parseMoneyLabel(selectedDetailIngredient.custoMedio);
   }, [averageCostByInsumo, detailIngredientQty, selectedDetailIngredient]);
 
   const selectedRowEditIngredient = useMemo(
@@ -1648,8 +1700,12 @@ export default function PrePreparoClient() {
     if (!selectedRowEditIngredient) return 0;
     const qty = parseDecimalInput(rowEditQty);
     const stats = averageCostByInsumo.get(selectedRowEditIngredient.item.toLowerCase()) ?? null;
-    const unit = stats && stats.sumQty > 0 && stats.sumCents > 0 ? stats.sumCents / stats.sumQty / 100 : parseMoneyLabel(selectedRowEditIngredient.custoMedio);
-    return qty * unit;
+    if (stats && stats.sumQty > 0 && stats.sumCents > 0) {
+      const qtyInStatsUnit = stats.unit ? convertQty(qty, String(selectedRowEditIngredient.medida ?? "Und"), stats.unit) : qty;
+      const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
+      return (stats.sumCents / stats.sumQty / 100) * finalQty;
+    }
+    return qty * parseMoneyLabel(selectedRowEditIngredient.custoMedio);
   }, [averageCostByInsumo, rowEditQty, selectedRowEditIngredient]);
 
   const detailsIngredientsTotalCents = useMemo(() => {
