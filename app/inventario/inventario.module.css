@@ -282,6 +282,80 @@
   }
 }
 
+@media (max-width: 720px) {
+  .layout {
+    min-height: 0;
+    gap: 12px;
+  }
+
+  .left {
+    padding: 10px;
+  }
+
+  .newCountBtn {
+    height: 42px;
+  }
+
+  .datesList {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-right: 0;
+    padding-bottom: 4px;
+  }
+
+  .dateRow {
+    flex: 0 0 auto;
+    width: 220px;
+  }
+
+  .dateBtn {
+    height: 38px;
+  }
+
+  .rightTitleRow {
+    flex-wrap: wrap;
+    align-items: stretch;
+  }
+
+  .pdfBtn {
+    width: 100%;
+    justify-content: center;
+    height: 40px;
+  }
+
+  .topFilters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .select {
+    width: 100%;
+  }
+
+  .colBody {
+    min-height: 160px;
+  }
+
+  .itemRow {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .itemRight {
+    justify-content: flex-end;
+  }
+
+  .qtyLabel {
+    min-width: 0;
+  }
+}
+
 .col {
   border-radius: 14px;
   overflow: hidden;
