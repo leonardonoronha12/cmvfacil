@@ -354,8 +354,8 @@
 }
 
 .pageFrame {
-  width: 1120px;
-  max-width: 1120px;
+  width: min(1360px, 100%);
+  max-width: 1360px;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -371,8 +371,8 @@
 
 @media (max-width: 1100px) {
   .pageFrame {
-    width: min(1120px, calc(100vw - 290px));
-    max-width: 1120px;
+    width: min(1360px, calc(100vw - 290px));
+    max-width: 1360px;
   }
 }
 
