@@ -2754,24 +2754,30 @@ export default function PrePreparoClient() {
                     </div>
                     {isRecipeOpen ? (
                       <div className={styles.recipeDropdown} role="listbox" aria-label="Receitas">
-                        {etiquetaRecipeOptions.map((r) => (
-                          <button
-                            key={r.id}
-                            type="button"
-                            className={styles.recipeOption}
-                            onClick={() => {
-                              setEtiquetaRecipeId(r.id);
-                              setEtiquetaRecipeQuery(r.receita);
-                              setEtiquetaUnidade("Kg");
-                              const base = new Date();
-                              setEtiquetaDataProd(formatDateLabel(base));
-                              setEtiquetaDataVal(formatDateLabel(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)));
-                              setIsRecipeOpen(false);
-                            }}
-                          >
-                            {r.receita}
-                          </button>
-                        ))}
+                        {etiquetaRecipeOptions.length ? (
+                          etiquetaRecipeOptions.map((r) => (
+                            <button
+                              key={r.id}
+                              type="button"
+                              className={styles.recipeOption}
+                              onClick={() => {
+                                setEtiquetaRecipeId(r.id);
+                                setEtiquetaRecipeQuery(r.receita);
+                                setEtiquetaUnidade("Kg");
+                                const base = new Date();
+                                setEtiquetaDataProd(formatDateLabel(base));
+                                setEtiquetaDataVal(formatDateLabel(new Date(base.getTime() + 7 * 24 * 60 * 60 * 1000)));
+                                setIsRecipeOpen(false);
+                              }}
+                            >
+                              {r.receita}
+                            </button>
+                          ))
+                        ) : (
+                          <div className={styles.emptyText}>
+                            Cadastre uma receita no Pré-preparo para depois selecionar aqui e gerar a etiqueta.
+                          </div>
+                        )}
                       </div>
                     ) : null}
                   </div>
