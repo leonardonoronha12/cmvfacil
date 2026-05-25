@@ -1655,7 +1655,28 @@ export default function DesperdiciosClient() {
                     <div className={styles.label}>Custo Unitário</div>
                     <div className={styles.inputGroup}>
                       <div className={styles.prefix}>R$</div>
-                      <input className={styles.groupInput} value={draftUnitCost} onChange={(e) => setDraftUnitCost(e.target.value)} placeholder="0,00" />
+                      <input
+                        className={styles.groupInput}
+                        value={draftUnitCost}
+                        onChange={(e) => setDraftUnitCost(e.target.value)}
+                        onMouseDown={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
+                        onMouseUp={(e) => e.preventDefault()}
+                        onTouchStart={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
+                        onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        placeholder="0,00"
+                      />
                     </div>
                   </div>
 
@@ -1666,8 +1687,22 @@ export default function DesperdiciosClient() {
                         className={styles.groupInput}
                         value={draftQty}
                         onChange={(e) => setDraftQty(e.target.value)}
+                        onMouseDown={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
+                        onMouseUp={(e) => e.preventDefault()}
+                        onTouchStart={(e) => {
+                          if (document.activeElement !== e.currentTarget) {
+                            e.preventDefault();
+                            e.currentTarget.focus();
+                            e.currentTarget.select();
+                          }
+                        }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
-                        onClick={(e) => requestAnimationFrame(() => e.currentTarget.select())}
                         placeholder="0,00"
                       />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
