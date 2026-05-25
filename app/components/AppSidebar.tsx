@@ -2,10 +2,57 @@
 
 import { useEffect, useMemo, useState } from "react";
 import dash from "../dashboard/dashboard.module.css";
-import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
-import { type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
+import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
-import { readDesperdiciosSeenIdsFromStore, writeDesperdiciosSeenIdsToStore } from "../lib/desperdiciosBadgeStore";
+
+function parseDateLabelLoose(value: string) {
+  const raw = value.trim();
+  if (!raw) return null;
+  const m = raw.match(/^(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})[,\s]+(\d{4})$/);
+  if (!m) return null;
+  const day = Number.parseInt(m[1], 10);
+  const monRaw = m[2].toLowerCase().replace(".", "");
+  const year = Number.parseInt(m[3], 10);
+  const monthMap: Record<string, number> = {
+    jan: 0,
+    janeiro: 0,
+    feb: 1,
+    fev: 1,
+    fevereiro: 1,
+    mar: 2,
+    março: 2,
+    marco: 2,
+    apr: 3,
+    abr: 3,
+    abril: 3,
+    may: 4,
+    mai: 4,
+    maio: 4,
+    jun: 5,
+    junho: 5,
+    jul: 6,
+    julho: 6,
+    aug: 7,
+    ago: 7,
+    agosto: 7,
+    sep: 8,
+    set: 8,
+    setembro: 8,
+    oct: 9,
+    out: 9,
+    outubro: 9,
+    nov: 10,
+    novembro: 10,
+    dec: 11,
+    dez: 11,
+    dezembro: 11,
+  };
+  const month = monthMap[monRaw];
+  if (month === undefined) return null;
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return d;
+}
 
 type SidebarKey =
   | "dashboard"
@@ -149,8 +196,12 @@ function IconChat() {
 }
 
 export default function AppSidebar({ active }: { active: SidebarKey }) {
-  const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
-  const [seenIds, setSeenIds] = useState<string[]>(() => readDesperdiciosSeenIdsFromStore());
+  const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>(() => readPrePreparoEtiquetasFromStore());
+
+  useEffect(() => {
+    setEtiquetas(readPrePreparoEtiquetasFromStore());
+    return subscribePrePreparoEtiquetas((rows) => setEtiquetas(rows));
+  }, []);
 
   useEffect(() => {
     void (async () => {
@@ -159,25 +210,26 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         setEtiquetas(dbRows);
         writePrePreparoEtiquetasToStore(dbRows);
       } catch {
-        setEtiquetas([]);
-        writePrePreparoEtiquetasToStore([]);
+        setEtiquetas(readPrePreparoEtiquetasFromStore());
       }
     })();
   }, []);
 
-  const etiquetasVencidas = useMemo(() => buildExpiredPrePreparoEtiquetaDesperdicios(etiquetas), [etiquetas]);
-  const etiquetasVencidasNaoVistas = useMemo(() => {
-    const seen = new Set(seenIds);
-    return etiquetasVencidas.filter((row) => !seen.has(row.id));
-  }, [etiquetasVencidas, seenIds]);
-
-  useEffect(() => {
-    if (active !== "desperdicios") return;
-    if (!etiquetasVencidasNaoVistas.length) return;
-    const merged = [...seenIds, ...etiquetasVencidasNaoVistas.map((row) => row.id)];
-    writeDesperdiciosSeenIdsToStore(merged);
-    setSeenIds(readDesperdiciosSeenIdsFromStore());
-  }, [active, etiquetasVencidasNaoVistas, seenIds]);
+  const etiquetasVencidasPendentes = useMemo(() => {
+    const now = new Date();
+    const todayT = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    let count = 0;
+    for (const e of etiquetas) {
+      const validade = parseDateLabelLoose(e.dataValidade);
+      if (!validade) continue;
+      const t = new Date(validade.getFullYear(), validade.getMonth(), validade.getDate()).getTime();
+      if (t >= todayT) continue;
+      const status = (e.wasteStatus ?? "pending") as "pending" | "launched" | "ignored";
+      if (status !== "pending") continue;
+      count += 1;
+    }
+    return count;
+  }, [etiquetas]);
 
   return (
     <aside className={dash.menuLateral}>
@@ -241,7 +293,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           <a className={navClass(active, "desperdicios")} href="/desperdicios">
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
-            {etiquetasVencidasNaoVistas.length > 0 ? <span className={dash.navBadge}>{etiquetasVencidasNaoVistas.length}</span> : null}
+            {etiquetasVencidasPendentes > 0 ? <span className={dash.navBadge}>{etiquetasVencidasPendentes}</span> : null}
           </a>
         </div>
 

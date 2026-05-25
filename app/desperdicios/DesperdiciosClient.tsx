@@ -1501,7 +1501,7 @@ export default function DesperdiciosClient() {
           </div>
         </section>
 
-        {etiquetaWasteSummary.totalNotIgnored ? (
+        {etiquetaWasteSummary.pending.length ? (
           <section className={styles.etiquetaPrompt}>
             <div className={styles.etiquetaPromptTop}>
               <div className={styles.etiquetaPromptTitle}>Etiquetas vencidas</div>
@@ -1539,15 +1539,6 @@ export default function DesperdiciosClient() {
                 </div>
               ))}
 
-              {etiquetaWasteSummary.launched.map((e) => (
-                <div key={e.id} className={styles.etiquetaPromptRow}>
-                  <div className={styles.etiquetaPromptMain}>
-                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
-                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Venceu em: ${e.dataValidade} • Lançada`}</div>
-                  </div>
-                  <div className={styles.etiquetaPromptRowActions} />
-                </div>
-              ))}
             </div>
           </section>
         ) : null}
