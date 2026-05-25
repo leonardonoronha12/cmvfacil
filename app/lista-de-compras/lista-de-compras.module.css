@@ -1,7 +1,7 @@
 .pageFrameWide {
-  width: 100%;
-  max-width: none;
-  align-self: stretch;
+  width: min(1360px, 100%);
+  max-width: 1360px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 24px;
