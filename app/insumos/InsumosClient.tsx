@@ -942,8 +942,13 @@ export default function InsumosClient() {
   }
 
   function openDeleteCategory(name: string) {
+    const count = categoryCounts.get(name) ?? 0;
+    if (count > 0) {
+      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
+      return;
+    }
     setDeletingCategoryName(name);
-    setDeletingCategoryCount(categoryCounts.get(name) ?? 0);
+    setDeletingCategoryCount(count);
     setIsDeleteCategoryOpen(true);
   }
 
@@ -957,6 +962,11 @@ export default function InsumosClient() {
     const name = deletingCategoryName;
     if (!name) return;
     const count = deletingCategoryCount;
+    if (count > 0) {
+      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
+      cancelDeleteCategory();
+      return;
+    }
     setCategories((prev) => prev.filter((c) => c !== name));
     if (count) setDataRows((prev) => prev.map((r) => (r.categoria === name ? { ...r, categoria: "-" } : r)));
     if (newCategory === name) setNewCategory("");
@@ -1810,7 +1820,14 @@ export default function InsumosClient() {
                             <button type="button" className={styles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategory(c)}>
                               <IconEdit />
                             </button>
-                            <button type="button" className={styles.categoryIconBtn} aria-label="Excluir categoria" onClick={() => openDeleteCategory(c)}>
+                            <button
+                              type="button"
+                              className={styles.categoryIconBtn}
+                              aria-label="Excluir categoria"
+                              onClick={() => openDeleteCategory(c)}
+                              disabled={(categoryCounts.get(c) ?? 0) > 0}
+                              title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
+                            >
                               <IconTrash />
                             </button>
                           </div>
