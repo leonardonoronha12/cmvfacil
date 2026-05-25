@@ -1848,6 +1848,38 @@ export default function DashboardClient() {
 
   const historicoEntradas = useMemo(() => {
     if (!historyItem) return [];
+    const isPrePreparoItem = historyItem.insumoId.startsWith("prep:");
+    if (isPrePreparoItem) {
+      const recipeId = historyItem.insumoId.slice("prep:".length).trim();
+      const list = prePreparoEtiquetas.filter((e) => String(e.recipeId ?? "").trim() === recipeId);
+      const out: Array<{
+        t: number;
+        data: string;
+        fornecedor: string;
+        qtd: string;
+        preco: string;
+        subtotal: string;
+      }> = [];
+      for (const e of list) {
+        const dateLabel = String(e.dataProducao ?? "").trim() || String(e.dataValidade ?? "").trim();
+        const d = dateLabel ? parseDateLabelLoose(dateLabel) : null;
+        const t = d ? startOfDay(d).getTime() : 0;
+        const qtyNum = parsePtNumber(String(e.quantidade ?? ""));
+        const unit = String(e.unidade ?? "").trim().toUpperCase() || "UND";
+        const subtotalCents = parseBrlToCents(String(e.custo ?? ""));
+        const unitCostCents = qtyNum > 0 ? Math.round(subtotalCents / qtyNum) : 0;
+        out.push({
+          t,
+          data: dateLabel || "-",
+          fornecedor: String(e.responsavel ?? "").trim() || "Pré-preparo",
+          qtd: `${String(e.quantidade ?? "").trim() || "0,000"} ${unit}`.trim(),
+          preco: `${formatBrlFromCents(unitCostCents)}/${unit}`,
+          subtotal: formatBrlFromCents(subtotalCents),
+        });
+      }
+      out.sort((a, b) => b.t - a.t);
+      return out;
+    }
     const key = normalizeKey(historyItem.item);
     const out: Array<{
       t: number;
@@ -1881,7 +1913,7 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, getEquivalenciasForFornecedor, historyItem]);
+  }, [entradas, getEquivalenciasForFornecedor, historyItem, prePreparoEtiquetas]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];

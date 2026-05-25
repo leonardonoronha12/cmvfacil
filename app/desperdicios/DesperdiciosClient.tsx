@@ -107,6 +107,20 @@ function parsePtNumber(value: string) {
   return neg ? -num : num;
 }
 
+function formatQtyInput3(value: string) {
+  const raw = String(value ?? "");
+  const cleaned = raw.replace(/[^\d,.-]/g, "");
+  if (!cleaned.trim()) return "";
+  const neg = cleaned.includes("-");
+  const s = cleaned.replace(/-/g, "").replace(/\./g, ",");
+  const parts = s.split(",");
+  const intPart = (parts[0] ?? "").replace(/[^\d]/g, "") || "0";
+  const hasComma = s.includes(",");
+  const decPart = hasComma ? (parts[1] ?? "").replace(/[^\d]/g, "").slice(0, 3) : "";
+  const out = hasComma ? `${intPart},${decPart}` : intPart;
+  return neg ? `-${out}` : out;
+}
+
 function formatPtNumber(value: number, decimals = 2) {
   const n = Number.isFinite(value) ? value : 0;
   return n.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -993,7 +1007,7 @@ export default function DesperdiciosClient() {
     setDraftData(formatDateLabelLowerPT(new Date()));
     setDraftItem("");
     setDraftUnitCost("0,00");
-    setDraftQty("0,00");
+    setDraftQty("0,000");
     setDraftQtyUnit("UND");
     setDraftMotivo("Validade Vencida");
     setIsDataCalOpen(false);
@@ -1152,9 +1166,9 @@ export default function DesperdiciosClient() {
     setDraftData(row.data);
     setDraftItem(row.item);
     const qtyMatch = (row.quantidade ?? "").match(/([\d.,]+)\s*([A-Za-zÀ-ÿ]+)/);
-    const qtyValue = qtyMatch?.[1] ?? "0,00";
+    const qtyValue = qtyMatch?.[1] ?? "0,000";
     const qtyUnit = (qtyMatch?.[2] ?? "UND").trim().toUpperCase();
-    setDraftQty(qtyValue);
+    setDraftQty(formatQtyInput3(qtyValue));
     setDraftQtyUnit(qtyUnit || "UND");
     const qtyNum = parsePtNumber(qtyValue);
     const totalCents = parseBrlToCents(row.custo ?? "");
@@ -1736,7 +1750,7 @@ export default function DesperdiciosClient() {
                       <input
                         className={styles.groupInput}
                         value={draftQty}
-                        onChange={(e) => setDraftQty(e.target.value)}
+                        onChange={(e) => setDraftQty(formatQtyInput3(e.target.value))}
                         onMouseDown={(e) => {
                           if (document.activeElement !== e.currentTarget) {
                             e.preventDefault();
@@ -1753,7 +1767,7 @@ export default function DesperdiciosClient() {
                           }
                         }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
-                        placeholder="0,00"
+                        placeholder="0,000"
                       />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
                         {["UND", "KG", "G", "L", "ML", "PC", "CX"].map((u) => (
