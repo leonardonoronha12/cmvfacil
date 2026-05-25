@@ -3284,7 +3284,7 @@ export default function PrePreparoClient() {
         ) : null}
 
         {isCategoriasOpen ? (
-          <div className={insumosStyles.modalOverlay} role="presentation" onClick={() => setIsCategoriasOpen(false)}>
+          <div className={insumosStyles.modalOverlay} role="presentation" onClick={() => setIsCategoriasOpen(false)} style={{ zIndex: 10000 }}>
             <div className={`${insumosStyles.modal} ${insumosStyles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={insumosStyles.modalHeader}>
                 <div className={insumosStyles.modalTitle}>Categorias de Itens</div>
@@ -3359,7 +3359,7 @@ export default function PrePreparoClient() {
         ) : null}
 
         {isDeleteCategoryOpen ? (
-          <div className={insumosStyles.modalOverlay} role="presentation" onClick={cancelDeleteCategoria}>
+          <div className={insumosStyles.modalOverlay} role="presentation" onClick={cancelDeleteCategoria} style={{ zIndex: 10000 }}>
             <div className={insumosStyles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={insumosStyles.modalHeader}>
                 <div className={insumosStyles.modalTitle}>Excluir Categoria?</div>
