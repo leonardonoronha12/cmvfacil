@@ -389,16 +389,41 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const usersLimit = 3;
   const usersPct = usersLimit > 0 ? Math.min(1, Math.max(0, usersUsed / usersLimit)) : 0;
 
+  const activeTitle =
+    active === "dashboard"
+      ? "CMV Real"
+      : active === "lista-compras"
+        ? "Lista de Compras"
+        : active === "fichas-tecnicas"
+          ? "Fichas Técnicas"
+          : active === "insumos"
+            ? "Insumos"
+            : active === "pre-preparo"
+              ? "Pré-Preparo"
+              : active === "fornecedores"
+                ? "Fornecedores"
+                : active === "entradas"
+                  ? "Entradas"
+                  : active === "inventario"
+                    ? "Inventário"
+                    : active === "desperdicios"
+                      ? "Desperdícios"
+                      : active === "ajustes"
+                        ? "Ajustes"
+                        : "Suporte";
+
   const closeDrawer = () => {
     if (isMobile) setIsDrawerOpen(false);
   };
 
-  const sidebarBody = (
+  const sidebarBody = (includeBrand: boolean) => (
     <>
       <div className={dash.menuTop}>
-        <div className={dash.brand}>
-          <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
-        </div>
+        {includeBrand ? (
+          <div className={dash.brand}>
+            <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
+          </div>
+        ) : null}
 
         <div className={dash.companyCard}>
           <div className={dash.companyAvatar} aria-hidden>
@@ -514,14 +539,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       <div className={dash.mobileTopBar}>
         <div className={dash.mobileDrawerBrand}>
           <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
-          <div className={dash.mobileDrawerTitle}>Menu</div>
+          <div className={dash.mobileDrawerTitle}>{activeTitle}</div>
         </div>
         <button type="button" className={dash.mobileMenuBtn} onClick={() => setIsDrawerOpen(true)} aria-label="Abrir menu">
           <IconMenu />
         </button>
       </div>
 
-      {!isMobile ? <aside className={dash.menuLateral}>{sidebarBody}</aside> : null}
+      {!isMobile ? <aside className={dash.menuLateral}>{sidebarBody(true)}</aside> : null}
 
       {isMobile && isDrawerOpen
         ? createPortal(
@@ -536,13 +561,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 <div className={dash.mobileDrawerHeader}>
                   <div className={dash.mobileDrawerBrand}>
                     <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
-                    <div className={dash.mobileDrawerTitle}>Menu</div>
+                    <div className={dash.mobileDrawerTitle}>{activeTitle}</div>
                   </div>
                   <button type="button" className={dash.mobileMenuBtn} onClick={() => setIsDrawerOpen(false)} aria-label="Fechar menu">
                     <IconClose />
                   </button>
                 </div>
-                {sidebarBody}
+                {sidebarBody(false)}
               </aside>
             </div>,
             document.body,
