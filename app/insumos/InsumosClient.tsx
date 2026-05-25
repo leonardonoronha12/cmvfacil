@@ -650,7 +650,16 @@ export default function InsumosClient() {
     }
   }
 
-  function downloadTemplateCsv() {
+  async function downloadTemplateCsv() {
+    try {
+      const res = await fetch("/api/insumos-templates?kind=csv&download=1", { method: "GET" });
+      if (res.ok) {
+        const blob = await res.blob();
+        const name = res.headers.get("x-template-filename")?.trim() || "modelo-importacao-insumos.csv";
+        downloadBlob(blob, name);
+        return;
+      }
+    } catch {}
     const sep = ";";
     const rows = [
       ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
@@ -662,6 +671,15 @@ export default function InsumosClient() {
   }
 
   async function downloadTemplateXlsx() {
+    try {
+      const res = await fetch("/api/insumos-templates?kind=xlsx&download=1", { method: "GET" });
+      if (res.ok) {
+        const blob = await res.blob();
+        const name = res.headers.get("x-template-filename")?.trim() || "modelo-importacao-insumos.xlsx";
+        downloadBlob(blob, name);
+        return;
+      }
+    } catch {}
     const XLSX = await import("xlsx");
     const unitOptions = [
       "Und",
