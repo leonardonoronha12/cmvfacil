@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../../components/AppSidebar";
+import LoadingSpinner from "../../components/LoadingSpinner";
 import SystemToast from "../../components/SystemToast";
 import dash from "../../dashboard/dashboard.module.css";
 
@@ -152,14 +153,30 @@ export default function ModelosImportacaoClient() {
                 </p>
               </div>
               <button type="button" className="cmv-button" onClick={() => void refresh()} disabled={loading}>
-                {loading ? "Carregando..." : "Recarregar"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                    <LoadingSpinner size={14} />
+                    Carregando...
+                  </span>
+                ) : (
+                  "Recarregar"
+                )}
               </button>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16, marginTop: 18 }}>
               <div style={{ border: "1px solid #e4e8e7", borderRadius: 14, padding: 16 }}>
                 <div style={{ fontWeight: 900 }}>Insumos (CSV)</div>
-                <div style={{ marginTop: 8, color: "#6f7c7a", fontSize: 13 }}>{loading ? "Carregando..." : csvStatus}</div>
+                <div style={{ marginTop: 8, color: "#6f7c7a", fontSize: 13 }}>
+                  {loading ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <LoadingSpinner size={14} />
+                      Carregando...
+                    </span>
+                  ) : (
+                    csvStatus
+                  )}
+                </div>
                 <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
                   <input type="file" accept=".csv,text/csv" onChange={(e) => setCsvFile(e.currentTarget.files?.[0] ?? null)} />
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -178,7 +195,16 @@ export default function ModelosImportacaoClient() {
 
               <div style={{ border: "1px solid #e4e8e7", borderRadius: 14, padding: 16 }}>
                 <div style={{ fontWeight: 900 }}>Insumos (XLSX)</div>
-                <div style={{ marginTop: 8, color: "#6f7c7a", fontSize: 13 }}>{loading ? "Carregando..." : xlsxStatus}</div>
+                <div style={{ marginTop: 8, color: "#6f7c7a", fontSize: 13 }}>
+                  {loading ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                      <LoadingSpinner size={14} />
+                      Carregando...
+                    </span>
+                  ) : (
+                    xlsxStatus
+                  )}
+                </div>
                 <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
                   <input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(e) => setXlsxFile(e.currentTarget.files?.[0] ?? null)} />
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>

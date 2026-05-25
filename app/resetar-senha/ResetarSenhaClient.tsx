@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function ResetarSenhaClient() {
   const router = useRouter();
@@ -74,7 +75,14 @@ export default function ResetarSenhaClient() {
               </div>
 
               <button type="submit" className="cmv-reset-submit" disabled={loading}>
-                {loading ? "Enviando…" : "Enviar Instruções"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <LoadingSpinner size={16} />
+                    Enviando…
+                  </span>
+                ) : (
+                  "Enviar Instruções"
+                )}
               </button>
 
               {sent ? (

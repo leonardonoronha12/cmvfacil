@@ -351,6 +351,8 @@
   margin-left: 194px;
   overflow-y: auto;
   row-gap: 24px;
+  animation: cmvFadeIn 180ms ease both;
+  will-change: opacity, transform;
 }
 
 .pageFrame {
@@ -2750,5 +2752,11 @@ select.topInput option:checked {
   .content {
     padding: 16px 16px;
     margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content {
+    animation: none;
   }
 }

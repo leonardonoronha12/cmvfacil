@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 function parseHashParams(hash: string) {
   const h = hash.startsWith("#") ? hash.slice(1) : hash;
@@ -180,7 +181,19 @@ export default function RestaurarSenhaClient() {
               </div>
 
               <button type="submit" className="cmv-reset-submit" disabled={!ready || loading}>
-                {loading ? "Salvando…" : ready ? "Trocar Senha" : "Preparando troca de senha…"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <LoadingSpinner size={16} />
+                    Salvando…
+                  </span>
+                ) : ready ? (
+                  "Trocar Senha"
+                ) : (
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <LoadingSpinner size={16} />
+                    Preparando troca de senha…
+                  </span>
+                )}
               </button>
 
               <p className="cmv-reset-footer">

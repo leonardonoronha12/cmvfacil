@@ -3,6 +3,7 @@
 import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function LoginClient() {
   const router = useRouter();
@@ -125,7 +126,14 @@ export default function LoginClient() {
             </div>
 
               <button type="submit" className="cmv-login-submit" disabled={loading}>
-                {loading ? "Entrando…" : "Login"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <LoadingSpinner size={16} />
+                    Entrando…
+                  </span>
+                ) : (
+                  "Login"
+                )}
               </button>
             </form>
 

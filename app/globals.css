@@ -43,6 +43,64 @@ a {
   color: inherit;
 }
 
+:where(a, button, input, select, textarea):focus-visible {
+  outline: none;
+  box-shadow: var(--cmv-ring);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  a:hover {
+    filter: brightness(0.98);
+  }
+
+  button:not(:disabled):hover {
+    filter: brightness(0.98);
+  }
+}
+
+@keyframes cmvFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cmvSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.cmv-loadingSpinner {
+  display: inline-block;
+  border-radius: 999px;
+  border: 3px solid rgba(148, 163, 161, 0.4);
+  border-top-color: #0ab86d;
+  animation: cmvSpin 0.8s linear infinite;
+}
+
+.cmv-inlineSpinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  vertical-align: middle;
+}
+
+:where(main.cmv-login, main.cmv-reset, main.cmv-signup) {
+  animation: cmvFadeIn 180ms ease both;
+  will-change: opacity, transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :where(main.cmv-login, main.cmv-reset, main.cmv-signup) {
+    animation: none;
+  }
+}
+
 .cmv-container {
   max-width: 1120px;
   margin: 0 auto;

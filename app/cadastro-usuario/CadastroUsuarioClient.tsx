@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function CadastroUsuarioClient() {
   const router = useRouter();
@@ -237,7 +238,14 @@ export default function CadastroUsuarioClient() {
               </div>
 
               <button type="submit" className="cmv-signup-submit" disabled={loading}>
-                {loading ? "Criando…" : "Criar Conta"}
+                {loading ? (
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <LoadingSpinner size={16} />
+                    Criando…
+                  </span>
+                ) : (
+                  "Criar Conta"
+                )}
               </button>
 
               <p className="cmv-signup-footer">
