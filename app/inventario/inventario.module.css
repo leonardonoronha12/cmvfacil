@@ -844,6 +844,63 @@
   height: 44px;
 }
 
+@keyframes cmvSheetIn {
+  from {
+    transform: translateY(12px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (max-width: 720px) {
+  .modalOverlay {
+    align-items: flex-end;
+    justify-content: center;
+    padding: 12px 12px max(12px, env(safe-area-inset-bottom));
+  }
+
+  .modal {
+    max-width: none;
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -16px 50px rgba(0, 0, 0, 0.22);
+    max-height: min(84vh, 720px);
+    display: flex;
+    flex-direction: column;
+    animation: cmvSheetIn 180ms ease both;
+  }
+
+  .modalHeader {
+    padding: 12px 14px;
+    position: sticky;
+    top: 0;
+    background: #ffffff;
+    z-index: 1;
+  }
+
+  .modalClose {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    font-size: 22px;
+  }
+
+  .modalBody {
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .modalFooter {
+    position: sticky;
+    bottom: 0;
+    background: #ffffff;
+    z-index: 1;
+    padding-bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+
 .confirmModal {
   max-width: 620px;
 }
