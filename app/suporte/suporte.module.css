@@ -1,0 +1,183 @@
+.pageCenter {
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.openBtn {
+  border: 1px solid #059e5d;
+  border-radius: 12px;
+  background: #0ab86d;
+  height: 44px;
+  padding: 0 18px;
+  color: #ffffff;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 80;
+}
+
+.modalCard {
+  width: 760px;
+  max-width: calc(100vw - 40px);
+  border-radius: 16px;
+  background: #ffffff;
+  border: 1px solid #e1e5e4;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  border-bottom: 1px solid #eef1f1;
+}
+
+.modalTitle {
+  font-size: 18px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.modalClose {
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #01040e;
+  cursor: pointer;
+}
+
+.modalBody {
+  padding: 18px;
+  display: grid;
+  gap: 14px;
+}
+
+.optionCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  background: #f6f7f7;
+  text-decoration: none;
+  color: inherit;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.optionCard:hover {
+  background: #f3f5f5;
+  box-shadow: 0 14px 30px rgba(16, 18, 20, 0.08);
+  transform: translateY(-1px);
+}
+
+.optionLeft {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.optionIcon {
+  width: 50px;
+  height: 50px;
+  border-radius: 999px;
+  background: #003b43;
+  color: #ffffff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.optionText {
+  min-width: 0;
+}
+
+.optionTitle {
+  font-size: 16px;
+  font-weight: 900;
+  color: #01040e;
+  line-height: 1.2;
+}
+
+.optionDesc {
+  margin-top: 4px;
+  font-size: 14px;
+  line-height: 20px;
+  color: #6f7c7a;
+  font-weight: 600;
+}
+
+.optionArrow {
+  color: #01040e;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@media (max-width: 720px) {
+  .modalOverlay {
+    padding: 14px;
+  }
+
+  .modalCard {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .modalHeader {
+    padding: 14px 14px;
+  }
+
+  .modalTitle {
+    font-size: 16px;
+  }
+
+  .modalClose {
+    width: 40px;
+    height: 40px;
+  }
+
+  .modalBody {
+    padding: 14px;
+  }
+
+  .optionCard {
+    padding: 14px 14px;
+  }
+
+  .optionIcon {
+    width: 44px;
+    height: 44px;
+  }
+
+  .optionTitle {
+    font-size: 14px;
+  }
+
+  .optionDesc {
+    font-size: 13px;
+  }
+}
+

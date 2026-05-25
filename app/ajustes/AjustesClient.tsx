@@ -33,6 +33,19 @@ function IconSearchMini() {
   );
 }
 
+function IconBurgerBadge() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5.25 10.5C5.7 7.63604 8.43351 5.5 12 5.5C15.5665 5.5 18.3 7.63604 18.75 10.5H5.25Z" stroke="#111111" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M4.5 13.5H19.5" stroke="#111111" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M6 15.75H18" stroke="#111111" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M6.75 18H17.25" stroke="#111111" strokeWidth="1.7" strokeLinecap="round" />
+      <path d="M17.8 6.2L19.8 4.2" stroke="#111111" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M19.2 6.8H21.2" stroke="#111111" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios";
 
 export default function AjustesClient() {
@@ -101,7 +114,12 @@ export default function AjustesClient() {
               {tab === "minha-conta" ? (
                 <div className={styles.panelInner}>
                   <div className={styles.avatarRow}>
-                    <div className={styles.avatarBox}>Enviar Imagem</div>
+                    <div className={styles.avatarBox}>
+                      <span className={styles.avatarIcon} aria-hidden>
+                        <IconBurgerBadge />
+                      </span>
+                      <span>Enviar Imagem</span>
+                    </div>
                     <div>
                       <div className={styles.avatarHint}>Tamanho recomendado: 600 x 600 px</div>
                     </div>

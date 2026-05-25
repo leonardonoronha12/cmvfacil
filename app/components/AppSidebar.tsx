@@ -368,7 +368,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <a className={dash.userDropdown} href="/ajustes?tab=minha-conta">
           <div className={dash.userLeft}>
-            <div className={dash.userAvatar} aria-hidden />
+            <div className={dash.userAvatar} aria-hidden>
+              <IconBurgerBadge />
+            </div>
             <p className={dash.userHello}>Olá, Gold Burger</p>
           </div>
           <span className={dash.userChevron} aria-hidden>
