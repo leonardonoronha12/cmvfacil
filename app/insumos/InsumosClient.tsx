@@ -1564,7 +1564,18 @@ export default function InsumosClient() {
                   Encerrar
                 </button>
                 <button type="button" className={styles.modalPrimary} onClick={onImport} disabled={importing}>
-                  {selectedFile ? (importing ? "Importando..." : "Importar") : "Selecionar planilha"}
+                  {selectedFile ? (
+                    importing ? (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                        <LoadingSpinner size={16} />
+                        Importando...
+                      </span>
+                    ) : (
+                      "Importar"
+                    )
+                  ) : (
+                    "Selecionar planilha"
+                  )}
                 </button>
               </div>
             </div>

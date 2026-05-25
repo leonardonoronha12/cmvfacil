@@ -1123,10 +1123,26 @@ export default function FornecedoresClient() {
                     <div className={styles.dropIcon} aria-hidden>
                       <IconUpload />
                     </div>
-                    <div className={styles.dropTitle}>{importing ? "Importando..." : "Arraste e solte seu arquivo aqui"}</div>
+                    <div className={styles.dropTitle}>
+                      {importing ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <LoadingSpinner size={16} />
+                          Importando...
+                        </span>
+                      ) : (
+                        "Arraste e solte seu arquivo aqui"
+                      )}
+                    </div>
                     <div className={styles.dropHint}>Formatos aceitos: CSV, XLSX</div>
                     <button type="button" className={styles.dropBtn} onClick={() => fileInputRef.current?.click()} disabled={importing}>
-                      Selecionar Arquivo
+                      {importing ? (
+                        <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <LoadingSpinner size={16} />
+                          Importando...
+                        </span>
+                      ) : (
+                        "Selecionar Arquivo"
+                      )}
                     </button>
                   </div>
                 </div>
