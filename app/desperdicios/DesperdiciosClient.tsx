@@ -19,6 +19,8 @@ import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type En
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
+import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
+import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnicasToStore, type FichaTecnicaRow } from "../lib/fichasTecnicasStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
@@ -340,6 +342,7 @@ export default function DesperdiciosClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [fichasTecnicas, setFichasTecnicas] = useState<FichaTecnicaRow[]>([]);
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>([]);
   const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
   const [motivosStore, setMotivosStore] = useState<DesperdicioMotivoRow[]>([]);
@@ -393,6 +396,29 @@ export default function DesperdiciosClient() {
   }, [motivosStore]);
 
   const integratedRows = useMemo(() => rows, [rows]);
+
+  const kpiRows = useMemo(() => {
+    let filtered = integratedRows;
+    if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => (r.motivo || "Sem motivo") === motivoFilter);
+    const p = periodo.trim();
+    if (p) {
+      const parts = p.split("-").map((x) => x.trim()).filter(Boolean);
+      const a = parseDateNumericLoose(parts[0] ?? p);
+      const b = parts[1] ? parseDateNumericLoose(parts[1]) : null;
+      const start = a ? new Date(a.getFullYear(), a.getMonth(), a.getDate()) : null;
+      const end = b ? new Date(b.getFullYear(), b.getMonth(), b.getDate()) : start;
+      if (!start || !end) return filtered;
+      const min = start.getTime() <= end.getTime() ? start.getTime() : end.getTime();
+      const max = start.getTime() <= end.getTime() ? end.getTime() : start.getTime();
+      filtered = filtered.filter((r) => {
+        const d = parseDateNumericLoose(formatDateNumericLoose(r.data));
+        if (!d) return false;
+        const t = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        return t >= min && t <= max;
+      });
+    }
+    return filtered;
+  }, [integratedRows, motivoFilter, periodo]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -538,9 +564,9 @@ export default function DesperdiciosClient() {
     return { totalNotIgnored, pending, launched };
   }, [prePreparoEtiquetas]);
 
-  const totalCents = useMemo(() => visible.reduce((acc, r) => acc + parseBrlToCents(r.custo), 0), [visible]);
-  const totalItems = useMemo(() => visible.length, [visible]);
-  const totalMotivos = useMemo(() => new Set(visible.map((r) => r.motivo || "Sem motivo")).size, [visible]);
+  const totalCents = useMemo(() => kpiRows.reduce((acc, r) => acc + parseBrlToCents(r.custo), 0), [kpiRows]);
+  const totalItems = useMemo(() => kpiRows.length, [kpiRows]);
+  const totalMotivos = useMemo(() => new Set(kpiRows.map((r) => r.motivo || "Sem motivo")).size, [kpiRows]);
   const etiquetasVencidas = useMemo(() => etiquetaWasteSummary.totalNotIgnored, [etiquetaWasteSummary.totalNotIgnored]);
 
   const motivoCounts = useMemo(() => {
@@ -573,11 +599,11 @@ export default function DesperdiciosClient() {
   const yTicks = useMemo(() => [yMax, Math.round((yMax * 3) / 4), Math.round(yMax / 2), Math.round(yMax / 4), 0], [yMax]);
 
   const suggestions = useMemo(() => {
-    const list = [...insumosStore.map((i) => i.item), ...prePreparoStore.map((r) => r.receita)];
+    const list = [...insumosStore.map((i) => i.item), ...prePreparoStore.map((r) => r.receita), ...fichasTecnicas.map((r) => r.receita)];
     const q = draftItem.trim().toLowerCase();
     if (!q) return list.slice(0, 6);
     return list.filter((n) => n.toLowerCase().includes(q)).slice(0, 6);
-  }, [draftItem, insumosStore, prePreparoStore]);
+  }, [draftItem, fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
@@ -615,6 +641,18 @@ export default function DesperdiciosClient() {
       setEquivalenciasMap(nextEq);
     })();
     return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+  }, []);
+
+  useEffect(() => {
+    setFichasTecnicas(readFichasTecnicasFromStore([]));
+    void (async () => {
+      try {
+        const db = await loadFichasTecnicasFromSupabase();
+        if (db.length) writeFichasTecnicasToStore(db);
+      } catch {}
+      setFichasTecnicas(readFichasTecnicasFromStore([]));
+    })();
+    return subscribeFichasTecnicas((rows) => setFichasTecnicas(rows));
   }, []);
 
   useEffect(() => {
@@ -727,16 +765,25 @@ export default function DesperdiciosClient() {
       return;
     }
     const prep = prePreparoStore.find((r) => r.receita.toLowerCase() === nameKey) ?? null;
-    if (!prep) return;
-    const unitCostLabel = String(prep.custoUnitario ?? "").trim();
-    const m = unitCostLabel.match(/R\$\s*([\d.,]+)\s*\/\s*([A-Za-zÀ-ÿ]+)/i);
-    if (m) {
-      const v = String(m[1] ?? "").trim();
-      const u = String(m[2] ?? "").trim().toUpperCase();
-      if (v) setDraftUnitCost(v);
-      if (u) setDraftQtyUnit(u);
+    if (prep) {
+      const unitCostLabel = String(prep.custoUnitario ?? "").trim();
+      const m = unitCostLabel.match(/R\$\s*([\d.,]+)\s*\/\s*([A-Za-zÀ-ÿ]+)/i);
+      if (m) {
+        const v = String(m[1] ?? "").trim();
+        const u = String(m[2] ?? "").trim().toUpperCase();
+        if (v) setDraftUnitCost(v);
+        if (u) setDraftQtyUnit(u);
+      }
+      return;
     }
-  }, [draftItem, insumosStore, prePreparoStore]);
+    const ficha = fichasTecnicas.find((r) => r.receita.toLowerCase() === nameKey) ?? null;
+    if (!ficha) return;
+    const unitCents = parseBrlToCents(String(ficha.custoUnitario ?? ""));
+    if (unitCents <= 0) return;
+    const raw = formatBrlFromCents(unitCents).replace(/^R\$\s?/, "").trim();
+    if (raw) setDraftUnitCost(raw);
+    setDraftQtyUnit("UND");
+  }, [draftItem, avgUnitCostCentsByInsumoId, fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
     (async () => {
@@ -1592,8 +1639,8 @@ export default function DesperdiciosClient() {
                       Ex: Carne Bovina
                     </option>
                     {(
-                      insumosStore[0] || prePreparoStore[0]
-                        ? [...insumosStore.map((i) => i.item), ...prePreparoStore.map((p) => p.receita)]
+                      insumosStore[0] || prePreparoStore[0] || fichasTecnicas[0]
+                        ? Array.from(new Set([...insumosStore.map((i) => i.item), ...prePreparoStore.map((p) => p.receita), ...fichasTecnicas.map((f) => f.receita)]))
                         : ["Carne Bovina"]
                     ).map((s) => (
                       <option key={s} value={s}>
@@ -1615,7 +1662,14 @@ export default function DesperdiciosClient() {
                   <div className={styles.field}>
                     <div className={styles.label}>Qtd. Desperdiçada</div>
                     <div className={styles.inputGroup}>
-                      <input className={styles.groupInput} value={draftQty} onChange={(e) => setDraftQty(e.target.value)} placeholder="0,00" />
+                      <input
+                        className={styles.groupInput}
+                        value={draftQty}
+                        onChange={(e) => setDraftQty(e.target.value)}
+                        onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        onClick={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        placeholder="0,00"
+                      />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
                         {["UND", "KG", "G", "L", "ML", "PC", "CX"].map((u) => (
                           <option key={u} value={u}>

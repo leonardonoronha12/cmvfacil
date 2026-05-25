@@ -7,6 +7,7 @@ export type DesperdicioMotivoRow = {
 
 const EVENT = "cmvfacil:desperdicios:motivos";
 let cache: DesperdicioMotivoRow[] = [];
+const STORAGE_KEY = "cmvfacil:desperdicios:motivos:v1";
 
 function normalizeRows(input: unknown): DesperdicioMotivoRow[] {
   if (!Array.isArray(input)) return [];
@@ -26,6 +27,14 @@ function normalizeRows(input: unknown): DesperdicioMotivoRow[] {
 }
 
 export function readDesperdicioMotivosFromStore(): DesperdicioMotivoRow[] {
+  if (typeof window !== "undefined") {
+    try {
+      if (!cache.length) {
+        const raw = window.localStorage.getItem(STORAGE_KEY);
+        if (raw) cache = normalizeRows(JSON.parse(raw) as unknown);
+      }
+    } catch {}
+  }
   return cache;
 }
 
@@ -33,6 +42,9 @@ export function writeDesperdicioMotivosToStore(rows: DesperdicioMotivoRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+  } catch {}
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 
