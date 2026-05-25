@@ -1,14 +1,20 @@
 "use client";
 
-let cachedUserId: string | null | undefined = undefined;
+let inflight: Promise<string | null> | null = null;
 
 export async function getUserIdFromApi(): Promise<string | null> {
-  if (cachedUserId !== undefined) return cachedUserId;
-  const res = await fetch("/api/auth/me", { method: "GET" });
-  const json = (await res.json().catch(() => null)) as { userId?: string | null } | null;
-  const userId = (json?.userId ?? null) as string | null;
-  cachedUserId = userId ? String(userId).trim() : null;
-  return cachedUserId;
+  if (inflight) return inflight;
+  inflight = (async () => {
+    const res = await fetch("/api/auth/me", { method: "GET" });
+    const json = (await res.json().catch(() => null)) as { userId?: string | null } | null;
+    const userId = (json?.userId ?? null) as string | null;
+    return userId ? String(userId).trim() : null;
+  })();
+  try {
+    return await inflight;
+  } finally {
+    inflight = null;
+  }
 }
 
 export async function buildUserScopedId(rawId: string) {
@@ -25,4 +31,3 @@ export async function requireUserScopePrefix() {
   if (!userId) throw new Error("unauthorized");
   return `user:${userId}:`;
 }
-

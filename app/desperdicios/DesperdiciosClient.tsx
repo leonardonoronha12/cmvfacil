@@ -26,7 +26,7 @@ import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, t
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
-import { buildUserScopedId } from "../lib/userScope";
+import { buildUserScopedId, requireUserScopePrefix } from "../lib/userScope";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -330,6 +330,7 @@ export default function DesperdiciosClient() {
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [rows, setRows] = useState<DesperdicioRow[]>([]);
   const rowsReadyRef = useRef(false);
+  const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [motivoFilter, setMotivoFilter] = useState("Motivo");
@@ -385,6 +386,12 @@ export default function DesperdiciosClient() {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    void requireUserScopePrefix()
+      .then((prefix) => setUserScopePrefix(prefix))
+      .catch(() => setUserScopePrefix(""));
   }, []);
   const [periodoRangeStart, setPeriodoRangeStart] = useState<Date | null>(null);
   const [periodoRangeEnd, setPeriodoRangeEnd] = useState<Date | null>(null);
@@ -870,7 +877,8 @@ export default function DesperdiciosClient() {
         return;
       }
     }
-    const sync = getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas);
+    if (!userScopePrefix) return;
+    const sync = getExpiredPrePreparoEtiquetaDesperdicioSync(rows, prePreparoEtiquetas, new Date(), userScopePrefix);
     const changed =
       sync.merged.length !== rows.length ||
       sync.merged.some((row, index) => {
@@ -895,7 +903,7 @@ export default function DesperdiciosClient() {
         }
       });
     }
-  }, [prePreparoEtiquetas, rows]);
+  }, [prePreparoEtiquetas, rows, userScopePrefix]);
 
   useEffect(() => {
     if (!isDataCalOpen) return;

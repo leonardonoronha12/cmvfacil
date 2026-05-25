@@ -5,6 +5,14 @@ import type { PrePreparoEtiquetaRow } from "./prePreparoEtiquetasStore";
 
 const ETIQUETA_WASTE_PREFIX = "etiqueta-vencida:";
 
+function stripUserPrefix(id: string) {
+  const raw = String(id ?? "");
+  if (!raw.startsWith("user:")) return raw;
+  const parts = raw.split(":");
+  if (parts.length < 3) return raw;
+  return parts.slice(2).join(":");
+}
+
 function parsePtNumber(value: string) {
   const s = value.replace(/[^\d,.-]/g, "").trim();
   if (!s) return 0;
@@ -78,11 +86,11 @@ function startOfDay(d: Date) {
 }
 
 export function isPrePreparoEtiquetaWasteId(id: string) {
-  return String(id ?? "").startsWith(ETIQUETA_WASTE_PREFIX);
+  return stripUserPrefix(String(id ?? "")).startsWith(ETIQUETA_WASTE_PREFIX);
 }
 
 export function getEtiquetaIdFromWasteId(id: string) {
-  const raw = String(id ?? "");
+  const raw = stripUserPrefix(String(id ?? ""));
   if (!raw.startsWith(ETIQUETA_WASTE_PREFIX)) return null;
   const etiquetaId = raw.slice(ETIQUETA_WASTE_PREFIX.length).trim();
   return etiquetaId || null;
@@ -92,7 +100,8 @@ function desperdicioRowsEqual(a: DesperdicioRow, b: DesperdicioRow) {
   return a.id === b.id && a.data === b.data && a.item === b.item && a.quantidade === b.quantidade && a.custo === b.custo && a.motivo === b.motivo;
 }
 
-export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEtiquetaRow[], referenceDate = new Date()): DesperdicioRow[] {
+export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEtiquetaRow[], referenceDate = new Date(), userPrefix = ""): DesperdicioRow[] {
+  const scopedPrefix = userPrefix ? String(userPrefix).trim() : "";
   const today = startOfDay(referenceDate).getTime();
   const out: Array<DesperdicioRow & { t: number }> = [];
   for (const label of labels) {
@@ -104,7 +113,7 @@ export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEti
     const quantidadeValor = parsePtNumber(label.quantidade);
     const quantidade = `${quantidadeValor > 0 ? label.quantidade : "0,000"} ${label.unidade}`.trim();
     out.push({
-      id: `${ETIQUETA_WASTE_PREFIX}${label.id}`,
+      id: `${scopedPrefix}${ETIQUETA_WASTE_PREFIX}${label.id}`,
       data: formatDateLabelLowerPT(validade),
       item: label.receita,
       quantidade,
@@ -117,8 +126,8 @@ export function buildExpiredPrePreparoEtiquetaDesperdicios(labels: PrePreparoEti
   return out.map(({ t: _t, ...row }) => row);
 }
 
-export function getExpiredPrePreparoEtiquetaDesperdicioSync(rows: DesperdicioRow[], labels: PrePreparoEtiquetaRow[], referenceDate = new Date()) {
-  const generated = buildExpiredPrePreparoEtiquetaDesperdicios(labels, referenceDate);
+export function getExpiredPrePreparoEtiquetaDesperdicioSync(rows: DesperdicioRow[], labels: PrePreparoEtiquetaRow[], referenceDate = new Date(), userPrefix = "") {
+  const generated = buildExpiredPrePreparoEtiquetaDesperdicios(labels, referenceDate, userPrefix);
   const generatedMap = new Map(generated.map((row) => [row.id, row]));
   const currentGenerated = rows.filter((row) => isPrePreparoEtiquetaWasteId(row.id));
   const currentGeneratedMap = new Map(currentGenerated.map((row) => [row.id, row]));
