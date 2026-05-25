@@ -566,7 +566,21 @@ export default function DesperdiciosClient() {
 
   const totalCents = useMemo(() => kpiRows.reduce((acc, r) => acc + parseBrlToCents(r.custo), 0), [kpiRows]);
   const totalItems = useMemo(() => kpiRows.length, [kpiRows]);
-  const totalMotivos = useMemo(() => new Set(kpiRows.map((r) => r.motivo || "Sem motivo")).size, [kpiRows]);
+  const totalMotivos = useMemo(() => {
+    const set = new Set<string>();
+    const base = motivosStore[0] ? motivosStore.map((m) => m.nome) : motivos;
+    for (const nome of base) {
+      const v = String(nome ?? "").trim();
+      if (!v) continue;
+      set.add(v.toLowerCase());
+    }
+    for (const r of kpiRows) {
+      const v = String(r.motivo ?? "").trim();
+      if (!v) continue;
+      set.add(v.toLowerCase());
+    }
+    return set.size;
+  }, [kpiRows, motivos, motivosStore]);
   const etiquetasVencidas = useMemo(() => etiquetaWasteSummary.totalNotIgnored, [etiquetaWasteSummary.totalNotIgnored]);
 
   const motivoCounts = useMemo(() => {
