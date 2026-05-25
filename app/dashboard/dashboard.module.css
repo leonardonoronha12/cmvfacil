@@ -245,7 +245,7 @@
   flex-shrink: 0;
   align-items: center;
   border-radius: 150px;
-  width: 211px;
+  width: 100%;
   overflow: hidden;
 }
 

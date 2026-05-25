@@ -502,6 +502,44 @@ type LastCalc = {
 };
 
 const LAST_CALC_KEY = "cmvfacil.cmvreal.lastcalc.v1";
+const CMVREAL_SNAPSHOT_KEY = "cmvfacil.cmvreal.snapshot.v1";
+
+type CalcSnapshot = {
+  cmvPercent: number;
+  deltaPp: number;
+  initialCents: number;
+  comprasCents: number;
+  finalCents: number;
+  saidasCents: number;
+  revenueCents: number;
+  desperdiciosCents: number;
+  rows: Row[];
+};
+
+type PeriodFlowSnapshot = {
+  initialCents: number;
+  comprasCents: number;
+  finalCents: number;
+  saidasCents: number;
+  rows: Row[];
+};
+
+type CmvRealSnapshot = {
+  startDate: string;
+  endDate: string;
+  revenue: string;
+  targetCmv: string;
+  tableQuery: string;
+  tableCategoria: string;
+  tableColumnOrder: DashboardTableColumn[];
+  tableSortKey: DashboardTableColumn | null;
+  tableSortDir: "asc" | "desc";
+  calc: CalcSnapshot | null;
+  periodFlow: PeriodFlowSnapshot | null;
+  computedAt: number;
+};
+
+let snapshotCache: CmvRealSnapshot | null | undefined = undefined;
 
 function readLastCalc(): LastCalc | null {
   if (typeof window === "undefined") return null;
@@ -525,6 +563,78 @@ function writeLastCalc(next: LastCalc) {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(LAST_CALC_KEY, JSON.stringify(next));
+  } catch {}
+}
+
+function normalizeTableColumnOrder(input: unknown): DashboardTableColumn[] {
+  const allowed: DashboardTableColumn[] = ["item", "initial", "entradas", "final", "saidas", "custo", "cmv"];
+  if (!Array.isArray(input)) return ["item", "initial", "entradas", "final", "saidas", "custo", "cmv"];
+  const out: DashboardTableColumn[] = [];
+  for (const v of input) {
+    const k = String(v ?? "").trim() as DashboardTableColumn;
+    if (!allowed.includes(k)) continue;
+    if (out.includes(k)) continue;
+    out.push(k);
+  }
+  for (const k of allowed) if (!out.includes(k)) out.push(k);
+  return out;
+}
+
+function readCmvRealSnapshot(): CmvRealSnapshot | null {
+  if (typeof window === "undefined") return null;
+  if (snapshotCache !== undefined) return snapshotCache;
+  try {
+    const raw = window.localStorage.getItem(CMVREAL_SNAPSHOT_KEY);
+    if (!raw) {
+      snapshotCache = null;
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<CmvRealSnapshot>;
+    if (!parsed || typeof parsed !== "object") {
+      snapshotCache = null;
+      return null;
+    }
+    const startDate = String(parsed.startDate ?? "").trim();
+    const endDate = String(parsed.endDate ?? "").trim();
+    const revenue = String(parsed.revenue ?? "").trim();
+    const targetCmv = String(parsed.targetCmv ?? "").trim();
+    const tableQuery = String(parsed.tableQuery ?? "").trim();
+    const tableCategoria = String(parsed.tableCategoria ?? "").trim() || "todas";
+    const tableColumnOrder = normalizeTableColumnOrder(parsed.tableColumnOrder);
+    const tableSortKeyRaw = String(parsed.tableSortKey ?? "").trim() as DashboardTableColumn;
+    const tableSortKey = (["item", "initial", "entradas", "final", "saidas", "custo", "cmv"] as const).includes(tableSortKeyRaw) ? tableSortKeyRaw : null;
+    const tableSortDir = parsed.tableSortDir === "desc" ? "desc" : "asc";
+    const computedAt = typeof parsed.computedAt === "number" && Number.isFinite(parsed.computedAt) ? parsed.computedAt : 0;
+
+    const calc = parsed.calc && typeof parsed.calc === "object" ? (parsed.calc as CalcSnapshot) : null;
+    const periodFlow = parsed.periodFlow && typeof parsed.periodFlow === "object" ? (parsed.periodFlow as PeriodFlowSnapshot) : null;
+
+    snapshotCache = {
+      startDate,
+      endDate,
+      revenue,
+      targetCmv,
+      tableQuery,
+      tableCategoria,
+      tableColumnOrder,
+      tableSortKey,
+      tableSortDir,
+      calc,
+      periodFlow,
+      computedAt,
+    };
+    return snapshotCache;
+  } catch {
+    snapshotCache = null;
+    return null;
+  }
+}
+
+function writeCmvRealSnapshot(next: CmvRealSnapshot) {
+  if (typeof window === "undefined") return;
+  snapshotCache = next;
+  try {
+    window.localStorage.setItem(CMVREAL_SNAPSHOT_KEY, JSON.stringify(next));
   } catch {}
 }
 
@@ -746,12 +856,12 @@ export default function DashboardClient() {
   const [desperdicios, setDesperdicios] = useState<DesperdicioRow[]>([]);
   const [prePreparo, setPrePreparo] = useState<PrePreparoStoreRow[]>([]);
   const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
-  const [tableQuery, setTableQuery] = useState("");
-  const [tableCategoria, setTableCategoria] = useState("todas");
-  const [tableColumnOrder, setTableColumnOrder] = useState<DashboardTableColumn[]>(["item", "initial", "entradas", "final", "saidas", "custo", "cmv"]);
+  const [tableQuery, setTableQuery] = useState(() => readCmvRealSnapshot()?.tableQuery ?? "");
+  const [tableCategoria, setTableCategoria] = useState(() => readCmvRealSnapshot()?.tableCategoria ?? "todas");
+  const [tableColumnOrder, setTableColumnOrder] = useState<DashboardTableColumn[]>(() => readCmvRealSnapshot()?.tableColumnOrder ?? ["item", "initial", "entradas", "final", "saidas", "custo", "cmv"]);
   const [draggingTableColumn, setDraggingTableColumn] = useState<DashboardTableColumn | null>(null);
-  const [tableSortKey, setTableSortKey] = useState<DashboardTableColumn | null>(null);
-  const [tableSortDir, setTableSortDir] = useState<"asc" | "desc">("asc");
+  const [tableSortKey, setTableSortKey] = useState<DashboardTableColumn | null>(() => readCmvRealSnapshot()?.tableSortKey ?? null);
+  const [tableSortDir, setTableSortDir] = useState<"asc" | "desc">(() => readCmvRealSnapshot()?.tableSortDir ?? "asc");
   const [isVariacaoOpen, setIsVariacaoOpen] = useState(false);
   const [lastCalc, setLastCalc] = useState<LastCalc | null>(null);
   const [calcError, setCalcError] = useState<string>("");
@@ -791,6 +901,7 @@ export default function DashboardClient() {
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
   const targetCmvInputRef = useRef<HTMLInputElement | null>(null);
   const tableHeaderDidDragRef = useRef(false);
+  const [calcComputedAt, setCalcComputedAt] = useState<number>(() => readCmvRealSnapshot()?.computedAt ?? 0);
   const [calc, setCalc] = useState<{
     cmvPercent: number;
     deltaPp: number;
@@ -801,14 +912,14 @@ export default function DashboardClient() {
     revenueCents: number;
     desperdiciosCents: number;
     rows: Row[];
-  } | null>(null);
+  } | null>(() => readCmvRealSnapshot()?.calc ?? null);
   const [periodFlow, setPeriodFlow] = useState<{
     initialCents: number;
     comprasCents: number;
     finalCents: number;
     saidasCents: number;
     rows: Row[];
-  } | null>(null);
+  } | null>(() => readCmvRealSnapshot()?.periodFlow ?? null);
 
   function closeHistoryPanel() {
     setHistoryItem(null);
@@ -1249,6 +1360,36 @@ export default function DashboardClient() {
     writeDashboardCmvPrefsToStore({ startDate, endDate, revenue, targetCmv });
   }, [endDate, revenue, startDate, targetCmv]);
 
+  useEffect(() => {
+    writeCmvRealSnapshot({
+      startDate,
+      endDate,
+      revenue,
+      targetCmv,
+      tableQuery,
+      tableCategoria,
+      tableColumnOrder,
+      tableSortKey,
+      tableSortDir,
+      calc,
+      periodFlow,
+      computedAt: calcComputedAt,
+    });
+  }, [
+    calc,
+    calcComputedAt,
+    endDate,
+    periodFlow,
+    revenue,
+    startDate,
+    tableCategoria,
+    tableColumnOrder,
+    tableQuery,
+    tableSortDir,
+    tableSortKey,
+    targetCmv,
+  ]);
+
   const canCalculate =
     inventoryOptions.length > 0 &&
     Boolean(startDate.trim()) &&
@@ -1466,10 +1607,9 @@ export default function DashboardClient() {
       desperdiciosCents,
       rows: computedRows,
     });
-
-    writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt: Date.now() });
-    setTableQuery("");
-    setTableCategoria("todas");
+    const computedAt = Date.now();
+    setCalcComputedAt(computedAt);
+    writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
     if (!searchParams.get("itemId") && !searchParams.get("item")) {
       setHistoryItem(null);
       setDetailsTab("entradas");

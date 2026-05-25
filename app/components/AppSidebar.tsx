@@ -361,7 +361,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             <p className={dash.usersActiveText}>{`Usuários (${usersUsed} de ${usersLimit})`}</p>
           </div>
           <div className={dash.progress} aria-hidden>
-            <div className={dash.progressOn} style={{ width: `${Math.round(211 * usersPct)}px` }} />
+            <div className={dash.progressOn} style={{ width: `${Math.round(usersPct * 100)}%` }} />
             <div className={dash.progressOff} />
           </div>
         </a>
