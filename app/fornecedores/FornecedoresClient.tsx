@@ -289,6 +289,7 @@ export default function FornecedoresClient() {
   const [vincInsumoEq, setVincInsumoEq] = useState("");
   const [vincEqQtd, setVincEqQtd] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
   const [draftFornecedor, setDraftFornecedor] = useState("");
   const [draftVendedorNome, setDraftVendedorNome] = useState("");
   const [draftWhatsapp, setDraftWhatsapp] = useState("");
@@ -672,6 +673,7 @@ export default function FornecedoresClient() {
 
   function openNew() {
     setEditingId(null);
+    setEditingKey(null);
     setDraftFornecedor("");
     setDraftVendedorNome("");
     setDraftWhatsapp("");
@@ -681,6 +683,7 @@ export default function FornecedoresClient() {
 
   function openEdit(row: FornecedorRow) {
     setEditingId(row.id);
+    setEditingKey(row.fornecedor.trim().toUpperCase());
     setDraftFornecedor(row.fornecedor);
     setDraftVendedorNome(row.vendedorNome === "-" ? "" : row.vendedorNome);
     setDraftWhatsapp(row.whatsapp === "-" ? "" : row.whatsapp);
@@ -695,11 +698,17 @@ export default function FornecedoresClient() {
     const whatsapp = draftWhatsapp.trim() || "-";
     const endereco = draftEndereco.trim() || "-";
     const key = fornecedor.toUpperCase();
-    const nextInfo = { ...infoMap, [key]: { fornecedor, vendedor: vendedorNome === "-" ? "" : vendedorNome, whatsapp: whatsapp === "-" ? "" : whatsapp, endereco: endereco === "-" ? "" : endereco } };
-    setInfoMap(nextInfo);
-    writeFornecedorInfoMap(nextInfo);
+    const infoPayload = {
+      fornecedor,
+      vendedor: vendedorNome === "-" ? "" : vendedorNome,
+      whatsapp: whatsapp === "-" ? "" : whatsapp,
+      endereco: endereco === "-" ? "" : endereco,
+    };
 
     if (!editingId) {
+      const nextInfo = { ...infoMap, [key]: infoPayload };
+      setInfoMap(nextInfo);
+      writeFornecedorInfoMap(nextInfo);
       setRows((prev) => [{ id: String(prev.length + 1), fornecedor, itens: 0, vendedorNome, whatsapp, endereco }, ...prev]);
       setQuery("");
       setSortKey(null);
@@ -707,10 +716,54 @@ export default function FornecedoresClient() {
       setIsFormOpen(false);
       return;
     }
+
+    const prevKey = (editingKey ?? "").trim().toUpperCase();
+    if (prevKey && prevKey !== key) {
+      const nextInfo = { ...infoMap };
+      delete nextInfo[prevKey];
+      nextInfo[key] = infoPayload;
+      setInfoMap(nextInfo);
+      writeFornecedorInfoMap(nextInfo);
+
+      const prevProdutos = produtosMap[prevKey] ?? [];
+      const curProdutos = produtosMap[key] ?? [];
+      const mergedProdutos: string[] = [];
+      for (const item of [...curProdutos, ...prevProdutos]) {
+        if (!mergedProdutos.some((x) => x.toLowerCase() === item.toLowerCase())) mergedProdutos.push(item);
+      }
+      const nextProdutos = { ...produtosMap };
+      delete nextProdutos[prevKey];
+      nextProdutos[key] = mergedProdutos;
+      setProdutosMap(nextProdutos);
+      writeFornecedorProdutosMap(nextProdutos);
+
+      const prevEq = equivalenciasMap[prevKey] ?? [];
+      const curEq = equivalenciasMap[key] ?? [];
+      const mergedEqMap = new Map<string, (typeof curEq)[number]>();
+      for (const row of [...curEq, ...prevEq]) {
+        mergedEqMap.set(row.id, row);
+      }
+      const nextEq = { ...equivalenciasMap };
+      delete nextEq[prevKey];
+      nextEq[key] = Array.from(mergedEqMap.values());
+      setEquivalenciasMap(nextEq);
+      writeFornecedorEquivalenciasMap(nextEq);
+
+      if (prodFornecedorKey === prevKey) {
+        setProdFornecedorKey(key);
+        setProdFornecedorLabel(fornecedor);
+      }
+    } else {
+      const nextInfo = { ...infoMap, [key]: infoPayload };
+      setInfoMap(nextInfo);
+      writeFornecedorInfoMap(nextInfo);
+    }
+
     setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, fornecedor, vendedorNome, whatsapp, endereco } : r)));
     setQuery("");
     setIsFormOpen(false);
     setEditingId(null);
+    setEditingKey(null);
   }
 
   function openDelete(row: FornecedorRow) {
