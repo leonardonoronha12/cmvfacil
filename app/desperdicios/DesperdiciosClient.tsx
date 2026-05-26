@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -377,11 +378,13 @@ export default function DesperdiciosClient() {
   const [draftItem, setDraftItem] = useState("");
   const [draftUnitCost, setDraftUnitCost] = useState("0,00");
   const [draftQty, setDraftQty] = useState("0,00");
-  const [draftQtyUnit, setDraftQtyUnit] = useState("UND");
+  const [draftQtyUnit, setDraftQtyUnit] = useState("Und");
   const [draftMotivo, setDraftMotivo] = useState("Validade Vencida");
   const [isDataCalOpen, setIsDataCalOpen] = useState(false);
   const [dataCalMonth, setDataCalMonth] = useState(() => startOfMonth(new Date()));
   const dataCalWrapRef = useRef<HTMLDivElement | null>(null);
+  const dataCalPopRef = useRef<HTMLDivElement | null>(null);
+  const [dataCalRect, setDataCalRect] = useState<{ left: number; top: number } | null>(null);
   const [isPeriodoCalOpen, setIsPeriodoCalOpen] = useState(false);
   const [periodoCalMonth, setPeriodoCalMonth] = useState(() => startOfMonth(new Date()));
   const periodoCalWrapRef = useRef<HTMLDivElement | null>(null);
@@ -949,9 +952,10 @@ export default function DesperdiciosClient() {
     if (!isDataCalOpen) return;
     function onDown(e: MouseEvent) {
       const el = dataCalWrapRef.current;
-      if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
+      const pop = dataCalPopRef.current;
+      if (e.target instanceof Node && (el?.contains(e.target) || pop?.contains(e.target))) return;
       setIsDataCalOpen(false);
+      setDataCalRect(null);
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -961,6 +965,7 @@ export default function DesperdiciosClient() {
     if (!isDataCalOpen) return;
     function close() {
       setIsDataCalOpen(false);
+      setDataCalRect(null);
     }
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
@@ -998,6 +1003,16 @@ export default function DesperdiciosClient() {
     return { left, top };
   }
 
+  function normalizeUnitLabel(value: string) {
+    const v = String(value ?? "").trim().toLowerCase();
+    if (v === "und" || v === "un" || v === "u") return "Und";
+    if (v === "kg") return "Kg";
+    if (v === "g") return "g";
+    if (v === "l") return "L";
+    if (v === "ml") return "ml";
+    return "Und";
+  }
+
   function parsePeriodoRange(value: string) {
     const raw = value.trim();
     if (!raw) return { start: null as Date | null, end: null as Date | null };
@@ -1014,9 +1029,10 @@ export default function DesperdiciosClient() {
     setDraftItem("");
     setDraftUnitCost("0,00");
     setDraftQty("0,000");
-    setDraftQtyUnit("UND");
+    setDraftQtyUnit("Und");
     setDraftMotivo("Validade Vencida");
     setIsDataCalOpen(false);
+    setDataCalRect(null);
     setDataCalMonth(startOfMonth(new Date()));
     setIsFormOpen(true);
   }
@@ -1183,9 +1199,9 @@ export default function DesperdiciosClient() {
     setDraftItem(row.item);
     const qtyMatch = (row.quantidade ?? "").match(/([\d.,]+)\s*([A-Za-zÀ-ÿ]+)/);
     const qtyValue = qtyMatch?.[1] ?? "0,000";
-    const qtyUnit = (qtyMatch?.[2] ?? "UND").trim().toUpperCase();
+    const qtyUnit = (qtyMatch?.[2] ?? "Und").trim();
     setDraftQty(formatQtyInput3(qtyValue));
-    setDraftQtyUnit(qtyUnit || "UND");
+    setDraftQtyUnit(normalizeUnitLabel(qtyUnit || "Und"));
     const qtyNum = parsePtNumber(qtyValue);
     const totalCents = parseBrlToCents(row.custo ?? "");
     const unitCost = qtyNum > 0 ? totalCents / 100 / qtyNum : 0;
@@ -1194,6 +1210,7 @@ export default function DesperdiciosClient() {
     const parsed = parseDateLabelLoose(row.data);
     setDataCalMonth(startOfMonth(parsed ?? new Date()));
     setIsDataCalOpen(false);
+    setDataCalRect(null);
     setIsFormOpen(true);
   }
 
@@ -1201,7 +1218,7 @@ export default function DesperdiciosClient() {
     const item = draftItem.trim();
     const data = draftData.trim();
     if (!item || !data) return;
-    const qtyUnit = (draftQtyUnit || "UND").trim().toUpperCase();
+    const qtyUnit = (draftQtyUnit || "Und").trim();
     const qtyNum = parsePtNumber(draftQty);
     const quantidade = `${draftQty.trim()} ${qtyUnit}`.trim();
     const unitCostCents = parseBrlToCents(draftUnitCost);
@@ -1787,7 +1804,7 @@ export default function DesperdiciosClient() {
                         placeholder="0,000"
                       />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
-                        {["UND", "KG", "G", "L", "ML", "PC", "CX"].map((u) => (
+                        {["Und", "Kg", "g", "L", "ml"].map((u) => (
                           <option key={u} value={u}>
                             {u}
                           </option>
@@ -1821,9 +1838,15 @@ export default function DesperdiciosClient() {
                         type="button"
                         className={styles.prefixIconBtn}
                         onClick={() => {
+                          const anchor = dataCalWrapRef.current?.querySelector("input")?.getBoundingClientRect() ?? null;
+                          if (anchor) setDataCalRect(computeCalendarRect(anchor));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
-                          setIsDataCalOpen((v) => !v);
+                          setIsDataCalOpen((v) => {
+                            const next = !v;
+                            if (!next) setDataCalRect(null);
+                            return next;
+                          });
                         }}
                         aria-label="Abrir calendário"
                       >
@@ -1834,11 +1857,13 @@ export default function DesperdiciosClient() {
                         value={draftData}
                         onChange={(e) => setDraftData(e.target.value)}
                         onClick={(e) => {
+                          setDataCalRect(computeCalendarRect(e.currentTarget.getBoundingClientRect()));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
                           setIsDataCalOpen(true);
                         }}
                         onFocus={(e) => {
+                          setDataCalRect(computeCalendarRect(e.currentTarget.getBoundingClientRect()));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
                           setIsDataCalOpen(true);
@@ -1847,7 +1872,12 @@ export default function DesperdiciosClient() {
                       />
                     </div>
                     {isDataCalOpen ? (
-                      <div className={styles.calendarPopover}>
+                      createPortal(
+                        <div
+                          ref={dataCalPopRef}
+                          className={styles.calendarPopover}
+                          style={dataCalRect ? { position: "fixed", left: dataCalRect.left, top: dataCalRect.top, transform: "none" } : { position: "fixed" }}
+                        >
                         <div className={styles.calendarHeader}>
                           <button type="button" className={styles.calNavBtn} onClick={() => setDataCalMonth((d) => addMonths(d, -1))}>
                             ‹
@@ -1899,6 +1929,7 @@ export default function DesperdiciosClient() {
                                   onClick={() => {
                                     setDraftData(formatDateLabelLowerPT(d));
                                     setIsDataCalOpen(false);
+                                    setDataCalRect(null);
                                   }}
                                 >
                                   {day}
@@ -1914,7 +1945,9 @@ export default function DesperdiciosClient() {
                             return cells;
                           })()}
                         </div>
-                      </div>
+                        </div>,
+                        document.body,
+                      )
                     ) : null}
                   </div>
                 </div>

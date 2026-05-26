@@ -956,24 +956,6 @@ export default function InventarioClient() {
                           placeholder="0"
                         />
                         <div className={styles.unitPill}>{r.unidade}</div>
-                        <div className={styles.actions}>
-                          <button
-                            type="button"
-                            className={styles.iconBtn}
-                            aria-label="Editar"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={(e) => {
-                              const rowEl = e.currentTarget.closest(`.${styles.itemRight}`);
-                              const input = rowEl?.querySelector("input");
-                              if (input instanceof HTMLInputElement) input.focus();
-                            }}
-                          >
-                            <IconPencil />
-                          </button>
-                          <button type="button" className={styles.iconBtn} aria-label="Excluir" onClick={() => removeItem(r.id)}>
-                            <IconTrash />
-                          </button>
-                        </div>
                       </div>
                     </div>
                   ))}

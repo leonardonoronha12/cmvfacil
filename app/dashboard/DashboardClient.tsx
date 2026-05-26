@@ -925,7 +925,7 @@ export default function DashboardClient() {
     setHistoryItem(null);
     setDetailsTab("entradas");
     if (searchParams.get("itemId") || searchParams.get("item")) {
-      router.replace(pathname, { scroll: false });
+      router.back();
     }
   }
 
@@ -1610,6 +1610,7 @@ export default function DashboardClient() {
     const computedAt = Date.now();
     setCalcComputedAt(computedAt);
     writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
+    showToast("Cálculo feito.", "success");
     if (!searchParams.get("itemId") && !searchParams.get("item")) {
       setHistoryItem(null);
       setDetailsTab("entradas");
@@ -1856,7 +1857,7 @@ export default function DashboardClient() {
     }
 
     if (column === "cmv") {
-      return <div className={row.cmvTone === "red" ? styles.rowCmvRed : row.cmvTone === "yellow" ? styles.rowCmvYellow : styles.rowCmvGreen}>{row.cmv}</div>;
+      return <div className={styles.rowCellBold}>{row.cmv}</div>;
     }
 
     return <div className={styles.rowCell}>{row[column]}</div>;
@@ -1936,11 +1937,16 @@ export default function DashboardClient() {
     const minT = Math.min(startT, endT);
     const maxT = Math.max(startT, endT);
 
-    const idByKey = new Map<string, string>();
+    const insumoByKey = new Map<string, { id: string; baseUnit: string; custoMedioCents: number }>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
       if (!key) continue;
-      if (!idByKey.has(key)) idByKey.set(key, i.id);
+      if (insumoByKey.has(key)) continue;
+      insumoByKey.set(key, {
+        id: i.id,
+        baseUnit: String(i.medida ?? "Und").trim() || "Und",
+        custoMedioCents: parseBrlToCents(String(i.custoMedio ?? "")) ?? 0,
+      });
     }
 
     const lastBeforeStart = new Map<string, { t: number; cents: number }>();
@@ -1951,26 +1957,54 @@ export default function DashboardClient() {
       if (!d) continue;
       const t = startOfDay(d).getTime();
       if (t > maxT) continue;
-      for (const it of e.itensNota ?? []) {
-        const id = idByKey.get(normalizeKey(it.nome));
-        if (!id) continue;
-        const unitStr = String(it.custoUnitarioLabel ?? "");
-        const rawValue = unitStr.split("/")[0] ?? unitStr;
-        const cents = parseBrlToCents(rawValue);
-        if (!cents) continue;
-        if (t <= minT) {
-          const prev = lastBeforeStart.get(id);
-          if (!prev || t >= prev.t) lastBeforeStart.set(id, { t, cents });
+      if (!e.itensNota?.length) continue;
+      const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
+      for (const it of e.itensNota) {
+        const rawKey = normalizeKey(it.nome);
+        if (!rawKey) continue;
+        const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+        const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
+        const ins = insumoByKey.get(mappedKey) ?? null;
+        if (!ins) continue;
+
+        const parsed = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qtyNota = parsed.qty;
+        if (!(qtyNota > 0)) continue;
+
+        let qtyBase = qtyNota;
+        if (eq) {
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) qtyBase = qtyNota * f;
+        } else {
+          const fromUnit = (parsed.unit || ins.baseUnit).trim() || ins.baseUnit;
+          const converted = convertQty(qtyNota, fromUnit, ins.baseUnit);
+          qtyBase = Number.isFinite(converted) && converted > 0 ? converted : qtyNota;
         }
-        const prevEnd = lastBeforeEnd.get(id);
-        if (!prevEnd || t >= prevEnd.t) lastBeforeEnd.set(id, { t, cents });
+        if (!(qtyBase > 0)) continue;
+
+        let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!subtotalCents) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyNota > 0) subtotalCents = Math.round(unit * qtyNota);
+        }
+        if (!subtotalCents) continue;
+
+        const unitCents = Math.round(subtotalCents / qtyBase);
+        if (!unitCents) continue;
+
+        if (t <= minT) {
+          const prev = lastBeforeStart.get(ins.id);
+          if (!prev || t >= prev.t) lastBeforeStart.set(ins.id, { t, cents: unitCents });
+        }
+        const prevEnd = lastBeforeEnd.get(ins.id);
+        if (!prevEnd || t >= prevEnd.t) lastBeforeEnd.set(ins.id, { t, cents: unitCents });
       }
     }
 
     const out = insumos
       .map((i) => {
-        const startCost = lastBeforeStart.get(i.id)?.cents ?? parseBrlToCents(String(i.custoMedio ?? "")) ?? 0;
-        const endCost = lastBeforeEnd.get(i.id)?.cents ?? parseBrlToCents(String(i.custoMedio ?? "")) ?? 0;
+        const startCost = lastBeforeStart.get(i.id)?.cents ?? (parseBrlToCents(String(i.custoMedio ?? "")) ?? 0);
+        const endCost = lastBeforeEnd.get(i.id)?.cents ?? (parseBrlToCents(String(i.custoMedio ?? "")) ?? 0);
         const pct = startCost > 0 ? ((endCost - startCost) / startCost) * 100 : 0;
         return {
           id: i.id,

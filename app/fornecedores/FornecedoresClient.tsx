@@ -285,7 +285,7 @@ export default function FornecedoresClient() {
   const [isVincOpen, setIsVincOpen] = useState(false);
   const [vincNomeOriginal, setVincNomeOriginal] = useState("");
   const [vincNomeNota, setVincNomeNota] = useState("");
-  const [vincUnidadeNota, setVincUnidadeNota] = useState("CX");
+  const [vincUnidadeNota, setVincUnidadeNota] = useState("Und");
   const [vincInsumoEq, setVincInsumoEq] = useState("");
   const [vincEqQtd, setVincEqQtd] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -524,7 +524,7 @@ export default function FornecedoresClient() {
     const existing = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
     setVincNomeOriginal(name);
     setVincNomeNota(name);
-    setVincUnidadeNota(existing?.unidadeNaNota || "CX");
+    setVincUnidadeNota(existing?.unidadeNaNota || "Und");
     setVincInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? ""));
     setVincEqQtd(existing?.equivalenteQuantidade || "");
     setIsVincOpen(true);
@@ -1401,7 +1401,7 @@ export default function FornecedoresClient() {
                   <div className={styles.formField}>
                     <div className={styles.formLabel}>Unidade de Medida na nota</div>
                     <select className={styles.formInput} value={vincUnidadeNota} onChange={(e) => setVincUnidadeNota(e.target.value)}>
-                      {["CX", "Und", "Kg", "g", "L", "ml", "Pc"].map((u) => (
+                      {["Und", "Kg", "g", "L", "ml"].map((u) => (
                         <option key={u} value={u}>
                           {u}
                         </option>

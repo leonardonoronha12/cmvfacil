@@ -423,7 +423,7 @@ export default function EntradasClient() {
   const [fornecedorItemMap, setFornecedorItemMap] = useState<FornecedorEquivalenciasMap>({});
   const [isAddFornecedorItemOpen, setIsAddFornecedorItemOpen] = useState(false);
   const [mapNomeNota, setMapNomeNota] = useState("");
-  const [mapUnidadeNota, setMapUnidadeNota] = useState("CX");
+  const [mapUnidadeNota, setMapUnidadeNota] = useState("Und");
   const [mapInsumoEq, setMapInsumoEq] = useState("");
   const [mapEqQtd, setMapEqQtd] = useState("");
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -1034,7 +1034,7 @@ export default function EntradasClient() {
     if (!fornecedorKey) return;
     const existing = fornecedorItemMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
     setMapNomeNota(name);
-    setMapUnidadeNota(existing?.unidadeNaNota || "CX");
+    setMapUnidadeNota(existing?.unidadeNaNota || "Und");
     setMapInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? "").trim());
     setMapEqQtd(existing?.equivalenteQuantidade || "");
     setIsAddFornecedorItemOpen(true);
@@ -1075,7 +1075,7 @@ export default function EntradasClient() {
 
   function openAddItemFornecedor() {
     setMapNomeNota("");
-    setMapUnidadeNota("CX");
+    setMapUnidadeNota("Und");
     setMapInsumoEq((insumosStore[0]?.item ?? "").trim());
     setMapEqQtd("");
     setIsAddFornecedorItemOpen(true);
@@ -1812,8 +1812,15 @@ export default function EntradasClient() {
                       <div className={styles.qtyWrap}>
                         <input
                           className={styles.qtyInput}
-                          inputMode="decimal"
+                          inputMode="numeric"
+                          pattern="[0-9,]*"
                           value={detailQty}
+                          onKeyDown={(e) => {
+                            if (e.ctrlKey || e.metaKey || e.altKey) return;
+                            const k = e.key;
+                            if (k.length !== 1) return;
+                            if (!/[0-9,]/.test(k)) e.preventDefault();
+                          }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;
                             if (document.activeElement !== el) {
@@ -1840,8 +1847,15 @@ export default function EntradasClient() {
                         <div className={styles.moneyPrefix}>R$</div>
                         <input
                           className={styles.moneyInput}
-                          inputMode="decimal"
+                          inputMode="numeric"
+                          pattern="[0-9,]*"
                           value={detailSubtotal}
+                          onKeyDown={(e) => {
+                            if (e.ctrlKey || e.metaKey || e.altKey) return;
+                            const k = e.key;
+                            if (k.length !== 1) return;
+                            if (!/[0-9,]/.test(k)) e.preventDefault();
+                          }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;
                             if (document.activeElement !== el) {
@@ -2242,7 +2256,7 @@ export default function EntradasClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida na nota</div>
                   <select className={styles.formSelect} value={mapUnidadeNota} onChange={(e) => setMapUnidadeNota(e.target.value)}>
-                    {["CX", "Und", "Kg", "g", "L", "ml", "Pc"].map((u) => (
+                    {["Und", "Kg", "g", "L", "ml"].map((u) => (
                       <option key={u} value={u}>
                         {u}
                       </option>
