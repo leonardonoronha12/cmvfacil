@@ -60,7 +60,7 @@ function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 20_000);
 }
 
 function normalizeText(value: string) {
@@ -168,11 +168,38 @@ function startOfDay(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
+function normalizeUnit(value: string) {
+  const raw = String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z]/g, "")
+    .toUpperCase()
+    .trim();
+  if (!raw) return "";
+  if (raw === "UN" || raw === "UND" || raw === "UNID" || raw === "UNIDADE" || raw === "UNIDADES") return "UND";
+  if (raw === "G" || raw === "GR" || raw === "GRAMA" || raw === "GRAMAS") return "G";
+  if (raw === "KG" || raw === "KILO" || raw === "KILOS" || raw === "KILOGRAMA" || raw === "KILOGRAMAS") return "KG";
+  if (raw === "ML" || raw === "MILILITRO" || raw === "MILILITROS") return "ML";
+  if (raw === "L" || raw === "LT" || raw === "LITRO" || raw === "LITROS") return "L";
+  return raw;
+}
+
+function convertUnitQty(qty: number, fromUnit: string, toUnit: string) {
+  const from = normalizeUnit(fromUnit);
+  const to = normalizeUnit(toUnit);
+  if (!qty || !from || !to || from === to) return qty;
+  if (from === "G" && to === "KG") return qty / 1000;
+  if (from === "KG" && to === "G") return qty * 1000;
+  if (from === "ML" && to === "L") return qty / 1000;
+  if (from === "L" && to === "ML") return qty * 1000;
+  return qty;
+}
+
 function parseQtyLabel(input: string) {
   const raw = String(input ?? "").trim();
-  if (!raw) return 0;
-  const match = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
-  return parsePtNumber(match?.[1] ?? raw);
+  if (!raw) return { qty: 0, unit: "" };
+  const match = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?/);
+  return { qty: parsePtNumber(match?.[1] ?? raw), unit: normalizeUnit(match?.[2] ?? "") };
 }
 
 function buildLatestEntriesIndex(
@@ -444,10 +471,12 @@ export default function ListaDeComprasClient() {
     }
 
     const insumoIdByKey = new Map<string, string>();
+    const insumoById = new Map<string, InsumoStoreItem>();
     for (const item of insumos) {
       const key = normalizeText(item.item);
       if (!key || insumoIdByKey.has(key)) continue;
       insumoIdByKey.set(key, item.id);
+      insumoById.set(item.id, item);
     }
 
     const entradasQtyById = new Map<string, number>();
@@ -475,12 +504,17 @@ export default function ListaDeComprasClient() {
         }
         const id = insumoIdByKey.get(mappedKey);
         if (!id) continue;
-        const qtyEq = parseQtyLabel(item.quantidadeLabel ?? "") * fator;
+        const insumoUnit = insumoById.get(id)?.medida ?? "";
+        const parsed = parseQtyLabel(item.quantidadeLabel ?? "");
+        const qtyNota = parsed.qty;
+        const qtyEq = eq
+          ? qtyNota * fator
+          : convertUnitQty(qtyNota, parsed.unit || insumoUnit, insumoUnit);
         entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
         let sub = Math.round(parseMoney(item.subtotalLabel ?? "") * 100);
         if (!sub) {
           const unitCents = Math.round(parseMoney(item.custoUnitarioLabel ?? "") * 100);
-          if (unitCents && qtyEq > 0) sub = Math.round(unitCents * qtyEq);
+          if (unitCents && qtyNota > 0) sub = Math.round(unitCents * qtyNota);
         }
         if (sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
       }
