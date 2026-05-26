@@ -1780,19 +1780,15 @@ export default function DesperdiciosClient() {
                         }}
                         onChange={(e) => setDraftUnitCost(formatMoneyInput2(e.target.value))}
                         onMouseDown={(e) => {
-                          if (document.activeElement !== e.currentTarget) {
-                            e.preventDefault();
-                            e.currentTarget.focus();
-                            e.currentTarget.select();
-                          }
+                          e.preventDefault();
+                          e.currentTarget.focus();
+                          e.currentTarget.select();
                         }}
                         onMouseUp={(e) => e.preventDefault()}
                         onTouchStart={(e) => {
-                          if (document.activeElement !== e.currentTarget) {
-                            e.preventDefault();
-                            e.currentTarget.focus();
-                            e.currentTarget.select();
-                          }
+                          e.preventDefault();
+                          e.currentTarget.focus();
+                          e.currentTarget.select();
                         }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
                         onBlur={() => {
@@ -1815,19 +1811,15 @@ export default function DesperdiciosClient() {
                         inputMode="decimal"
                         pattern="[0-9.,-]*"
                         onMouseDown={(e) => {
-                          if (document.activeElement !== e.currentTarget) {
-                            e.preventDefault();
-                            e.currentTarget.focus();
-                            e.currentTarget.select();
-                          }
+                          e.preventDefault();
+                          e.currentTarget.focus();
+                          e.currentTarget.select();
                         }}
                         onMouseUp={(e) => e.preventDefault()}
                         onTouchStart={(e) => {
-                          if (document.activeElement !== e.currentTarget) {
-                            e.preventDefault();
-                            e.currentTarget.focus();
-                            e.currentTarget.select();
-                          }
+                          e.preventDefault();
+                          e.currentTarget.focus();
+                          e.currentTarget.select();
                         }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
                         placeholder="0,000"

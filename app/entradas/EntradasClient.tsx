@@ -1823,11 +1823,16 @@ export default function EntradasClient() {
                           }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;
-                            if (document.activeElement !== el) {
-                              e.preventDefault();
-                              el.focus();
-                              selectAllSoon(el);
-                            }
+                            e.preventDefault();
+                            el.focus();
+                            selectAllSoon(el);
+                          }}
+                          onMouseUp={(e) => e.preventDefault()}
+                          onTouchStart={(e) => {
+                            const el = e.currentTarget;
+                            e.preventDefault();
+                            el.focus();
+                            selectAllSoon(el);
                           }}
                           onFocus={(e) => {
                             const next = formatMaskedPtInput(detailQty, 3);
@@ -1858,11 +1863,16 @@ export default function EntradasClient() {
                           }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;
-                            if (document.activeElement !== el) {
-                              e.preventDefault();
-                              el.focus();
-                              selectAllSoon(el);
-                            }
+                            e.preventDefault();
+                            el.focus();
+                            selectAllSoon(el);
+                          }}
+                          onMouseUp={(e) => e.preventDefault()}
+                          onTouchStart={(e) => {
+                            const el = e.currentTarget;
+                            e.preventDefault();
+                            el.focus();
+                            selectAllSoon(el);
                           }}
                           onFocus={(e) => {
                             const next = formatMaskedPtInput(detailSubtotal, 2);

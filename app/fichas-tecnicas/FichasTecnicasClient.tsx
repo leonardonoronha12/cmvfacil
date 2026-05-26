@@ -2013,11 +2013,15 @@ export default function FichasTecnicasClient() {
                               inputMode="decimal"
                               pattern="[0-9.,]*"
                               onMouseDown={(e) => {
-                                if (document.activeElement !== e.currentTarget) {
-                                  e.preventDefault();
-                                  e.currentTarget.focus();
-                                  e.currentTarget.select();
-                                }
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
+                              }}
+                              onMouseUp={(e) => e.preventDefault()}
+                              onTouchStart={(e) => {
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
                               }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailIngredientQty("");
@@ -2101,11 +2105,15 @@ export default function FichasTecnicasClient() {
                                   inputMode="decimal"
                                   pattern="[0-9.,]*"
                                   onMouseDown={(e) => {
-                                    if (document.activeElement !== e.currentTarget) {
-                                      e.preventDefault();
-                                      e.currentTarget.focus();
-                                      e.currentTarget.select();
-                                    }
+                                    e.preventDefault();
+                                    e.currentTarget.focus();
+                                    e.currentTarget.select();
+                                  }}
+                                  onMouseUp={(e) => e.preventDefault()}
+                                  onTouchStart={(e) => {
+                                    e.preventDefault();
+                                    e.currentTarget.focus();
+                                    e.currentTarget.select();
                                   }}
                                   onFocus={(e) => {
                                     if (/^0,0+$/.test(e.currentTarget.value.trim())) setRowEditQty("");
@@ -2169,11 +2177,15 @@ export default function FichasTecnicasClient() {
                               pattern="[0-9.,]*"
                               value={detailsYieldDraft}
                               onMouseDown={(e) => {
-                                if (document.activeElement !== e.currentTarget) {
-                                  e.preventDefault();
-                                  e.currentTarget.focus();
-                                  e.currentTarget.select();
-                                }
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
+                              }}
+                              onMouseUp={(e) => e.preventDefault()}
+                              onTouchStart={(e) => {
+                                e.preventDefault();
+                                e.currentTarget.focus();
+                                e.currentTarget.select();
                               }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailsYieldDraft("");
