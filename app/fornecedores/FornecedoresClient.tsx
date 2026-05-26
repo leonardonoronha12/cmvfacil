@@ -1401,7 +1401,7 @@ export default function FornecedoresClient() {
                   <div className={styles.formField}>
                     <div className={styles.formLabel}>Unidade de Medida na nota</div>
                     <select className={styles.formInput} value={vincUnidadeNota} onChange={(e) => setVincUnidadeNota(e.target.value)}>
-                      {["Und", "Kg", "g", "L", "ml"].map((u) => (
+                      {["Und", "Kg", "g", "L"].map((u) => (
                         <option key={u} value={u}>
                           {u}
                         </option>

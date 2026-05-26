@@ -396,6 +396,9 @@ export default function EntradasClient() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftFornecedor, setDraftFornecedor] = useState("");
   const [draftDataLancamento, setDraftDataLancamento] = useState("");
+  const [isEditCalendarOpen, setIsEditCalendarOpen] = useState(false);
+  const [editMonth, setEditMonth] = useState(() => startOfMonth(new Date()));
+  const editWrapRef = useRef<HTMLDivElement | null>(null);
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingDate, setDeletingDate] = useState<string>("");
@@ -970,23 +973,27 @@ export default function EntradasClient() {
     setEditingId(row.id);
     setDraftFornecedor(row.fornecedor);
     setDraftDataLancamento(row.dataLancamento);
+    const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
+    setEditMonth(startOfMonth(parsed));
+    setIsEditCalendarOpen(false);
     setIsEditOpen(true);
   }
 
   function confirmEdit() {
     const id = editingId;
     if (!id) return;
-    const fornecedor = draftFornecedor.trim();
     const dataLancamento = normalizeDateLabelPT(draftDataLancamento);
-    if (!fornecedor || !dataLancamento) {
-      showToast("Preencha fornecedor e data.", "error");
+    if (!dataLancamento) {
+      showToast("Preencha a data de lançamento.", "error");
       return;
     }
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, fornecedor, dataLancamento } : r)));
     const base = rows.find((r) => r.id === id);
-    if (base) void upsertEntradaToSupabase({ ...base, fornecedor, dataLancamento } as unknown as any).catch(() => {});
+    if (!base) return;
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, dataLancamento } : r)));
+    void upsertEntradaToSupabase({ ...base, dataLancamento } as unknown as any).catch(() => {});
     setIsEditOpen(false);
     setEditingId(null);
+    setIsEditCalendarOpen(false);
     showToast("Alterações salvas!", "success");
   }
 
@@ -1576,11 +1583,26 @@ export default function EntradasClient() {
         </section>
 
         {isEditOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsEditOpen(false)}>
+          <div
+            className={styles.modalOverlay}
+            role="presentation"
+            onClick={() => {
+              setIsEditOpen(false);
+              setIsEditCalendarOpen(false);
+            }}
+          >
             <div className={`${styles.modal} ${styles.editModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Editar Nota</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsEditOpen(false)}>
+                <button
+                  type="button"
+                  className={styles.modalClose}
+                  aria-label="Fechar"
+                  onClick={() => {
+                    setIsEditOpen(false);
+                    setIsEditCalendarOpen(false);
+                  }}
+                >
                   ×
                 </button>
               </div>
@@ -1595,7 +1617,10 @@ export default function EntradasClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Fornecedor</div>
-                  <select className={styles.formSelect} value={draftFornecedor} onChange={(e) => setDraftFornecedor(e.target.value)}>
+                  <select className={styles.formSelect} value={draftFornecedor} onChange={() => {}} disabled>
+                    {draftFornecedor && !fornecedores.some((f) => f === draftFornecedor) ? (
+                      <option value={draftFornecedor}>{draftFornecedor}</option>
+                    ) : null}
                     {fornecedores.map((f) => (
                       <option key={f} value={f}>
                         {f}
@@ -1606,12 +1631,155 @@ export default function EntradasClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Data de Lançamento</div>
-                  <input className={styles.formInput} value={draftDataLancamento} onChange={(e) => setDraftDataLancamento(e.target.value)} />
+                  <div className={styles.dateWrap} ref={editWrapRef}>
+                    <input
+                      className={styles.formInput}
+                      value={draftDataLancamento}
+                      onChange={() => {}}
+                      readOnly
+                      onFocus={() => {
+                        const parsed = parseDateLabelLoose(draftDataLancamento) ?? new Date();
+                        setEditMonth(startOfMonth(parsed));
+                        setIsEditCalendarOpen(true);
+                      }}
+                      onClick={() => {
+                        const parsed = parseDateLabelLoose(draftDataLancamento) ?? new Date();
+                        setEditMonth(startOfMonth(parsed));
+                        setIsEditCalendarOpen(true);
+                      }}
+                    />
+
+                    {isEditCalendarOpen ? (
+                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data">
+                        <div className={styles.calendarHeader}>
+                          <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEditMonth((m) => addMonths(m, -1))}>
+                            ◀
+                          </button>
+                          <div className={styles.calTitle}>
+                            <span className={styles.calMonthName}>
+                              {
+                                [
+                                  "janeiro",
+                                  "fevereiro",
+                                  "março",
+                                  "abril",
+                                  "maio",
+                                  "junho",
+                                  "julho",
+                                  "agosto",
+                                  "setembro",
+                                  "outubro",
+                                  "novembro",
+                                  "dezembro",
+                                ][editMonth.getMonth()]
+                              }
+                            </span>{" "}
+                            <span className={styles.calYear}>{editMonth.getFullYear()}</span>
+                          </div>
+                          <button type="button" className={styles.calNavBtn} aria-label="Próximo mês" onClick={() => setEditMonth((m) => addMonths(m, 1))}>
+                            ▶
+                          </button>
+                        </div>
+
+                        <div className={styles.calDow}>
+                          {["dom", "seg", "ter", "qua", "qui", "sex", "sab"].map((d) => (
+                            <div key={d} className={styles.calDowCell}>
+                              {d}
+                            </div>
+                          ))}
+                        </div>
+
+                        <div className={styles.calGrid}>
+                          {(() => {
+                            const first = startOfMonth(editMonth);
+                            const start = first.getDay();
+                            const daysInMonth = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+                            const prevDaysInMonth = new Date(first.getFullYear(), first.getMonth(), 0).getDate();
+                            const selected = parseDateLabelLoose(draftDataLancamento);
+                            const cells: Array<JSX.Element> = [];
+
+                            for (let i = 0; i < start; i += 1) {
+                              const day = prevDaysInMonth - (start - 1 - i);
+                              cells.push(
+                                <button key={`pm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {day}
+                                </button>,
+                              );
+                            }
+
+                            for (let day = 1; day <= daysInMonth; day += 1) {
+                              const d = new Date(first.getFullYear(), first.getMonth(), day);
+                              const isSelected =
+                                selected &&
+                                d.getFullYear() === selected.getFullYear() &&
+                                d.getMonth() === selected.getMonth() &&
+                                d.getDate() === selected.getDate();
+                              cells.push(
+                                <button
+                                  type="button"
+                                  key={`d-${day}`}
+                                  className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
+                                  onClick={() => {
+                                    setDraftDataLancamento(formatDateLabelPT(d));
+                                    setIsEditCalendarOpen(false);
+                                  }}
+                                >
+                                  {day}
+                                </button>,
+                              );
+                            }
+                            const total = cells.length;
+                            const rem = total % 7;
+                            const pad = rem === 0 ? 0 : 7 - rem;
+                            for (let i = 0; i < pad; i += 1) {
+                              cells.push(
+                                <button key={`nm-${i}`} type="button" className={`${styles.calDay} ${styles.calDayMuted}`} disabled>
+                                  {i + 1}
+                                </button>,
+                              );
+                            }
+                            return cells;
+                          })()}
+                        </div>
+
+                        <div className={styles.calFooter}>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              const t = new Date();
+                              setDraftDataLancamento(formatDateLabelPT(t));
+                              setEditMonth(startOfMonth(t));
+                            }}
+                          >
+                            <span className={styles.dotBlue} aria-hidden />
+                            hoje
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.calFooterBtn}
+                            onClick={() => {
+                              setDraftDataLancamento("");
+                            }}
+                          >
+                            <span className={styles.dotRed} aria-hidden />
+                            limpar
+                          </button>
+                          <button type="button" className={styles.calFooterBtn} onClick={() => setIsEditCalendarOpen(false)}>
+                            <span className={styles.xMark} aria-hidden>
+                              ×
+                            </span>
+                            fechar
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={!draftFornecedor.trim() || !draftDataLancamento.trim()} onClick={confirmEdit}>
+                <button type="button" className={styles.saveBtn} disabled={!draftDataLancamento.trim()} onClick={confirmEdit}>
                   Salvar edição
                 </button>
               </div>
@@ -2284,7 +2452,7 @@ export default function EntradasClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida na nota</div>
                   <select className={styles.formSelect} value={mapUnidadeNota} onChange={(e) => setMapUnidadeNota(e.target.value)}>
-                    {["Und", "Kg", "g", "L", "ml"].map((u) => (
+                    {["Und", "Kg", "g", "L"].map((u) => (
                       <option key={u} value={u}>
                         {u}
                       </option>

@@ -197,36 +197,6 @@ function IconChat() {
   );
 }
 
-function IconUsers() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M16.5 20.5c0-2.8-2-4.5-4.5-4.5S7.5 17.7 7.5 20.5"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12 13.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M19.5 20.5c0-2.2-1.1-3.6-2.8-4.2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-      <path
-        d="M16.6 6.3A3.4 3.4 0 0 1 18 9a3.4 3.4 0 0 1-1.4 2.7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 function IconChevronRight() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -385,10 +355,6 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     return count;
   }, [etiquetas]);
 
-  const usersUsed = 2;
-  const usersLimit = 3;
-  const usersPct = usersLimit > 0 ? Math.min(1, Math.max(0, usersUsed / usersLimit)) : 0;
-
   const activeTitle =
     active === "dashboard"
       ? "CMV Real"
@@ -506,19 +472,6 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       </div>
 
       <div className={dash.menuBottom}>
-        <a className={dash.usersActiveCard} href="/ajustes?tab=usuarios" onClick={closeDrawer}>
-          <div className={dash.usersActiveRow}>
-            <span className={dash.usersActiveIcon} aria-hidden>
-              <IconUsers />
-            </span>
-            <p className={dash.usersActiveText}>{`Usuários (${usersUsed} de ${usersLimit})`}</p>
-          </div>
-          <div className={dash.progress} aria-hidden>
-            <div className={dash.progressOn} style={{ width: `${Math.round(usersPct * 100)}%` }} />
-            <div className={dash.progressOff} />
-          </div>
-        </a>
-
         <a className={dash.userDropdown} href="/ajustes?tab=minha-conta" onClick={closeDrawer}>
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>

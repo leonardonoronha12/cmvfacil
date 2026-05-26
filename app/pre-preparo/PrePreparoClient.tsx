@@ -2463,11 +2463,10 @@ export default function PrePreparoClient() {
                                   autoFocus
                                 />
                                 <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => setYieldDraftUnit(e.target.value)}>
+                                  <option value="Und">Und</option>
                                   <option value="Kg">Kg</option>
                                   <option value="g">g</option>
                                   <option value="L">L</option>
-                                  <option value="ml">ml</option>
-                                  <option value="Und">Und</option>
                                 </select>
                               </>
                             ) : (
@@ -2900,11 +2899,10 @@ export default function PrePreparoClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida</div>
                   <select className={styles.formSelect} value={draftUnit} onChange={(e) => setDraftUnit(e.target.value)}>
+                    <option value="Und">Und</option>
                     <option value="Kg">Kg</option>
                     <option value="g">g</option>
                     <option value="L">L</option>
-                    <option value="ml">ml</option>
-                    <option value="Un">Un</option>
                   </select>
                 </div>
 
@@ -3243,11 +3241,10 @@ export default function PrePreparoClient() {
                         <div className={styles.formLabel}>Unidade de Medida</div>
                         <select className={styles.formSelect} value={newRecipeUnit} onChange={(e) => setNewRecipeUnit(e.target.value)}>
                           <option value="">Selecione</option>
+                          <option value="Und">Und</option>
                           <option value="Kg">Kg</option>
                           <option value="g">g</option>
                           <option value="L">L</option>
-                          <option value="ml">ml</option>
-                          <option value="Un">Un</option>
                         </select>
                       </div>
                     </div>

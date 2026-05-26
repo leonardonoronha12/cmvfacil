@@ -1851,7 +1851,7 @@ export default function DesperdiciosClient() {
                         placeholder="0,000"
                       />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
-                        {["Und", "Kg", "g", "L", "ml"].map((u) => (
+                        {["Und", "Kg", "g", "L"].map((u) => (
                           <option key={u} value={u}>
                             {u}
                           </option>

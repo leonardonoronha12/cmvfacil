@@ -1638,7 +1638,6 @@ export default function InsumosClient() {
                     <option value="Kg">Kg</option>
                     <option value="g">g</option>
                     <option value="L">L</option>
-                    <option value="ml">ml</option>
                   </select>
                 </div>
 
@@ -1737,12 +1736,11 @@ export default function InsumosClient() {
                   <div className={styles.formLabel}>Unidade de Medida</div>
                   <select className={styles.formSelect} value={newUnit} onChange={(e) => setNewUnit(e.target.value)}>
                     <option value="">Selecione</option>
-                    {newUnit && !["Und", "Kg", "g", "L", "ml"].includes(newUnit) ? <option value={newUnit}>{newUnit}</option> : null}
+                    {newUnit && !["Und", "Kg", "g", "L"].includes(newUnit) ? <option value={newUnit}>{newUnit}</option> : null}
                     <option value="Und">Und</option>
                     <option value="Kg">Kg</option>
                     <option value="g">g</option>
                     <option value="L">L</option>
-                    <option value="ml">ml</option>
                   </select>
                 </div>
 

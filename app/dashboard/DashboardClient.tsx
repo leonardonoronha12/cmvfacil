@@ -2055,6 +2055,10 @@ export default function DashboardClient() {
       return out;
     }
     const key = normalizeKey(historyItem.item);
+    const insumo =
+      insumos.find((i) => i.id === historyItem.insumoId) ??
+      (key ? insumos.find((i) => normalizeKey(i.item) === key) ?? null : null);
+    const baseUnit = (String(insumo?.medida ?? "") || "Und").trim() || "Und";
     const out: Array<{
       t: number;
       data: string;
@@ -2074,20 +2078,38 @@ export default function DashboardClient() {
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
         if (mappedKey !== key) continue;
+
+        const parsed = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qty = parsed.qty;
+        let fator = 1;
+        if (eq) {
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const qtyBase = qty * fator;
+        if (!Number.isFinite(qtyBase) || qtyBase <= 0) continue;
+
+        let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
+        if (!subtotalCents) {
+          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (unit && qtyBase > 0) subtotalCents = Math.round(unit * qtyBase);
+        }
+        const unitCostCents = subtotalCents > 0 && qtyBase > 0 ? Math.round(subtotalCents / qtyBase) : 0;
+        const qtyLabel = `${qtyBase.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}${baseUnit}`;
         out.push({
           t,
           data: e.dataLancamento,
           fornecedor: e.fornecedor,
-          qtd: it.quantidadeLabel,
-          preco: it.custoUnitarioLabel,
-          subtotal: it.subtotalLabel,
+          qtd: qtyLabel,
+          preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)}/${baseUnit}` : `-/${baseUnit}`,
+          subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
         });
       }
     }
 
     out.sort((a, b) => b.t - a.t);
     return out;
-  }, [entradas, getEquivalenciasForFornecedor, historyItem, prePreparoEtiquetas]);
+  }, [entradas, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
