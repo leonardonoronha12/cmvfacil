@@ -431,6 +431,64 @@ export default function ListaDeComprasClient() {
     };
   }, []);
 
+  const avgUnitCostCentsById = useMemo(() => {
+    const idByKey = new Map<string, string>();
+    const insumoById = new Map<string, InsumoStoreItem>();
+    for (const item of insumos) {
+      const key = normalizeText(item.item);
+      if (!key || idByKey.has(key)) continue;
+      idByKey.set(key, item.id);
+      insumoById.set(item.id, item);
+    }
+    const fornecedorKeyLookup = new Map<string, string>();
+    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
+      const nk = normalizeText(key);
+      if (!nk || fornecedorKeyLookup.has(nk)) continue;
+      fornecedorKeyLookup.set(nk, key);
+    }
+    const qtyById = new Map<string, number>();
+    const centsById = new Map<string, number>();
+    for (const entrada of entradas) {
+      const fornecedorKey = fornecedorKeyLookup.get(normalizeText(entrada.fornecedor)) ?? entrada.fornecedor.trim().toUpperCase();
+      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
+      for (const item of entrada.itensNota ?? []) {
+        const rawKey = normalizeText(item.nome);
+        let mappedKey = rawKey;
+        let fator = 1;
+        const eq = equivalencias.find((m) => normalizeText(m.nomeNaNota) === rawKey) ?? null;
+        if (eq) {
+          mappedKey = normalizeText(eq.insumoEquivalente);
+          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+          if (Number.isFinite(f) && f > 0) fator = f;
+        }
+        const id = idByKey.get(mappedKey);
+        if (!id) continue;
+        const insumoUnit = insumoById.get(id)?.medida ?? "";
+        const parsed = parseQtyLabel(item.quantidadeLabel ?? "");
+        const qtyNota = parsed.qty;
+        const qtyEq = eq
+          ? qtyNota * fator
+          : convertUnitQty(qtyNota, parsed.unit || insumoUnit, insumoUnit);
+        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+        let sub = Math.round(parseMoney(item.subtotalLabel ?? "") * 100);
+        if (!sub) {
+          const unitCents = Math.round(parseMoney(item.custoUnitarioLabel ?? "") * 100);
+          if (unitCents && qtyNota > 0) sub = Math.round(unitCents * qtyNota);
+        }
+        if (!sub) continue;
+        qtyById.set(id, (qtyById.get(id) ?? 0) + qtyEq);
+        centsById.set(id, (centsById.get(id) ?? 0) + sub);
+      }
+    }
+    const out = new Map<string, number>();
+    for (const [id, qty] of qtyById.entries()) {
+      const cents = centsById.get(id) ?? 0;
+      if (!qty || !cents) continue;
+      out.set(id, Math.round(cents / qty));
+    }
+    return out;
+  }, [entradas, fornecedorEquivalenciasMap, insumos]);
+
   const baseRows = useMemo(() => {
     const latestIndex = buildLatestEntriesIndex(entradas, fornecedorInfoMap, fornecedorEquivalenciasMap, fornecedorProdutosMap);
     const fornecedorFallback = buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
@@ -578,11 +636,8 @@ export default function ListaDeComprasClient() {
         const saidasQty = initialQty + entradasQty - finalQty;
         const consumoDiario = saidasQty / periodDays;
         const comprar = Math.max(consumoDiario * (parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1)) - finalQty, 0);
-        const custoInicialCents = Math.round(parseMoney(row.custoMedio ?? "") * 100);
-        const entradasCents = entradasCentsById.get(row.id) ?? 0;
-        const initialValCents = Math.round(initialQty * custoInicialCents);
-        const denomQty = initialQty + entradasQty;
-        const custoMedioCents = denomQty > 0 ? Math.round((initialValCents + entradasCents) / denomQty) : custoInicialCents;
+        const avgCents = avgUnitCostCentsById.get(row.id) ?? 0;
+        const custoMedioCents = avgCents > 0 ? avgCents : Math.round(parseMoney(row.custoMedio ?? "") * 100);
         const custoMedioValue = custoMedioCents / 100;
         return {
           id: row.id,
@@ -602,6 +657,7 @@ export default function ListaDeComprasClient() {
         };
       });
   }, [
+    avgUnitCostCentsById,
     contagens,
     diasEntrega,
     diasEstoque,

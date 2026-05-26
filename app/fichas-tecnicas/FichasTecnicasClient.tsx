@@ -38,6 +38,12 @@ type RecipeRow = {
   cmvDelta: string;
   bcg: BcgType;
   thumb: ThumbType;
+  recipeImage?: string;
+  popularidade?: "alta" | "baixa";
+  ingredientsTotal?: number;
+  recipeYield?: number;
+  ingredientRows?: ModalIngredientRow[];
+  modoPreparo?: string;
 };
 
 type ModalIngredientRow = {
@@ -414,6 +420,17 @@ function popularityLabel(value: string) {
   }
 }
 
+function normalizePopularidade(value: string) {
+  const v = String(value ?? "").trim().toLowerCase();
+  return v === "alta" ? ("alta" as const) : ("baixa" as const);
+}
+
+function computeBcg(popularidade: "alta" | "baixa", cmvAtual: number, cmvMeta: number): BcgType {
+  const above = cmvMeta > 0 ? cmvAtual > cmvMeta : cmvAtual > 0;
+  if (popularidade === "alta") return above ? "cavalo" : "estrela";
+  return above ? "abacaxi" : "quebra-cabeca";
+}
+
 function parseMoneyLabel(value?: string) {
   const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
@@ -773,11 +790,11 @@ function buildFichaTecnicaPdfMarkup(params: {
             <div class="price">${escapeHtml(params.precoVenda)}</div>
           </div>
           <div class="meta">
-            <div class="metaLine"><strong>Validade:</strong>&nbsp; ${escapeHtml(params.validade)}</div>
-            <div class="metaLine"><strong>Categoria:</strong>&nbsp; ${escapeHtml(params.categoria)}</div>
-            <div class="metaLine"><strong>Custo Total:</strong>&nbsp; ${escapeHtml(params.custoTotal)}</div>
-            <div class="metaLine"><strong>Custo Unitário:</strong>&nbsp; ${escapeHtml(params.custoUnitario)}</div>
-            <div class="metaLine"><strong>Preço de Venda Sugerido (CMV = ${escapeHtml(params.cmvMeta)}):</strong>&nbsp; ${escapeHtml(params.precoSugerido)}</div>
+            <div class="metaLine"><strong>Validade:</strong> ${escapeHtml(params.validade)}</div>
+            <div class="metaLine"><strong>Categoria:</strong> ${escapeHtml(params.categoria)}</div>
+            <div class="metaLine"><strong>Custo Total:</strong> ${escapeHtml(params.custoTotal)}</div>
+            <div class="metaLine"><strong>Custo Unitário:</strong> ${escapeHtml(params.custoUnitario)}</div>
+            <div class="metaLine"><strong>Preço de Venda Sugerido (CMV = ${escapeHtml(params.cmvMeta)}):</strong> ${escapeHtml(params.precoSugerido)}</div>
           </div>
         </div>
         <div class="previewWrap">${previewMarkup}</div>
@@ -819,6 +836,7 @@ function badgeClass(type: BcgType) {
 export default function FichasTecnicasClient() {
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
+  const bcgNormalizedRef = useRef(false);
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
@@ -983,6 +1001,22 @@ export default function FichasTecnicasClient() {
     });
   }
 
+  useEffect(() => {
+    if (bcgNormalizedRef.current) return;
+    if (!tableRows.length) return;
+    bcgNormalizedRef.current = true;
+    setAndPersistTableRows((prev) =>
+      prev.map((row) => {
+        const pop = row.popularidade ? normalizePopularidade(row.popularidade) : row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa";
+        const cmvMetaValue = parseDecimalInput(String(row.cmvMeta).replace(/[^\d,.-]/g, ""));
+        const cmvAtualValue = parseDecimalInput(String(row.cmvAtual).replace(/[^\d,.-]/g, ""));
+        const bcg = computeBcg(pop, cmvAtualValue, cmvMetaValue);
+        if (row.bcg === bcg && row.popularidade === pop) return row;
+        return { ...row, bcg, popularidade: pop };
+      }),
+    );
+  }, [tableRows]);
+
   function formatPercent1(value: number) {
     return value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
   }
@@ -992,6 +1026,39 @@ export default function FichasTecnicasClient() {
     const abs = Math.abs(diff);
     const suffix = diff > 0 ? "Maior" : diff < 0 ? "Menor" : "Igual";
     return `${formatPercent1(abs)}% ${suffix}`;
+  }
+
+  function persistDetails(next: SavedRecipeDetails) {
+    setDetailsRecipe(next);
+    const metrics = calcRecipeMetrics(next.ingredientsTotal, next.recipeYield, next.precoVenda, next.cmvMeta);
+    const bcg = computeBcg(normalizePopularidade(next.popularidade), metrics.cmvAtual, next.cmvMeta);
+    const cmvAtualLabel = `${formatPercent1(metrics.cmvAtual)}%`;
+    const cmvMetaLabel = `${next.cmvMeta.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
+    const custoUnitarioLabel = formatMoney(metrics.custoPorPorcao);
+    const precoSugeridoLabel = metrics.precoSugerido > 0 ? formatMoney(metrics.precoSugerido) : undefined;
+    setAndPersistTableRows((prev) =>
+      prev.map((row) =>
+        row.id === next.rowId
+          ? {
+              ...row,
+              receita: next.recipeName,
+              precoVenda: formatMoney(next.precoVenda),
+              precoVendaSub: precoSugeridoLabel,
+              custoUnitario: custoUnitarioLabel,
+              cmvMeta: cmvMetaLabel,
+              cmvAtual: cmvAtualLabel,
+              cmvDelta: buildCmvDeltaLabel(metrics.cmvAtual, next.cmvMeta),
+              bcg,
+              recipeImage: next.recipeImage,
+              popularidade: normalizePopularidade(next.popularidade),
+              ingredientsTotal: next.ingredientsTotal,
+              recipeYield: next.recipeYield,
+              ingredientRows: next.ingredientRows,
+              modoPreparo: next.modoPreparo,
+            }
+          : row,
+      ),
+    );
   }
 
   useEffect(() => {
@@ -1007,7 +1074,7 @@ export default function FichasTecnicasClient() {
     const yieldValue = parseDecimalInput(nextValue);
     const safeYield = yieldValue > 0 ? yieldValue : 1;
     const nextMetrics = calcRecipeMetrics(detailsRecipe.ingredientsTotal, safeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
-    setDetailsRecipe({
+    persistDetails({
       ...detailsRecipe,
       recipeYield: safeYield,
       cmvAtual: nextMetrics.cmvAtual,
@@ -1421,7 +1488,8 @@ export default function FichasTecnicasClient() {
   function openSavedRecipeDetails() {
     const metrics = calcRecipeMetrics(ingredientsTotal, recipeYieldValue, priceValue, cmvMetaValue);
     const id = String(Date.now());
-    const bcg: BcgType = popularidade === "alta" ? "estrela" : "abacaxi";
+    const pop = normalizePopularidade(popularidade);
+    const bcg: BcgType = computeBcg(pop, metrics.cmvAtual, cmvMetaValue);
     const cmvAtualLabel = `${formatPercent1(metrics.cmvAtual)}%`;
     const cmvMetaLabel = `${cmvMetaValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`;
     const custoUnitarioLabel = formatMoney(metrics.custoPorPorcao);
@@ -1438,6 +1506,12 @@ export default function FichasTecnicasClient() {
         cmvDelta: buildCmvDeltaLabel(metrics.cmvAtual, cmvMetaValue),
         bcg,
         thumb: "burger",
+        recipeImage,
+        popularidade: pop,
+        ingredientsTotal,
+        recipeYield: recipeYieldValue,
+        ingredientRows,
+        modoPreparo: "",
       },
       ...prev,
     ]);
@@ -1445,7 +1519,7 @@ export default function FichasTecnicasClient() {
       rowId: id,
       recipeName: recipeName.trim() || "Sem nome",
       recipeImage,
-      popularidade,
+      popularidade: pop,
       precoVenda: priceValue,
       cmvMeta: cmvMetaValue,
       cmvAtual: metrics.cmvAtual,
@@ -1498,7 +1572,7 @@ export default function FichasTecnicasClient() {
 
     const nextTotal = nextRows.reduce((sum, row) => sum + row.custoTotal, 0);
     const nextMetrics = calcRecipeMetrics(nextTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
-    setDetailsRecipe({
+    persistDetails({
       ...detailsRecipe,
       ingredientRows: nextRows,
       ingredientsTotal: nextTotal,
@@ -1543,7 +1617,7 @@ export default function FichasTecnicasClient() {
 
     const nextTotal = nextRows.reduce((sum, row) => sum + row.custoTotal, 0);
     const nextMetrics = calcRecipeMetrics(nextTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
-    setDetailsRecipe({
+    persistDetails({
       ...detailsRecipe,
       ingredientRows: nextRows,
       ingredientsTotal: nextTotal,
@@ -1557,7 +1631,7 @@ export default function FichasTecnicasClient() {
     const nextRows = detailsRecipe.ingredientRows.filter((row) => row.id !== id);
     const nextTotal = nextRows.reduce((sum, row) => sum + row.custoTotal, 0);
     const nextMetrics = calcRecipeMetrics(nextTotal, detailsRecipe.recipeYield, detailsRecipe.precoVenda, detailsRecipe.cmvMeta);
-    setDetailsRecipe({
+    persistDetails({
       ...detailsRecipe,
       ingredientRows: nextRows,
       ingredientsTotal: nextTotal,
@@ -1578,7 +1652,7 @@ export default function FichasTecnicasClient() {
 
   function savePrepEdit() {
     if (!detailsRecipe) return;
-    setDetailsRecipe({
+    persistDetails({
       ...detailsRecipe,
       modoPreparo: prepDraft.trim(),
     });
@@ -1602,6 +1676,7 @@ export default function FichasTecnicasClient() {
   }
 
   function openEditModal(row: RecipeRow) {
+    const pop = row.popularidade ? normalizePopularidade(row.popularidade) : row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa";
     setEditDraft({
       rowId: row.id,
       thumb: row.thumb,
@@ -1614,7 +1689,7 @@ export default function FichasTecnicasClient() {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       }),
-      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "Alta" : "Baixa",
+      popularidade: pop === "alta" ? "Alta" : "Baixa",
       custoUnitario: parseMoneyLabel(row.custoUnitario),
     });
     setActionMenuRowId(null);
@@ -1642,7 +1717,9 @@ export default function FichasTecnicasClient() {
     if (!editDraft) return;
     const precoVendaValue = parseDecimalInput(editDraft.precoVenda);
     const cmvMetaValue = parseDecimalInput(editDraft.cmvMeta);
-    const bcgFromPopularity: BcgType = editDraft.popularidade === "Alta" ? "estrela" : "abacaxi";
+    const pop = normalizePopularidade(editDraft.popularidade);
+    const cmvAtualValue = precoVendaValue > 0 ? (editDraft.custoUnitario / precoVendaValue) * 100 : 0;
+    const bcg = computeBcg(pop, cmvAtualValue, cmvMetaValue);
     const precoSugeridoValue = cmvMetaValue > 0 ? editDraft.custoUnitario / (cmvMetaValue / 100) : 0;
 
     setAndPersistTableRows((prev) =>
@@ -1654,11 +1731,24 @@ export default function FichasTecnicasClient() {
               precoVenda: formatMoney(precoVendaValue),
               precoVendaSub: precoSugeridoValue > 0 ? formatMoney(precoSugeridoValue) : row.precoVendaSub,
               cmvMeta: `${cmvMetaValue.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
-              bcg: bcgFromPopularity,
+              cmvAtual: `${formatPercent1(cmvAtualValue)}%`,
+              cmvDelta: buildCmvDeltaLabel(cmvAtualValue, cmvMetaValue),
+              bcg,
+              popularidade: pop,
             }
           : row
       )
     );
+    if (detailsRecipe && detailsRecipe.rowId === editDraft.rowId) {
+      persistDetails({
+        ...detailsRecipe,
+        recipeName: editDraft.recipeName.trim() || detailsRecipe.recipeName,
+        precoVenda: precoVendaValue,
+        cmvMeta: cmvMetaValue,
+        cmvAtual: cmvAtualValue,
+        popularidade: pop,
+      });
+    }
     setEditDraft(null);
   }
 
@@ -1667,28 +1757,37 @@ export default function FichasTecnicasClient() {
     const custoUnitarioValue = parseMoneyLabel(row.custoUnitario);
     const cmvMetaRow = parseDecimalInput(String(row.cmvMeta).replace(/[^\d,.-]/g, ""));
     const cmvAtualRow = parseDecimalInput(String(row.cmvAtual).replace(/[^\d,.-]/g, ""));
+    const pop = row.popularidade ? normalizePopularidade(row.popularidade) : row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa";
+    const recipeYield = Number.isFinite(row.recipeYield) && (row.recipeYield ?? 0) > 0 ? (row.recipeYield as number) : 1;
+    const storedIngredientRows = Array.isArray(row.ingredientRows) && row.ingredientRows.length ? row.ingredientRows : null;
+    const ingredientsTotal =
+      Number.isFinite(row.ingredientsTotal) && (row.ingredientsTotal ?? -1) >= 0
+        ? (row.ingredientsTotal as number)
+        : custoUnitarioValue * recipeYield;
 
     return {
       rowId: row.id,
       recipeName: row.receita,
-      recipeImage: "",
-      popularidade: row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa",
+      recipeImage: row.recipeImage || "",
+      popularidade: pop,
       precoVenda: precoVendaValue,
       cmvMeta: cmvMetaRow,
       cmvAtual: cmvAtualRow,
-      ingredientsTotal: custoUnitarioValue,
-      recipeYield: 1,
-      ingredientRows: [
-        {
-          id: `${row.id}-base`,
-          ingredientId: "",
-          item: row.receita,
-          quantidade: "1",
-          unidade: "Und",
-          custoTotal: custoUnitarioValue,
-        },
-      ],
-      modoPreparo: "",
+      ingredientsTotal,
+      recipeYield,
+      ingredientRows:
+        storedIngredientRows ??
+        [
+          {
+            id: `${row.id}-base`,
+            ingredientId: "",
+            item: row.receita,
+            quantidade: "1",
+            unidade: "Und",
+            custoTotal: custoUnitarioValue,
+          },
+        ],
+      modoPreparo: row.modoPreparo || "",
     };
   }
 
@@ -1772,7 +1871,7 @@ export default function FichasTecnicasClient() {
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+      window.setTimeout(() => URL.revokeObjectURL(url), 20_000);
     } catch (err) {
       if (previewTab) {
         previewTab.document.title = "Erro ao gerar PDF";

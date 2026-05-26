@@ -11,6 +11,19 @@ export type FichaTecnicaRow = {
   cmvDelta: string;
   bcg: "estrela" | "cavalo" | "quebra-cabeca" | "abacaxi";
   thumb: "burger" | "duplo" | "triplo";
+  recipeImage?: string;
+  popularidade?: "alta" | "baixa";
+  ingredientsTotal?: number;
+  recipeYield?: number;
+  ingredientRows?: Array<{
+    id: string;
+    ingredientId: string;
+    item: string;
+    quantidade: string;
+    unidade: string;
+    custoTotal: number;
+  }>;
+  modoPreparo?: string;
 };
 
 const EVENT = "cmvfacil:fichas_tecnicas:rows";
@@ -29,6 +42,28 @@ function normalizeRow(input: unknown): FichaTecnicaRow | null {
     bcgRaw === "estrela" || bcgRaw === "cavalo" || bcgRaw === "quebra-cabeca" || bcgRaw === "abacaxi" ? (bcgRaw as any) : "quebra-cabeca";
   const thumb: FichaTecnicaRow["thumb"] = thumbRaw === "burger" || thumbRaw === "duplo" || thumbRaw === "triplo" ? (thumbRaw as any) : "burger";
   const precoVendaSub = String(r.precoVendaSub ?? "").trim();
+  const recipeImage = String(r.recipeImage ?? "").trim();
+  const popularidadeRaw = String(r.popularidade ?? "").trim().toLowerCase();
+  const popularidade: FichaTecnicaRow["popularidade"] = popularidadeRaw === "alta" || popularidadeRaw === "baixa" ? (popularidadeRaw as any) : undefined;
+  const ingredientsTotal = typeof r.ingredientsTotal === "number" && Number.isFinite(r.ingredientsTotal) && r.ingredientsTotal >= 0 ? r.ingredientsTotal : undefined;
+  const recipeYield = typeof r.recipeYield === "number" && Number.isFinite(r.recipeYield) && r.recipeYield > 0 ? r.recipeYield : undefined;
+  const modoPreparo = String(r.modoPreparo ?? "");
+  const ingredientRows = Array.isArray(r.ingredientRows)
+    ? (r.ingredientRows as any[])
+        .map((raw) => {
+          if (!raw || typeof raw !== "object") return null;
+          const rr = raw as Record<string, unknown>;
+          const rid = String(rr.id ?? "").trim();
+          const item = String(rr.item ?? "").trim();
+          if (!rid || !item) return null;
+          const ingredientId = String(rr.ingredientId ?? "").trim();
+          const quantidade = String(rr.quantidade ?? "").trim();
+          const unidade = String(rr.unidade ?? "").trim() || "Und";
+          const custoTotal = typeof rr.custoTotal === "number" && Number.isFinite(rr.custoTotal) ? rr.custoTotal : 0;
+          return { id: rid, ingredientId, item, quantidade, unidade, custoTotal };
+        })
+        .filter(Boolean)
+    : undefined;
   return {
     id,
     receita,
@@ -40,6 +75,12 @@ function normalizeRow(input: unknown): FichaTecnicaRow | null {
     cmvDelta: String(r.cmvDelta ?? "").trim(),
     bcg,
     thumb,
+    recipeImage: recipeImage ? recipeImage : undefined,
+    popularidade,
+    ingredientsTotal,
+    recipeYield,
+    ingredientRows: ingredientRows && ingredientRows.length ? (ingredientRows as any) : undefined,
+    modoPreparo: modoPreparo ? modoPreparo : undefined,
   };
 }
 
