@@ -264,6 +264,163 @@
   font-weight: 600;
 }
 
+.plansWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.plansTopRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 14px;
+  max-width: 980px;
+}
+
+.planMiniCard {
+  border: 1px solid #e4e8e7;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  column-gap: 10px;
+  row-gap: 6px;
+}
+
+.planMiniTitle {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  font-weight: 800;
+  color: #6f7c7a;
+  text-transform: uppercase;
+}
+
+.planMiniValue {
+  font-size: 14px;
+  font-weight: 900;
+  color: #101214;
+  line-height: 1.2;
+}
+
+.planMiniMuted {
+  grid-column: 1 / -1;
+  font-size: 10px;
+  color: #95a8a6;
+  font-weight: 600;
+}
+
+.planMiniLink {
+  border: 0;
+  background: transparent;
+  color: #0ab86d;
+  font-weight: 800;
+  font-size: 11px;
+  cursor: pointer;
+  align-self: start;
+}
+
+.plansGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  max-width: 980px;
+}
+
+.planCard {
+  border: 1px solid #e4e8e7;
+  border-radius: 14px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.planHeader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.planNameRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.planName {
+  font-size: 13px;
+  font-weight: 900;
+  color: #101214;
+}
+
+.planBadge {
+  font-size: 10px;
+  font-weight: 900;
+  color: #ffffff;
+  background: #ff2f54;
+  border-radius: 999px;
+  padding: 6px 10px;
+}
+
+.planPriceRow {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.planPrice {
+  font-size: 18px;
+  font-weight: 900;
+  color: #101214;
+}
+
+.planPriceMeta {
+  font-size: 10px;
+  font-weight: 700;
+  color: #95a8a6;
+}
+
+.planSeat {
+  font-size: 11px;
+  color: #101214;
+  font-weight: 700;
+}
+
+.planSelectBtn {
+  width: 100%;
+  height: 38px;
+  margin-top: 12px;
+  border-radius: 10px;
+  border: 1px solid #0b3b3a;
+  background: #0b3b3a;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.planList {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: #2f3537;
+  font-size: 11px;
+  font-weight: 600;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .plansTopRow {
+    grid-template-columns: 1fr;
+  }
+
+  .plansGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .table {
   width: 100%;
   max-width: 980px;

@@ -46,7 +46,7 @@ function IconBurgerBadge() {
   );
 }
 
-type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios";
+type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios" | "planos";
 
 export default function AjustesClient() {
   const searchParams = useSearchParams();
@@ -55,6 +55,7 @@ export default function AjustesClient() {
     if (raw === "alterar-senha") return "alterar-senha";
     if (raw === "minha-empresa") return "minha-empresa";
     if (raw === "usuarios") return "usuarios";
+    if (raw === "planos") return "planos";
     return "minha-conta";
   }, [searchParams]);
 
@@ -73,6 +74,9 @@ export default function AjustesClient() {
   const [emailCorp, setEmailCorp] = useState("");
   const [empresaWhats, setEmpresaWhats] = useState("(00) 00000-0000");
   const [ramo, setRamo] = useState("Hamburgueria");
+
+  const [planType, setPlanType] = useState<"PRO Mensal" | "PRO Anual">("PRO Mensal");
+  const [cardLast4, setCardLast4] = useState("8895");
 
   const canSaveAccount = Boolean(nome.trim() && sobrenome.trim() && email.trim() && whatsapp.trim() && permissao);
   const canSavePassword = Boolean(senhaAtual.trim() && novaSenha.trim() && repitaSenha.trim() && novaSenha === repitaSenha);
@@ -107,6 +111,9 @@ export default function AjustesClient() {
               </a>
               <a className={tabClass("usuarios")} href="/ajustes?tab=usuarios">
                 Usuários
+              </a>
+              <a className={tabClass("planos")} href="/ajustes?tab=planos">
+                Planos
               </a>
             </div>
 
@@ -304,13 +311,6 @@ export default function AjustesClient() {
 
               {tab === "usuarios" ? (
                 <div>
-                  <div className={styles.notice}>
-                    <span style={{ color: "#95a8a6" }} aria-hidden>
-                      <IconSearchMini />
-                    </span>
-                    <div className={styles.noticeText}>Seu plano tem 1 assento(s) restante(s).</div>
-                  </div>
-
                   <div className={styles.table}>
                     <div className={styles.trHead}>
                       <div>Membro</div>
@@ -348,6 +348,79 @@ export default function AjustesClient() {
                       </div>
                       <div>10/11/25 às 16:16h</div>
                       <div className={styles.badgeCollab}>Colaborador</div>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {tab === "planos" ? (
+                <div className={styles.plansWrap}>
+                  <div className={styles.plansTopRow}>
+                    <div className={styles.planMiniCard}>
+                      <div className={styles.planMiniTitle}>Plano</div>
+                      <div className={styles.planMiniValue}>{planType}</div>
+                      <button type="button" className={styles.planMiniLink} onClick={() => setPlanType((p) => (p === "PRO Mensal" ? "PRO Anual" : "PRO Mensal"))}>
+                        Alterar
+                      </button>
+                    </div>
+                    <div className={styles.planMiniCard}>
+                      <div className={styles.planMiniTitle}>Status</div>
+                      <div className={styles.planMiniValue}>Ativo</div>
+                      <div className={styles.planMiniMuted}>Status da assinatura</div>
+                    </div>
+                    <div className={styles.planMiniCard}>
+                      <div className={styles.planMiniTitle}>Cartão</div>
+                      <div className={styles.planMiniValue}>{`**** **** **** ${cardLast4}`}</div>
+                      <button type="button" className={styles.planMiniLink} onClick={() => setCardLast4(String(Math.floor(1000 + Math.random() * 9000)))}>
+                        Alterar
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.plansGrid}>
+                    <div className={styles.planCard}>
+                      <div className={styles.planHeader}>
+                        <div className={styles.planName}>PRO Mensal</div>
+                        <div className={styles.planPriceRow}>
+                          <span className={styles.planPrice}>R$ 97,00</span>
+                          <span className={styles.planPriceMeta}>/ pago mensalmente</span>
+                        </div>
+                        <div className={styles.planSeat}>Até 3 usuários inclusos</div>
+                      </div>
+                      <button type="button" className={styles.planSelectBtn} onClick={() => setPlanType("PRO Mensal")}>
+                        Selecionar Plano
+                      </button>
+                      <ul className={styles.planList}>
+                        <li>Cadastro ilimitado de itens</li>
+                        <li>Cadastro ilimitado de fornecedores</li>
+                        <li>Cadastro ilimitado de compras</li>
+                        <li>Contagem ilimitada de inventário</li>
+                        <li>Suporte via WhatsApp</li>
+                      </ul>
+                    </div>
+
+                    <div className={styles.planCard}>
+                      <div className={styles.planHeader}>
+                        <div className={styles.planNameRow}>
+                          <div className={styles.planName}>PRO Anual</div>
+                          <span className={styles.planBadge}>25% OFF</span>
+                        </div>
+                        <div className={styles.planPriceRow}>
+                          <span className={styles.planPrice}>R$ 873,00</span>
+                          <span className={styles.planPriceMeta}>/ pago anualmente</span>
+                        </div>
+                        <div className={styles.planSeat}>Até 3 usuários inclusos</div>
+                      </div>
+                      <button type="button" className={styles.planSelectBtn} onClick={() => setPlanType("PRO Anual")}>
+                        Selecionar Plano
+                      </button>
+                      <ul className={styles.planList}>
+                        <li>Cadastro ilimitado de itens</li>
+                        <li>Cadastro ilimitado de fornecedores</li>
+                        <li>Cadastro ilimitado de compras</li>
+                        <li>Contagem ilimitada de inventário</li>
+                        <li>Suporte via WhatsApp</li>
+                      </ul>
                     </div>
                   </div>
                 </div>
