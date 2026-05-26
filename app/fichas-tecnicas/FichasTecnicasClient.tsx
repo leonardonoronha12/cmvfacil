@@ -2015,13 +2015,22 @@ export default function FichasTecnicasClient() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.currentTarget.focus();
-                                e.currentTarget.select();
+                                requestAnimationFrame(() => e.currentTarget.select());
                               }}
                               onMouseUp={(e) => e.preventDefault()}
                               onTouchStart={(e) => {
                                 e.preventDefault();
                                 e.currentTarget.focus();
-                                e.currentTarget.select();
+                                requestAnimationFrame(() => e.currentTarget.select());
+                              }}
+                              onClick={(e) => {
+                                requestAnimationFrame(() => e.currentTarget.select());
+                              }}
+                              onSelect={(e) => {
+                                const el = e.currentTarget;
+                                if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
+                                  requestAnimationFrame(() => el.select());
+                                }
                               }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailIngredientQty("");
@@ -2107,13 +2116,22 @@ export default function FichasTecnicasClient() {
                                   onMouseDown={(e) => {
                                     e.preventDefault();
                                     e.currentTarget.focus();
-                                    e.currentTarget.select();
+                                    requestAnimationFrame(() => e.currentTarget.select());
                                   }}
                                   onMouseUp={(e) => e.preventDefault()}
                                   onTouchStart={(e) => {
                                     e.preventDefault();
                                     e.currentTarget.focus();
-                                    e.currentTarget.select();
+                                    requestAnimationFrame(() => e.currentTarget.select());
+                                  }}
+                                  onClick={(e) => {
+                                    requestAnimationFrame(() => e.currentTarget.select());
+                                  }}
+                                  onSelect={(e) => {
+                                    const el = e.currentTarget;
+                                    if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
+                                      requestAnimationFrame(() => el.select());
+                                    }
                                   }}
                                   onFocus={(e) => {
                                     if (/^0,0+$/.test(e.currentTarget.value.trim())) setRowEditQty("");
@@ -2179,13 +2197,22 @@ export default function FichasTecnicasClient() {
                               onMouseDown={(e) => {
                                 e.preventDefault();
                                 e.currentTarget.focus();
-                                e.currentTarget.select();
+                                requestAnimationFrame(() => e.currentTarget.select());
                               }}
                               onMouseUp={(e) => e.preventDefault()}
                               onTouchStart={(e) => {
                                 e.preventDefault();
                                 e.currentTarget.focus();
-                                e.currentTarget.select();
+                                requestAnimationFrame(() => e.currentTarget.select());
+                              }}
+                              onClick={(e) => {
+                                requestAnimationFrame(() => e.currentTarget.select());
+                              }}
+                              onSelect={(e) => {
+                                const el = e.currentTarget;
+                                if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
+                                  requestAnimationFrame(() => el.select());
+                                }
                               }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailsYieldDraft("");

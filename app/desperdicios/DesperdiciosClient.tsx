@@ -1790,6 +1790,15 @@ export default function DesperdiciosClient() {
                           e.currentTarget.focus();
                           e.currentTarget.select();
                         }}
+                        onClick={(e) => {
+                          requestAnimationFrame(() => e.currentTarget.select());
+                        }}
+                        onSelect={(e) => {
+                          const el = e.currentTarget;
+                          if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
+                            requestAnimationFrame(() => el.select());
+                          }
+                        }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
                         onBlur={() => {
                           const cents = parseBrlToCents(draftUnitCost);
@@ -1820,6 +1829,15 @@ export default function DesperdiciosClient() {
                           e.preventDefault();
                           e.currentTarget.focus();
                           e.currentTarget.select();
+                        }}
+                        onClick={(e) => {
+                          requestAnimationFrame(() => e.currentTarget.select());
+                        }}
+                        onSelect={(e) => {
+                          const el = e.currentTarget;
+                          if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
+                            requestAnimationFrame(() => el.select());
+                          }
                         }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
                         placeholder="0,000"
