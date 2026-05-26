@@ -1676,7 +1676,7 @@ export default function InsumosClient() {
                   type="button"
                   className={styles.modalPrimaryWide}
                   onClick={saveNewItem}
-                  disabled={!newItemName.trim() || !newCategory.trim() || !newSpec.trim() || !newUnit.trim() || !newInitialCost.trim()}
+                  disabled={!newItemName.trim() || !newCategory.trim() || !newUnit.trim() || !newInitialCost.trim()}
                 >
                   Salvar
                 </button>
@@ -1780,7 +1780,7 @@ export default function InsumosClient() {
                   type="button"
                   className={styles.modalPrimaryWide}
                   onClick={saveEditItem}
-                  disabled={!newItemName.trim() || !newCategory.trim() || !newSpec.trim() || !newUnit.trim() || !newInitialCost.trim()}
+                  disabled={!newItemName.trim() || !newCategory.trim() || !newUnit.trim() || !newInitialCost.trim()}
                 >
                   Salvar
                 </button>

@@ -708,8 +708,13 @@ export default function PrePreparoClient() {
       if (!name || name === "-") continue;
       map.set(name, (map.get(name) ?? 0) + 1);
     }
+    for (const r of rows) {
+      const name = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+      if (!name || name === "-") continue;
+      map.set(name, (map.get(name) ?? 0) + 1);
+    }
     return map;
-  }, [insumosStore]);
+  }, [insumosStore, rows]);
 
   const categoriesSorted = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
@@ -790,8 +795,13 @@ export default function PrePreparoClient() {
   }
 
   function openDeleteCategoria(name: string) {
+    const count = categoryCounts.get(name) ?? 0;
+    if (count > 0) {
+      showToast("Não é possível excluir: existem itens vinculados nessa categoria.", "error");
+      return;
+    }
     setDeletingCategoryName(name);
-    setDeletingCategoryCount(categoryCounts.get(name) ?? 0);
+    setDeletingCategoryCount(count);
     setIsDeleteCategoryOpen(true);
   }
 
@@ -804,6 +814,12 @@ export default function PrePreparoClient() {
   async function confirmDeleteCategoria() {
     const name = deletingCategoryName;
     if (!name) return;
+    const count = categoryCounts.get(name) ?? 0;
+    if (count > 0) {
+      showToast("Não é possível excluir: existem itens vinculados nessa categoria.", "error");
+      cancelDeleteCategoria();
+      return;
+    }
     const nextCategories = insumoCategorias.filter((c) => c !== name);
     setInsumoCategorias(nextCategories);
     writeInsumoCategoriasToStore(nextCategories);
@@ -1771,8 +1787,8 @@ export default function PrePreparoClient() {
 
   const canGoNextRecipe = useMemo(() => {
     if (newRecipeStep !== 1) return true;
-    return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeValidity.trim());
-  }, [newRecipeCategory, newRecipeName, newRecipeSpec, newRecipeStep, newRecipeUnit, newRecipeValidity]);
+    return Boolean(newRecipeName.trim() && newRecipeCategory && newRecipeUnit && newRecipeValidity.trim());
+  }, [newRecipeCategory, newRecipeName, newRecipeStep, newRecipeUnit, newRecipeValidity]);
 
   const canGoNextRecipeStep2 = useMemo(() => {
     if (newRecipeStep !== 2) return false;
@@ -1781,8 +1797,8 @@ export default function PrePreparoClient() {
   }, [newRecipeIngredients.length, newRecipeStep, newRecipeYield]);
 
   const canSaveRecipe = useMemo(() => {
-    return Boolean(newRecipeName.trim() && newRecipeSpec.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
-  }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeSpec, newRecipeUnit, recipeYieldValue]);
+    return Boolean(newRecipeName.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
+  }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeUnit, recipeYieldValue]);
 
   async function downloadEtiquetaPdf(label: {
     receita: string;
@@ -3373,7 +3389,14 @@ export default function PrePreparoClient() {
                             <button type="button" className={insumosStyles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategoria(c)}>
                               <IconEdit />
                             </button>
-                            <button type="button" className={insumosStyles.categoryIconBtn} aria-label="Excluir categoria" onClick={() => openDeleteCategoria(c)}>
+                            <button
+                              type="button"
+                              className={insumosStyles.categoryIconBtn}
+                              aria-label="Excluir categoria"
+                              onClick={() => openDeleteCategoria(c)}
+                              disabled={(categoryCounts.get(c) ?? 0) > 0}
+                              title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
+                            >
                               <IconTrash />
                             </button>
                           </div>
@@ -3413,7 +3436,7 @@ export default function PrePreparoClient() {
               </div>
 
               <div className={insumosStyles.confirmActions}>
-                <button type="button" className={insumosStyles.confirmDelete} onClick={() => void confirmDeleteCategoria()}>
+                <button type="button" className={insumosStyles.confirmDelete} onClick={() => void confirmDeleteCategoria()} disabled={deletingCategoryCount > 0}>
                   Excluir
                 </button>
                 <button type="button" className={insumosStyles.confirmCancel} onClick={cancelDeleteCategoria}>
