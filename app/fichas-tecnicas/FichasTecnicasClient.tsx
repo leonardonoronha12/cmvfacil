@@ -54,7 +54,7 @@ type IngredientOption = {
   item: string;
   medida: string;
   custoMedio: string;
-  kind: "insumo" | "prepreparo";
+  kind: "insumo" | "prepreparo" | "ficha";
 };
 
 type SavedRecipeDetails = {
@@ -1179,14 +1179,35 @@ export default function FichasTecnicasClient() {
       }));
   }, [insumos]);
 
-  const ingredientOptions = useMemo(() => [...insumoIngredientOptions, ...prePreparoIngredientData.options], [insumoIngredientOptions, prePreparoIngredientData.options]);
+  const fichaIngredientOptions = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base", numeric: true });
+    const list: IngredientOption[] = [];
+    for (const row of tableRows) {
+      if (detailsRecipe && String(detailsRecipe.rowId) === String(row.id)) continue;
+      list.push({
+        id: `ficha:${row.id}`,
+        item: row.receita,
+        medida: "Porção",
+        custoMedio: row.custoUnitario || "0,00",
+        kind: "ficha",
+      });
+    }
+    list.sort((a, b) => collator.compare(a.item, b.item));
+    return list;
+  }, [detailsRecipe, tableRows]);
+
+  const ingredientOptions = useMemo(
+    () => [...insumoIngredientOptions, ...prePreparoIngredientData.options, ...fichaIngredientOptions],
+    [fichaIngredientOptions, insumoIngredientOptions, prePreparoIngredientData.options],
+  );
 
   const ingredientOptionGroups = useMemo(() => {
     return {
       insumos: insumoIngredientOptions,
       prePreparo: prePreparoIngredientData.options,
+      fichas: fichaIngredientOptions,
     };
-  }, [insumoIngredientOptions, prePreparoIngredientData.options]);
+  }, [fichaIngredientOptions, insumoIngredientOptions, prePreparoIngredientData.options]);
   const avgUnitCostCentsById = useMemo(() => {
     const idByKey = new Map<string, string>();
     for (const i of insumos) {
@@ -1255,6 +1276,8 @@ export default function FichasTecnicasClient() {
     const unitCents =
       selectedIngredient.kind === "prepreparo"
         ? prePreparoIngredientData.unitCostCentsById.get(selectedIngredient.id) ?? Math.round(parseMoneyLabel(selectedIngredient.custoMedio) * 100)
+        : selectedIngredient.kind === "ficha"
+          ? Math.round(parseMoneyLabel(selectedIngredient.custoMedio) * 100)
         : avgUnitCostCentsById.get(selectedIngredient.id) ?? Math.round(parseMoneyLabel(selectedIngredient.custoMedio) * 100);
     return (parseDecimalInput(ingredientQty) * unitCents) / 100;
   }, [avgUnitCostCentsById, ingredientQty, prePreparoIngredientData.unitCostCentsById, selectedIngredient]);
@@ -1263,6 +1286,8 @@ export default function FichasTecnicasClient() {
     const unitCents =
       selectedDetailIngredient.kind === "prepreparo"
         ? prePreparoIngredientData.unitCostCentsById.get(selectedDetailIngredient.id) ?? Math.round(parseMoneyLabel(selectedDetailIngredient.custoMedio) * 100)
+        : selectedDetailIngredient.kind === "ficha"
+          ? Math.round(parseMoneyLabel(selectedDetailIngredient.custoMedio) * 100)
         : avgUnitCostCentsById.get(selectedDetailIngredient.id) ?? Math.round(parseMoneyLabel(selectedDetailIngredient.custoMedio) * 100);
     return (parseDecimalInput(detailIngredientQty) * unitCents) / 100;
   }, [avgUnitCostCentsById, detailIngredientQty, prePreparoIngredientData.unitCostCentsById, selectedDetailIngredient]);
@@ -1271,6 +1296,8 @@ export default function FichasTecnicasClient() {
     const unitCents =
       selectedRowEditIngredient.kind === "prepreparo"
         ? prePreparoIngredientData.unitCostCentsById.get(selectedRowEditIngredient.id) ?? Math.round(parseMoneyLabel(selectedRowEditIngredient.custoMedio) * 100)
+        : selectedRowEditIngredient.kind === "ficha"
+          ? Math.round(parseMoneyLabel(selectedRowEditIngredient.custoMedio) * 100)
         : avgUnitCostCentsById.get(selectedRowEditIngredient.id) ?? Math.round(parseMoneyLabel(selectedRowEditIngredient.custoMedio) * 100);
     return (parseDecimalInput(rowEditQty) * unitCents) / 100;
   }, [avgUnitCostCentsById, prePreparoIngredientData.unitCostCentsById, rowEditQty, selectedRowEditIngredient]);
@@ -1831,6 +1858,15 @@ export default function FichasTecnicasClient() {
                               ))}
                             </optgroup>
                           ) : null}
+                          {ingredientOptionGroups.fichas.length ? (
+                            <optgroup label="Fichas Técnicas">
+                              {ingredientOptionGroups.fichas.map((item) => (
+                                <option key={`ficha:${item.id}`} value={item.id}>
+                                  {item.item}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
                             </select>
                           </label>
 
@@ -1904,6 +1940,15 @@ export default function FichasTecnicasClient() {
                                     <optgroup label="Pré-preparo">
                                       {ingredientOptionGroups.prePreparo.map((item) => (
                                         <option key={`prep:${item.id}`} value={item.id}>
+                                          {item.item}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ) : null}
+                                  {ingredientOptionGroups.fichas.length ? (
+                                    <optgroup label="Fichas Técnicas">
+                                      {ingredientOptionGroups.fichas.map((item) => (
+                                        <option key={`ficha:${item.id}`} value={item.id}>
                                           {item.item}
                                         </option>
                                       ))}
@@ -2517,6 +2562,15 @@ export default function FichasTecnicasClient() {
                             <optgroup label="Pré-preparo">
                               {ingredientOptionGroups.prePreparo.map((item) => (
                                 <option key={`prep:${item.id}`} value={item.id}>
+                                  {item.item}
+                                </option>
+                              ))}
+                            </optgroup>
+                          ) : null}
+                          {ingredientOptionGroups.fichas.length ? (
+                            <optgroup label="Fichas Técnicas">
+                              {ingredientOptionGroups.fichas.map((item) => (
+                                <option key={`ficha:${item.id}`} value={item.id}>
                                   {item.item}
                                 </option>
                               ))}

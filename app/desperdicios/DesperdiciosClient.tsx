@@ -382,7 +382,6 @@ export default function DesperdiciosClient() {
   const [isDataCalOpen, setIsDataCalOpen] = useState(false);
   const [dataCalMonth, setDataCalMonth] = useState(() => startOfMonth(new Date()));
   const dataCalWrapRef = useRef<HTMLDivElement | null>(null);
-  const [dataCalRect, setDataCalRect] = useState<{ left: number; top: number } | null>(null);
   const [isPeriodoCalOpen, setIsPeriodoCalOpen] = useState(false);
   const [periodoCalMonth, setPeriodoCalMonth] = useState(() => startOfMonth(new Date()));
   const periodoCalWrapRef = useRef<HTMLDivElement | null>(null);
@@ -607,11 +606,20 @@ export default function DesperdiciosClient() {
   const motivoCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of integratedRows) {
-      const k = r.motivo || "Sem motivo";
-      map.set(k, (map.get(k) ?? 0) + 1);
+      const key = normalizeKey(String(r.motivo ?? "")) || "sem-motivo";
+      map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
   }, [integratedRows]);
+
+  function motivoLaunchCount(nome: string) {
+    const key = normalizeKey(nome) || "sem-motivo";
+    return motivoCounts.get(key) ?? 0;
+  }
+
+  function motivoLaunchCountLabel(count: number) {
+    return `${count} ${count === 1 ? "lançamento" : "lançamentos"}`;
+  }
 
   const chartData = useMemo(() => {
     const byMotivo = new Map<string, number>();
@@ -944,7 +952,6 @@ export default function DesperdiciosClient() {
       if (!el) return;
       if (e.target instanceof Node && el.contains(e.target)) return;
       setIsDataCalOpen(false);
-      setDataCalRect(null);
     }
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
@@ -954,7 +961,6 @@ export default function DesperdiciosClient() {
     if (!isDataCalOpen) return;
     function close() {
       setIsDataCalOpen(false);
-      setDataCalRect(null);
     }
     window.addEventListener("resize", close);
     window.addEventListener("scroll", close, true);
@@ -1107,6 +1113,11 @@ export default function DesperdiciosClient() {
       window.alert("O motivo Validade Vencida não pode ser excluído.");
       return;
     }
+    const count = motivoLaunchCount(row.nome);
+    if (count > 0) {
+      showToast("Não é possível excluir: existem lançamentos vinculados a este motivo.", "error");
+      return;
+    }
     const nameKey = normalizeKey(row.nome);
     setMotivosStore((prev) => {
       const next = prev.filter((m) => m.id !== row.id);
@@ -1131,6 +1142,11 @@ export default function DesperdiciosClient() {
   function openConfirmDeleteMotivo(row: DesperdicioMotivoRow) {
     if (isProtectedMotivo(row.nome)) {
       window.alert("O motivo Validade Vencida não pode ser excluído.");
+      return;
+    }
+    const count = motivoLaunchCount(row.nome);
+    if (count > 0) {
+      showToast("Não é possível excluir: existem lançamentos vinculados a este motivo.", "error");
       return;
     }
     setConfirmType("motivo");
@@ -1805,15 +1821,9 @@ export default function DesperdiciosClient() {
                         type="button"
                         className={styles.prefixIconBtn}
                         onClick={() => {
-                          const anchor = dataCalWrapRef.current?.querySelector("input")?.getBoundingClientRect() ?? null;
-                          if (anchor) setDataCalRect(computeCalendarRect(anchor));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
-                          setIsDataCalOpen((v) => {
-                            const next = !v;
-                            if (!next) setDataCalRect(null);
-                            return next;
-                          });
+                          setIsDataCalOpen((v) => !v);
                         }}
                         aria-label="Abrir calendário"
                       >
@@ -1824,13 +1834,11 @@ export default function DesperdiciosClient() {
                         value={draftData}
                         onChange={(e) => setDraftData(e.target.value)}
                         onClick={(e) => {
-                          setDataCalRect(computeCalendarRect(e.currentTarget.getBoundingClientRect()));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
                           setIsDataCalOpen(true);
                         }}
                         onFocus={(e) => {
-                          setDataCalRect(computeCalendarRect(e.currentTarget.getBoundingClientRect()));
                           const parsed = parseDateLabelLoose(draftData);
                           setDataCalMonth(startOfMonth(parsed ?? new Date()));
                           setIsDataCalOpen(true);
@@ -1839,10 +1847,7 @@ export default function DesperdiciosClient() {
                       />
                     </div>
                     {isDataCalOpen ? (
-                      <div
-                        className={styles.calendarPopover}
-                        style={dataCalRect ? { position: "fixed", left: dataCalRect.left, top: dataCalRect.top, transform: "none" } : { position: "fixed" }}
-                      >
+                      <div className={styles.calendarPopover}>
                         <div className={styles.calendarHeader}>
                           <button type="button" className={styles.calNavBtn} onClick={() => setDataCalMonth((d) => addMonths(d, -1))}>
                             ‹
@@ -1894,7 +1899,6 @@ export default function DesperdiciosClient() {
                                   onClick={() => {
                                     setDraftData(formatDateLabelLowerPT(d));
                                     setIsDataCalOpen(false);
-                                    setDataCalRect(null);
                                   }}
                                 >
                                   {day}
@@ -1992,7 +1996,7 @@ export default function DesperdiciosClient() {
                         <>
                           <div className={styles.motivosName}>{m.nome}</div>
                           <div className={styles.motivosRight}>
-                            <div className={styles.motivosCount}>{`${motivoCounts.get(m.nome) ?? 0} itens`}</div>
+                            <div className={styles.motivosCount}>{motivoLaunchCountLabel(motivoLaunchCount(m.nome))}</div>
                             <div className={styles.motivosActions}>
                               <button
                                 type="button"
@@ -2009,8 +2013,14 @@ export default function DesperdiciosClient() {
                                 className={styles.iconBtn}
                                 aria-label="Excluir"
                                 onClick={() => openConfirmDeleteMotivo(m)}
-                                disabled={isProtectedMotivo(m.nome)}
-                                title={isProtectedMotivo(m.nome) ? "Não pode excluir Validade Vencida" : ""}
+                                disabled={isProtectedMotivo(m.nome) || motivoLaunchCount(m.nome) > 0}
+                                title={
+                                  isProtectedMotivo(m.nome)
+                                    ? "Não pode excluir Validade Vencida"
+                                    : motivoLaunchCount(m.nome) > 0
+                                      ? "Não é possível excluir: existem lançamentos vinculados"
+                                      : ""
+                                }
                               >
                                 <IconTrash />
                               </button>

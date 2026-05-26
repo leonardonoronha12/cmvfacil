@@ -39,6 +39,14 @@ type IngredienteRow = {
   custoCents: number;
 };
 
+type IngredientOption = {
+  id: string;
+  item: string;
+  unidade: string;
+  kind: "insumo" | "prepreparo";
+  custoMedio?: string;
+};
+
 function IconPrep() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -1115,6 +1123,22 @@ export default function PrePreparoClient() {
     };
   }, [insumosByKey, insumosByName, insumosStore]);
 
+  const resolvePrePreparoFromQuery = useMemo(() => {
+    const list = rows.map((r) => r);
+    return (q: string) => {
+      const raw = q.trim();
+      if (!raw) return null;
+      const direct = list.find((r) => String(r.receita ?? "").trim().toLowerCase() === raw.toLowerCase()) ?? null;
+      if (direct) return direct;
+      const key = normalizeNameKey(raw);
+      if (key && key.length >= 4) {
+        const candidates = list.filter((r) => normalizeNameKey(String(r.receita ?? "")).includes(key));
+        if (candidates.length === 1) return candidates[0];
+      }
+      return null;
+    };
+  }, [rows]);
+
   const averageCostByInsumo = useMemo(() => {
     const acc = new Map<string, { sumCents: number; sumQty: number; unit: string }>();
     for (const e of entradasRows) {
@@ -1204,18 +1228,39 @@ export default function PrePreparoClient() {
 
   useEffect(() => {
     const resolved = resolveInsumoFromQuery(ingredientQuery);
+    const resolvedPre = resolved ? null : resolvePrePreparoFromQuery(ingredientQuery);
+
     if (resolved) {
       const targetUnit = String(resolved.medida ?? "Und").trim() || "Und";
       if (ingredientUnit !== targetUnit) setIngredientUnit(targetUnit);
+    } else if (resolvedPre) {
+      const parsed = parseQtyLabel(String(resolvedPre.rendimento ?? ""));
+      const targetUnit = (parsed.unit || "Und").trim() || "Und";
+      if (ingredientUnit !== targetUnit) setIngredientUnit(targetUnit);
+    }
+
+    const qty = parsePtNumber(ingredientQty);
+    if (!qty) {
+      setIngredientCost("0,00");
+      return;
+    }
+
+    if (resolvedPre) {
+      const totalCents = clampNonNegativeInt(parseCurrencyBRLToCents(String(resolvedPre.custoTotal ?? "")));
+      const parsedYield = parseQtyLabel(String(resolvedPre.rendimento ?? ""));
+      const yieldQty = parsedYield.qty;
+      if (!(yieldQty > 0) || totalCents <= 0) {
+        setIngredientCost("0,00");
+        return;
+      }
+      const unitCents = clampNonNegativeInt(Math.round(totalCents / yieldQty));
+      const cents = clampNonNegativeInt(Math.round(unitCents * qty));
+      setIngredientCost(formatBRLValueFromCents(cents));
+      return;
     }
 
     const ins = resolved;
     if (!ins) {
-      setIngredientCost("0,00");
-      return;
-    }
-    const qty = parsePtNumber(ingredientQty);
-    if (!qty) {
       setIngredientCost("0,00");
       return;
     }
@@ -1242,14 +1287,25 @@ export default function PrePreparoClient() {
     }
     const cents = clampNonNegativeInt(Math.round(insUnitCostCents * qtyInBase));
     setIngredientCost(formatBRLValueFromCents(cents));
-  }, [averageCostByInsumo, ingredientQty, ingredientQuery, ingredientUnit, resolveInsumoFromQuery]);
+  }, [averageCostByInsumo, ingredientQty, ingredientQuery, ingredientUnit, resolveInsumoFromQuery, resolvePrePreparoFromQuery]);
 
   const ingredientSuggestions = useMemo(() => {
-    const list = insumosStore.map((i) => i.item);
+    const list = [...insumosStore.map((i) => i.item), ...rows.map((r) => r.receita)];
     const q = ingredientQuery.trim().toLowerCase();
-    const filtered = q ? list.filter((n) => n.toLowerCase().includes(q)) : list;
-    return filtered.slice(0, 10);
-  }, [ingredientQuery, insumosStore]);
+    const filtered = q ? list.filter((n) => String(n ?? "").toLowerCase().includes(q)) : list;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const n of filtered) {
+      const s = String(n ?? "").trim();
+      if (!s) continue;
+      const k = s.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(s);
+      if (out.length >= 10) break;
+    }
+    return out;
+  }, [ingredientQuery, insumosStore, rows]);
 
   function openEditModal(row: PrePreparoRow) {
     setEditingId(row.id);
@@ -1534,7 +1590,7 @@ export default function PrePreparoClient() {
       id: String(Date.now()),
       item: selectedDetailIngredient.item,
       quantidade: nextQty,
-      unidade: selectedDetailIngredient.medida || "Und",
+      unidade: selectedDetailIngredient.unidade || "Und",
       custoCents: costCents,
     };
     const prevList = detailsRow.ingredientes ?? [];
@@ -1567,16 +1623,22 @@ export default function PrePreparoClient() {
     const qty = parseDecimalInput(rowEditQty);
     if (!(qty > 0)) return;
     const nextQty = formatDecimalFixedDraft(rowEditQty, 3);
-    const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
-    const unitCents =
-      stats && stats.sumQty > 0 && stats.sumCents > 0 ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty)) : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio) * 100));
-    const fromUnit = String(selected.medida ?? "Und").trim() || "Und";
-    const qtyInStatsUnit = stats?.unit ? convertQty(qty, fromUnit, stats.unit) : qty;
-    const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
-    const costCents = clampNonNegativeInt(Math.round(unitCents * finalQty));
+    let costCents = 0;
+    if (selected.kind === "prepreparo") {
+      costCents = clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio || "0") * 100 * qty));
+    } else {
+      const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
+      const unitCents =
+        stats && stats.sumQty > 0 && stats.sumCents > 0
+          ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+          : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio || "0") * 100));
+      const qtyInStatsUnit = stats?.unit ? convertQty(qty, selected.unidade, stats.unit) : qty;
+      const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
+      costCents = clampNonNegativeInt(Math.round(unitCents * finalQty));
+    }
     const prevList = detailsRow.ingredientes ?? [];
     const nextList = prevList.map((r) =>
-      r.id === id ? { ...r, item: selected.item, quantidade: nextQty, unidade: selected.medida || "Und", custoCents: costCents } : r
+      r.id === id ? { ...r, item: selected.item, quantidade: nextQty, unidade: selected.unidade || "Und", custoCents: costCents } : r
     );
     updateDetailsRow({ ...detailsRow, ingredientes: nextList });
     cancelRowEdit();
@@ -1704,7 +1766,41 @@ export default function PrePreparoClient() {
       });
   }, [detailsRecipeId, etiquetasRows]);
 
-  const ingredientOptions = useMemo(() => insumosStore.filter((row) => !row.ocultar), [insumosStore]);
+  const ingredientOptionGroups = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    const insumos: IngredientOption[] = [];
+    for (const row of insumosStore) {
+      if (row.ocultar) continue;
+      insumos.push({
+        id: `insumo:${row.id}`,
+        item: row.item,
+        unidade: String(row.medida ?? "Und").trim() || "Und",
+        kind: "insumo",
+        custoMedio: String(row.custoMedio ?? ""),
+      });
+    }
+    const prePreparo: IngredientOption[] = [];
+    for (const row of rows) {
+      if (detailsRecipeId && row.id === detailsRecipeId) continue;
+      const parsed = parseQtyLabel(String(row.rendimento ?? ""));
+      const unit = (parsed.unit || "Und").trim() || "Und";
+      const totalCents = clampNonNegativeInt(parseCurrencyBRLToCents(String(row.custoTotal ?? "")));
+      const yieldQty = parsed.qty;
+      const unitCostLabel = yieldQty > 0 && totalCents > 0 ? formatBRLValueFromCents(Math.round(totalCents / yieldQty)) : "0,00";
+      prePreparo.push({
+        id: `prep:${row.id}`,
+        item: row.receita,
+        unidade: unit,
+        kind: "prepreparo",
+        custoMedio: unitCostLabel,
+      });
+    }
+    insumos.sort((a, b) => collator.compare(a.item, b.item));
+    prePreparo.sort((a, b) => collator.compare(a.item, b.item));
+    return { insumos, prePreparo };
+  }, [detailsRecipeId, insumosStore, rows]);
+
+  const ingredientOptions = useMemo(() => [...ingredientOptionGroups.insumos, ...ingredientOptionGroups.prePreparo], [ingredientOptionGroups]);
 
   const selectedDetailIngredient = useMemo(
     () => ingredientOptions.find((row) => row.id === detailIngredientId) ?? null,
@@ -1714,13 +1810,15 @@ export default function PrePreparoClient() {
   const detailIngredientCost = useMemo(() => {
     if (!selectedDetailIngredient) return 0;
     const qty = parseDecimalInput(detailIngredientQty);
+    if (!(qty > 0)) return 0;
+    if (selectedDetailIngredient.kind === "prepreparo") return qty * parseMoneyLabel(selectedDetailIngredient.custoMedio || "0");
     const stats = averageCostByInsumo.get(selectedDetailIngredient.item.toLowerCase()) ?? null;
     if (stats && stats.sumQty > 0 && stats.sumCents > 0) {
-      const qtyInStatsUnit = stats.unit ? convertQty(qty, String(selectedDetailIngredient.medida ?? "Und"), stats.unit) : qty;
+      const qtyInStatsUnit = stats.unit ? convertQty(qty, selectedDetailIngredient.unidade, stats.unit) : qty;
       const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
       return (stats.sumCents / stats.sumQty / 100) * finalQty;
     }
-    return qty * parseMoneyLabel(selectedDetailIngredient.custoMedio);
+    return qty * parseMoneyLabel(selectedDetailIngredient.custoMedio || "0");
   }, [averageCostByInsumo, detailIngredientQty, selectedDetailIngredient]);
 
   const selectedRowEditIngredient = useMemo(
@@ -1731,13 +1829,15 @@ export default function PrePreparoClient() {
   const rowEditCost = useMemo(() => {
     if (!selectedRowEditIngredient) return 0;
     const qty = parseDecimalInput(rowEditQty);
+    if (!(qty > 0)) return 0;
+    if (selectedRowEditIngredient.kind === "prepreparo") return qty * parseMoneyLabel(selectedRowEditIngredient.custoMedio || "0");
     const stats = averageCostByInsumo.get(selectedRowEditIngredient.item.toLowerCase()) ?? null;
     if (stats && stats.sumQty > 0 && stats.sumCents > 0) {
-      const qtyInStatsUnit = stats.unit ? convertQty(qty, String(selectedRowEditIngredient.medida ?? "Und"), stats.unit) : qty;
+      const qtyInStatsUnit = stats.unit ? convertQty(qty, selectedRowEditIngredient.unidade, stats.unit) : qty;
       const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
       return (stats.sumCents / stats.sumQty / 100) * finalQty;
     }
-    return qty * parseMoneyLabel(selectedRowEditIngredient.custoMedio);
+    return qty * parseMoneyLabel(selectedRowEditIngredient.custoMedio || "0");
   }, [averageCostByInsumo, rowEditQty, selectedRowEditIngredient]);
 
   const detailsIngredientsTotalCents = useMemo(() => {
@@ -2186,11 +2286,24 @@ export default function PrePreparoClient() {
                               className={ft.detailsItemSelect}
                             >
                               <option value="">Pesquise por itens...</option>
-                              {ingredientOptions.map((item) => (
-                                <option key={item.id} value={item.id}>
-                                  {item.item}
-                                </option>
-                              ))}
+                              {ingredientOptionGroups.insumos.length ? (
+                                <optgroup label="Insumos">
+                                  {ingredientOptionGroups.insumos.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.item}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ) : null}
+                              {ingredientOptionGroups.prePreparo.length ? (
+                                <optgroup label="Pré-preparo">
+                                  {ingredientOptionGroups.prePreparo.map((item) => (
+                                    <option key={item.id} value={item.id}>
+                                      {item.item}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ) : null}
                             </select>
                           </label>
 
@@ -2203,7 +2316,7 @@ export default function PrePreparoClient() {
                               onChange={(e) => setDetailIngredientQty(formatDecimalDraft(e.target.value, 3))}
                               onBlur={(e) => setDetailIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
                             />
-                            <span className={ft.detailsInlineSuffix}>{selectedDetailIngredient?.medida || "Und"}</span>
+                            <span className={ft.detailsInlineSuffix}>{selectedDetailIngredient?.unidade || "Und"}</span>
                           </span>
 
                           <span className={`${ft.detailsInlineGroup} ${ft.detailsInlineGroupPrefix}`}>
@@ -2236,11 +2349,24 @@ export default function PrePreparoClient() {
                                 </span>
                                 <select value={rowEditIngredientId} onChange={(e) => setRowEditIngredientId(e.target.value)} className={ft.detailsItemSelect}>
                                   <option value="">Pesquise por itens...</option>
-                                  {ingredientOptions.map((item) => (
-                                    <option key={item.id} value={item.id}>
-                                      {item.item}
-                                    </option>
-                                  ))}
+                                  {ingredientOptionGroups.insumos.length ? (
+                                    <optgroup label="Insumos">
+                                      {ingredientOptionGroups.insumos.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                          {item.item}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ) : null}
+                                  {ingredientOptionGroups.prePreparo.length ? (
+                                    <optgroup label="Pré-preparo">
+                                      {ingredientOptionGroups.prePreparo.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                          {item.item}
+                                        </option>
+                                      ))}
+                                    </optgroup>
+                                  ) : null}
                                 </select>
                               </label>
 
@@ -2253,7 +2379,7 @@ export default function PrePreparoClient() {
                                   onChange={(e) => setRowEditQty(formatDecimalDraft(e.target.value, 3))}
                                   onBlur={(e) => setRowEditQty(formatDecimalFixedDraft(e.target.value, 3))}
                                 />
-                                <span className={ft.detailsInlineSuffix}>{selectedRowEditIngredient?.medida || row.unidade || "Und"}</span>
+                                <span className={ft.detailsInlineSuffix}>{selectedRowEditIngredient?.unidade || row.unidade || "Und"}</span>
                               </span>
 
                               <span className={`${ft.detailsInlineGroup} ${ft.detailsInlineGroupPrefix}`}>
@@ -3143,14 +3269,21 @@ export default function PrePreparoClient() {
                                   className={styles.ingredientOption}
                                   onClick={() => {
                                     setIngredientQuery(name);
-                                    setIngredientUnit(insumosByName.get(name.toLowerCase())?.medida ?? "Und");
+                                    const ins = insumosByName.get(name.toLowerCase()) ?? null;
+                                    if (ins) {
+                                      setIngredientUnit(ins.medida ?? "Und");
+                                    } else {
+                                      const prep = resolvePrePreparoFromQuery(name);
+                                      const parsed = prep ? parseQtyLabel(String(prep.rendimento ?? "")) : { qty: 0, unit: "" };
+                                      setIngredientUnit((parsed.unit || "Und").trim() || "Und");
+                                    }
                                     setIsIngredientMenuOpen(false);
                                   }}
                                 >
                                   {name}
                                 </button>
                               ))}
-                              {!ingredientSuggestions[0] ? <div className={styles.ingredientEmpty}>Nenhum insumo encontrado</div> : null}
+                              {!ingredientSuggestions[0] ? <div className={styles.ingredientEmpty}>Nenhum item encontrado</div> : null}
                             </div>
                           ) : null}
                         </div>
