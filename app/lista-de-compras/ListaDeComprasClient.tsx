@@ -914,24 +914,46 @@ export default function ListaDeComprasClient() {
       const margin = 40;
       const rowH = 34;
 
-      function clipText(text: string, maxWidth: number, size: number) {
+      function safePdfText(text: string) {
         const raw = String(text ?? "");
+        const replaced = raw
+          .replaceAll("✓", "V")
+          .replaceAll("✔", "V")
+          .replaceAll("√", "V")
+          .replaceAll("•", "-")
+          .replaceAll("–", "-")
+          .replaceAll("—", "-")
+          .replaceAll("“", '"')
+          .replaceAll("”", '"')
+          .replaceAll("‘", "'")
+          .replaceAll("’", "'")
+          .replaceAll("…", "...")
+          .replace(/[^\u0000-\u00FF]/g, "");
+        return replaced;
+      }
+
+      function clipText(text: string, maxWidth: number, size: number) {
+        const raw = safePdfText(text);
         if (font.widthOfTextAtSize(raw, size) <= maxWidth) return raw;
         let out = raw;
-        while (out.length > 1 && font.widthOfTextAtSize(`${out}…`, size) > maxWidth) out = out.slice(0, -1);
-        return `${out}…`;
+        while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, size) > maxWidth) out = out.slice(0, -1);
+        return `${out}...`;
       }
 
       let page = doc.addPage(pageSize);
       let y = pageSize[1] - margin;
 
       function drawHeader() {
-        const title = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? `Lista de Compras - ${fornecedorFilter}` : "Lista de Compras";
+        const title =
+          mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? `Lista de Compras - ${fornecedorFilter}` : "Lista de Compras";
         const now = new Date();
-        const meta = `Período: ${effectiveStartDate || "-"} até ${effectiveEndDate || "-"} • Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
-        page.drawText(title, { x: margin, y, size: 16, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
+        const meta = `Período: ${effectiveStartDate || "-"} até ${effectiveEndDate || "-"} - Gerado em ${now.toLocaleDateString("pt-BR")} ${now.toLocaleTimeString(
+          "pt-BR",
+          { hour: "2-digit", minute: "2-digit" },
+        )}`;
+        page.drawText(safePdfText(title), { x: margin, y, size: 16, font: fontBold, color: rgb(0.01, 0.01, 0.01) });
         y -= 18;
-        page.drawText(meta, { x: margin, y, size: 10, font, color: rgb(0.3, 0.3, 0.3) });
+        page.drawText(safePdfText(meta), { x: margin, y, size: 10, font, color: rgb(0.3, 0.3, 0.3) });
         y -= 18;
 
         const tableW = pageSize[0] - margin * 2;
@@ -945,7 +967,7 @@ export default function ListaDeComprasClient() {
         const colComprar = gridW * (0.8 / frTotal);
 
         page.drawRectangle({ x: margin, y: y - 14, width: tableW, height: 20, color: rgb(0, 0.157, 0.176) });
-        page.drawText("✓", { x: margin + 6, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
+        page.drawText("V", { x: margin + 6, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
         page.drawText("Item", { x: margin + checkW + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
         page.drawText("Custo Médio", { x: margin + checkW + colItem + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
         page.drawText("Consumo", { x: margin + checkW + colItem + colCusto + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
