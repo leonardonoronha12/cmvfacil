@@ -191,6 +191,10 @@ function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeCategoria(value: string) {
+  return toTitleCase(normalizeCategoryName(String(value ?? "")));
+}
+
 function formatCurrencyBRLFromCents(valueCents: number) {
   const value = valueCents / 100;
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -704,12 +708,12 @@ export default function PrePreparoClient() {
   const categoryCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of insumosStore) {
-      const name = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+      const name = normalizeCategoria(String(r.categoria ?? ""));
       if (!name || name === "-") continue;
       map.set(name, (map.get(name) ?? 0) + 1);
     }
     for (const r of rows) {
-      const name = toTitleCase(normalizeCategoryName(String(r.categoria ?? "")));
+      const name = normalizeCategoria(String(r.categoria ?? ""));
       if (!name || name === "-") continue;
       map.set(name, (map.get(name) ?? 0) + 1);
     }
@@ -718,7 +722,17 @@ export default function PrePreparoClient() {
 
   const categoriesSorted = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
-    return [...insumoCategorias].filter((c) => normalizeCategoryName(c).toLowerCase() !== "todas").sort((a, b) => collator.compare(a, b));
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const c of insumoCategorias) {
+      const name = normalizeCategoria(String(c ?? ""));
+      if (!name || name === "-" || name.toLowerCase() === "todas") continue;
+      const k = name.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(name);
+    }
+    return out.sort((a, b) => collator.compare(a, b));
   }, [insumoCategorias]);
 
   async function persistInsumosCategories(nextCategories: string[], applyRowRename?: { from: string; to: string }, applyRowDelete?: string) {
@@ -736,10 +750,10 @@ export default function PrePreparoClient() {
   }
 
   async function addCategoriaFromModal() {
-    const name = toTitleCase(normalizeCategoryName(categoryNewDraft.trim()));
+    const name = normalizeCategoria(categoryNewDraft.trim());
     if (!name || name === "-") return;
     const existsKey = name.toLowerCase();
-    const nextCategories = insumoCategorias.some((c) => c.toLowerCase() === existsKey) ? insumoCategorias : [...insumoCategorias, name];
+    const nextCategories = insumoCategorias.some((c) => normalizeCategoria(c).toLowerCase() === existsKey) ? insumoCategorias : [...insumoCategorias, name];
     setInsumoCategorias(nextCategories);
     writeInsumoCategoriasToStore(nextCategories);
     setCategoryNewDraft("");
@@ -768,20 +782,22 @@ export default function PrePreparoClient() {
   async function confirmEditCategoria() {
     const from = editingCategoryOriginal;
     if (!from) return;
-    const name = toTitleCase(normalizeCategoryName(editingCategoryDraft.trim()));
+    const name = normalizeCategoria(editingCategoryDraft.trim());
     if (!name) return;
 
     const existsKey = name.toLowerCase();
     const fromKey = from.toLowerCase();
-    if (fromKey !== existsKey && insumoCategorias.some((c) => c.toLowerCase() === existsKey)) {
+    if (fromKey !== existsKey && insumoCategorias.some((c) => normalizeCategoria(c).toLowerCase() === existsKey)) {
       window.alert("Já existe uma categoria com esse nome.");
       return;
     }
 
-    const nextCategories = insumoCategorias.map((c) => (c === from ? name : c));
+    const nextCategories = insumoCategorias.map((c) => (normalizeCategoria(c).toLowerCase() === fromKey ? name : c));
     setInsumoCategorias(nextCategories);
     writeInsumoCategoriasToStore(nextCategories);
-    setRows((prev) => prev.map((r) => (r.categoria === from ? { ...r, categoria: name } : r)));
+    setRows((prev) =>
+      prev.map((r) => (normalizeCategoria(String(r.categoria ?? "")).toLowerCase() === fromKey ? { ...r, categoria: name } : r)),
+    );
     if (draftCategory === from) setDraftCategory(name);
     if (newRecipeCategory === from) setNewRecipeCategory(name);
     cancelEditCategoria();
@@ -795,12 +811,13 @@ export default function PrePreparoClient() {
   }
 
   function openDeleteCategoria(name: string) {
-    const count = categoryCounts.get(name) ?? 0;
+    const normalizedName = normalizeCategoria(name);
+    const count = categoryCounts.get(normalizedName) ?? 0;
     if (count > 0) {
       showToast("Não é possível excluir: existem itens vinculados nessa categoria.", "error");
       return;
     }
-    setDeletingCategoryName(name);
+    setDeletingCategoryName(normalizedName);
     setDeletingCategoryCount(count);
     setIsDeleteCategoryOpen(true);
   }
@@ -820,10 +837,13 @@ export default function PrePreparoClient() {
       cancelDeleteCategoria();
       return;
     }
-    const nextCategories = insumoCategorias.filter((c) => c !== name);
+    const nameKey = normalizeCategoria(name).toLowerCase();
+    const nextCategories = insumoCategorias.filter((c) => normalizeCategoria(c).toLowerCase() !== nameKey);
     setInsumoCategorias(nextCategories);
     writeInsumoCategoriasToStore(nextCategories);
-    setRows((prev) => prev.map((r) => (r.categoria === name ? { ...r, categoria: "-" } : r)));
+    setRows((prev) =>
+      prev.map((r) => (normalizeCategoria(String(r.categoria ?? "")).toLowerCase() === nameKey ? { ...r, categoria: "-" } : r)),
+    );
     if (draftCategory === name) setDraftCategory("");
     if (newRecipeCategory === name) setNewRecipeCategory("");
     if (editingCategoryOriginal === name) cancelEditCategoria();
