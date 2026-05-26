@@ -805,11 +805,18 @@ export default function ListaDeComprasClient() {
     inventoryOptions.some((option) => option.iso === effectiveStartDate) &&
     inventoryOptions.some((option) => option.iso === effectiveEndDate);
 
-  const exportRows = useMemo(() => {
-    return rows.filter((row) => Boolean(selectedIds[row.id]));
+  const hasAnySelected = useMemo(() => {
+    for (const row of rows) {
+      if (selectedIds[row.id]) return true;
+    }
+    return false;
   }, [rows, selectedIds]);
 
-  const canExport = isPeriodReady && exportRows.length > 0;
+  const exportRows = useMemo(() => {
+    return hasAnySelected ? rows.filter((row) => Boolean(selectedIds[row.id])) : rows;
+  }, [hasAnySelected, rows, selectedIds]);
+
+  const canExport = isPeriodReady && rows.length > 0;
   const exportDisabled = !canExport || isExportingPdf || isExportingXlsx;
 
   function computeCompra(row: CompraRow) {
@@ -1141,7 +1148,7 @@ export default function ListaDeComprasClient() {
               <div className={styles.fieldLabel}>Período:</div>
               <div className={styles.periodFields}>
                 <div className={styles.dateFieldWrap}>
-                  <div className={styles.dateSelectWrap}>
+                  <div className={isPeriodReady || !inventoryOptions.length ? styles.dateSelectWrap : `${styles.dateSelectWrap} ${styles.dateSelectWrapInvalid}`}>
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
@@ -1157,7 +1164,7 @@ export default function ListaDeComprasClient() {
                 </div>
                 <span className={styles.periodText}>Até</span>
                 <div className={styles.dateFieldWrap}>
-                  <div className={styles.dateSelectWrap}>
+                  <div className={isPeriodReady || !inventoryOptions.length ? styles.dateSelectWrap : `${styles.dateSelectWrap} ${styles.dateSelectWrapInvalid}`}>
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>

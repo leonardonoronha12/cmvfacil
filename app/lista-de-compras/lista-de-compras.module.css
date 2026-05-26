@@ -210,12 +210,16 @@
   gap: 7px;
   width: 126px;
   height: 28px;
-  border: 1px solid #f19797;
+  border: 1px solid #dfe5e4;
   border-radius: 5px;
   padding: 0 8px;
   background: #ffffff;
   color: #8a9b98;
   box-sizing: border-box;
+}
+
+.dateSelectWrapInvalid {
+  border-color: #f19797;
 }
 
 .dateSelect {

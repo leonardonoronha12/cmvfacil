@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { createPortal } from "react-dom";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import SystemToast from "../components/SystemToast";
@@ -431,6 +432,17 @@ function computeBcg(popularidade: "alta" | "baixa", cmvAtual: number, cmvMeta: n
   return above ? "abacaxi" : "quebra-cabeca";
 }
 
+function computeActionMenuRect(anchor: DOMRect, popWidth = 182, popHeight = 170) {
+  const minLeft = 8;
+  const maxLeft = Math.max(8, window.innerWidth - 8 - popWidth);
+  const preferLeft = anchor.right - popWidth;
+  const left = Math.min(maxLeft, Math.max(minLeft, Math.round(preferLeft)));
+  const belowTop = Math.round(anchor.bottom + 8);
+  const aboveTop = Math.round(anchor.top - 8 - popHeight);
+  const top = belowTop + popHeight > window.innerHeight - 8 ? Math.max(8, aboveTop) : belowTop;
+  return { left, top };
+}
+
 function parseMoneyLabel(value?: string) {
   const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
@@ -837,6 +849,7 @@ export default function FichasTecnicasClient() {
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
   const bcgNormalizedRef = useRef(false);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
@@ -887,6 +900,7 @@ export default function FichasTecnicasClient() {
   const [isEditingPrep, setIsEditingPrep] = useState(false);
   const [prepDraft, setPrepDraft] = useState("");
   const [actionMenuRowId, setActionMenuRowId] = useState<string | null>(null);
+  const [actionMenuRect, setActionMenuRect] = useState<{ left: number; top: number } | null>(null);
   const [editDraft, setEditDraft] = useState<EditRecipeDraft | null>(null);
   const [deleteRow, setDeleteRow] = useState<RecipeRow | null>(null);
 
@@ -905,6 +919,28 @@ export default function FichasTecnicasClient() {
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!actionMenuRowId) return;
+    function onDown(e: MouseEvent) {
+      const el = actionMenuRef.current;
+      if (e.target instanceof Node && el?.contains(e.target)) return;
+      setActionMenuRowId(null);
+      setActionMenuRect(null);
+    }
+    function close() {
+      setActionMenuRowId(null);
+      setActionMenuRect(null);
+    }
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+    };
+  }, [actionMenuRowId]);
 
   useEffect(() => {
     setInsumos(readInsumosFromStore());
@@ -2443,38 +2479,60 @@ export default function FichasTecnicasClient() {
                           className={styles.actionBtn}
                           aria-label={`Ações da receita ${row.receita}`}
                           aria-expanded={actionMenuRowId === row.id}
-                          onClick={() => setActionMenuRowId((prev) => (prev === row.id ? null : row.id))}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActionMenuRowId((prev) => {
+                              const next = prev === row.id ? null : row.id;
+                              if (!next) {
+                                setActionMenuRect(null);
+                                return null;
+                              }
+                              setActionMenuRect(computeActionMenuRect(e.currentTarget.getBoundingClientRect()));
+                              return next;
+                            });
+                          }}
                         >
                           <DotsIcon />
                         </button>
                         {actionMenuRowId === row.id ? (
-                          <div className={styles.actionMenu}>
-                            <button type="button" className={styles.actionMenuItem} onClick={() => openEditModal(row)}>
-                              <span className={styles.actionMenuIcon}>
-                                <EditIcon />
-                              </span>
-                              <span>Editar</span>
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.actionMenuItem}
-                              onClick={() => {
-                                setActionMenuRowId(null);
-                                void downloadFichaTecnicaPdf(buildDetailsRecipeFromRow(row));
-                              }}
-                            >
-                              <span className={styles.actionMenuIcon}>
-                                <PdfIcon />
-                              </span>
-                              <span>Ficha Técnica</span>
-                            </button>
-                            <button type="button" className={styles.actionMenuItem} onClick={() => openDeleteModal(row)}>
-                              <span className={styles.actionMenuIcon}>
-                                <TrashIcon />
-                              </span>
-                              <span>Excluir</span>
-                            </button>
-                          </div>
+                          actionMenuRect
+                            ? createPortal(
+                                <div
+                                  ref={actionMenuRef}
+                                  className={styles.actionMenu}
+                                  style={{ position: "fixed", left: actionMenuRect.left, top: actionMenuRect.top, right: "auto" }}
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  <button type="button" className={styles.actionMenuItem} onClick={() => openEditModal(row)}>
+                                    <span className={styles.actionMenuIcon}>
+                                      <EditIcon />
+                                    </span>
+                                    <span>Editar</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={styles.actionMenuItem}
+                                    onClick={() => {
+                                      setActionMenuRowId(null);
+                                      setActionMenuRect(null);
+                                      void downloadFichaTecnicaPdf(buildDetailsRecipeFromRow(row));
+                                    }}
+                                  >
+                                    <span className={styles.actionMenuIcon}>
+                                      <PdfIcon />
+                                    </span>
+                                    <span>Ficha Técnica</span>
+                                  </button>
+                                  <button type="button" className={styles.actionMenuItem} onClick={() => openDeleteModal(row)}>
+                                    <span className={styles.actionMenuIcon}>
+                                      <TrashIcon />
+                                    </span>
+                                    <span>Excluir</span>
+                                  </button>
+                                </div>,
+                                document.body,
+                              )
+                            : null
                         ) : null}
                       </div>
                     </div>
