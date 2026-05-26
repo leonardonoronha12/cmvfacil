@@ -2011,6 +2011,7 @@ export default function FichasTecnicasClient() {
                               className={styles.detailsInlineInput}
                               value={detailIngredientQty}
                               inputMode="decimal"
+                              pattern="[0-9.,]*"
                               onMouseDown={(e) => {
                                 if (document.activeElement !== e.currentTarget) {
                                   e.preventDefault();
@@ -2098,6 +2099,7 @@ export default function FichasTecnicasClient() {
                                   className={styles.detailsInlineInput}
                                   value={rowEditQty}
                                   inputMode="decimal"
+                                  pattern="[0-9.,]*"
                                   onMouseDown={(e) => {
                                     if (document.activeElement !== e.currentTarget) {
                                       e.preventDefault();
@@ -2164,6 +2166,7 @@ export default function FichasTecnicasClient() {
                               type="text"
                               className={styles.detailsYieldInput}
                               inputMode="decimal"
+                              pattern="[0-9.,]*"
                               value={detailsYieldDraft}
                               onMouseDown={(e) => {
                                 if (document.activeElement !== e.currentTarget) {

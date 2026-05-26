@@ -1812,14 +1812,14 @@ export default function EntradasClient() {
                       <div className={styles.qtyWrap}>
                         <input
                           className={styles.qtyInput}
-                          inputMode="numeric"
-                          pattern="[0-9,]*"
+                          inputMode="decimal"
+                          pattern="[0-9.,]*"
                           value={detailQty}
                           onKeyDown={(e) => {
                             if (e.ctrlKey || e.metaKey || e.altKey) return;
                             const k = e.key;
                             if (k.length !== 1) return;
-                            if (!/[0-9,]/.test(k)) e.preventDefault();
+                            if (!/[0-9,\.]/.test(k)) e.preventDefault();
                           }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;
@@ -1847,14 +1847,14 @@ export default function EntradasClient() {
                         <div className={styles.moneyPrefix}>R$</div>
                         <input
                           className={styles.moneyInput}
-                          inputMode="numeric"
-                          pattern="[0-9,]*"
+                          inputMode="decimal"
+                          pattern="[0-9.,]*"
                           value={detailSubtotal}
                           onKeyDown={(e) => {
                             if (e.ctrlKey || e.metaKey || e.altKey) return;
                             const k = e.key;
                             if (k.length !== 1) return;
-                            if (!/[0-9,]/.test(k)) e.preventDefault();
+                            if (!/[0-9,\.]/.test(k)) e.preventDefault();
                           }}
                           onMouseDown={(e) => {
                             const el = e.currentTarget;

@@ -1019,6 +1019,69 @@
   gap: 8px;
 }
 
+.detailsTableWrap {
+  margin-top: 10px;
+  border-radius: 10px;
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.detailsTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+  color: #2a3133;
+}
+
+.detailsTh,
+.detailsThRight {
+  background: #0b3b3a;
+  color: #ffffff;
+  font-weight: 900;
+  text-align: left;
+  padding: 10px 12px;
+  font-size: 10px;
+}
+
+.detailsThRight {
+  text-align: right;
+}
+
+.detailsTr {
+  background: #ffffff;
+}
+
+.detailsTr:nth-child(even) {
+  background: #f7f8f8;
+}
+
+.detailsTd,
+.detailsTdRight,
+.detailsTdStrong,
+.detailsTdMuted {
+  padding: 10px 12px;
+  border-top: 1px solid #eef1f1;
+  vertical-align: middle;
+}
+
+.detailsTdRight {
+  text-align: right;
+  font-weight: 800;
+  color: #101214;
+}
+
+.detailsTdStrong {
+  font-weight: 800;
+  color: #101214;
+}
+
+.detailsTdMuted {
+  color: #95a8a6;
+  font-weight: 800;
+  text-align: center;
+}
+
 .detailsListRow {
   min-height: 40px;
   border-radius: 6px;

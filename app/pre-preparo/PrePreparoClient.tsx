@@ -588,6 +588,7 @@ export default function PrePreparoClient() {
   const prePreparoLoadErrorShownRef = useRef(false);
   const etiquetasLoadErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [isLoadingPrePreparo, setIsLoadingPrePreparo] = useState(true);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
@@ -912,6 +913,8 @@ export default function PrePreparoClient() {
           prePreparoLoadErrorShownRef.current = true;
           showToast(supabaseLoadErrorMessage(err), "error");
         }
+      } finally {
+        setIsLoadingPrePreparo(false);
       }
     })();
   }, []);
@@ -2464,7 +2467,6 @@ export default function PrePreparoClient() {
                                   <option value="g">g</option>
                                   <option value="L">L</option>
                                   <option value="ml">ml</option>
-                                  <option value="Un">Un</option>
                                   <option value="Und">Und</option>
                                 </select>
                               </>
@@ -2524,19 +2526,34 @@ export default function PrePreparoClient() {
                   ) : (
                     <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
                       <div className={ft.detailsSectionTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
-                      <div className={ft.detailsList}>
-                        {detailsEtiquetas.map((e) => (
-                          <div key={e.id} className={ft.detailsListRow}>
-                            <div className={ft.detailsListItem}>
-                              <div>{`Produção: ${e.dataProducao || "-"}`}</div>
-                              <div>{`Validade: ${e.dataValidade || "-"}`}</div>
-                            </div>
-                            <div className={ft.detailsListQty}>{`${e.quantidade} ${e.unidade}`}</div>
-                            <div className={ft.detailsListCost}>{e.responsavel || "-"}</div>
-                            <div />
-                            <div />
-                          </div>
-                        ))}
+                      <div className={ft.detailsTableWrap}>
+                        <table className={ft.detailsTable}>
+                          <thead>
+                            <tr>
+                              <th className={ft.detailsTh}>Produção</th>
+                              <th className={ft.detailsTh}>Validade</th>
+                              <th className={ft.detailsThRight}>Quantidade</th>
+                              <th className={ft.detailsTh}>Responsável</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detailsEtiquetas.map((e) => (
+                              <tr key={e.id} className={ft.detailsTr}>
+                                <td className={ft.detailsTd}>{e.dataProducao || "-"}</td>
+                                <td className={ft.detailsTd}>{e.dataValidade || "-"}</td>
+                                <td className={ft.detailsTdRight}>{`${e.quantidade} ${e.unidade}`}</td>
+                                <td className={ft.detailsTdStrong}>{e.responsavel || "-"}</td>
+                              </tr>
+                            ))}
+                            {!detailsEtiquetas.length ? (
+                              <tr className={ft.detailsTr}>
+                                <td className={ft.detailsTdMuted} colSpan={4}>
+                                  Nenhuma etiqueta cadastrada.
+                                </td>
+                              </tr>
+                            ) : null}
+                          </tbody>
+                        </table>
                       </div>
                     </div>
                   )}
@@ -2651,7 +2668,35 @@ export default function PrePreparoClient() {
             </section>
 
             <section className={styles.board}>
-              {visible[0] ? (
+              {isLoadingPrePreparo ? (
+                Array.from({ length: 6 }).map((_, idx) => (
+                  <div key={`sk-${idx}`} className={styles.skeletonCard} aria-hidden>
+                    <div className={styles.skeletonTop}>
+                      <div className={styles.skeletonIcon} />
+                      <div className={styles.skeletonMeta}>
+                        <div className={styles.skeletonLineSm} />
+                        <div className={styles.skeletonLineMd} />
+                        <div className={styles.skeletonLineXs} />
+                      </div>
+                      <div className={styles.skeletonDot} />
+                    </div>
+                    <div className={styles.skeletonStats}>
+                      <div className={styles.skeletonStatRow}>
+                        <div className={styles.skeletonLineSm} />
+                        <div className={styles.skeletonLineSm} />
+                      </div>
+                      <div className={styles.skeletonStatRow}>
+                        <div className={styles.skeletonLineSm} />
+                        <div className={styles.skeletonLineSm} />
+                      </div>
+                      <div className={styles.skeletonStatRow}>
+                        <div className={styles.skeletonLineSm} />
+                        <div className={styles.skeletonLineSm} />
+                      </div>
+                    </div>
+                  </div>
+                ))
+              ) : visible[0] ? (
                 visible.map((r) => (
                   <div
                     key={r.id}

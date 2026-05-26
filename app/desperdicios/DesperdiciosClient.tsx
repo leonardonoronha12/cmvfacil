@@ -122,6 +122,20 @@ function formatQtyInput3(value: string) {
   return neg ? `-${out}` : out;
 }
 
+function formatMoneyInput2(value: string) {
+  const raw = String(value ?? "");
+  const cleaned = raw.replace(/[^\d,.-]/g, "");
+  if (!cleaned.trim()) return "";
+  const neg = cleaned.includes("-");
+  const s = cleaned.replace(/-/g, "");
+  const parts = s.split(",");
+  const intPart = (parts[0] ?? "").replace(/\./g, "").replace(/[^\d]/g, "") || "0";
+  const hasComma = s.includes(",");
+  const decPart = hasComma ? (parts[1] ?? "").replace(/[^\d]/g, "").slice(0, 2) : "";
+  const out = hasComma ? `${intPart},${decPart}` : intPart;
+  return neg ? `-${out}` : out;
+}
+
 function formatPtNumber(value: number, decimals = 2) {
   const n = Number.isFinite(value) ? value : 0;
   return n.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
@@ -1756,7 +1770,15 @@ export default function DesperdiciosClient() {
                       <input
                         className={styles.groupInput}
                         value={draftUnitCost}
-                        onChange={(e) => setDraftUnitCost(e.target.value)}
+                        inputMode="decimal"
+                        pattern="[0-9.,-]*"
+                        onKeyDown={(e) => {
+                          if (e.ctrlKey || e.metaKey || e.altKey) return;
+                          const k = e.key;
+                          if (k.length !== 1) return;
+                          if (!/[0-9,.\-]/.test(k)) e.preventDefault();
+                        }}
+                        onChange={(e) => setDraftUnitCost(formatMoneyInput2(e.target.value))}
                         onMouseDown={(e) => {
                           if (document.activeElement !== e.currentTarget) {
                             e.preventDefault();
@@ -1773,6 +1795,11 @@ export default function DesperdiciosClient() {
                           }
                         }}
                         onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        onBlur={() => {
+                          const cents = parseBrlToCents(draftUnitCost);
+                          const formatted = formatBrlFromCents(cents).replace(/^R\$\s?/, "").trim();
+                          if (formatted && formatted !== draftUnitCost) setDraftUnitCost(formatted);
+                        }}
                         placeholder="0,00"
                       />
                     </div>
@@ -1785,6 +1812,8 @@ export default function DesperdiciosClient() {
                         className={styles.groupInput}
                         value={draftQty}
                         onChange={(e) => setDraftQty(formatQtyInput3(e.target.value))}
+                        inputMode="decimal"
+                        pattern="[0-9.,-]*"
                         onMouseDown={(e) => {
                           if (document.activeElement !== e.currentTarget) {
                             e.preventDefault();
