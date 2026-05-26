@@ -2013,18 +2013,21 @@ export default function FichasTecnicasClient() {
                               inputMode="decimal"
                               pattern="[0-9.,]*"
                               onMouseDown={(e) => {
+                                const el = e.currentTarget;
                                 e.preventDefault();
-                                e.currentTarget.focus();
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                el.focus();
+                                requestAnimationFrame(() => el.select());
                               }}
                               onMouseUp={(e) => e.preventDefault()}
                               onTouchStart={(e) => {
+                                const el = e.currentTarget;
                                 e.preventDefault();
-                                e.currentTarget.focus();
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                el.focus();
+                                requestAnimationFrame(() => el.select());
                               }}
                               onClick={(e) => {
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                const el = e.currentTarget;
+                                requestAnimationFrame(() => el.select());
                               }}
                               onSelect={(e) => {
                                 const el = e.currentTarget;
@@ -2114,18 +2117,21 @@ export default function FichasTecnicasClient() {
                                   inputMode="decimal"
                                   pattern="[0-9.,]*"
                                   onMouseDown={(e) => {
+                                    const el = e.currentTarget;
                                     e.preventDefault();
-                                    e.currentTarget.focus();
-                                    requestAnimationFrame(() => e.currentTarget.select());
+                                    el.focus();
+                                    requestAnimationFrame(() => el.select());
                                   }}
                                   onMouseUp={(e) => e.preventDefault()}
                                   onTouchStart={(e) => {
+                                    const el = e.currentTarget;
                                     e.preventDefault();
-                                    e.currentTarget.focus();
-                                    requestAnimationFrame(() => e.currentTarget.select());
+                                    el.focus();
+                                    requestAnimationFrame(() => el.select());
                                   }}
                                   onClick={(e) => {
-                                    requestAnimationFrame(() => e.currentTarget.select());
+                                    const el = e.currentTarget;
+                                    requestAnimationFrame(() => el.select());
                                   }}
                                   onSelect={(e) => {
                                     const el = e.currentTarget;
@@ -2195,18 +2201,21 @@ export default function FichasTecnicasClient() {
                               pattern="[0-9.,]*"
                               value={detailsYieldDraft}
                               onMouseDown={(e) => {
+                                const el = e.currentTarget;
                                 e.preventDefault();
-                                e.currentTarget.focus();
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                el.focus();
+                                requestAnimationFrame(() => el.select());
                               }}
                               onMouseUp={(e) => e.preventDefault()}
                               onTouchStart={(e) => {
+                                const el = e.currentTarget;
                                 e.preventDefault();
-                                e.currentTarget.focus();
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                el.focus();
+                                requestAnimationFrame(() => el.select());
                               }}
                               onClick={(e) => {
-                                requestAnimationFrame(() => e.currentTarget.select());
+                                const el = e.currentTarget;
+                                requestAnimationFrame(() => el.select());
                               }}
                               onSelect={(e) => {
                                 const el = e.currentTarget;

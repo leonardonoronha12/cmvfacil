@@ -1791,7 +1791,8 @@ export default function DesperdiciosClient() {
                           e.currentTarget.select();
                         }}
                         onClick={(e) => {
-                          requestAnimationFrame(() => e.currentTarget.select());
+                          const el = e.currentTarget;
+                          requestAnimationFrame(() => el.select());
                         }}
                         onSelect={(e) => {
                           const el = e.currentTarget;
@@ -1799,7 +1800,10 @@ export default function DesperdiciosClient() {
                             requestAnimationFrame(() => el.select());
                           }
                         }}
-                        onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        onFocus={(e) => {
+                          const el = e.currentTarget;
+                          requestAnimationFrame(() => el.select());
+                        }}
                         onBlur={() => {
                           const cents = parseBrlToCents(draftUnitCost);
                           const formatted = formatBrlFromCents(cents).replace(/^R\$\s?/, "").trim();
@@ -1831,7 +1835,8 @@ export default function DesperdiciosClient() {
                           e.currentTarget.select();
                         }}
                         onClick={(e) => {
-                          requestAnimationFrame(() => e.currentTarget.select());
+                          const el = e.currentTarget;
+                          requestAnimationFrame(() => el.select());
                         }}
                         onSelect={(e) => {
                           const el = e.currentTarget;
@@ -1839,7 +1844,10 @@ export default function DesperdiciosClient() {
                             requestAnimationFrame(() => el.select());
                           }
                         }}
-                        onFocus={(e) => requestAnimationFrame(() => e.currentTarget.select())}
+                        onFocus={(e) => {
+                          const el = e.currentTarget;
+                          requestAnimationFrame(() => el.select());
+                        }}
                         placeholder="0,000"
                       />
                       <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
