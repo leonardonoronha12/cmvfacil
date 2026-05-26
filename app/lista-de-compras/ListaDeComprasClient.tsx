@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import LoadingSpinner from "../components/LoadingSpinner";
+import SystemToast from "../components/SystemToast";
 import dash from "../dashboard/dashboard.module.css";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
@@ -334,6 +335,8 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 
 export default function ListaDeComprasClient() {
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const toastTimerRef = useRef<number | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
@@ -357,6 +360,21 @@ export default function ListaDeComprasClient() {
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
+
+  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
+    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, durationMs);
+  }
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setInsumos(readInsumosFromStore());
@@ -881,6 +899,11 @@ export default function ListaDeComprasClient() {
   async function downloadListaPdf() {
     if (!canExport || exportDisabled) return;
     setIsExportingPdf(true);
+    const previewTab = window.open("", "_blank");
+    if (previewTab) {
+      previewTab.document.title = "Gerando PDF...";
+      previewTab.document.body.innerText = "Gerando PDF da Lista de Compras. Aguarde...";
+    }
     try {
       const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
       const doc = await PDFDocument.create();
@@ -921,7 +944,7 @@ export default function ListaDeComprasClient() {
         const colEstoque = gridW * (0.8 / frTotal);
         const colComprar = gridW * (0.8 / frTotal);
 
-        page.drawRectangle({ x: margin, y: y - 14, width: tableW, height: 20, color: rgb(0, 0.157, 0.176), borderRadius: 6 } as any);
+        page.drawRectangle({ x: margin, y: y - 14, width: tableW, height: 20, color: rgb(0, 0.157, 0.176) });
         page.drawText("✓", { x: margin + 6, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
         page.drawText("Item", { x: margin + checkW + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
         page.drawText("Custo Médio", { x: margin + checkW + colItem + 8, y: y - 10, size: 10, font: fontBold, color: rgb(1, 1, 1) });
@@ -955,7 +978,7 @@ export default function ListaDeComprasClient() {
         const comprar = mode === "fornecedor" ? calc.compraFornecedor : calc.comprarCalculado;
         const comprarLabel = `${formatDecimalUpTo3(comprar)} ${calc.unidadeComprar}`.trim();
 
-        page.drawRectangle({ x: margin + 3, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.88, 0.9, 0.9) } as any);
+        page.drawRectangle({ x: margin + 3, y: y - 2, width: 12, height: 12, borderWidth: 1, borderColor: rgb(0.88, 0.9, 0.9) });
 
         const itemLabel = clipText(row.displayItem, cols.colItem - 12, fontSize);
         const metaLabel = clipText(row.itemMetaLabel, cols.colItem - 12, subFontSize);
@@ -998,7 +1021,23 @@ export default function ListaDeComprasClient() {
 
       const bytes = await doc.save();
       const suffix = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? `-${fornecedorFilter.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}` : "";
-      downloadBlob(new Blob([bytes], { type: "application/pdf" }), `lista-de-compras${suffix}-${effectiveStartDate}-ate-${effectiveEndDate}.pdf`);
+      const filename = `lista-de-compras${suffix}-${effectiveStartDate}-ate-${effectiveEndDate}.pdf`;
+      const blob = new Blob([bytes], { type: "application/pdf" });
+      const url = URL.createObjectURL(blob);
+      if (previewTab) {
+        previewTab.location.href = url;
+      } else {
+        downloadBlob(blob, filename);
+      }
+      showToast("PDF gerado.", "success");
+      window.setTimeout(() => URL.revokeObjectURL(url), 20_000);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err ?? "");
+      showToast(`Não foi possível gerar o PDF (${msg || "erro"}).`, "error", 8000);
+      if (previewTab) {
+        previewTab.document.title = "Erro ao gerar PDF";
+        previewTab.document.body.innerText = "Não foi possível gerar o PDF da Lista de Compras. Tente novamente.";
+      }
     } finally {
       setIsExportingPdf(false);
     }
@@ -1078,6 +1117,7 @@ export default function ListaDeComprasClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="lista-compras" />
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       <main className={dash.content}>
         <div className={styles.pageFrameWide}>
           <section className={styles.headerRow}>
