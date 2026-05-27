@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -310,6 +311,7 @@ function IconCheck() {
 
 export default function InsumosClient() {
   const toastTimerRef = useRef<number | null>(null);
+  const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
@@ -361,6 +363,10 @@ export default function InsumosClient() {
     if (msg.includes("insumos_state") && msg.toLowerCase().includes("does not exist")) return "Tabela insumos_state não existe no Supabase.";
     return `Não foi possível salvar no Supabase (${msg}).`;
   }
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -897,7 +903,8 @@ export default function InsumosClient() {
     for (const r of dataRows) {
       const name = normalizeCategoryName(r.categoria ?? "");
       if (!name || name === "-") continue;
-      map.set(name, (map.get(name) ?? 0) + 1);
+      const key = name.toLowerCase();
+      map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
   }, [dataRows]);
@@ -954,13 +961,13 @@ export default function InsumosClient() {
     }
 
     setCategories((prev) => prev.map((c) => (c === from ? name : c)));
-    setDataRows((prev) => prev.map((r) => (r.categoria === from ? { ...r, categoria: name } : r)));
+    setDataRows((prev) => prev.map((r) => (normalizeCategoryName(r.categoria ?? "").toLowerCase() === fromKey ? { ...r, categoria: name } : r)));
     if (newCategory === from) setNewCategory(name);
     cancelEditCategory();
   }
 
   function openDeleteCategory(name: string) {
-    const count = categoryCounts.get(name) ?? 0;
+    const count = categoryCounts.get(name.toLowerCase()) ?? 0;
     if (count > 0) {
       showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
       return;
@@ -986,7 +993,7 @@ export default function InsumosClient() {
       return;
     }
     setCategories((prev) => prev.filter((c) => c !== name));
-    if (count) setDataRows((prev) => prev.map((r) => (r.categoria === name ? { ...r, categoria: "-" } : r)));
+    if (count) setDataRows((prev) => prev.map((r) => (normalizeCategoryName(r.categoria ?? "").toLowerCase() === name.toLowerCase() ? { ...r, categoria: "-" } : r)));
     if (newCategory === name) setNewCategory("");
     if (editingCategoryOriginal === name) cancelEditCategory();
     cancelDeleteCategory();
@@ -1453,7 +1460,8 @@ export default function InsumosClient() {
           </section>
         </div>
 
-        {isDeleteItemOpen ? (
+        {mounted && isDeleteItemOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteItemOpen(false)}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1481,10 +1489,13 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isBulkDeleteOpen ? (
+        {mounted && isBulkDeleteOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBulkDeleteOpen(false)}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1513,10 +1524,13 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isImportOpen ? (
+        {mounted && isImportOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1579,10 +1593,13 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isNewItemOpen ? (
+        {mounted && isNewItemOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation">
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1681,10 +1698,13 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isEditItemOpen ? (
+        {mounted && isEditItemOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation">
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1784,10 +1804,13 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isCategoriesOpen ? (
+        {mounted && isCategoriesOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsCategoriesOpen(false)}>
             <div className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1843,7 +1866,7 @@ export default function InsumosClient() {
                       ) : (
                         <>
                           <div className={styles.categoryName}>{c}</div>
-                          <div className={styles.categoryCount}>{categoryCounts.get(c) ?? 0}</div>
+                          <div className={styles.categoryCount}>{categoryCounts.get(c.toLowerCase()) ?? 0}</div>
                           <div className={styles.categoryActions}>
                             <button type="button" className={styles.categoryIconBtn} aria-label="Editar categoria" onClick={() => editCategory(c)}>
                               <IconEdit />
@@ -1853,7 +1876,7 @@ export default function InsumosClient() {
                               className={styles.categoryIconBtn}
                               aria-label="Excluir categoria"
                               onClick={() => openDeleteCategory(c)}
-                              title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
+                              title={(categoryCounts.get(c.toLowerCase()) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
                             >
                               <IconTrash />
                             </button>
@@ -1865,10 +1888,13 @@ export default function InsumosClient() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isDeleteCategoryOpen ? (
+        {mounted && isDeleteCategoryOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={cancelDeleteCategory}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -1902,7 +1928,9 @@ export default function InsumosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
         </div>
       </main>

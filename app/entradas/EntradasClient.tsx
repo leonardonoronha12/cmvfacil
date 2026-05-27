@@ -2002,15 +2002,6 @@ export default function EntradasClient() {
                             el.focus();
                             selectAllSoon(el);
                           }}
-                          onClick={(e) => {
-                            selectAllSoon(e.currentTarget);
-                          }}
-                          onSelect={(e) => {
-                            const el = e.currentTarget;
-                            if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                              selectAllSoon(el);
-                            }
-                          }}
                           onFocus={(e) => {
                             const next = formatMaskedPtInput(detailQty, 3);
                             if (next !== detailQty) setDetailQty(next);
@@ -2050,15 +2041,6 @@ export default function EntradasClient() {
                             e.preventDefault();
                             el.focus();
                             selectAllSoon(el);
-                          }}
-                          onClick={(e) => {
-                            selectAllSoon(e.currentTarget);
-                          }}
-                          onSelect={(e) => {
-                            const el = e.currentTarget;
-                            if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                              selectAllSoon(el);
-                            }
                           }}
                           onFocus={(e) => {
                             const next = formatMaskedPtInput(detailSubtotal, 2);

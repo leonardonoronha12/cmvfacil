@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
@@ -157,6 +158,7 @@ function normalizeContagens(list: InventarioContagem[]) {
 const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
+  const [mounted, setMounted] = useState(false);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
@@ -243,7 +245,8 @@ export default function InventarioClient() {
     const q = query.trim().toLowerCase();
     const afterQuery = q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
     if (categoriaFilter !== "Categorias pendentes") {
-      return afterQuery.filter((r) => (itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria") === categoriaFilter);
+      const desired = normCatName(categoriaFilter).toLowerCase();
+      return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
     }
     return afterQuery;
   }, [categoriaFilter, itemCategoryMap, query, selectedContagem?.categorias]);
@@ -254,6 +257,10 @@ export default function InventarioClient() {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
     return [...list].sort((a, b) => collator.compare(a.item, b.item));
   }, [allItems]);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     setInsumosStore(readInsumosFromStore());
@@ -352,25 +359,27 @@ export default function InventarioClient() {
         }
 
         const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
-        const desiredCatSet = new Set<string>();
-        for (const c0 of insumoCategorias) {
-          const name = normCatName(String(c0 ?? ""));
-          if (!name || name === "-") continue;
-          desiredCatSet.add(name);
+        const desiredCatByKey = new Map<string, string>();
+        function addDesiredCategory(nameRaw: string) {
+          const name = normCatName(String(nameRaw ?? ""));
+          if (!name || name === "-") return;
+          const key = name.toLowerCase();
+          if (!desiredCatByKey.has(key)) desiredCatByKey.set(key, name);
         }
+        for (const c0 of insumoCategorias) addDesiredCategory(String(c0 ?? ""));
         for (const ins of insumosStore) {
           const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
           sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
-          desiredCatSet.add(catName);
+          addDesiredCategory(catName);
         }
         for (const prep of prePreparoStore) {
           const catName = normCatName(String(prep.categoria ?? "")) || "Sem categoria";
           sourceById.set(prepInventoryId(String(prep.id)), { item: String(prep.receita ?? ""), unidade: parseUnitFromPrePreparo(prep), categoria: catName });
-          desiredCatSet.add(catName);
+          addDesiredCategory(catName);
         }
 
-        for (const name of existingCatById.values()) desiredCatSet.add(name);
-        if (!desiredCatSet.size) desiredCatSet.add("Sem categoria");
+        for (const name of existingCatById.values()) addDesiredCategory(name);
+        if (!desiredCatByKey.size) desiredCatByKey.set("sem categoria", "Sem categoria");
 
         const prevCatIdByName = new Map<string, string>();
         for (const cat of prevCats) {
@@ -410,7 +419,7 @@ export default function InventarioClient() {
         }
 
         const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
-        const orderedCats = Array.from(desiredCatSet.values()).sort((a, b) => collator.compare(a, b));
+        const orderedCats = Array.from(desiredCatByKey.values()).sort((a, b) => collator.compare(a, b));
         const nextCats: InventarioCategoria[] = orderedCats.map((name) => {
           const key = name.toLowerCase();
           const itens = [...(itemsByCat.get(key) ?? [])].sort((a, b) => collator.compare(a.item, b.item));
@@ -1083,8 +1092,9 @@ export default function InventarioClient() {
           </div>
         </section>
 
-        {isNewOpen ? (
-          <div className={styles.modalOverlay} role="dialog" aria-modal="true">
+        {mounted && isNewOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="dialog" aria-modal="true">
             <div className={styles.modal}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{editingContagemId ? "Editar Data" : "Nova Contagem"}</div>
@@ -1196,20 +1206,23 @@ export default function InventarioClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          </div>,
+              document.body,
+            )
+          : null}
 
-        {isDeleteContagemOpen && deleteContagemRow ? (
-          <div
-            className={styles.modalOverlay}
-            role="dialog"
-            aria-modal="true"
-            onClick={() => {
-              setIsDeleteContagemOpen(false);
-              setDeleteContagemRow(null);
-            }}
-          >
-            <div className={`${styles.modal} ${styles.confirmModal}`} onClick={(e) => e.stopPropagation()}>
+        {mounted && isDeleteContagemOpen && deleteContagemRow
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="dialog"
+                aria-modal="true"
+                onClick={() => {
+                  setIsDeleteContagemOpen(false);
+                  setDeleteContagemRow(null);
+                }}
+              >
+                <div className={`${styles.modal} ${styles.confirmModal}`} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Excluir Contagem?</div>
                 <button
@@ -1250,8 +1263,10 @@ export default function InventarioClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          </div>,
+              document.body,
+            )
+          : null}
         </div>
       </main>
     </div>

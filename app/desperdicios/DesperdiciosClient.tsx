@@ -353,6 +353,7 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 
 export default function DesperdiciosClient() {
   const toastTimerRef = useRef<number | null>(null);
+  const [mounted, setMounted] = useState(false);
   const loadErrorShownRef = useRef(false);
   const saveErrorShownRef = useRef(false);
   const deleteErrorShownRef = useRef(false);
@@ -411,6 +412,10 @@ export default function DesperdiciosClient() {
       toastTimerRef.current = null;
     }, durationMs);
   }
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -1705,7 +1710,8 @@ export default function DesperdiciosClient() {
           )}
         </section>
 
-        {isFormOpen ? (
+        {mounted && isFormOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="dialog" aria-modal="true">
             <div className={styles.modal}>
               <div className={styles.modalHeader}>
@@ -1790,16 +1796,6 @@ export default function DesperdiciosClient() {
                           e.currentTarget.focus();
                           e.currentTarget.select();
                         }}
-                        onClick={(e) => {
-                          const el = e.currentTarget;
-                          requestAnimationFrame(() => el.select());
-                        }}
-                        onSelect={(e) => {
-                          const el = e.currentTarget;
-                          if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                            requestAnimationFrame(() => el.select());
-                          }
-                        }}
                         onFocus={(e) => {
                           const el = e.currentTarget;
                           requestAnimationFrame(() => el.select());
@@ -1833,16 +1829,6 @@ export default function DesperdiciosClient() {
                           e.preventDefault();
                           e.currentTarget.focus();
                           e.currentTarget.select();
-                        }}
-                        onClick={(e) => {
-                          const el = e.currentTarget;
-                          requestAnimationFrame(() => el.select());
-                        }}
-                        onSelect={(e) => {
-                          const el = e.currentTarget;
-                          if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                            requestAnimationFrame(() => el.select());
-                          }
                         }}
                         onFocus={(e) => {
                           const el = e.currentTarget;
@@ -2010,10 +1996,13 @@ export default function DesperdiciosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isMotivosOpen ? (
+        {mounted && isMotivosOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="dialog" aria-modal="true" onClick={() => setIsMotivosOpen(false)}>
             <div className={`${styles.modal} ${styles.motivosModal}`} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -2113,10 +2102,13 @@ export default function DesperdiciosClient() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
-        {isConfirmOpen ? (
+        {mounted && isConfirmOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="dialog" aria-modal="true" onClick={() => setIsConfirmOpen(false)}>
             <div className={`${styles.modal} ${styles.confirmModal}`} onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -2156,7 +2148,9 @@ export default function DesperdiciosClient() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
         </div>
       </main>

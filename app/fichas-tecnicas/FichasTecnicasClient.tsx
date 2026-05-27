@@ -2025,16 +2025,6 @@ export default function FichasTecnicasClient() {
                                 el.focus();
                                 requestAnimationFrame(() => el.select());
                               }}
-                              onClick={(e) => {
-                                const el = e.currentTarget;
-                                requestAnimationFrame(() => el.select());
-                              }}
-                              onSelect={(e) => {
-                                const el = e.currentTarget;
-                                if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                                  requestAnimationFrame(() => el.select());
-                                }
-                              }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailIngredientQty("");
                                 e.currentTarget.select();
@@ -2129,16 +2119,6 @@ export default function FichasTecnicasClient() {
                                     el.focus();
                                     requestAnimationFrame(() => el.select());
                                   }}
-                                  onClick={(e) => {
-                                    const el = e.currentTarget;
-                                    requestAnimationFrame(() => el.select());
-                                  }}
-                                  onSelect={(e) => {
-                                    const el = e.currentTarget;
-                                    if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                                      requestAnimationFrame(() => el.select());
-                                    }
-                                  }}
                                   onFocus={(e) => {
                                     if (/^0,0+$/.test(e.currentTarget.value.trim())) setRowEditQty("");
                                     e.currentTarget.select();
@@ -2212,16 +2192,6 @@ export default function FichasTecnicasClient() {
                                 e.preventDefault();
                                 el.focus();
                                 requestAnimationFrame(() => el.select());
-                              }}
-                              onClick={(e) => {
-                                const el = e.currentTarget;
-                                requestAnimationFrame(() => el.select());
-                              }}
-                              onSelect={(e) => {
-                                const el = e.currentTarget;
-                                if (el.selectionStart !== 0 || el.selectionEnd !== el.value.length) {
-                                  requestAnimationFrame(() => el.select());
-                                }
                               }}
                               onFocus={(e) => {
                                 if (/^0,0+$/.test(e.currentTarget.value.trim())) setDetailsYieldDraft("");
