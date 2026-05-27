@@ -843,8 +843,41 @@ export default function FornecedoresClient() {
 
       const imported = parseSupplierRowsFromTable(table);
       if (!imported.length) throw new Error("Nenhum fornecedor encontrado na planilha.");
-      setRows(imported);
+      const nextInfo: FornecedorInfoMap = {};
+      for (const r of imported) {
+        const fornecedor = String(r.fornecedor ?? "").trim();
+        if (!fornecedor) continue;
+        const key = fornecedor.toUpperCase();
+        const vendedor = String(r.vendedorNome ?? "").trim();
+        const whatsapp = String(r.whatsapp ?? "").trim();
+        const endereco = String(r.endereco ?? "").trim();
+        nextInfo[key] = {
+          fornecedor,
+          vendedor: vendedor && vendedor !== "-" ? vendedor : "",
+          whatsapp: whatsapp && whatsapp !== "-" ? whatsapp : "",
+          endereco: endereco && endereco !== "-" ? endereco : "",
+        };
+      }
+      const keepKeys = new Set(Object.keys(nextInfo));
+      const nextProdutos: FornecedorProdutos = {};
+      for (const [k, list] of Object.entries(produtosMap)) {
+        if (!keepKeys.has(k)) continue;
+        nextProdutos[k] = list;
+      }
+      const nextEq: FornecedorEquivalenciasMap = {};
+      for (const [k, list] of Object.entries(equivalenciasMap)) {
+        if (!keepKeys.has(k)) continue;
+        nextEq[k] = list;
+      }
+
+      writeFornecedorInfoMap(nextInfo);
+      writeFornecedorProdutosMap(nextProdutos);
+      writeFornecedorEquivalenciasMap(nextEq);
+      setInfoMap(nextInfo);
+      setProdutosMap(nextProdutos);
+      setEquivalenciasMap(nextEq);
       setIsImportOpen(false);
+      showToast("Fornecedores importados e salvos.", "success");
     } catch (err) {
       setImportError(err instanceof Error ? err.message : String(err));
     } finally {
