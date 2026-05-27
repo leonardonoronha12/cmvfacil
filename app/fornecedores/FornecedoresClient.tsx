@@ -1202,7 +1202,7 @@ export default function FornecedoresClient() {
 
                 {importError ? <div className={styles.importError}>{importError}</div> : null}
 
-                <a className={styles.downloadLink} href="/fornecedores/fornecedores-modelo.csv" download>
+                <a className={styles.downloadLink} href="/fornecedores/fornecedores-modelo.xlsx" download>
                   Baixar Planilha Modelo
                 </a>
               </div>
