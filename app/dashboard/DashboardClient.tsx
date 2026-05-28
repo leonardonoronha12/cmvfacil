@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import styles from "./dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -848,6 +849,7 @@ export default function DashboardClient() {
   const searchParams = useSearchParams();
   const toastTimerRef = useRef<number | null>(null);
   const [userScopePrefix, setUserScopePrefix] = useState<string>("");
+  const [mounted, setMounted] = useState(false);
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
@@ -944,6 +946,10 @@ export default function DashboardClient() {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -3314,7 +3320,8 @@ export default function DashboardClient() {
           </div>
         ) : null}
 
-        {isVariacaoOpen ? (
+        {mounted && isVariacaoOpen ? (
+          createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVariacaoOpen(false)}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
@@ -3373,7 +3380,9 @@ export default function DashboardClient() {
                 </div>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
+          )
         ) : null}
 
         <div style={{ height: 72, width: "100%" }} />
