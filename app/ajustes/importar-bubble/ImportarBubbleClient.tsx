@@ -254,6 +254,7 @@ export default function ImportarBubbleClient() {
 
   const hasAny = uploads.length > 0;
   const hasPending = uploads.some((u) => u.status === "pending" || u.status === "error");
+  const canImport = !isUploading && !isPreparing && !hasPending;
 
   return (
     <div className={dash.dashboard}>
@@ -310,6 +311,15 @@ export default function ImportarBubbleClient() {
                 />
               </div>
 
+              <div className={styles.actions}>
+                <button type="button" className={styles.btn} onClick={analyzeServerFiles} disabled={isAnalyzing}>
+                  {isAnalyzing ? "Analisando..." : "Ver arquivos no servidor"}
+                </button>
+                <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runImport} disabled={!canImport || isImporting}>
+                  {isImporting ? "Importando..." : "Importar para o sistema"}
+                </button>
+              </div>
+
               {hasAny ? (
                 <>
                   <div className={styles.actions}>
@@ -318,12 +328,6 @@ export default function ImportarBubbleClient() {
                     </button>
                     <button type="button" className={styles.btn} onClick={copyPaths} disabled={!uploadedPathsText}>
                       Copiar caminhos enviados
-                    </button>
-                    <button type="button" className={styles.btn} onClick={analyzeServerFiles} disabled={isAnalyzing}>
-                      {isAnalyzing ? "Analisando..." : "Ver arquivos no servidor"}
-                    </button>
-                    <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runImport} disabled={isImporting}>
-                      {isImporting ? "Importando..." : "Importar para o sistema"}
                     </button>
                   </div>
 
