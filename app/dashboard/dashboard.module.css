@@ -1463,6 +1463,18 @@ select.topInput option:checked {
   overflow: hidden;
 }
 
+.variacaoModal {
+  max-height: min(84vh, 720px);
+  display: flex;
+  flex-direction: column;
+}
+
+.variacaoModal .modalBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 .itemEditModal {
   max-width: 604px;
   border-radius: 18px;

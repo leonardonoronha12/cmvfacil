@@ -3323,7 +3323,7 @@ export default function DashboardClient() {
         {mounted && isVariacaoOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVariacaoOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className={`${styles.modal} ${styles.variacaoModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Variação de Preço dos Insumos</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsVariacaoOpen(false)}>
