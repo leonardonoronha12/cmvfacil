@@ -241,9 +241,43 @@ export default function ImportarBubbleClient() {
     setIsImporting(true);
     setImportResult(null);
     try {
-      const res = await fetch("/api/bubble-import/import", { method: "POST" });
-      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null;
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      const res = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const text = await res.text();
+      const json = ((): { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })();
+      if (!res.ok || !json?.ok) throw new Error(json?.error || text || `failed_${res.status}`);
+      setImportResult(JSON.stringify(json.summary ?? {}, null, 2));
+    } catch (err) {
+      setImportResult(safeJsonMessage(err));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
+  async function runImportComplementos() {
+    if (isImporting) return;
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const res = await fetch("/api/bubble-import/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ only: ["fichas_tecnicas", "pre_preparo", "inventario"], includeUnknown: true }),
+      });
+      const text = await res.text();
+      const json = ((): { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null => {
+        try {
+          return JSON.parse(text);
+        } catch {
+          return null;
+        }
+      })();
+      if (!res.ok || !json?.ok) throw new Error(json?.error || text || `failed_${res.status}`);
       setImportResult(JSON.stringify(json.summary ?? {}, null, 2));
     } catch (err) {
       setImportResult(safeJsonMessage(err));
@@ -315,8 +349,11 @@ export default function ImportarBubbleClient() {
                 <button type="button" className={styles.btn} onClick={analyzeServerFiles} disabled={isAnalyzing}>
                   {isAnalyzing ? "Analisando..." : "Ver arquivos no servidor"}
                 </button>
+                <button type="button" className={styles.btn} onClick={runImportComplementos} disabled={!canImport || isImporting}>
+                  {isImporting ? "Importando..." : "Importar complementos"}
+                </button>
                 <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runImport} disabled={!canImport || isImporting}>
-                  {isImporting ? "Importando..." : "Importar para o sistema"}
+                  {isImporting ? "Importando..." : "Importar tudo"}
                 </button>
               </div>
 

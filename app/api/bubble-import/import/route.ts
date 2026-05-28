@@ -173,154 +173,191 @@ async function upsertInBatches<T extends Record<string, unknown>>(supabase: Retu
 }
 
 export async function POST(req: NextRequest) {
-  const { userId } = getUserIdFromRequest(req);
-  if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-  if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
-
-  let supabase: ReturnType<typeof getSupabaseAdmin>;
   try {
-    supabase = getSupabaseAdmin();
-  } catch {
-    return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
-  }
+    const body = (await req.json().catch(() => null)) as unknown;
+    const only = Array.isArray((body as any)?.only) ? ((body as any).only as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : null;
+    const includeUnknown = typeof (body as any)?.includeUnknown === "boolean" ? Boolean((body as any).includeUnknown) : true;
 
-  const bucket = "bubble-imports";
-  await ensureBucket(supabase, bucket);
-  const userPrefix = `user:${userId}`;
+    const enabled = (k: string) => !only || only.includes(k);
+    const enableInsumos = enabled("insumos");
+    const enableFornecedores = enabled("fornecedores");
+    const enableDesperdicios = enabled("desperdicios");
+    const enableEntradas = enabled("entradas");
+    const enablePrePreparo = enabled("pre_preparo");
+    const enableFichas = enabled("fichas_tecnicas");
+    const enableInventario = enabled("inventario");
 
-  const files = await listAllPaths(supabase, bucket, userPrefix);
-  const groups = groupParts(files);
-  const byKind = new Map<string, { base: string; parts: { path: string; name: string; part: number }[] }[]>();
-  for (const g of groups) {
-    const kind = classifyFile(g.base);
-    const list = byKind.get(kind) ?? [];
-    list.push(g);
-    byKind.set(kind, list);
-  }
+    let stage = "init";
 
-  const infoMap: Record<string, any> = {};
-  const produtosMap: Record<string, string[]> = {};
-  const equivalenciasMap: Record<string, any[]> = {};
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
-  const insumosByKey = new Map<string, any>();
-  const custoByItemKey = new Map<string, string>();
+    let supabase: ReturnType<typeof getSupabaseAdmin>;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch {
+      return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    }
 
-  const prefix = `user:${userId}:`;
+    stage = "list_files";
+    const bucket = "bubble-imports";
+    await ensureBucket(supabase, bucket);
+    const userPrefix = `user:${userId}`;
 
-  function handleCustoMedio(row: CsvObjectRow) {
-    const item = guessItemLabel(row);
-    const itemKey = normalizeItemName(item);
-    if (!itemKey) return;
-    const custo =
-      pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "preco_unitario", "custo_unitario", "valor_unitario"]) ||
-      pickKeyLike(row, ["custo", "preco", "valor"]);
-    const num = parsePtNumber(custo);
-    if (!num) return;
-    custoByItemKey.set(itemKey, formatMoneyBRL(num));
-  }
+    const files = await listAllPaths(supabase, bucket, userPrefix);
+    const groups = groupParts(files);
+    const byKind = new Map<string, { base: string; parts: { path: string; name: string; part: number }[] }[]>();
+    for (const g of groups) {
+      const kind = classifyFile(g.base);
+      const list = byKind.get(kind) ?? [];
+      list.push(g);
+      byKind.set(kind, list);
+    }
 
-  function handleInsumo(row: CsvObjectRow) {
-    const item = guessItemLabel(row);
-    const itemKey = normalizeItemName(item);
-    if (!itemKey) return;
-    const bubbleId = pickBubbleId(row);
-    const medida =
-      pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) || pickKeyLike(row, ["medida", "unidade"]) || "Und";
-    const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || pickKeyLike(row, ["categoria", "grupo"]);
-    const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]) || pickKeyLike(row, ["especific", "descr", "obs"]);
-    const ocultarRaw = pickFirst(row, ["ocultar", "hidden", "removido", "apagado"]);
-    const ocultar = ocultarRaw ? ocultarRaw.toLowerCase() === "sim" || ocultarRaw.toLowerCase() === "true" || ocultarRaw === "1" : undefined;
-    const custo =
-      pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]) ||
-      pickKeyLike(row, ["custo", "preco", "valor"]);
-    const custoNum = parsePtNumber(custo);
-    const custoMedio = custoNum ? formatMoneyBRL(custoNum) : custoByItemKey.get(itemKey) ?? "";
-    const prev = insumosByKey.get(itemKey) ?? {};
-    insumosByKey.set(itemKey, {
-      id: bubbleId || prev.id || String(insumosByKey.size + 1),
-      item: item.trim(),
-      medida: medida.trim() || prev.medida || "Und",
-      custoMedio: custoMedio || prev.custoMedio || undefined,
-      categoria: categoria.trim() || prev.categoria || undefined,
-      especificacao: especificacao.trim() || prev.especificacao || undefined,
-      ocultar: typeof ocultar === "boolean" ? ocultar : prev.ocultar,
-    });
-  }
+    const enabledKinds = new Set<string>();
+    if (enableInsumos) ["custo_medio", "ingredientes", "itens"].forEach((k) => enabledKinds.add(k));
+    if (enableFornecedores) ["fornecedores", "itens_fornecedores", "equivalencias"].forEach((k) => enabledKinds.add(k));
+    if (enableDesperdicios) enabledKinds.add("desperdicios");
+    if (enableEntradas) ["itens_notas", "notas_fiscais"].forEach((k) => enabledKinds.add(k));
+    if (enablePrePreparo) enabledKinds.add("pre_preparo");
+    if (enableFichas) enabledKinds.add("fichas_tecnicas");
+    if (enableInventario) enabledKinds.add("inventario");
+    if (includeUnknown) enabledKinds.add("unknown");
 
-  function handleFornecedorInfo(row: CsvObjectRow) {
-    const fornecedor =
-      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
-    const key = normalizeFornecedorKey(fornecedor);
-    if (!key) return;
-    infoMap[key] = {
-      fornecedor: fornecedor.trim() || fornecedor,
-      vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
-      whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
-      endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
-    };
-  }
+    const infoMap: Record<string, any> = {};
+    const produtosMap: Record<string, string[]> = {};
+    const equivalenciasMap: Record<string, any[]> = {};
 
-  function handleFornecedorProduto(row: CsvObjectRow) {
-    const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
-    const item =
-      pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
-      pickKeyLike(row, ["produto", "item", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
-      guessItemLabel(row);
-    const key = normalizeFornecedorKey(fornecedor);
-    if (!key || !item.trim()) return;
-    const list = produtosMap[key] ?? [];
-    list.push(item.trim());
-    produtosMap[key] = list;
-  }
+    const insumosByKey = new Map<string, any>();
+    const custoByItemKey = new Map<string, string>();
 
-  function handleEquivalencia(row: CsvObjectRow) {
-    const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
-    const key = normalizeFornecedorKey(fornecedor);
-    if (!key) return;
-    const nomeNaNota = pickFirst(row, ["nome_na_nota", "nomeNaNota", "nome", "item", "produto"]) || pickKeyLike(row, ["nome", "item", "produto"], { excludeParts: ["fornecedor", "empresa"] });
-    const insumoEquivalente = pickFirst(row, ["insumo_equivalente", "insumoEquivalente", "equivalente", "insumo"]) || pickKeyLike(row, ["insumo", "equival"]);
-    if (!nomeNaNota || !insumoEquivalente) return;
-    const unidadeNaNota = pickFirst(row, ["unidade_na_nota", "unidadeNaNota", "unidade", "medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
-    const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalenteQuantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
-    const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteUnidade", "unidade_equivalente", "unidade"]) || "";
-    const bubbleId = pickBubbleId(row) || String(Date.now());
-    const list = equivalenciasMap[key] ?? [];
-    list.push({
-      id: bubbleId,
-      nomeNaNota: nomeNaNota.trim(),
-      unidadeNaNota: unidadeNaNota.trim() || "Und",
-      insumoEquivalente: insumoEquivalente.trim(),
-      equivalenteQuantidade: equivalenteQuantidade.trim(),
-      equivalenteUnidade: equivalenteUnidade.trim(),
-    });
-    equivalenciasMap[key] = list;
-  }
+    const prefix = `user:${userId}:`;
 
-  const notaItemsByNotaKey = new Map<string, any[]>();
-  function handleNotaItem(row: CsvObjectRow) {
+    function handleCustoMedio(row: CsvObjectRow) {
+      if (!enableInsumos) return;
+      const item = guessItemLabel(row);
+      const itemKey = normalizeItemName(item);
+      if (!itemKey) return;
+      const custo =
+        pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "preco_unitario", "custo_unitario", "valor_unitario"]) ||
+        pickKeyLike(row, ["custo", "preco", "valor"]);
+      const num = parsePtNumber(custo);
+      if (!num) return;
+      custoByItemKey.set(itemKey, formatMoneyBRL(num));
+    }
+
+    function handleInsumo(row: CsvObjectRow) {
+      if (!enableInsumos) return;
+      const item = guessItemLabel(row);
+      const itemKey = normalizeItemName(item);
+      if (!itemKey) return;
+      const bubbleId = pickBubbleId(row);
+      const medida =
+        pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) ||
+        pickKeyLike(row, ["medida", "unidade"]) ||
+        "Und";
+      const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || pickKeyLike(row, ["categoria", "grupo"]);
+      const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]) || pickKeyLike(row, ["especific", "descr", "obs"]);
+      const ocultarRaw = pickFirst(row, ["ocultar", "hidden", "removido", "apagado"]);
+      const ocultar = ocultarRaw ? ocultarRaw.toLowerCase() === "sim" || ocultarRaw.toLowerCase() === "true" || ocultarRaw === "1" : undefined;
+      const custo =
+        pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]) ||
+        pickKeyLike(row, ["custo", "preco", "valor"]);
+      const custoNum = parsePtNumber(custo);
+      const custoMedio = custoNum ? formatMoneyBRL(custoNum) : custoByItemKey.get(itemKey) ?? "";
+      const prev = insumosByKey.get(itemKey) ?? {};
+      insumosByKey.set(itemKey, {
+        id: bubbleId || prev.id || String(insumosByKey.size + 1),
+        item: item.trim(),
+        medida: medida.trim() || prev.medida || "Und",
+        custoMedio: custoMedio || prev.custoMedio || undefined,
+        categoria: categoria.trim() || prev.categoria || undefined,
+        especificacao: especificacao.trim() || prev.especificacao || undefined,
+        ocultar: typeof ocultar === "boolean" ? ocultar : prev.ocultar,
+      });
+    }
+
+    function handleFornecedorInfo(row: CsvObjectRow) {
+      if (!enableFornecedores) return;
+      const fornecedor =
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+      const key = normalizeFornecedorKey(fornecedor);
+      if (!key) return;
+      infoMap[key] = {
+        fornecedor: fornecedor.trim() || fornecedor,
+        vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
+        whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
+        endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
+      };
+    }
+
+    function handleFornecedorProduto(row: CsvObjectRow) {
+      if (!enableFornecedores) return;
+      const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+      const item =
+        pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
+        pickKeyLike(row, ["produto", "item", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
+        guessItemLabel(row);
+      const key = normalizeFornecedorKey(fornecedor);
+      if (!key || !item.trim()) return;
+      const list = produtosMap[key] ?? [];
+      list.push(item.trim());
+      produtosMap[key] = list;
+    }
+
+    function handleEquivalencia(row: CsvObjectRow) {
+      if (!enableFornecedores) return;
+      const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+      const key = normalizeFornecedorKey(fornecedor);
+      if (!key) return;
+      const nomeNaNota =
+        pickFirst(row, ["nome_na_nota", "nomeNaNota", "nome", "item", "produto"]) || pickKeyLike(row, ["nome", "item", "produto"], { excludeParts: ["fornecedor", "empresa"] });
+      const insumoEquivalente = pickFirst(row, ["insumo_equivalente", "insumoEquivalente", "equivalente", "insumo"]) || pickKeyLike(row, ["insumo", "equival"]);
+      if (!nomeNaNota || !insumoEquivalente) return;
+      const unidadeNaNota = pickFirst(row, ["unidade_na_nota", "unidadeNaNota", "unidade", "medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
+      const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalenteQuantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
+      const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteUnidade", "unidade_equivalente", "unidade"]) || "";
+      const bubbleId = pickBubbleId(row) || String(Date.now());
+      const list = equivalenciasMap[key] ?? [];
+      list.push({
+        id: bubbleId,
+        nomeNaNota: nomeNaNota.trim(),
+        unidadeNaNota: unidadeNaNota.trim() || "Und",
+        insumoEquivalente: insumoEquivalente.trim(),
+        equivalenteQuantidade: equivalenteQuantidade.trim(),
+        equivalenteUnidade: equivalenteUnidade.trim(),
+      });
+      equivalenciasMap[key] = list;
+    }
+
+    const notaItemsByNotaKey = new Map<string, any[]>();
+    function handleNotaItem(row: CsvObjectRow) {
+      if (!enableEntradas) return;
     const notaId =
-      pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
-    if (!notaId) return;
-    const nome = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item"]) || guessItemLabel(row);
-    if (!nome) return;
-    const bubbleId = pickBubbleId(row) || String(Date.now());
-    const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
-    const subtotal = pickFirst(row, ["subtotal_label", "subtotal", "total", "valor"]) || pickKeyLike(row, ["subtotal", "total", "valor"]);
-    const unit =
-      pickFirst(row, ["custo_unitario_label", "custo_unitario", "preco_unitario", "valor_unitario"]) || pickKeyLike(row, ["custo", "preco", "valor"]);
-    const list = notaItemsByNotaKey.get(notaId) ?? [];
-    list.push({
-      id: `${prefix}nota_item:${bubbleId}`,
-      nome: nome.trim(),
-      quantidadeLabel: qtd.trim(),
-      subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",
-      custoUnitarioLabel: unit ? (parsePtNumber(unit) ? formatMoneyBRL(parsePtNumber(unit)) : unit.trim()) : "",
-    });
-    notaItemsByNotaKey.set(notaId, list);
-  }
+        pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
+      if (!notaId) return;
+      const nome = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item"]) || guessItemLabel(row);
+      if (!nome) return;
+      const bubbleId = pickBubbleId(row) || String(Date.now());
+      const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
+      const subtotal = pickFirst(row, ["subtotal_label", "subtotal", "total", "valor"]) || pickKeyLike(row, ["subtotal", "total", "valor"]);
+      const unit =
+        pickFirst(row, ["custo_unitario_label", "custo_unitario", "preco_unitario", "valor_unitario"]) || pickKeyLike(row, ["custo", "preco", "valor"]);
+      const list = notaItemsByNotaKey.get(notaId) ?? [];
+      list.push({
+        id: `${prefix}nota_item:${bubbleId}`,
+        nome: nome.trim(),
+        quantidadeLabel: qtd.trim(),
+        subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",
+        custoUnitarioLabel: unit ? (parsePtNumber(unit) ? formatMoneyBRL(parsePtNumber(unit)) : unit.trim()) : "",
+      });
+      notaItemsByNotaKey.set(notaId, list);
+    }
 
-  const entradasRows: any[] = [];
-  function handleNotaFiscal(row: CsvObjectRow) {
+    const entradasRows: any[] = [];
+    function handleNotaFiscal(row: CsvObjectRow) {
+      if (!enableEntradas) return;
     const fornecedor =
       pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
     if (!fornecedor) return;
@@ -349,8 +386,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const desperdiciosRows: any[] = [];
-  function handleDesperdicio(row: CsvObjectRow) {
+    const desperdiciosRows: any[] = [];
+    function handleDesperdicio(row: CsvObjectRow) {
+      if (!enableDesperdicios) return;
     const item = guessItemLabel(row);
     if (!item) return;
     const bubbleId = pickBubbleId(row) || String(desperdiciosRows.length + 1);
@@ -369,8 +407,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const prePreparoRows: any[] = [];
-  function handlePrePreparo(row: CsvObjectRow) {
+    const prePreparoRows: any[] = [];
+    function handlePrePreparo(row: CsvObjectRow) {
+      if (!enablePrePreparo) return;
     const receita =
       pickFirst(row, ["receita", "pre_preparo", "prepreparo", "nome", "recipe"]) ||
       pickKeyLike(row, ["receita", "pre", "preparo", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
@@ -405,8 +444,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const fichasRows: any[] = [];
-  function handleFicha(row: CsvObjectRow) {
+    const fichasRows: any[] = [];
+    function handleFicha(row: CsvObjectRow) {
+      if (!enableFichas) return;
     const receita =
       pickFirst(row, ["receita", "nome", "recipe"]) ||
       pickKeyLike(row, ["receita", "recipe", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
@@ -455,11 +495,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  type InvItem = { id: string; item: string; unidade: string; estoqueFinal: string; removido?: boolean };
-  type InvCat = { id: string; nome: string; status: "pendente" | "concluida"; itens: InvItem[] };
-  const inventarioMap = new Map<string, { id: string; data: string; cats: Map<string, { id: string; nome: string; itens: Map<string, InvItem> }> }>();
+    type InvItem = { id: string; item: string; unidade: string; estoqueFinal: string; removido?: boolean };
+    type InvCat = { id: string; nome: string; status: "pendente" | "concluida"; itens: InvItem[] };
+    const inventarioMap = new Map<string, { id: string; data: string; cats: Map<string, { id: string; nome: string; itens: Map<string, InvItem> }> }>();
 
-  function handleInventarioFlat(row: CsvObjectRow) {
+    function handleInventarioFlat(row: CsvObjectRow) {
+      if (!enableInventario) return;
     const dateRaw = pickFirst(row, ["data", "date", "data_inventario", "data_contagem"]) || pickKeyLike(row, ["data", "date"]);
     const d = parseDateLoose(dateRaw);
     if (!d) return;
@@ -490,7 +531,7 @@ export async function POST(req: NextRequest) {
     inventarioMap.set(invKey, inv);
   }
 
-  function detectUnknownKind(row: CsvObjectRow) {
+    function detectUnknownKind(row: CsvObjectRow) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
     if (has("valor_nota") || (has("fornecedor") && (has("numero") || has("nf")) && has("data"))) return "notas_fiscais";
@@ -506,133 +547,147 @@ export async function POST(req: NextRequest) {
     return "unknown";
   }
 
-  const unknownGroups = byKind.get("unknown") ?? [];
-  for (const g of unknownGroups) {
-    for (const part of g.parts) {
-      const text = await downloadText(supabase, bucket, part.path);
-      const parsed = parseBubbleCsvToObjects(text);
-      const sample = parsed.rows[0];
-      const kind = sample ? detectUnknownKind(sample) : "unknown";
-      for (const r of parsed.rows) {
-        if (kind === "notas_fiscais") handleNotaFiscal(r);
-        else if (kind === "itens_notas") handleNotaItem(r);
-        else if (kind === "fornecedores") handleFornecedorInfo(r);
-        else if (kind === "itens_fornecedores") handleFornecedorProduto(r);
-        else if (kind === "equivalencias") handleEquivalencia(r);
-        else if (kind === "desperdicios") handleDesperdicio(r);
-        else if (kind === "pre_preparo") handlePrePreparo(r);
-        else if (kind === "fichas_tecnicas") handleFicha(r);
-        else if (kind === "inventario_flat") handleInventarioFlat(r);
-        else if (kind === "itens") handleInsumo(r);
+    stage = "process_unknown";
+    if (includeUnknown && enabledKinds.has("unknown")) {
+      const unknownGroups = byKind.get("unknown") ?? [];
+      for (const g of unknownGroups) {
+        for (const part of g.parts) {
+          const text = await downloadText(supabase, bucket, part.path);
+          const parsed = parseBubbleCsvToObjects(text);
+          const sample = parsed.rows[0];
+          const kind = sample ? detectUnknownKind(sample) : "unknown";
+          for (const r of parsed.rows) {
+            if (kind === "notas_fiscais" && enableEntradas) handleNotaFiscal(r);
+            else if (kind === "itens_notas" && enableEntradas) handleNotaItem(r);
+            else if (kind === "fornecedores" && enableFornecedores) handleFornecedorInfo(r);
+            else if (kind === "itens_fornecedores" && enableFornecedores) handleFornecedorProduto(r);
+            else if (kind === "equivalencias" && enableFornecedores) handleEquivalencia(r);
+            else if (kind === "desperdicios" && enableDesperdicios) handleDesperdicio(r);
+            else if (kind === "pre_preparo" && enablePrePreparo) handlePrePreparo(r);
+            else if (kind === "fichas_tecnicas" && enableFichas) handleFicha(r);
+            else if (kind === "inventario_flat" && enableInventario) handleInventarioFlat(r);
+            else if (kind === "itens" && enableInsumos) handleInsumo(r);
+          }
+        }
       }
     }
-  }
 
-  async function processCsvGroups(kind: string, onRow: (row: CsvObjectRow, fileName: string) => void) {
-    const list = byKind.get(kind) ?? [];
-    for (const g of list) {
-      for (const part of g.parts) {
-        const text = await downloadText(supabase, bucket, part.path);
-        const parsed = parseBubbleCsvToObjects(text);
-        for (const r of parsed.rows) onRow(r, part.name);
+    async function processCsvGroups(kind: string, onRow: (row: CsvObjectRow, fileName: string) => void) {
+      if (!enabledKinds.has(kind)) return;
+      const list = byKind.get(kind) ?? [];
+      for (const g of list) {
+        for (const part of g.parts) {
+          const text = await downloadText(supabase, bucket, part.path);
+          const parsed = parseBubbleCsvToObjects(text);
+          for (const r of parsed.rows) onRow(r, part.name);
+        }
       }
     }
-  }
 
-  await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
+    stage = "process_files";
+    await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
+    await processCsvGroups("ingredientes", (row) => handleInsumo(row));
+    await processCsvGroups("itens", (row) => handleInsumo(row));
+    await processCsvGroups("fornecedores", (row) => handleFornecedorInfo(row));
+    await processCsvGroups("itens_fornecedores", (row) => handleFornecedorProduto(row));
+    await processCsvGroups("equivalencias", (row) => handleEquivalencia(row));
+    await processCsvGroups("pre_preparo", (row) => handlePrePreparo(row));
+    await processCsvGroups("fichas_tecnicas", (row) => handleFicha(row));
 
-  await processCsvGroups("ingredientes", (row) => handleInsumo(row));
-
-  await processCsvGroups("itens", (row) => handleInsumo(row));
-
-  await processCsvGroups("fornecedores", (row) => handleFornecedorInfo(row));
-
-  await processCsvGroups("itens_fornecedores", (row) => handleFornecedorProduto(row));
-
-  await processCsvGroups("equivalencias", (row) => handleEquivalencia(row));
-
-  await processCsvGroups("pre_preparo", (row) => handlePrePreparo(row));
-
-  await processCsvGroups("fichas_tecnicas", (row) => handleFicha(row));
-
-  for (const k of Object.keys(produtosMap)) {
-    produtosMap[k] = Array.from(new Set(produtosMap[k].filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
-  }
-
-  const insumosRows = Array.from(insumosByKey.values()).filter((r) => r && r.item);
-  const insumoCategories = Array.from(new Set(insumosRows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean)));
-
-  const stateId = `user:${userId}`;
-  const { error: insErr } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories: insumoCategories } } as any, { onConflict: "id" });
-  if (insErr) return json({ ok: false, error: `insumos_state:${insErr.message}` }, { status: 500 });
-
-  const { error: fornErr } = await supabase.from("fornecedores_state").upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
-  if (fornErr) return json({ ok: false, error: `fornecedores_state:${fornErr.message}` }, { status: 500 });
-
-  if (prePreparoRows.length) {
-    const { error: ppErr } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: prePreparoRows } as any, { onConflict: "id" });
-    if (ppErr) return json({ ok: false, error: `pre_preparo_state:${ppErr.message}` }, { status: 500 });
-  }
-
-  if (fichasRows.length) {
-    const { error: ftErr } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: fichasRows } as any, { onConflict: "id" });
-    if (ftErr) return json({ ok: false, error: `fichas_tecnicas_state:${ftErr.message}` }, { status: 500 });
-  }
-
-  const inventarioRows: any[] = [];
-  await processCsvGroups("inventario", (row) => {
-    const dataLabel = buildDateLabel(pickFirst(row, ["data", "date", "data_inventario"]));
-    const bubbleId = pickBubbleId(row) || String(inventarioRows.length + 1);
-    const categoriasRaw = pickFirst(row, ["categorias", "categories", "payload"]);
-    let categorias: any[] = [];
-    if (categoriasRaw && (categoriasRaw.trim().startsWith("[") || categoriasRaw.trim().startsWith("{"))) {
-      try {
-        const parsed = JSON.parse(categoriasRaw);
-        categorias = Array.isArray(parsed) ? parsed : [];
-      } catch {}
+    for (const k of Object.keys(produtosMap)) {
+      produtosMap[k] = Array.from(new Set(produtosMap[k].filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
     }
-    if (dataLabel && categorias.length) {
-      inventarioRows.push({ id: `${prefix}inventario:${bubbleId}`, data: dataLabel, categorias });
-      return;
+
+    stage = "save_supabase";
+    const stateId = `user:${userId}`;
+
+    const insumosRows = Array.from(insumosByKey.values()).filter((r) => r && r.item);
+    const insumoCategories = Array.from(new Set(insumosRows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean)));
+    if (enableInsumos) {
+      const { error: insErr } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories: insumoCategories } } as any, { onConflict: "id" });
+      if (insErr) return json({ ok: false, error: `insumos_state:${insErr.message}`, stage }, { status: 500 });
     }
-    handleInventarioFlat(row);
-  });
 
-  const inventarioRowsFromFlat = Array.from(inventarioMap.values()).map((inv) => {
-    const categorias: InvCat[] = Array.from(inv.cats.values()).map((c) => ({
-      id: c.id,
-      nome: c.nome,
-      status: "concluida",
-      itens: Array.from(c.itens.values()),
-    }));
-    return { id: inv.id, data: inv.data, categorias };
-  });
-  const inventarioInserted = inventarioRows.length || inventarioRowsFromFlat.length ? await upsertInBatches(supabase, "inventario", [...inventarioRows, ...inventarioRowsFromFlat], 100) : 0;
+    if (enableFornecedores) {
+      const { error: fornErr } = await supabase
+        .from("fornecedores_state")
+        .upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
+      if (fornErr) return json({ ok: false, error: `fornecedores_state:${fornErr.message}`, stage }, { status: 500 });
+    }
 
-  await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
+    if (enablePrePreparo && prePreparoRows.length) {
+      const { error: ppErr } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: prePreparoRows } as any, { onConflict: "id" });
+      if (ppErr) return json({ ok: false, error: `pre_preparo_state:${ppErr.message}`, stage }, { status: 500 });
+    }
 
-  const desperdiciosInserted = desperdiciosRows.length ? await upsertInBatches(supabase, "desperdicios", desperdiciosRows, 500) : 0;
+    if (enableFichas && fichasRows.length) {
+      const { error: ftErr } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: fichasRows } as any, { onConflict: "id" });
+      if (ftErr) return json({ ok: false, error: `fichas_tecnicas_state:${ftErr.message}`, stage }, { status: 500 });
+    }
 
-  await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
-  await processCsvGroups("notas_fiscais", (row) => handleNotaFiscal(row));
+    const inventarioRows: any[] = [];
+    if (enableInventario) {
+      await processCsvGroups("inventario", (row) => {
+        const dataLabel = buildDateLabel(pickFirst(row, ["data", "date", "data_inventario"]));
+        const bubbleId = pickBubbleId(row) || String(inventarioRows.length + 1);
+        const categoriasRaw = pickFirst(row, ["categorias", "categories", "payload"]);
+        let categorias: any[] = [];
+        if (categoriasRaw && (categoriasRaw.trim().startsWith("[") || categoriasRaw.trim().startsWith("{"))) {
+          try {
+            const parsed = JSON.parse(categoriasRaw);
+            categorias = Array.isArray(parsed) ? parsed : [];
+          } catch {}
+        }
+        if (dataLabel && categorias.length) {
+          inventarioRows.push({ id: `${prefix}inventario:${bubbleId}`, data: dataLabel, categorias });
+          return;
+        }
+        handleInventarioFlat(row);
+      });
+    }
 
-  const entradasInserted = entradasRows.length ? await upsertInBatches(supabase, "entradas", entradasRows, 300) : 0;
+    const inventarioRowsFromFlat = enableInventario
+      ? Array.from(inventarioMap.values()).map((inv) => {
+          const categorias: any[] = Array.from(inv.cats.values()).map((c) => ({
+            id: c.id,
+            nome: c.nome,
+            status: "concluida",
+            itens: Array.from(c.itens.values()),
+          }));
+          return { id: inv.id, data: inv.data, categorias };
+        })
+      : [];
 
-  return json(
-    {
-      ok: true,
-      summary: {
-        files: files.length,
-        insumos: insumosRows.length,
-        fornecedores: Object.keys(infoMap).length,
-        fornecedoresProdutos: Object.keys(produtosMap).length,
-        fichasTecnicas: fichasRows.length,
-        prePreparo: prePreparoRows.length,
-        inventario: inventarioInserted,
-        desperdicios: desperdiciosInserted,
-        entradas: entradasInserted,
+    const inventarioInserted =
+      enableInventario && (inventarioRows.length || inventarioRowsFromFlat.length)
+        ? await upsertInBatches(supabase, "inventario", [...inventarioRows, ...inventarioRowsFromFlat], 100)
+        : 0;
+
+    await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
+    const desperdiciosInserted = enableDesperdicios && desperdiciosRows.length ? await upsertInBatches(supabase, "desperdicios", desperdiciosRows, 500) : 0;
+
+    await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
+    await processCsvGroups("notas_fiscais", (row) => handleNotaFiscal(row));
+    const entradasInserted = enableEntradas && entradasRows.length ? await upsertInBatches(supabase, "entradas", entradasRows, 300) : 0;
+
+    return json(
+      {
+        ok: true,
+        summary: {
+          files: files.length,
+          insumos: enableInsumos ? insumosRows.length : 0,
+          fornecedores: enableFornecedores ? Object.keys(infoMap).length : 0,
+          fornecedoresProdutos: enableFornecedores ? Object.keys(produtosMap).length : 0,
+          fichasTecnicas: enableFichas ? fichasRows.length : 0,
+          prePreparo: enablePrePreparo ? prePreparoRows.length : 0,
+          inventario: inventarioInserted,
+          desperdicios: desperdiciosInserted,
+          entradas: entradasInserted,
+        },
       },
-    },
-    { status: 200 },
-  );
+      { status: 200 },
+    );
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
 }
