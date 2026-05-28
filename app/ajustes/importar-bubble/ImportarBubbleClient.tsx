@@ -101,6 +101,8 @@ export default function ImportarBubbleClient() {
   const [serverFiles, setServerFiles] = useState<ServerFile[] | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
 
   const uploadedPathsText = useMemo(() => {
     const paths = uploads.map((u) => u.path).filter(Boolean) as string[];
@@ -234,6 +236,22 @@ export default function ImportarBubbleClient() {
     }
   }
 
+  async function runImport() {
+    if (isImporting) return;
+    setIsImporting(true);
+    setImportResult(null);
+    try {
+      const res = await fetch("/api/bubble-import/import", { method: "POST" });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      setImportResult(JSON.stringify(json.summary ?? {}, null, 2));
+    } catch (err) {
+      setImportResult(safeJsonMessage(err));
+    } finally {
+      setIsImporting(false);
+    }
+  }
+
   const hasAny = uploads.length > 0;
   const hasPending = uploads.some((u) => u.status === "pending" || u.status === "error");
 
@@ -304,6 +322,9 @@ export default function ImportarBubbleClient() {
                     <button type="button" className={styles.btn} onClick={analyzeServerFiles} disabled={isAnalyzing}>
                       {isAnalyzing ? "Analisando..." : "Ver arquivos no servidor"}
                     </button>
+                    <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runImport} disabled={isImporting}>
+                      {isImporting ? "Importando..." : "Importar para o sistema"}
+                    </button>
                   </div>
 
                   {uploadedPathsText ? <div className={styles.pathsBox}>{uploadedPathsText}</div> : null}
@@ -337,6 +358,7 @@ export default function ImportarBubbleClient() {
               ) : null}
 
               {serverError ? <div className={styles.pathsBox}>{serverError}</div> : null}
+              {importResult ? <div className={styles.pathsBox}>{importResult}</div> : null}
 
               {serverFiles?.length ? (
                 <>
