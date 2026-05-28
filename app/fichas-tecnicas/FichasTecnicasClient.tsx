@@ -2502,13 +2502,16 @@ export default function FichasTecnicasClient() {
                           aria-expanded={actionMenuRowId === row.id}
                           onClick={(e) => {
                             e.stopPropagation();
+                            const anchor = e.currentTarget;
+                            const anchorRect = anchor?.getBoundingClientRect ? anchor.getBoundingClientRect() : null;
                             setActionMenuRowId((prev) => {
                               const next = prev === row.id ? null : row.id;
                               if (!next) {
                                 setActionMenuRect(null);
                                 return null;
                               }
-                              setActionMenuRect(computeActionMenuRect(e.currentTarget.getBoundingClientRect()));
+                              if (anchorRect) setActionMenuRect(computeActionMenuRect(anchorRect));
+                              else setActionMenuRect(null);
                               return next;
                             });
                           }}
