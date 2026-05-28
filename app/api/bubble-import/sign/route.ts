@@ -15,6 +15,8 @@ function safeFilename(input: string) {
   return cleaned.slice(0, 160) || "arquivo";
 }
 
+const MAX_UPLOAD_BYTES = 45 * 1024 * 1024;
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -34,6 +36,7 @@ export async function POST(req: NextRequest) {
   const size = typeof body.size === "number" ? body.size : 0;
   if (!filename) return json({ error: "filename_required" }, { status: 400 });
   if (!Number.isFinite(size) || size <= 0) return json({ error: "invalid_size" }, { status: 400 });
+  if (size > MAX_UPLOAD_BYTES) return json({ error: "file_too_large" }, { status: 413 });
 
   const { userId } = getUserIdFromRequest(req);
   if (!userId) return json({ error: "unauthorized" }, { status: 401 });
@@ -60,4 +63,3 @@ export async function POST(req: NextRequest) {
 
   return json({ ok: true, path: objectPath, signedUrl: data.signedUrl, token: data.token, contentType }, { status: 200 });
 }
-

@@ -36,6 +36,21 @@
   gap: 12px;
 }
 
+.notice {
+  border: 1px solid #eef1f1;
+  background: #fbfcfc;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 11px;
+  line-height: 16px;
+  color: #6b7c79;
+}
+
+.noticeStrong {
+  color: #01040e;
+  font-weight: 900;
+}
+
 .dropZone {
   border: 1px dashed #cfd7d6;
   border-radius: 14px;

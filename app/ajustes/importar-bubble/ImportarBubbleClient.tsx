@@ -13,6 +13,9 @@ type UploadRow = {
   path?: string;
 };
 
+const MAX_UPLOAD_BYTES = 45 * 1024 * 1024;
+const CHUNK_TARGET_BYTES = 20 * 1024 * 1024;
+
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
@@ -32,23 +35,96 @@ function safeJsonMessage(err: unknown) {
   return String(err);
 }
 
+function splitFilename(name: string) {
+  const base = String(name ?? "").split(/[\\/]/).pop() ?? "";
+  const dot = base.lastIndexOf(".");
+  if (dot <= 0) return { stem: base || "arquivo", ext: "" };
+  return { stem: base.slice(0, dot) || "arquivo", ext: base.slice(dot) };
+}
+
+async function splitCsvFile(file: File, targetBytes = CHUNK_TARGET_BYTES) {
+  const text = await file.text();
+  const firstNl = text.indexOf("\n");
+  if (firstNl === -1) return [file];
+  const header = text.slice(0, firstNl).replace(/\r$/, "");
+  const encoder = new TextEncoder();
+  const headerBytes = encoder.encode(`${header}\n`).length;
+  const parts: File[] = [];
+
+  const { stem, ext } = splitFilename(file.name);
+  const safeExt = ext.toLowerCase() === ".csv" ? ".csv" : ".csv";
+
+  let lines: string[] = [];
+  let bytes = headerBytes;
+  let idx = firstNl + 1;
+  while (idx < text.length) {
+    const nextNl = text.indexOf("\n", idx);
+    const end = nextNl === -1 ? text.length : nextNl;
+    const rawLine = text.slice(idx, end);
+    idx = nextNl === -1 ? text.length : nextNl + 1;
+    const line = rawLine.replace(/\r$/, "");
+    if (!line.trim()) continue;
+    const lineBytes = encoder.encode(`${line}\n`).length;
+    if (bytes + lineBytes > targetBytes && lines.length) {
+      const partIndex = parts.length + 1;
+      const name = `${stem}_part${String(partIndex).padStart(3, "0")}${safeExt}`;
+      parts.push(new File([`${header}\n${lines.join("\n")}\n`], name, { type: file.type || "text/csv" }));
+      lines = [];
+      bytes = headerBytes;
+    }
+    lines.push(line);
+    bytes += lineBytes;
+  }
+  if (lines.length) {
+    const partIndex = parts.length + 1;
+    const name = `${stem}_part${String(partIndex).padStart(3, "0")}${safeExt}`;
+    parts.push(new File([`${header}\n${lines.join("\n")}\n`], name, { type: file.type || "text/csv" }));
+  }
+  return parts.length ? parts : [file];
+}
+
 export default function ImportarBubbleClient() {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploads, setUploads] = useState<UploadRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPreparing, setIsPreparing] = useState(false);
 
   const uploadedPathsText = useMemo(() => {
     const paths = uploads.map((u) => u.path).filter(Boolean) as string[];
     return paths.join("\n");
   }, [uploads]);
 
-  function addFiles(files: File[]) {
+  async function addFilesAsync(files: File[]) {
+    setIsPreparing(true);
     const next: UploadRow[] = [];
-    for (const file of files) {
-      if (!file) continue;
-      if (file.size <= 0) continue;
-      next.push({ id: crypto.randomUUID(), file, status: "pending" });
+    try {
+      for (const file of files) {
+        if (!file) continue;
+        if (file.size <= 0) continue;
+        const lower = file.name.toLowerCase();
+        const isCsv = lower.endsWith(".csv");
+
+        if (file.size > MAX_UPLOAD_BYTES && isCsv) {
+          const parts = await splitCsvFile(file, CHUNK_TARGET_BYTES);
+          for (const part of parts) next.push({ id: crypto.randomUUID(), file: part, status: "pending" });
+          continue;
+        }
+
+        if (file.size > MAX_UPLOAD_BYTES) {
+          next.push({
+            id: crypto.randomUUID(),
+            file,
+            status: "error",
+            error: `Arquivo muito grande (${formatBytes(file.size)}). Limite por arquivo: ${formatBytes(MAX_UPLOAD_BYTES)}. Exporte em partes menores.`,
+          });
+          continue;
+        }
+
+        next.push({ id: crypto.randomUUID(), file, status: "pending" });
+      }
+    } finally {
+      setIsPreparing(false);
     }
     if (!next.length) return;
     setUploads((prev) => [...next, ...prev]);
@@ -84,7 +160,7 @@ export default function ImportarBubbleClient() {
   }
 
   async function startUpload() {
-    if (isUploading) return;
+    if (isUploading || isPreparing) return;
     const pending = uploads.filter((u) => u.status === "pending" || u.status === "error");
     if (!pending.length) return;
     setIsUploading(true);
@@ -133,16 +209,19 @@ export default function ImportarBubbleClient() {
                 <p className={styles.sub}>Envie aqui os arquivos exportados do Bubble (CSV/XLSX/JSON). Eles serão armazenados no Supabase para a migração.</p>
               </div>
               <div className={styles.actions}>
-                <button type="button" className={styles.btn} onClick={() => fileInputRef.current?.click()} disabled={isUploading}>
+                <button type="button" className={styles.btn} onClick={() => fileInputRef.current?.click()} disabled={isUploading || isPreparing}>
                   Selecionar arquivos
                 </button>
-                <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={startUpload} disabled={!hasPending || isUploading}>
-                  Enviar
+                <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={startUpload} disabled={!hasPending || isUploading || isPreparing}>
+                  {isPreparing ? "Preparando..." : "Enviar"}
                 </button>
               </div>
             </div>
 
             <section className={styles.panel}>
+              <div className={styles.notice}>
+                <span className={styles.noticeStrong}>Importante:</span> existe um limite de tamanho por arquivo. CSVs grandes serão divididos automaticamente em partes menores.
+              </div>
               <div
                 className={isDragging ? `${styles.dropZone} ${styles.dropZoneActive}` : styles.dropZone}
                 onDragOver={(e) => {
@@ -154,7 +233,7 @@ export default function ImportarBubbleClient() {
                   e.preventDefault();
                   setIsDragging(false);
                   const list = Array.from(e.dataTransfer.files ?? []);
-                  addFiles(list);
+                  void addFilesAsync(list);
                 }}
               >
                 <div className={styles.dropTitle}>Arraste e solte aqui</div>
@@ -168,7 +247,7 @@ export default function ImportarBubbleClient() {
                   onChange={(e) => {
                     const list = Array.from(e.currentTarget.files ?? []);
                     e.currentTarget.value = "";
-                    addFiles(list);
+                    void addFilesAsync(list);
                   }}
                 />
               </div>
@@ -176,7 +255,7 @@ export default function ImportarBubbleClient() {
               {hasAny ? (
                 <>
                   <div className={styles.actions}>
-                    <button type="button" className={styles.btn} onClick={clearAll} disabled={isUploading}>
+                    <button type="button" className={styles.btn} onClick={clearAll} disabled={isUploading || isPreparing}>
                       Limpar lista
                     </button>
                     <button type="button" className={styles.btn} onClick={copyPaths} disabled={!uploadedPathsText}>
