@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
-import { formatDateLabelPT, formatMoneyBRL, parseBubbleCsvToObjects, parseDateLoose, parsePtNumber, pickFirst, type CsvObjectRow } from "../../../lib/bubbleCsv";
+import { formatDateLabelPT, formatMoneyBRL, normalizeKey, parseBubbleCsvToObjects, parseDateLoose, parsePtNumber, pickFirst, type CsvObjectRow } from "../../../lib/bubbleCsv";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -36,7 +37,11 @@ async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
     }
   }
 
-  return paths.filter((p) => p.name.toLowerCase().endsWith(".csv")).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
+  const okExt = (name: string) => {
+    const n = name.toLowerCase();
+    return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+  };
+  return paths.filter((p) => okExt(p.name)).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
 }
 
 async function downloadText(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
@@ -45,6 +50,74 @@ async function downloadText(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   const res = await fetch(data.signedUrl);
   if (!res.ok) throw new Error(`failed_to_download_${res.status}`);
   return await res.text();
+}
+
+async function downloadBytes(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+  if (error || !data?.signedUrl) throw new Error(error?.message || "failed_to_sign");
+  const res = await fetch(data.signedUrl);
+  if (!res.ok) throw new Error(`failed_to_download_${res.status}`);
+  return await res.arrayBuffer();
+}
+
+function parseBubbleXlsxToObjects(buf: ArrayBuffer) {
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames?.[0];
+  if (!sheetName) return { header: [] as string[], rows: [] as CsvObjectRow[] };
+  const sheet = wb.Sheets[sheetName];
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as unknown[][];
+  const headerRaw = (grid[0] ?? []) as unknown[];
+  const headerNorm = headerRaw.map((h) => normalizeKey(String(h ?? "")));
+  const header = headerNorm.map((k, i) => k || `col_${i + 1}`);
+  const rows: CsvObjectRow[] = [];
+  for (let i = 1; i < grid.length; i++) {
+    const r = (grid[i] ?? []) as unknown[];
+    if (!r.length) continue;
+    const obj: CsvObjectRow = {};
+    for (let c = 0; c < header.length; c++) obj[header[c]] = String(r[c] ?? "").trim();
+    const hasAny = Object.values(obj).some((v) => String(v).trim());
+    if (hasAny) rows.push(obj);
+  }
+  return { header, rows };
+}
+
+async function loadRowsForPart(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, part: { path: string; name: string }) {
+  const lower = part.name.toLowerCase();
+  if (lower.endsWith(".csv")) {
+    const text = await downloadText(supabase, bucket, part.path);
+    return parseBubbleCsvToObjects(text).rows;
+  }
+  if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+    const buf = await downloadBytes(supabase, bucket, part.path);
+    return parseBubbleXlsxToObjects(buf).rows;
+  }
+  if (lower.endsWith(".json")) {
+    const text = await downloadText(supabase, bucket, part.path);
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      return parsed
+        .filter((x) => x && typeof x === "object" && !Array.isArray(x))
+        .map((x) => {
+          const obj: CsvObjectRow = {};
+          for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = String(v ?? "").trim();
+          return obj;
+        });
+    }
+    if (parsed && typeof parsed === "object") {
+      const list = (parsed as any).rows;
+      if (Array.isArray(list)) {
+        return list
+          .filter((x) => x && typeof x === "object" && !Array.isArray(x))
+          .map((x) => {
+            const obj: CsvObjectRow = {};
+            for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = String(v ?? "").trim();
+            return obj;
+          });
+      }
+    }
+    return [];
+  }
+  return [];
 }
 
 function groupParts(files: { path: string; name: string }[]) {
@@ -552,11 +625,10 @@ export async function POST(req: NextRequest) {
       const unknownGroups = byKind.get("unknown") ?? [];
       for (const g of unknownGroups) {
         for (const part of g.parts) {
-          const text = await downloadText(supabase, bucket, part.path);
-          const parsed = parseBubbleCsvToObjects(text);
-          const sample = parsed.rows[0];
+          const rows = await loadRowsForPart(supabase, bucket, part);
+          const sample = rows[0];
           const kind = sample ? detectUnknownKind(sample) : "unknown";
-          for (const r of parsed.rows) {
+          for (const r of rows) {
             if (kind === "notas_fiscais" && enableEntradas) handleNotaFiscal(r);
             else if (kind === "itens_notas" && enableEntradas) handleNotaItem(r);
             else if (kind === "fornecedores" && enableFornecedores) handleFornecedorInfo(r);
@@ -577,9 +649,8 @@ export async function POST(req: NextRequest) {
       const list = byKind.get(kind) ?? [];
       for (const g of list) {
         for (const part of g.parts) {
-          const text = await downloadText(supabase, bucket, part.path);
-          const parsed = parseBubbleCsvToObjects(text);
-          for (const r of parsed.rows) onRow(r, part.name);
+          const rows = await loadRowsForPart(supabase, bucket, part);
+          for (const r of rows) onRow(r, part.name);
         }
       }
     }

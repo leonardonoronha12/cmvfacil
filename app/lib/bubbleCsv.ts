@@ -1,4 +1,4 @@
-function normalizeKey(input: string) {
+export function normalizeKey(input: string) {
   return String(input ?? "")
     .trim()
     .toLowerCase()
@@ -147,4 +147,3 @@ export function parseDateLoose(input: string) {
   if (Number.isFinite(ts)) return new Date(ts);
   return null;
 }
-
