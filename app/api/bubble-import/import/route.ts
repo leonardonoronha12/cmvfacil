@@ -369,6 +369,127 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const prePreparoRows: any[] = [];
+  function handlePrePreparo(row: CsvObjectRow) {
+    const receita =
+      pickFirst(row, ["receita", "pre_preparo", "prepreparo", "nome", "recipe"]) ||
+      pickKeyLike(row, ["receita", "pre", "preparo", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
+      pickTextValue(row);
+    if (!receita) return;
+    const bubbleId = pickBubbleId(row) || String(prePreparoRows.length + 1);
+    const categoria = pickFirst(row, ["categoria", "category", "grupo"]) || pickKeyLike(row, ["categoria", "grupo"]) || "-";
+    const custoTotal = pickFirst(row, ["custo_total", "custoTotal", "custo", "total", "valor"]) || pickKeyLike(row, ["custo", "total", "valor"]) || "-";
+    const rendimento = pickFirst(row, ["rendimento", "yield"]) || pickKeyLike(row, ["rendimento", "yield"]) || "-";
+    const custoUnitario = pickFirst(row, ["custo_unitario", "custoUnitario", "unitario"]) || pickKeyLike(row, ["unitario", "custo"]) || "-";
+    const validade = pickFirst(row, ["validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
+    const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
+    const ingredientesRaw = pickFirst(row, ["ingredientes", "ingredientes_json", "ingredientRows", "ingredient_rows", "itens", "items"]) || pickKeyLike(row, ["ingred", "ingredient", "itens"]);
+    let ingredientes: any[] | undefined;
+    if (ingredientesRaw && (ingredientesRaw.trim().startsWith("[") || ingredientesRaw.trim().startsWith("{"))) {
+      try {
+        const parsed = JSON.parse(ingredientesRaw);
+        ingredientes = Array.isArray(parsed) ? parsed : undefined;
+      } catch {}
+    }
+    const modoPreparo = pickFirst(row, ["modo_preparo", "modoPreparo", "preparo", "modo"]) || pickKeyLike(row, ["modo", "preparo"]) || "";
+    prePreparoRows.push({
+      id: bubbleId,
+      categoria: categoria.trim() || "-",
+      receita: receita.trim(),
+      custoTotal: custoTotal.trim() || "-",
+      rendimento: rendimento.trim() || "-",
+      custoUnitario: custoUnitario.trim() || "-",
+      validadeDias: typeof validadeDiasNum === "number" ? validadeDiasNum : undefined,
+      ingredientes: ingredientes && ingredientes.length ? ingredientes : undefined,
+      modoPreparo: modoPreparo.trim() || undefined,
+    });
+  }
+
+  const fichasRows: any[] = [];
+  function handleFicha(row: CsvObjectRow) {
+    const receita =
+      pickFirst(row, ["receita", "nome", "recipe"]) ||
+      pickKeyLike(row, ["receita", "recipe", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
+      pickTextValue(row);
+    if (!receita) return;
+    const bubbleId = pickBubbleId(row) || String(fichasRows.length + 1);
+    const precoVenda = pickFirst(row, ["preco_venda", "precoVenda", "preco", "valor_venda"]) || pickKeyLike(row, ["preco", "venda", "valor"]);
+    const custoUnitario = pickFirst(row, ["custo_unitario", "custoUnitario", "custo"]) || pickKeyLike(row, ["custo", "unitario"]);
+    const cmvMeta = pickFirst(row, ["cmv_meta", "cmvMeta", "meta_cmv"]) || pickKeyLike(row, ["cmv", "meta"]);
+    const cmvAtual = pickFirst(row, ["cmv_atual", "cmvAtual"]) || pickKeyLike(row, ["cmv", "atual"]);
+    const cmvDelta = pickFirst(row, ["cmv_delta", "cmvDelta"]) || pickKeyLike(row, ["cmv", "delta"]);
+    const bcgRaw = pickFirst(row, ["bcg", "matriz_bcg", "matriz"]) || pickKeyLike(row, ["bcg", "matriz"]) || "quebra-cabeca";
+    const bcg = bcgRaw === "estrela" || bcgRaw === "cavalo" || bcgRaw === "quebra-cabeca" || bcgRaw === "abacaxi" ? bcgRaw : "quebra-cabeca";
+    const thumbRaw = pickFirst(row, ["thumb", "tipo", "burger"]) || pickKeyLike(row, ["thumb", "tipo"]) || "burger";
+    const thumb = thumbRaw === "burger" || thumbRaw === "duplo" || thumbRaw === "triplo" ? thumbRaw : "burger";
+    const recipeImage = pickFirst(row, ["recipe_image", "recipeImage", "imagem", "image"]) || pickKeyLike(row, ["image", "imagem"]);
+    const popularidadeRaw = pickFirst(row, ["popularidade"]) || pickKeyLike(row, ["popular"]);
+    const popularidade = popularidadeRaw.toLowerCase() === "alta" || popularidadeRaw.toLowerCase() === "baixa" ? popularidadeRaw.toLowerCase() : undefined;
+    const ingredientsTotal = pickFirst(row, ["ingredients_total", "ingredientsTotal"]) || pickKeyLike(row, ["ingredients", "ingredientes", "total"]);
+    const recipeYield = pickFirst(row, ["recipe_yield", "recipeYield", "rendimento"]) || pickKeyLike(row, ["yield", "rendimento"]);
+    const ingredientRowsRaw = pickFirst(row, ["ingredient_rows", "ingredientRows", "ingredientes"]) || pickKeyLike(row, ["ingredient", "ingredientes"]);
+    let ingredientRows: any[] | undefined;
+    if (ingredientRowsRaw && (ingredientRowsRaw.trim().startsWith("[") || ingredientRowsRaw.trim().startsWith("{"))) {
+      try {
+        const parsed = JSON.parse(ingredientRowsRaw);
+        ingredientRows = Array.isArray(parsed) ? parsed : undefined;
+      } catch {}
+    }
+    const modoPreparo = pickFirst(row, ["modo_preparo", "modoPreparo"]) || pickKeyLike(row, ["modo", "preparo"]) || "";
+    fichasRows.push({
+      id: bubbleId,
+      receita: receita.trim(),
+      precoVenda: String(precoVenda ?? "").trim(),
+      custoUnitario: String(custoUnitario ?? "").trim(),
+      cmvMeta: String(cmvMeta ?? "").trim(),
+      cmvAtual: String(cmvAtual ?? "").trim(),
+      cmvDelta: String(cmvDelta ?? "").trim(),
+      bcg,
+      thumb,
+      recipeImage: recipeImage ? String(recipeImage).trim() || undefined : undefined,
+      popularidade,
+      ingredientsTotal: ingredientsTotal ? Math.max(0, Math.floor(parsePtNumber(ingredientsTotal))) : undefined,
+      recipeYield: recipeYield ? Math.max(0, parsePtNumber(recipeYield)) : undefined,
+      ingredientRows: ingredientRows && ingredientRows.length ? ingredientRows : undefined,
+      modoPreparo: modoPreparo.trim() || undefined,
+    });
+  }
+
+  type InvItem = { id: string; item: string; unidade: string; estoqueFinal: string; removido?: boolean };
+  type InvCat = { id: string; nome: string; status: "pendente" | "concluida"; itens: InvItem[] };
+  const inventarioMap = new Map<string, { id: string; data: string; cats: Map<string, { id: string; nome: string; itens: Map<string, InvItem> }> }>();
+
+  function handleInventarioFlat(row: CsvObjectRow) {
+    const dateRaw = pickFirst(row, ["data", "date", "data_inventario", "data_contagem"]) || pickKeyLike(row, ["data", "date"]);
+    const d = parseDateLoose(dateRaw);
+    if (!d) return;
+    const iso = d.toISOString().slice(0, 10);
+    const dataLabel = formatDateLabelPT(d);
+    const tipo = pickFirst(row, ["tipo", "tipo_inventario", "inventario_tipo"]) || pickKeyLike(row, ["tipo"]);
+    const invId = `${prefix}inventario:${iso}${tipo ? `:${String(tipo).trim().toLowerCase()}` : ""}`;
+    const invKey = invId;
+
+    const categoria =
+      pickFirst(row, ["categoria", "category", "grupo"]) || pickKeyLike(row, ["categoria", "grupo"]) || "Importado";
+    const catName = String(categoria).trim() || "Importado";
+    const catKey = normalizeItemName(catName);
+
+    const item = guessItemLabel(row);
+    if (!item) return;
+    const itemName = item.trim();
+    const unidade = pickFirst(row, ["unidade", "medida", "unidade_medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
+    const estoqueFinal =
+      pickFirst(row, ["estoque_final", "estoqueFinal", "quantidade", "qtd", "qtde", "estoque"]) || pickKeyLike(row, ["estoque", "quantidade", "qtd"]);
+    const bubbleId = pickBubbleId(row) || `${iso}:${catKey}:${normalizeItemName(itemName)}`;
+    const itemId = `${invId}:${bubbleId}`;
+
+    const inv = inventarioMap.get(invKey) ?? { id: invId, data: dataLabel, cats: new Map() };
+    const cat = inv.cats.get(catKey) ?? { id: `${invId}:${catKey}`, nome: catName, itens: new Map() };
+    cat.itens.set(itemId, { id: itemId, item: itemName, unidade: String(unidade).trim() || "Und", estoqueFinal: String(estoqueFinal ?? "").trim() });
+    inv.cats.set(catKey, cat);
+    inventarioMap.set(invKey, inv);
+  }
+
   function detectUnknownKind(row: CsvObjectRow) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
@@ -378,6 +499,9 @@ export async function POST(req: NextRequest) {
     if ((has("fornecedor") || has("empresa")) && (has("produto") || has("item")) && !has("numero")) return "itens_fornecedores";
     if (has("equival") && (has("insumo") || has("item"))) return "equivalencias";
     if (has("motivo") && (has("quantidade") || has("qtd"))) return "desperdicios";
+    if ((has("pre") && has("preparo")) || (has("validade") && (has("rendimento") || has("yield")))) return "pre_preparo";
+    if (has("cmv") || has("bcg") || (has("preco") && has("venda") && has("custo"))) return "fichas_tecnicas";
+    if (has("categorias") || (has("estoque") && (has("categoria") || has("grupo")))) return "inventario_flat";
     if (has("custo_medio") || (has("custo") && (has("medida") || has("unidade")))) return "itens";
     return "unknown";
   }
@@ -396,6 +520,9 @@ export async function POST(req: NextRequest) {
         else if (kind === "itens_fornecedores") handleFornecedorProduto(r);
         else if (kind === "equivalencias") handleEquivalencia(r);
         else if (kind === "desperdicios") handleDesperdicio(r);
+        else if (kind === "pre_preparo") handlePrePreparo(r);
+        else if (kind === "fichas_tecnicas") handleFicha(r);
+        else if (kind === "inventario_flat") handleInventarioFlat(r);
         else if (kind === "itens") handleInsumo(r);
       }
     }
@@ -424,6 +551,10 @@ export async function POST(req: NextRequest) {
 
   await processCsvGroups("equivalencias", (row) => handleEquivalencia(row));
 
+  await processCsvGroups("pre_preparo", (row) => handlePrePreparo(row));
+
+  await processCsvGroups("fichas_tecnicas", (row) => handleFicha(row));
+
   for (const k of Object.keys(produtosMap)) {
     produtosMap[k] = Array.from(new Set(produtosMap[k].filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
   }
@@ -438,90 +569,10 @@ export async function POST(req: NextRequest) {
   const { error: fornErr } = await supabase.from("fornecedores_state").upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
   if (fornErr) return json({ ok: false, error: `fornecedores_state:${fornErr.message}` }, { status: 500 });
 
-  const prePreparoRows: any[] = [];
-  await processCsvGroups("pre_preparo", (row) => {
-    const receita = pickFirst(row, ["receita", "nome", "pre_preparo", "prepreparo"]);
-    if (!receita) return;
-    const bubbleId = pickBubbleId(row) || String(prePreparoRows.length + 1);
-    const categoria = pickFirst(row, ["categoria", "category", "grupo"]) || "-";
-    const custoTotal = pickFirst(row, ["custo_total", "custoTotal", "custo", "total"]) || "-";
-    const rendimento = pickFirst(row, ["rendimento", "yield"]) || "-";
-    const custoUnitario = pickFirst(row, ["custo_unitario", "custoUnitario", "unitario"]) || "-";
-    const validade = pickFirst(row, ["validade_dias", "validadeDias", "validade"]);
-    const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
-    const ingredientesRaw = pickFirst(row, ["ingredientes", "ingredientes_json", "itens", "items"]);
-    let ingredientes: any[] | undefined;
-    if (ingredientesRaw && (ingredientesRaw.trim().startsWith("[") || ingredientesRaw.trim().startsWith("{"))) {
-      try {
-        const parsed = JSON.parse(ingredientesRaw);
-        ingredientes = Array.isArray(parsed) ? parsed : undefined;
-      } catch {}
-    }
-    const modoPreparo = pickFirst(row, ["modo_preparo", "modoPreparo", "preparo", "modo"]) || "";
-    prePreparoRows.push({
-      id: bubbleId,
-      categoria: categoria.trim() || "-",
-      receita: receita.trim(),
-      custoTotal: custoTotal.trim() || "-",
-      rendimento: rendimento.trim() || "-",
-      custoUnitario: custoUnitario.trim() || "-",
-      validadeDias: typeof validadeDiasNum === "number" ? validadeDiasNum : undefined,
-      ingredientes: ingredientes && ingredientes.length ? ingredientes : undefined,
-      modoPreparo: modoPreparo.trim() || undefined,
-    });
-  });
-
   if (prePreparoRows.length) {
     const { error: ppErr } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: prePreparoRows } as any, { onConflict: "id" });
     if (ppErr) return json({ ok: false, error: `pre_preparo_state:${ppErr.message}` }, { status: 500 });
   }
-
-  const fichasRows: any[] = [];
-  await processCsvGroups("fichas_tecnicas", (row) => {
-    const receita = pickFirst(row, ["receita", "nome", "recipe"]);
-    if (!receita) return;
-    const bubbleId = pickBubbleId(row) || String(fichasRows.length + 1);
-    const precoVenda = pickFirst(row, ["preco_venda", "precoVenda", "preco", "valor_venda"]) || "";
-    const custoUnitario = pickFirst(row, ["custo_unitario", "custoUnitario", "custo"]) || "";
-    const cmvMeta = pickFirst(row, ["cmv_meta", "cmvMeta", "meta_cmv"]) || "";
-    const cmvAtual = pickFirst(row, ["cmv_atual", "cmvAtual"]) || "";
-    const cmvDelta = pickFirst(row, ["cmv_delta", "cmvDelta"]) || "";
-    const bcgRaw = pickFirst(row, ["bcg", "matriz_bcg", "matriz"]) || "quebra-cabeca";
-    const bcg = bcgRaw === "estrela" || bcgRaw === "cavalo" || bcgRaw === "quebra-cabeca" || bcgRaw === "abacaxi" ? bcgRaw : "quebra-cabeca";
-    const thumbRaw = pickFirst(row, ["thumb", "tipo", "burger"]) || "burger";
-    const thumb = thumbRaw === "burger" || thumbRaw === "duplo" || thumbRaw === "triplo" ? thumbRaw : "burger";
-    const recipeImage = pickFirst(row, ["recipe_image", "recipeImage", "imagem", "image"]) || "";
-    const popularidadeRaw = pickFirst(row, ["popularidade"]) || "";
-    const popularidade = popularidadeRaw.toLowerCase() === "alta" || popularidadeRaw.toLowerCase() === "baixa" ? popularidadeRaw.toLowerCase() : undefined;
-    const ingredientsTotal = pickFirst(row, ["ingredients_total", "ingredientsTotal"]);
-    const recipeYield = pickFirst(row, ["recipe_yield", "recipeYield", "rendimento"]);
-    const ingredientRowsRaw = pickFirst(row, ["ingredient_rows", "ingredientRows", "ingredientes"]);
-    let ingredientRows: any[] | undefined;
-    if (ingredientRowsRaw && (ingredientRowsRaw.trim().startsWith("[") || ingredientRowsRaw.trim().startsWith("{"))) {
-      try {
-        const parsed = JSON.parse(ingredientRowsRaw);
-        ingredientRows = Array.isArray(parsed) ? parsed : undefined;
-      } catch {}
-    }
-    const modoPreparo = pickFirst(row, ["modo_preparo", "modoPreparo"]) || "";
-    fichasRows.push({
-      id: bubbleId,
-      receita: receita.trim(),
-      precoVenda: precoVenda.trim(),
-      custoUnitario: custoUnitario.trim(),
-      cmvMeta: cmvMeta.trim(),
-      cmvAtual: cmvAtual.trim(),
-      cmvDelta: cmvDelta.trim(),
-      bcg,
-      thumb,
-      recipeImage: recipeImage.trim() || undefined,
-      popularidade,
-      ingredientsTotal: ingredientsTotal ? Math.max(0, Math.floor(parsePtNumber(ingredientsTotal))) : undefined,
-      recipeYield: recipeYield ? Math.max(0, parsePtNumber(recipeYield)) : undefined,
-      ingredientRows: ingredientRows && ingredientRows.length ? ingredientRows : undefined,
-      modoPreparo: modoPreparo.trim() || undefined,
-    });
-  });
 
   if (fichasRows.length) {
     const { error: ftErr } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: fichasRows } as any, { onConflict: "id" });
@@ -540,11 +591,23 @@ export async function POST(req: NextRequest) {
         categorias = Array.isArray(parsed) ? parsed : [];
       } catch {}
     }
-    if (!dataLabel || !categorias.length) return;
-    inventarioRows.push({ id: `${prefix}inventario:${bubbleId}`, data: dataLabel, categorias });
+    if (dataLabel && categorias.length) {
+      inventarioRows.push({ id: `${prefix}inventario:${bubbleId}`, data: dataLabel, categorias });
+      return;
+    }
+    handleInventarioFlat(row);
   });
 
-  const inventarioInserted = inventarioRows.length ? await upsertInBatches(supabase, "inventario", inventarioRows, 100) : 0;
+  const inventarioRowsFromFlat = Array.from(inventarioMap.values()).map((inv) => {
+    const categorias: InvCat[] = Array.from(inv.cats.values()).map((c) => ({
+      id: c.id,
+      nome: c.nome,
+      status: "concluida",
+      itens: Array.from(c.itens.values()),
+    }));
+    return { id: inv.id, data: inv.data, categorias };
+  });
+  const inventarioInserted = inventarioRows.length || inventarioRowsFromFlat.length ? await upsertInBatches(supabase, "inventario", [...inventarioRows, ...inventarioRowsFromFlat], 100) : 0;
 
   await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
 
