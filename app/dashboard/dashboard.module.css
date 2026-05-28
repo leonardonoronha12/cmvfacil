@@ -444,6 +444,24 @@
   will-change: opacity, transform;
 }
 
+@keyframes cmvFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content {
+    animation: none;
+    will-change: auto;
+  }
+}
+
 .pageFrame {
   width: min(1360px, 100%);
   max-width: 1360px;
