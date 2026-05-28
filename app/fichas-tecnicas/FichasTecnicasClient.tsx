@@ -1232,13 +1232,13 @@ export default function FichasTecnicasClient() {
 
   const tableGridTemplateColumns = useMemo(() => {
     const widths: Record<FichaTableColumn | "acoes", string> = {
-      receita: "minmax(280px, 2.3fr)",
-      precoVenda: "minmax(120px, 0.9fr)",
-      custoUnitario: "minmax(120px, 0.9fr)",
-      cmvMeta: "minmax(92px, 0.7fr)",
-      cmvAtual: "minmax(110px, 0.8fr)",
-      bcg: "minmax(150px, 1fr)",
-      acoes: "88px",
+      receita: "minmax(240px, 2.3fr)",
+      precoVenda: "minmax(110px, 0.9fr)",
+      custoUnitario: "minmax(110px, 0.9fr)",
+      cmvMeta: "minmax(84px, 0.7fr)",
+      cmvAtual: "minmax(96px, 0.8fr)",
+      bcg: "minmax(130px, 1fr)",
+      acoes: "72px",
     };
     const orderedColumns: Array<FichaTableColumn | "acoes"> = [...columnOrder, "acoes"];
     return orderedColumns.map((column) => widths[column]).join(" ");
