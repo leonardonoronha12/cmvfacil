@@ -1,0 +1,160 @@
+.pageWrap {
+  width: min(980px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.sub {
+  margin: 0;
+  font-size: 12px;
+  color: #6b7c79;
+  line-height: 18px;
+}
+
+.panel {
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dropZone {
+  border: 1px dashed #cfd7d6;
+  border-radius: 14px;
+  background: #f7f8f8;
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.dropZoneActive {
+  background: #eefbf5;
+  border-color: #0ab86d;
+}
+
+.dropTitle {
+  font-size: 12px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.dropHint {
+  font-size: 11px;
+  color: #6b7c79;
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  color: #01040e;
+  border-radius: 10px;
+  height: 38px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btnPrimary {
+  border-color: #0ab86d;
+  background: #0ab86d;
+  color: #ffffff;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.fileList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.fileRow {
+  border: 1px solid #eef1f1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: #ffffff;
+}
+
+.fileName {
+  font-size: 12px;
+  font-weight: 800;
+  color: #01040e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.fileMeta {
+  font-size: 11px;
+  color: #6b7c79;
+  flex-shrink: 0;
+}
+
+.fileStatus {
+  font-size: 11px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.statusOk {
+  color: #0ab86d;
+}
+
+.statusErr {
+  color: #ff2f54;
+}
+
+.statusProg {
+  color: #3b82f6;
+}
+
+.pathsBox {
+  border: 1px solid #eef1f1;
+  background: #fbfcfc;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
