@@ -18,9 +18,10 @@ import { loadDesperdiciosFromSupabase } from "../lib/desperdiciosSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, type PrePreparoStoreRow, writePrePreparoToStore } from "../lib/prePreparoStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
-import { buildExpiredPrePreparoEtiquetaDesperdicios } from "../lib/prePreparoEtiquetasToDesperdicios";
+import { buildExpiredPrePreparoEtiquetaDesperdicios, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
+import { requireUserScopePrefix } from "../lib/userScope";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -846,6 +847,7 @@ export default function DashboardClient() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const toastTimerRef = useRef<number | null>(null);
+  const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
@@ -942,6 +944,12 @@ export default function DashboardClient() {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    void requireUserScopePrefix()
+      .then((prefix) => setUserScopePrefix(prefix))
+      .catch(() => setUserScopePrefix(""));
   }, []);
 
   useEffect(() => {
@@ -1046,11 +1054,21 @@ export default function DashboardClient() {
   }, []);
 
   const desperdiciosIntegrados = useMemo(() => {
-    const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas);
+    const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas, new Date(), userScopePrefix);
     if (!generated.length) return desperdicios;
-    const generatedIds = new Set(generated.map((row) => row.id));
-    return [...generated, ...desperdicios.filter((row) => !generatedIds.has(row.id))];
-  }, [desperdicios, prePreparoEtiquetas]);
+    const etiquetaIds = new Set<string>();
+    for (const row of generated) {
+      const etiquetaId = getEtiquetaIdFromWasteId(row.id);
+      if (etiquetaId) etiquetaIds.add(etiquetaId);
+    }
+    const manual = desperdicios.filter((row) => {
+      if (!isPrePreparoEtiquetaWasteId(row.id)) return true;
+      const etiquetaId = getEtiquetaIdFromWasteId(row.id);
+      if (!etiquetaId) return true;
+      return !etiquetaIds.has(etiquetaId);
+    });
+    return [...generated, ...manual];
+  }, [desperdicios, prePreparoEtiquetas, userScopePrefix]);
 
   useEffect(() => {
     if (!calc) return;
