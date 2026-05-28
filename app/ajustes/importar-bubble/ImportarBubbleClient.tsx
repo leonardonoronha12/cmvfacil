@@ -3,7 +3,6 @@
 import { useMemo, useRef, useState } from "react";
 import dash from "../../dashboard/dashboard.module.css";
 import AppSidebar from "../../components/AppSidebar";
-import { getSupabaseBrowser } from "../../lib/supabaseBrowser";
 import styles from "./importar-bubble.module.css";
 
 type UploadRow = {
@@ -72,12 +71,16 @@ export default function ImportarBubbleClient() {
     return { path: json.path, signedUrl: json.signedUrl, token: json.token };
   }
 
-  async function uploadToSignedUrl({ path, token }: { path: string; token: string }, file: File) {
-    const supabase = getSupabaseBrowser();
-    const { error } = await supabase.storage.from("bubble-imports").uploadToSignedUrl(path, token, file, {
-      contentType: file.type || "application/octet-stream",
+  async function uploadToSignedUrl(signedUrl: string, file: File) {
+    const contentType = file.type || "application/octet-stream";
+    const res = await fetch(signedUrl, {
+      method: "PUT",
+      headers: { "content-type": contentType },
+      body: file,
     });
-    if (error) throw new Error(error.message || "Falha no upload.");
+    if (res.ok) return;
+    const details = await res.text().catch(() => "");
+    throw new Error(details.trim() || `Falha no upload (${res.status}).`);
   }
 
   async function startUpload() {
@@ -91,7 +94,7 @@ export default function ImportarBubbleClient() {
         setUploads((prev) => prev.map((u) => (u.id === row.id ? { ...u, status: "uploading", error: undefined } : u)));
         try {
           const signed = await signUpload(row.file);
-          await uploadToSignedUrl({ path: signed.path, token: signed.token }, row.file);
+          await uploadToSignedUrl(signed.signedUrl, row.file);
           setUploads((prev) => prev.map((u) => (u.id === row.id ? { ...u, status: "uploaded", path: signed.path } : u)));
         } catch (err) {
           setUploads((prev) => prev.map((u) => (u.id === row.id ? { ...u, status: "error", error: safeJsonMessage(err) } : u)));
