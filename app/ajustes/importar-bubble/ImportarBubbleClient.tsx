@@ -243,15 +243,15 @@ export default function ImportarBubbleClient() {
     try {
       const res = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
       const text = await res.text();
-      const json = ((): { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null => {
+      const json = ((): Record<string, unknown> | null => {
         try {
           return JSON.parse(text);
         } catch {
           return null;
         }
       })();
-      if (!res.ok || !json?.ok) throw new Error(json?.error || text || `failed_${res.status}`);
-      setImportResult(JSON.stringify(json.summary ?? {}, null, 2));
+      if (!res.ok || !json || (json as any).ok !== true) throw new Error((json as any)?.error || text || `failed_${res.status}`);
+      setImportResult(JSON.stringify(json ?? {}, null, 2));
     } catch (err) {
       setImportResult(safeJsonMessage(err));
     } finally {
@@ -270,15 +270,15 @@ export default function ImportarBubbleClient() {
         body: JSON.stringify({ only: ["fichas_tecnicas", "pre_preparo", "inventario"], includeUnknown: true }),
       });
       const text = await res.text();
-      const json = ((): { ok?: boolean; error?: string; summary?: Record<string, unknown> } | null => {
+      const json = ((): Record<string, unknown> | null => {
         try {
           return JSON.parse(text);
         } catch {
           return null;
         }
       })();
-      if (!res.ok || !json?.ok) throw new Error(json?.error || text || `failed_${res.status}`);
-      setImportResult(JSON.stringify(json.summary ?? {}, null, 2));
+      if (!res.ok || !json || (json as any).ok !== true) throw new Error((json as any)?.error || text || `failed_${res.status}`);
+      setImportResult(JSON.stringify(json ?? {}, null, 2));
     } catch (err) {
       setImportResult(safeJsonMessage(err));
     } finally {

@@ -288,6 +288,16 @@ export async function POST(req: NextRequest) {
       byKind.set(kind, list);
     }
 
+    const fileCountsByKind: Record<string, { groups: number; parts: number; examples: string[] }> = {};
+    for (const [kind, list] of byKind.entries()) {
+      const parts = list.reduce((acc, g) => acc + g.parts.length, 0);
+      const examples = list
+        .map((g) => g.base)
+        .slice(0, 6)
+        .sort((a, b) => a.localeCompare(b));
+      fileCountsByKind[kind] = { groups: list.length, parts, examples };
+    }
+
     const enabledKinds = new Set<string>();
     if (enableInsumos) ["custo_medio", "ingredientes", "itens"].forEach((k) => enabledKinds.add(k));
     if (enableFornecedores) ["fornecedores", "itens_fornecedores", "equivalencias"].forEach((k) => enabledKinds.add(k));
@@ -744,16 +754,27 @@ export async function POST(req: NextRequest) {
     return json(
       {
         ok: true,
+        ran: {
+          insumos: enableInsumos,
+          fornecedores: enableFornecedores,
+          desperdicios: enableDesperdicios,
+          entradas: enableEntradas,
+          prePreparo: enablePrePreparo,
+          fichasTecnicas: enableFichas,
+          inventario: enableInventario,
+          includeUnknown,
+        },
+        filesByKind: fileCountsByKind,
         summary: {
           files: files.length,
-          insumos: enableInsumos ? insumosRows.length : 0,
-          fornecedores: enableFornecedores ? Object.keys(infoMap).length : 0,
-          fornecedoresProdutos: enableFornecedores ? Object.keys(produtosMap).length : 0,
-          fichasTecnicas: enableFichas ? fichasRows.length : 0,
-          prePreparo: enablePrePreparo ? prePreparoRows.length : 0,
-          inventario: inventarioInserted,
-          desperdicios: desperdiciosInserted,
-          entradas: entradasInserted,
+          insumos: enableInsumos ? insumosRows.length : null,
+          fornecedores: enableFornecedores ? Object.keys(infoMap).length : null,
+          fornecedoresProdutos: enableFornecedores ? Object.keys(produtosMap).length : null,
+          fichasTecnicas: enableFichas ? fichasRows.length : null,
+          prePreparo: enablePrePreparo ? prePreparoRows.length : null,
+          inventario: enableInventario ? inventarioInserted : null,
+          desperdicios: enableDesperdicios ? desperdiciosInserted : null,
+          entradas: enableEntradas ? entradasInserted : null,
         },
       },
       { status: 200 },

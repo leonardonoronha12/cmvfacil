@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { normalizeKey } from "../../../lib/bubbleCsv";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -9,13 +11,26 @@ function json(data: unknown, init: ResponseInit = {}) {
 }
 
 const MAX_BYTES = 220_000;
+const MAX_XLSX_BYTES = 12_000_000;
+
+function detectDelimiter(headerLine: string) {
+  const comma = (headerLine.match(/,/g) ?? []).length;
+  const semicolon = (headerLine.match(/;/g) ?? []).length;
+  const tab = (headerLine.match(/\t/g) ?? []).length;
+  if (semicolon > comma && semicolon > tab) return ";";
+  if (tab > comma && tab > semicolon) return "\t";
+  return ",";
+}
 
 function parseCsvHeader(text: string) {
   const cleaned = text.replace(/^\uFEFF/, "");
   const firstLine = cleaned.split(/\r?\n/)[0] ?? "";
+  const delim = detectDelimiter(firstLine);
   const cols = firstLine
-    .split(",")
+    .split(delim)
     .map((c) => c.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean)
+    .map(normalizeKey)
     .filter(Boolean);
   return cols;
 }
@@ -72,6 +87,32 @@ async function fetchHeadText(supabase: ReturnType<typeof getSupabaseAdmin>, buck
   return text;
 }
 
+async function fetchBytes(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+  if (error || !data?.signedUrl) throw new Error(error?.message || "failed_to_sign");
+  const res = await fetch(data.signedUrl);
+  if (!res.ok) throw new Error(`failed_to_read_${res.status}`);
+  return await res.arrayBuffer();
+}
+
+function parseXlsxHeader(buf: ArrayBuffer) {
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames?.[0];
+  if (!sheetName) return [];
+  const sheet = wb.Sheets[sheetName];
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as unknown[][];
+  const headerRaw = (grid[0] ?? []) as unknown[];
+  return headerRaw.map((h) => normalizeKey(String(h ?? ""))).filter(Boolean);
+}
+
+function parseJsonHeader(text: string) {
+  const parsed = JSON.parse(text);
+  const first =
+    (Array.isArray(parsed) ? parsed[0] : parsed && typeof parsed === "object" && Array.isArray((parsed as any).rows) ? (parsed as any).rows[0] : null) ?? null;
+  if (!first || typeof first !== "object" || Array.isArray(first)) return [];
+  return Object.keys(first as any).map(normalizeKey).filter(Boolean);
+}
+
 export async function GET(req: NextRequest) {
   const { userId } = getUserIdFromRequest(req);
   if (!userId) return json({ ok: true, files: [] }, { status: 200 });
@@ -97,6 +138,17 @@ export async function GET(req: NextRequest) {
         if (ext === ".csv") {
           const text = await fetchHeadText(supabase, bucket, p.path);
           header = parseCsvHeader(text);
+        } else if (ext === ".json") {
+          const text = await fetchHeadText(supabase, bucket, p.path);
+          header = parseJsonHeader(text);
+        } else if (ext === ".xlsx" || ext === ".xls") {
+          const size = p.size ?? null;
+          if (typeof size === "number" && size > MAX_XLSX_BYTES) {
+            note = "xlsx_muito_grande_para_analisar";
+          } else {
+            const buf = await fetchBytes(supabase, bucket, p.path);
+            header = parseXlsxHeader(buf);
+          }
         } else {
           note = "formato_nao_suportado";
         }
@@ -110,4 +162,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
