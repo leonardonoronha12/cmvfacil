@@ -2530,6 +2530,7 @@ export default function FichasTecnicasClient() {
                                   ref={actionMenuRef}
                                   className={styles.actionMenu}
                                   style={{ position: "fixed", left: actionMenuRect.left, top: actionMenuRect.top, right: "auto" }}
+                                  onMouseDown={(e) => e.stopPropagation()}
                                   onClick={(e) => e.stopPropagation()}
                                 >
                                   <button type="button" className={styles.actionMenuItem} onClick={() => openEditModal(row)}>
