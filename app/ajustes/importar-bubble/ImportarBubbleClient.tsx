@@ -13,6 +13,15 @@ type UploadRow = {
   path?: string;
 };
 
+type ServerFile = {
+  path: string;
+  name: string;
+  size: number | null;
+  kind: string;
+  header: string[];
+  note: string | null;
+};
+
 const MAX_UPLOAD_BYTES = 45 * 1024 * 1024;
 const CHUNK_TARGET_BYTES = 20 * 1024 * 1024;
 
@@ -89,6 +98,9 @@ export default function ImportarBubbleClient() {
   const [uploads, setUploads] = useState<UploadRow[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
+  const [serverFiles, setServerFiles] = useState<ServerFile[] | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   const uploadedPathsText = useMemo(() => {
     const paths = uploads.map((u) => u.path).filter(Boolean) as string[];
@@ -194,6 +206,34 @@ export default function ImportarBubbleClient() {
     setUploads([]);
   }
 
+  async function analyzeServerFiles() {
+    if (isAnalyzing) return;
+    setIsAnalyzing(true);
+    setServerError(null);
+    try {
+      const res = await fetch("/api/bubble-import/analyze", { method: "GET" });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; files?: ServerFile[]; error?: string } | null;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      setServerFiles(json.files ?? []);
+    } catch (err) {
+      setServerError(safeJsonMessage(err));
+      setServerFiles(null);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
+
+  async function copyServerPaths() {
+    const paths = (serverFiles ?? []).map((f) => f.path).filter(Boolean);
+    if (!paths.length) return;
+    const text = paths.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      window.prompt("Copie os caminhos abaixo:", text);
+    }
+  }
+
   const hasAny = uploads.length > 0;
   const hasPending = uploads.some((u) => u.status === "pending" || u.status === "error");
 
@@ -261,6 +301,9 @@ export default function ImportarBubbleClient() {
                     <button type="button" className={styles.btn} onClick={copyPaths} disabled={!uploadedPathsText}>
                       Copiar caminhos enviados
                     </button>
+                    <button type="button" className={styles.btn} onClick={analyzeServerFiles} disabled={isAnalyzing}>
+                      {isAnalyzing ? "Analisando..." : "Ver arquivos no servidor"}
+                    </button>
                   </div>
 
                   {uploadedPathsText ? <div className={styles.pathsBox}>{uploadedPathsText}</div> : null}
@@ -286,6 +329,34 @@ export default function ImportarBubbleClient() {
                           }
                         >
                           {u.status === "pending" ? "Pronto" : u.status === "uploading" ? "Enviando..." : u.status === "uploaded" ? "Enviado" : "Erro"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              ) : null}
+
+              {serverError ? <div className={styles.pathsBox}>{serverError}</div> : null}
+
+              {serverFiles?.length ? (
+                <>
+                  <div className={styles.actions}>
+                    <button type="button" className={styles.btn} onClick={copyServerPaths}>
+                      Copiar caminhos do servidor
+                    </button>
+                  </div>
+                  <div className={styles.fileList}>
+                    {serverFiles.map((f) => (
+                      <div key={f.path} className={styles.fileRow}>
+                        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                          <div className={styles.fileName}>{f.name}</div>
+                          <div className={styles.fileMeta}>
+                            {f.kind}
+                            {typeof f.size === "number" ? ` • ${formatBytes(f.size)}` : ""}
+                          </div>
+                          {f.header?.length ? <div className={styles.fileMeta}>{f.header.join(" | ")}</div> : null}
+                          {f.note ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{f.note}</div> : null}
+                          <div className={styles.fileMeta}>{f.path}</div>
                         </div>
                       </div>
                     ))}
