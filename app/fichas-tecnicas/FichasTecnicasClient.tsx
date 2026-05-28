@@ -852,6 +852,7 @@ export default function FichasTecnicasClient() {
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
+  const [mounted, setMounted] = useState(false);
   const saveErrorShownRef = useRef(false);
   const loadErrorShownRef = useRef(false);
   const missingTablesShownRef = useRef(false);
@@ -918,6 +919,10 @@ export default function FichasTecnicasClient() {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -2600,7 +2605,8 @@ export default function FichasTecnicasClient() {
         </main>
       </div>
 
-      {isCreateOpen ? (
+      {mounted && isCreateOpen ? (
+        createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="nova-ficha-title">
             <div className={styles.modalHeader}>
@@ -2952,10 +2958,13 @@ export default function FichasTecnicasClient() {
               </div>
             ) : null}
           </div>
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
 
-      {editDraft ? (
+      {mounted && editDraft ? (
+        createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="editar-ficha-title">
             <div className={styles.modalHeader}>
@@ -3070,10 +3079,13 @@ export default function FichasTecnicasClient() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
 
-      {deleteRow ? (
+      {mounted && deleteRow ? (
+        createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.deleteModalCard} role="dialog" aria-modal="true" aria-labelledby="excluir-receita-title">
             <div className={styles.modalHeader}>
@@ -3110,7 +3122,9 @@ export default function FichasTecnicasClient() {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
+        )
       ) : null}
     </>
   );
