@@ -136,9 +136,11 @@ function groupParts(files: { path: string; name: string }[]) {
 
 function classifyFile(name: string) {
   const n = name.toLowerCase();
+  if (n.includes("categoria")) return "categorias";
   if (n.includes("equival")) return "equivalencias";
   if (n.includes("invent")) return "inventario";
   if (n.includes("pre") && n.includes("preparo")) return "pre_preparo";
+  if (n.includes("etiqueta")) return "pre_preparo_etiquetas";
   if (n.includes("ficha") || n.includes("fichas") || (n.includes("receita") && !n.includes("itens"))) return "fichas_tecnicas";
   if ((n.includes("itens") || n.includes("items")) && n.includes("nota")) return "itens_notas";
   if (n.includes("itens-fornecedores") || n.includes("items_fornecedores") || n.includes("itens_fornecedores")) return "itens_fornecedores";
@@ -303,7 +305,7 @@ export async function POST(req: NextRequest) {
     if (enableFornecedores) ["fornecedores", "itens_fornecedores", "equivalencias"].forEach((k) => enabledKinds.add(k));
     if (enableDesperdicios) enabledKinds.add("desperdicios");
     if (enableEntradas) ["itens_notas", "notas_fiscais"].forEach((k) => enabledKinds.add(k));
-    if (enablePrePreparo) enabledKinds.add("pre_preparo");
+    if (enablePrePreparo) ["pre_preparo", "pre_preparo_etiquetas", "categorias", "itens"].forEach((k) => enabledKinds.add(k));
     if (enableFichas) enabledKinds.add("fichas_tecnicas");
     if (enableInventario) enabledKinds.add("inventario");
     if (includeUnknown) enabledKinds.add("unknown");
@@ -311,11 +313,27 @@ export async function POST(req: NextRequest) {
     const infoMap: Record<string, any> = {};
     const produtosMap: Record<string, string[]> = {};
     const equivalenciasMap: Record<string, any[]> = {};
+    const categoriasById = new Map<string, string>();
 
     const insumosByKey = new Map<string, any>();
     const custoByItemKey = new Map<string, string>();
 
     const prefix = `user:${userId}:`;
+
+    function catNameLooksLikePrePreparo(name: string) {
+      const s = String(name ?? "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      return s.includes("pre") && s.includes("preparo");
+    }
+
+    function handleCategoria(row: CsvObjectRow) {
+      const id = pickBubbleId(row) || pickFirst(row, ["categoria_id", "id_categoria"]) || pickKeyLike(row, ["id"]);
+      const nome = pickFirst(row, ["nome", "titulo", "name"]) || pickKeyLike(row, ["nome", "titulo", "name"]) || "";
+      if (!id || !nome) return;
+      categoriasById.set(id.trim(), nome.trim());
+    }
 
     function handleCustoMedio(row: CsvObjectRow) {
       if (!enableInsumos) return;
@@ -340,7 +358,11 @@ export async function POST(req: NextRequest) {
         pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) ||
         pickKeyLike(row, ["medida", "unidade"]) ||
         "Und";
-      const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || pickKeyLike(row, ["categoria", "grupo"]);
+      const catId = pickFirst(row, ["categoria_id"]) || pickKeyLike(row, ["categoria_id"]);
+      const categoria =
+        pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) ||
+        (catId && categoriasById.get(catId.trim())) ||
+        pickKeyLike(row, ["categoria", "grupo"]);
       const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]) || pickKeyLike(row, ["especific", "descr", "obs"]);
       const ocultarRaw = pickFirst(row, ["ocultar", "hidden", "removido", "apagado"]);
       const ocultar = ocultarRaw ? ocultarRaw.toLowerCase() === "sim" || ocultarRaw.toLowerCase() === "true" || ocultarRaw === "1" : undefined;
@@ -491,6 +513,7 @@ export async function POST(req: NextRequest) {
   }
 
     const prePreparoRows: any[] = [];
+    const prePreparoIds = new Set<string>();
     function handlePrePreparo(row: CsvObjectRow) {
       if (!enablePrePreparo) return;
     const receita =
@@ -526,6 +549,76 @@ export async function POST(req: NextRequest) {
       modoPreparo: modoPreparo.trim() || undefined,
     });
   }
+
+    const prePreparoEtiquetasRows: any[] = [];
+    function handlePrePreparoEtiqueta(row: CsvObjectRow) {
+      if (!enablePrePreparo) return;
+      const codigo = pickFirst(row, ["codigo", "code"]) || pickKeyLike(row, ["codigo", "code"]);
+      const bubbleId = pickBubbleId(row) || codigo || String(prePreparoEtiquetasRows.length + 1);
+      const prodRaw = pickFirst(row, ["data_producao", "dataProducao", "producao"]) || pickKeyLike(row, ["data_producao", "producao"]);
+      const valRaw = pickFirst(row, ["data_validade", "dataValidade", "validade"]) || pickKeyLike(row, ["data_validade", "validade"]);
+      const prod = parseDateLoose(prodRaw);
+      const val = parseDateLoose(valRaw);
+      const dataProducao = prod ? formatDateLabelPT(prod) : String(prodRaw ?? "").trim();
+      const dataValidade = val ? formatDateLabelPT(val) : String(valRaw ?? "").trim();
+      const desperdicadoRaw = pickFirst(row, ["boolean_desperdicado", "desperdicado"]) || pickKeyLike(row, ["desperdic"]);
+      const desperdicado = desperdicadoRaw ? desperdicadoRaw.toLowerCase() === "true" || desperdicadoRaw.toLowerCase() === "sim" || desperdicadoRaw === "1" : false;
+      prePreparoEtiquetasRows.push({
+        id: `${prefix}etiqueta:${bubbleId}`,
+        recipeId: "unknown",
+        receita: codigo ? `Etiqueta ${codigo}` : "Etiqueta",
+        responsavel: "-",
+        quantidade: "1",
+        unidade: "Und",
+        custo: "R$0,00",
+        dataProducao: dataProducao || "-",
+        dataValidade: dataValidade || "-",
+        wasteStatus: desperdicado ? ("launched" as const) : ("pending" as const),
+      });
+      prePreparoIds.add(String(bubbleId));
+    }
+
+    function handlePrePreparoFromItemRow(row: CsvObjectRow) {
+      if (!enablePrePreparo) return;
+      const catId = pickFirst(row, ["categoria_id"]) || pickKeyLike(row, ["categoria_id"]);
+      if (!catId) return;
+      const catName = categoriasById.get(catId.trim()) ?? "";
+      if (!catName || !catNameLooksLikePrePreparo(catName)) return;
+
+      const receita = guessItemLabel(row);
+      if (!receita) return;
+      const bubbleId = pickBubbleId(row) || pickFirst(row, ["item_id"]) || String(prePreparoRows.length + 1);
+      const id = String(bubbleId);
+      if (prePreparoIds.has(id)) return;
+
+      const custoTotalRaw =
+        pickFirst(row, ["custo_total_receita", "custoTotalReceita", "custo_total", "custoTotal", "total", "valor"]) || pickKeyLike(row, ["custo_total", "total", "valor", "custo"]);
+      const totalNum = parsePtNumber(custoTotalRaw);
+      const custoTotal = totalNum ? formatMoneyBRL(totalNum) : String(custoTotalRaw ?? "").trim() || "-";
+
+      const yieldRaw = pickFirst(row, ["rendimento", "yield", "rendimento_receita", "porcao", "porcoes", "qtde_rendimento"]) || pickKeyLike(row, ["rendimento", "yield", "porcao"]);
+      const yieldUnit =
+        pickFirst(row, ["unidade_rendimento", "unidade", "medida", "item_medida", "unidade_medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
+      const yieldNum = parsePtNumber(yieldRaw);
+      const rendimento = yieldNum ? `${yieldNum.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 })}${yieldUnit ? yieldUnit : ""}` : `${String(yieldRaw ?? "").trim() || "1"}${yieldUnit ? yieldUnit : ""}`;
+
+      const unitCost = yieldNum > 0 && totalNum > 0 ? totalNum / yieldNum : 0;
+      const custoUnitario = unitCost > 0 ? `${formatMoneyBRL(unitCost)} / ${yieldUnit}` : "-";
+
+      const validade = pickFirst(row, ["dias_validade", "validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
+      const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
+
+      prePreparoRows.push({
+        id,
+        categoria: catName.trim() || "-",
+        receita: receita.trim(),
+        custoTotal,
+        rendimento,
+        custoUnitario,
+        validadeDias: typeof validadeDiasNum === "number" ? validadeDiasNum : undefined,
+      });
+      prePreparoIds.add(id);
+    }
 
     const fichasRows: any[] = [];
     function handleFicha(row: CsvObjectRow) {
@@ -623,7 +716,8 @@ export async function POST(req: NextRequest) {
     if ((has("fornecedor") || has("empresa")) && (has("produto") || has("item")) && !has("numero")) return "itens_fornecedores";
     if (has("equival") && (has("insumo") || has("item"))) return "equivalencias";
     if (has("motivo") && (has("quantidade") || has("qtd"))) return "desperdicios";
-    if ((has("pre") && has("preparo")) || (has("validade") && (has("rendimento") || has("yield")))) return "pre_preparo";
+      if (has("codigo") && has("data_validade") && (has("data_producao") || has("dias_validade"))) return "pre_preparo_etiquetas";
+      if ((has("pre") && has("preparo")) || (has("validade") && (has("rendimento") || has("yield")))) return "pre_preparo";
     if (has("cmv") || has("bcg") || (has("preco") && has("venda") && has("custo"))) return "fichas_tecnicas";
     if (has("categorias") || (has("estoque") && (has("categoria") || has("grupo")))) return "inventario_flat";
     if (has("custo_medio") || (has("custo") && (has("medida") || has("unidade")))) return "itens";
@@ -646,6 +740,7 @@ export async function POST(req: NextRequest) {
             else if (kind === "equivalencias" && enableFornecedores) handleEquivalencia(r);
             else if (kind === "desperdicios" && enableDesperdicios) handleDesperdicio(r);
             else if (kind === "pre_preparo" && enablePrePreparo) handlePrePreparo(r);
+            else if (kind === "pre_preparo_etiquetas" && enablePrePreparo) handlePrePreparoEtiqueta(r);
             else if (kind === "fichas_tecnicas" && enableFichas) handleFicha(r);
             else if (kind === "inventario_flat" && enableInventario) handleInventarioFlat(r);
             else if (kind === "itens" && enableInsumos) handleInsumo(r);
@@ -666,6 +761,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "process_files";
+    await processCsvGroups("categorias", (row) => handleCategoria(row));
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
     await processCsvGroups("ingredientes", (row) => handleInsumo(row));
     await processCsvGroups("itens", (row) => handleInsumo(row));
@@ -673,7 +769,12 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("itens_fornecedores", (row) => handleFornecedorProduto(row));
     await processCsvGroups("equivalencias", (row) => handleEquivalencia(row));
     await processCsvGroups("pre_preparo", (row) => handlePrePreparo(row));
+    await processCsvGroups("pre_preparo_etiquetas", (row) => handlePrePreparoEtiqueta(row));
     await processCsvGroups("fichas_tecnicas", (row) => handleFicha(row));
+
+    if (enablePrePreparo) {
+      await processCsvGroups("itens", (row) => handlePrePreparoFromItemRow(row));
+    }
 
     for (const k of Object.keys(produtosMap)) {
       produtosMap[k] = Array.from(new Set(produtosMap[k].filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
@@ -699,6 +800,12 @@ export async function POST(req: NextRequest) {
     if (enablePrePreparo && prePreparoRows.length) {
       const { error: ppErr } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: prePreparoRows } as any, { onConflict: "id" });
       if (ppErr) return json({ ok: false, error: `pre_preparo_state:${ppErr.message}`, stage }, { status: 500 });
+    }
+    if (enablePrePreparo && prePreparoEtiquetasRows.length) {
+      const { error: ppeErr } = await supabase
+        .from("pre_preparo_etiquetas_state")
+        .upsert({ id: stateId, payload: prePreparoEtiquetasRows } as any, { onConflict: "id" });
+      if (ppeErr) return json({ ok: false, error: `pre_preparo_etiquetas_state:${ppeErr.message}`, stage }, { status: 500 });
     }
 
     if (enableFichas && fichasRows.length) {
@@ -772,6 +879,7 @@ export async function POST(req: NextRequest) {
           fornecedoresProdutos: enableFornecedores ? Object.keys(produtosMap).length : null,
           fichasTecnicas: enableFichas ? fichasRows.length : null,
           prePreparo: enablePrePreparo ? prePreparoRows.length : null,
+          etiquetasPrePreparo: enablePrePreparo ? prePreparoEtiquetasRows.length : null,
           inventario: enableInventario ? inventarioInserted : null,
           desperdicios: enableDesperdicios ? desperdiciosInserted : null,
           entradas: enableEntradas ? entradasInserted : null,
