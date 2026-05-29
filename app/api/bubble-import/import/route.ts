@@ -329,10 +329,14 @@ export async function POST(req: NextRequest) {
     }
 
     function handleCategoria(row: CsvObjectRow) {
-      const id = pickBubbleId(row) || pickFirst(row, ["categoria_id", "id_categoria"]) || pickKeyLike(row, ["id"]);
       const nome = pickFirst(row, ["nome", "titulo", "name"]) || pickKeyLike(row, ["nome", "titulo", "name"]) || "";
-      if (!id || !nome) return;
-      categoriasById.set(id.trim(), nome.trim());
+      if (!nome) return;
+      const slug = pickFirst(row, ["slug"]) || pickKeyLike(row, ["slug"]);
+      const id = pickBubbleId(row) || pickFirst(row, ["categoria_id", "id_categoria"]) || "";
+
+      const cleanedName = nome.trim();
+      if (id) categoriasById.set(id.trim(), cleanedName);
+      if (slug) categoriasById.set(slug.trim(), cleanedName);
     }
 
     function handleCustoMedio(row: CsvObjectRow) {
@@ -358,7 +362,7 @@ export async function POST(req: NextRequest) {
         pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) ||
         pickKeyLike(row, ["medida", "unidade"]) ||
         "Und";
-      const catId = pickFirst(row, ["categoria_id"]) || pickKeyLike(row, ["categoria_id"]);
+      const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]) || pickKeyLike(row, ["categoria_id", "categoria", "slug"]);
       const categoria =
         pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) ||
         (catId && categoriasById.get(catId.trim())) ||
@@ -580,10 +584,9 @@ export async function POST(req: NextRequest) {
 
     function handlePrePreparoFromItemRow(row: CsvObjectRow) {
       if (!enablePrePreparo) return;
-      const catId = pickFirst(row, ["categoria_id"]) || pickKeyLike(row, ["categoria_id"]);
-      if (!catId) return;
-      const catName = categoriasById.get(catId.trim()) ?? "";
-      if (!catName || !catNameLooksLikePrePreparo(catName)) return;
+      const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]) || pickKeyLike(row, ["categoria_id", "categoria", "slug"]);
+      const catName = catId ? categoriasById.get(catId.trim()) ?? "" : "";
+      if (!catNameLooksLikePrePreparo(catName)) return;
 
       const receita = guessItemLabel(row);
       if (!receita) return;
