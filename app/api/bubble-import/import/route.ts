@@ -134,8 +134,8 @@ function groupParts(files: { path: string; name: string }[]) {
   const groups = new Map<string, { base: string; parts: { path: string; name: string; part: number }[] }>();
   for (const f of files) {
     const lower = f.name.toLowerCase();
-    const m = lower.match(/^(.*)_part(\d+)\.csv$/);
-    const base = m ? `${m[1]}.csv` : lower;
+    const m = lower.match(/^(.*)_part(\d+)\.(csv|json)$/);
+    const base = m ? `${m[1]}.${m[3]}` : lower;
     const part = m ? Number.parseInt(m[2] ?? "0", 10) : 0;
     const g = groups.get(base) ?? { base, parts: [] };
     g.parts.push({ path: f.path, name: f.name, part: Number.isFinite(part) ? part : 0 });
