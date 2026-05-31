@@ -94,12 +94,22 @@ async function loadRowsForPart(supabase: ReturnType<typeof getSupabaseAdmin>, bu
   if (lower.endsWith(".json")) {
     const text = await downloadText(supabase, bucket, part.path);
     const parsed = JSON.parse(text);
+    const toCell = (v: unknown) => {
+      if (v == null) return "";
+      if (typeof v === "string") return v.trim();
+      if (typeof v === "number" || typeof v === "boolean") return String(v);
+      try {
+        return JSON.stringify(v);
+      } catch {
+        return String(v);
+      }
+    };
     if (Array.isArray(parsed)) {
       return parsed
         .filter((x) => x && typeof x === "object" && !Array.isArray(x))
         .map((x) => {
           const obj: CsvObjectRow = {};
-          for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = String(v ?? "").trim();
+          for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = toCell(v);
           return obj;
         });
     }
@@ -110,7 +120,7 @@ async function loadRowsForPart(supabase: ReturnType<typeof getSupabaseAdmin>, bu
           .filter((x) => x && typeof x === "object" && !Array.isArray(x))
           .map((x) => {
             const obj: CsvObjectRow = {};
-            for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = String(v ?? "").trim();
+            for (const [k, v] of Object.entries(x as Record<string, unknown>)) obj[normalizeKey(k)] = toCell(v);
             return obj;
           });
       }
