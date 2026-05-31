@@ -136,6 +136,20 @@
   width: 100%;
 }
 
+.progressWrap {
+  height: 10px;
+  border-radius: 999px;
+  background: #eef1f1;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  width: 0%;
+  background: #0ab86d;
+  transition: width 250ms ease;
+}
+
 .fileList {
   display: flex;
   flex-direction: column;

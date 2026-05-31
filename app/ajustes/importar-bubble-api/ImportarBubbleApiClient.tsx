@@ -18,7 +18,9 @@ export default function ImportarBubbleApiClient() {
     "categorias\ncusto_medio_item\ndesperdicio\nempresas\netiquetas\nfaturamentos\nfornecedores\ningredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nitens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real\nuser",
   );
   const [isRunning, setIsRunning] = useState(false);
+  const [stage, setStage] = useState<"idle" | "pulling" | "importing" | "done" | "error">("idle");
   const [result, setResult] = useState<string>("");
+  const [progress, setProgress] = useState<Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [countsError, setCountsError] = useState<string>("");
   const stopRef = useRef(false);
@@ -47,18 +49,28 @@ export default function ImportarBubbleApiClient() {
     void refreshCounts();
   }, []);
 
-  async function runPullPaged() {
+  useEffect(() => {
+    if (!isRunning) return;
+    const t = window.setInterval(() => {
+      void refreshCounts();
+    }, 2000);
+    return () => window.clearInterval(t);
+  }, [isRunning]);
+
+  async function runSync() {
     if (isRunning) return;
     setIsRunning(true);
+    setStage("pulling");
     setResult("");
+    setProgress(null);
     stopRef.current = false;
     try {
       const runId = crypto.randomUUID();
-      const progress: Record<string, any> = {};
+      const prog: Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> = {};
       for (const typeName of types) {
         if (stopRef.current) break;
-        progress[typeName] = { status: "pulling", fetched: 0, parts: 0, remaining: null as number | null, lastPath: "" };
-        setResult(JSON.stringify({ runId, progress }, null, 2));
+        prog[typeName] = { status: "pulling", fetched: 0, parts: 0, remaining: null as number | null, lastPath: "" };
+        setProgress({ ...prog });
         let cursor = 0;
         let part = 1;
         for (let guard = 0; guard < 100000; guard++) {
@@ -73,26 +85,44 @@ export default function ImportarBubbleApiClient() {
           const up = json.uploaded ?? {};
           const rows = typeof up.rows === "number" ? up.rows : 0;
           cursor = typeof up.nextCursor === "number" ? up.nextCursor : cursor + rows;
-          progress[typeName] = {
+          prog[typeName] = {
             status: json.done ? "done" : "pulling",
-            fetched: (progress[typeName]?.fetched ?? 0) + rows,
+            fetched: (prog[typeName]?.fetched ?? 0) + rows,
             parts: part,
             remaining: typeof up.remaining === "number" ? up.remaining : null,
             lastPath: String(up.path ?? ""),
           };
-          setResult(JSON.stringify({ runId, progress }, null, 2));
+          setProgress({ ...prog });
           part += 1;
           if (json.done) break;
         }
-        if (progress[typeName]?.status !== "done") {
-          progress[typeName] = { ...(progress[typeName] ?? {}), status: "stopped" };
-          setResult(JSON.stringify({ runId, progress }, null, 2));
+        if (prog[typeName]?.status !== "done") {
+          prog[typeName] = { ...(prog[typeName] ?? {}), status: "stopped" };
+          setProgress({ ...prog });
           break;
         }
       }
+      setResult(JSON.stringify({ runId, progress: prog }, null, 2));
+
+      if (stopRef.current) {
+        setStage("idle");
+        return;
+      }
+
+      setStage("importing");
+      const importRes = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const importText = await importRes.text();
+      let importJson: unknown = null;
+      try {
+        importJson = JSON.parse(importText);
+      } catch {}
+      if (!importRes.ok || !importJson || (importJson as any).ok !== true) throw new Error((importJson as any)?.error || importText || `failed_${importRes.status}`);
+      setResult(JSON.stringify({ runId, progress: prog, import: importJson }, null, 2));
       await refreshCounts();
+      setStage("done");
     } catch (err) {
       setResult(safeJsonMessage(err));
+      setStage("error");
     } finally {
       setIsRunning(false);
     }
@@ -101,6 +131,20 @@ export default function ImportarBubbleApiClient() {
   function stop() {
     stopRef.current = true;
   }
+
+  const progressList = useMemo(() => {
+    const p = progress ?? {};
+    return types.map((t) => ({ type: t, ...(p[t] ?? { status: "pending", fetched: 0, parts: 0, remaining: null, lastPath: "" }) }));
+  }, [progress, types]);
+
+  const totals = useMemo(() => {
+    const list = progressList;
+    const done = list.filter((r) => r.status === "done").length;
+    const fetched = list.reduce((sum, r) => sum + (Number.isFinite(r.fetched) ? r.fetched : 0), 0);
+    const remainingKnown = list.every((r) => r.status === "done" || typeof r.remaining === "number");
+    const remaining = remainingKnown ? list.reduce((sum, r) => sum + (typeof r.remaining === "number" ? r.remaining : 0), 0) : null;
+    return { done, total: list.length, fetched, remaining };
+  }, [progressList]);
 
   return (
     <div className={dash.dashboard}>
@@ -120,8 +164,8 @@ export default function ImportarBubbleApiClient() {
                 <button type="button" className={styles.btn} onClick={stop} disabled={!isRunning}>
                   Parar
                 </button>
-                <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runPullPaged} disabled={isRunning || !types.length}>
-                  {isRunning ? "Puxando..." : "Puxar do Bubble"}
+                <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runSync} disabled={isRunning || !types.length}>
+                  {isRunning ? (stage === "importing" ? "Organizando..." : "Puxando...") : "Sincronizar tudo"}
                 </button>
               </div>
             </div>
@@ -156,6 +200,52 @@ export default function ImportarBubbleApiClient() {
                         )}
                       </div>
                     ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.fileList}>
+                <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
+                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className={styles.fileName}>Bubble (puxando via API)</div>
+                    <div className={styles.fileMeta}>
+                      {totals.done}/{totals.total} tabelas concluídas • {totals.fetched.toLocaleString("pt-BR")} itens
+                      {typeof totals.remaining === "number" ? ` • faltam ${totals.remaining.toLocaleString("pt-BR")}` : ""}
+                    </div>
+                    <div className={styles.progressWrap}>
+                      <div
+                        className={styles.progressFill}
+                        style={{
+                          width:
+                            totals.total > 0
+                              ? `${Math.round((totals.done / totals.total) * 100)}%`
+                              : "0%",
+                        }}
+                      />
+                    </div>
+                    <div className={styles.fileList}>
+                      {progressList.map((r) => {
+                        const denom = typeof r.remaining === "number" ? r.fetched + r.remaining : 0;
+                        const pct = denom > 0 ? Math.round((r.fetched / denom) * 100) : null;
+                        return (
+                          <div key={r.type} className={styles.fileRow}>
+                            <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+                              <div className={styles.fileName}>{r.type}</div>
+                              <div className={styles.fileMeta}>
+                                {r.status} • {r.fetched.toLocaleString("pt-BR")} itens • {r.parts} partes
+                                {typeof r.remaining === "number" ? ` • ${pct ?? 0}%` : ""}
+                              </div>
+                              {r.lastPath ? <div className={styles.fileMeta}>{r.lastPath}</div> : null}
+                            </div>
+                            <div style={{ width: 160, flexShrink: 0, display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div className={styles.progressWrap}>
+                                <div className={styles.progressFill} style={{ width: typeof pct === "number" ? `${pct}%` : r.status === "done" ? "100%" : "20%" }} />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>

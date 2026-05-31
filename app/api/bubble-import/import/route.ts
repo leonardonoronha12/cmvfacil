@@ -147,6 +147,7 @@ function groupParts(files: { path: string; name: string }[]) {
 function classifyFile(name: string) {
   const n = name.toLowerCase();
   if (n.includes("categoria")) return "categorias";
+  if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
   if (n.includes("invent")) return "inventario";
   if (n.includes("pre") && n.includes("preparo")) return "pre_preparo";
@@ -159,6 +160,7 @@ function classifyFile(name: string) {
   if (n.includes("desperd")) return "desperdicios";
   if (n.includes("custo") && n.includes("medio")) return "custo_medio";
   if (n.includes("ingred")) return "ingredientes";
+  if (/(^|[^a-z])item([^a-z]|$)/.test(n)) return "itens";
   if (n.includes("items") || /\bitens\b/.test(n)) return "itens";
   return "unknown";
 }
@@ -313,7 +315,7 @@ export async function POST(req: NextRequest) {
     const enabledKinds = new Set<string>();
     if (enableInsumos) ["custo_medio", "ingredientes", "itens"].forEach((k) => enabledKinds.add(k));
     if (enableFornecedores) ["fornecedores", "itens_fornecedores", "equivalencias"].forEach((k) => enabledKinds.add(k));
-    if (enableDesperdicios) enabledKinds.add("desperdicios");
+    if (enableDesperdicios) ["desperdicios", "motivos_desperdicios"].forEach((k) => enabledKinds.add(k));
     if (enableEntradas) ["itens_notas", "notas_fiscais"].forEach((k) => enabledKinds.add(k));
     if (enablePrePreparo) ["pre_preparo", "pre_preparo_etiquetas", "categorias", "itens"].forEach((k) => enabledKinds.add(k));
     if (enableFichas) enabledKinds.add("fichas_tecnicas");
@@ -324,6 +326,10 @@ export async function POST(req: NextRequest) {
     const produtosMap: Record<string, string[]> = {};
     const equivalenciasMap: Record<string, any[]> = {};
     const categoriasById = new Map<string, string>();
+    const itemById = new Map<string, { nome: string; unidade: string; categoria: string }>();
+    const fornecedorNameById = new Map<string, string>();
+    const motivoNameById = new Map<string, string>();
+    const inventarioDateById = new Map<string, string>();
 
     const insumosByKey = new Map<string, any>();
     const custoByItemKey = new Map<string, string>();
@@ -367,7 +373,7 @@ export async function POST(req: NextRequest) {
       const item = guessItemLabel(row);
       const itemKey = normalizeItemName(item);
       if (!itemKey) return;
-      const bubbleId = pickBubbleId(row);
+      const bubbleId = pickBubbleId(row) || pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
       const medida =
         pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) ||
         pickKeyLike(row, ["medida", "unidade"]) ||
@@ -395,6 +401,15 @@ export async function POST(req: NextRequest) {
         especificacao: especificacao.trim() || prev.especificacao || undefined,
         ocultar: typeof ocultar === "boolean" ? ocultar : prev.ocultar,
       });
+
+      if (bubbleId) {
+        const prevItem = itemById.get(bubbleId) ?? null;
+        itemById.set(bubbleId, {
+          nome: item.trim() || prevItem?.nome || "",
+          unidade: medida.trim() || prevItem?.unidade || "Und",
+          categoria: categoria.trim() || prevItem?.categoria || "",
+        });
+      }
     }
 
     function handleFornecedorInfo(row: CsvObjectRow) {
@@ -403,6 +418,8 @@ export async function POST(req: NextRequest) {
         pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
+      const fornId = pickBubbleId(row) || pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
+      if (fornId) fornecedorNameById.set(fornId, fornecedor.trim());
       infoMap[key] = {
         fornecedor: fornecedor.trim() || fornecedor,
         vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
@@ -413,15 +430,23 @@ export async function POST(req: NextRequest) {
 
     function handleFornecedorProduto(row: CsvObjectRow) {
       if (!enableFornecedores) return;
-      const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
-      const item =
+      const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
+      const fornecedor =
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
+        (fornecedorId ? fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
+        pickKeyLike(row, ["fornecedor", "empresa"]);
+
+      const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
+      const itemName =
         pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
+        (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||
         pickKeyLike(row, ["produto", "item", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
         guessItemLabel(row);
+
       const key = normalizeFornecedorKey(fornecedor);
-      if (!key || !item.trim()) return;
+      if (!key || !String(itemName ?? "").trim()) return;
       const list = produtosMap[key] ?? [];
-      list.push(item.trim());
+      list.push(String(itemName).trim());
       produtosMap[key] = list;
     }
 
@@ -456,7 +481,11 @@ export async function POST(req: NextRequest) {
     const notaId =
         pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
-      const nome = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item"]) || guessItemLabel(row);
+      const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
+      const nome =
+        pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]) ||
+        (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||
+        guessItemLabel(row);
       if (!nome) return;
       const bubbleId = pickBubbleId(row) || String(Date.now());
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
@@ -477,8 +506,11 @@ export async function POST(req: NextRequest) {
     const entradasRows: any[] = [];
     function handleNotaFiscal(row: CsvObjectRow) {
       if (!enableEntradas) return;
+    const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
     const fornecedor =
-      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) ||
+      (fornecedorId ? fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
+      pickKeyLike(row, ["fornecedor", "empresa"]);
     if (!fornecedor) return;
     const numero =
       pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
@@ -506,15 +538,27 @@ export async function POST(req: NextRequest) {
   }
 
     const desperdiciosRows: any[] = [];
+    function handleMotivoDesperdicio(row: CsvObjectRow) {
+      const bubbleId = pickBubbleId(row) || pickFirst(row, ["motivo_id"]) || pickKeyLike(row, ["motivo_id"]);
+      const titulo = pickFirst(row, ["titulo", "motivo", "nome", "name"]) || pickKeyLike(row, ["titulo", "motivo", "nome", "name"]);
+      if (!bubbleId || !titulo) return;
+      motivoNameById.set(String(bubbleId).trim(), String(titulo).trim());
+    }
+
     function handleDesperdicio(row: CsvObjectRow) {
       if (!enableDesperdicios) return;
-    const item = guessItemLabel(row);
+    const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
+    const item = guessItemLabel(row) || (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "");
     if (!item) return;
     const bubbleId = pickBubbleId(row) || String(desperdiciosRows.length + 1);
     const data = buildDateLabel(pickFirst(row, ["data", "date", "data_desperdicio", "created_date", "created_at"]) || pickKeyLike(row, ["data", "date"]));
     const quantidade = pickFirst(row, ["quantidade", "qtd", "qtde", "quantidade_label"]) || pickKeyLike(row, ["quantidade", "qtd"]);
     const custo = pickFirst(row, ["custo", "valor", "total", "subtotal"]) || pickKeyLike(row, ["custo", "valor", "total", "subtotal"]);
-    const motivo = pickFirst(row, ["motivo", "reason", "descricao", "obs", "observacao"]) || pickKeyLike(row, ["motivo", "reason", "obs", "descr"]);
+    const motivoId = pickFirst(row, ["motivo_id", "etiqueta_id"]) || pickKeyLike(row, ["motivo_id", "etiqueta_id"]);
+    const motivo =
+      pickFirst(row, ["motivo", "reason", "descricao", "obs", "observacao"]) ||
+      (motivoId ? motivoNameById.get(motivoId.trim()) ?? "" : "") ||
+      pickKeyLike(row, ["motivo", "reason", "obs", "descr"]);
     const custoNum = parsePtNumber(custo);
     desperdiciosRows.push({
       id: `${prefix}desperdicio:${bubbleId}`,
@@ -720,6 +764,44 @@ export async function POST(req: NextRequest) {
     inventarioMap.set(invKey, inv);
   }
 
+    function handleInventarioApiHeader(row: CsvObjectRow) {
+      if (!enableInventario) return;
+      const invId = pickBubbleId(row);
+      if (!invId) return;
+      const dateRaw =
+        pickFirst(row, ["data", "date", "data_inventario", "data_contagem", "data_criacao", "created_date", "created_at", "creation_date"]) ||
+        pickKeyLike(row, ["data", "date", "criacao", "created"]);
+      const d = parseDateLoose(dateRaw);
+      const label = d ? formatDateLabelPT(d) : String(dateRaw ?? "").trim();
+      if (label) inventarioDateById.set(invId.trim(), label);
+    }
+
+    function handleInventarioApiItem(row: CsvObjectRow) {
+      if (!enableInventario) return false;
+      const invRef = pickFirst(row, ["inventario_id", "inventarios_id", "inventario"]) || pickKeyLike(row, ["inventario_id", "inventario"]);
+      const itemRef = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
+      if (!invRef || !itemRef) return false;
+      const dataLabel = inventarioDateById.get(invRef.trim()) ?? "";
+      const item = itemById.get(itemRef.trim())?.nome ?? "";
+      const unidade = itemById.get(itemRef.trim())?.unidade ?? "";
+      const categoria = itemById.get(itemRef.trim())?.categoria ?? "";
+      const estoqueFinal =
+        pickFirst(row, ["estoque_final", "estoqueFinal", "quantidade", "qtd", "qtde", "estoque", "inventario_final"]) ||
+        pickKeyLike(row, ["estoque", "quantidade", "qtd", "final"]);
+
+      const fake: CsvObjectRow = {
+        data: dataLabel || pickFirst(row, ["data", "date"]) || "",
+        categoria: categoria || "Importado",
+        item: item || "",
+        unidade: unidade || "Und",
+        estoque_final: String(estoqueFinal ?? "").trim(),
+        id: `${invRef}:${itemRef}`,
+      };
+      if (!fake.data || !fake.item) return false;
+      handleInventarioFlat(fake);
+      return true;
+    }
+
     function detectUnknownKind(row: CsvObjectRow) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
@@ -828,7 +910,22 @@ export async function POST(req: NextRequest) {
 
     const inventarioRows: any[] = [];
     if (enableInventario) {
+      const pendingInvItems: CsvObjectRow[] = [];
       await processCsvGroups("inventario", (row) => {
+        const hasInvItemsList = Boolean(pickFirst(row, ["lista_itens_inventarios", "itens_inventarios"]) || pickKeyLike(row, ["itens_inventarios", "lista_itens"]));
+        const looksHeader = hasInvItemsList && !pickFirst(row, ["inventario_id", "inventarios_id"]) && !pickKeyLike(row, ["inventario_id"]);
+        if (looksHeader) {
+          handleInventarioApiHeader(row);
+          return;
+        }
+
+        const lookedApiItem = Boolean(pickFirst(row, ["inventario_id", "inventarios_id"]) || pickKeyLike(row, ["inventario_id"])) && Boolean(pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]));
+        if (lookedApiItem) {
+          const ok = handleInventarioApiItem(row);
+          if (!ok) pendingInvItems.push(row);
+          return;
+        }
+
         const dataLabel = buildDateLabel(pickFirst(row, ["data", "date", "data_inventario"]));
         const bubbleId = pickBubbleId(row) || String(inventarioRows.length + 1);
         const categoriasRaw = pickFirst(row, ["categorias", "categories", "payload"]);
@@ -845,6 +942,7 @@ export async function POST(req: NextRequest) {
         }
         handleInventarioFlat(row);
       });
+      for (const row of pendingInvItems) handleInventarioApiItem(row);
     }
 
     const inventarioRowsFromFlat = enableInventario
@@ -864,6 +962,7 @@ export async function POST(req: NextRequest) {
         ? await upsertInBatches(supabase, "inventario", [...inventarioRows, ...inventarioRowsFromFlat], 100)
         : 0;
 
+    await processCsvGroups("motivos_desperdicios", (row) => handleMotivoDesperdicio(row));
     await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
     const desperdiciosInserted = enableDesperdicios && desperdiciosRows.length ? await upsertInBatches(supabase, "desperdicios", desperdiciosRows, 500) : 0;
 
