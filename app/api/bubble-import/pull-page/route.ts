@@ -155,7 +155,10 @@ export async function POST(req: NextRequest) {
     let lastCreatedDate: string | null = null;
     for (let i = results.length - 1; i >= 0; i--) {
       const r: any = results[i];
-      const cd = r && typeof r === "object" ? (r.created_date ?? r.created_at ?? r.creation_date) : null;
+      const cd =
+        r && typeof r === "object"
+          ? (r["Created Date"] ?? r["Modified Date"] ?? r.created_date ?? r.created_at ?? r.creation_date ?? r.modified_date ?? r.modified_at)
+          : null;
       if (typeof cd === "string" && cd.trim()) {
         lastCreatedDate = cd.trim();
         break;

@@ -121,12 +121,12 @@ export default function ImportarBubbleApiClient() {
               limit: 200,
               runId,
               part,
-              sortField: "created_date",
+              sortField: "Created Date",
               descending: false,
               constraints: segmentAfter
                 ? [
                     {
-                      key: "created_date",
+                      key: "Created Date",
                       constraint_type: "greater than",
                       value: segmentAfter,
                     },
