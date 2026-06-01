@@ -239,7 +239,6 @@ export async function POST(req: NextRequest) {
 
     const state = await downloadJson(supabase, bucket, statePath);
     if (state?.v !== 1) return json({ ok: false, error: "unsupported_state" }, { status: 400 });
-    if (state.phase === "done") return json({ ok: true, state }, { status: 200 });
 
     const startMs = Date.now();
     const hardMs = 22_000;
@@ -249,6 +248,32 @@ export async function POST(req: NextRequest) {
       state.updatedAt = nowIso();
       await uploadJson(supabase, bucket, statePath, state);
     };
+
+    const ensureImportPlan = async () => {
+      const has = state.import && typeof state.import === "object";
+      if (!has) {
+        state.import = {
+          domains: ["insumos", "fornecedores", "entradas", "desperdicios", "inventario", "pre_preparo", "fichas_tecnicas"],
+          index: 0,
+          status: "pending",
+          lastError: "",
+        };
+      }
+      if (!Array.isArray(state.import.domains) || !state.import.domains.length) {
+        state.import.domains = ["insumos", "fornecedores", "entradas", "desperdicios", "inventario", "pre_preparo", "fichas_tecnicas"];
+      }
+      if (typeof state.import.index !== "number" || !Number.isFinite(state.import.index) || state.import.index < 0) state.import.index = 0;
+      if (typeof state.import.status !== "string") state.import.status = "pending";
+      if (typeof state.import.lastError !== "string") state.import.lastError = "";
+      await persist();
+    };
+
+    if (state.phase === "done") {
+      if (state.import?.status === "done") return json({ ok: true, state }, { status: 200 });
+      await ensureImportPlan();
+      state.phase = "importing";
+      await persist();
+    }
 
     const doImportDomain = async (domain: string) => {
       const url = new URL("/api/bubble-import/import", req.url);
