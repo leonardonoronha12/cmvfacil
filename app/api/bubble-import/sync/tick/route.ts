@@ -16,12 +16,39 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 }
 
 async function downloadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
-  const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
-  if (error || !data?.signedUrl) throw new Error(error?.message || "failed_to_sign");
-  const res = await fetch(data.signedUrl, { cache: "no-store" });
-  const text = await res.text();
-  if (!res.ok) throw new Error(`failed_to_download_${res.status}`);
-  return JSON.parse(text) as any;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
+    if (error || !data?.signedUrl) throw new Error(error?.message || "failed_to_sign");
+    const res = await fetch(data.signedUrl, { cache: "no-store" });
+    const text = await res.text();
+    if (!res.ok) {
+      if (attempt < 3) {
+        await sleep(300 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`failed_to_download_${res.status}`);
+    }
+    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
+    const trimmed = text.trimStart();
+    const looksMarkup = trimmed.startsWith("<") || ct.includes("text/html") || ct.includes("application/xml") || ct.includes("text/xml");
+    if (looksMarkup) {
+      if (attempt < 3) {
+        await sleep(300 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`invalid_json_from_storage:${path.split("/").slice(-1)[0] || "file"}`);
+    }
+    try {
+      return JSON.parse(text) as any;
+    } catch {
+      if (attempt < 3) {
+        await sleep(300 * Math.pow(2, attempt));
+        continue;
+      }
+      throw new Error(`invalid_json_from_storage:${path.split("/").slice(-1)[0] || "file"}`);
+    }
+  }
+  throw new Error("failed_to_download");
 }
 
 async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
@@ -51,7 +78,7 @@ async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
     for (const folder of folders) await walk(`${currentPrefix}/${folder.name}`, depth + 1);
   }
   await walk(prefix, 0);
-  return paths;
+  return paths.sort((a, b) => a.path.localeCompare(b.path));
 }
 
 function safeBaseUrl(input: string) {

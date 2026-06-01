@@ -44,7 +44,7 @@ async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
     const n = name.toLowerCase();
     return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
   };
-  return paths.filter((p) => okExt(p.name)).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
+  return paths.filter((p) => okExt(p.name)).sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || a.path.localeCompare(b.path));
 }
 
 async function downloadText(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
