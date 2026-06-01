@@ -26,7 +26,7 @@ function safeBaseUrl(input: string) {
   const stripped = noTrail
     .replace(/\/api\/1\.1\/obj$/i, "")
     .replace(/\/api\/1\.1$/i, "");
-  if (!/^https?:\/\//i.test(noTrail)) return `https://${noTrail}`;
+  if (!/^https?:\/\//i.test(stripped)) return `https://${stripped}`;
   return stripped;
 }
 
@@ -54,8 +54,27 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
 }
 
-async function fetchBubblePage(baseUrl: string, token: string, typeName: string, cursor: number, limit: number) {
-  const url = `${baseUrl}/api/1.1/obj/${encodeURIComponent(typeName)}?cursor=${cursor}&limit=${limit}`;
+type BubbleConstraint = { key: string; constraint_type: string; value: unknown };
+
+async function fetchBubblePage(args: {
+  baseUrl: string;
+  token: string;
+  typeName: string;
+  cursor: number;
+  limit: number;
+  constraints?: BubbleConstraint[] | null;
+  sortField?: string | null;
+  descending?: boolean | null;
+}) {
+  const { baseUrl, token, typeName, cursor, limit, constraints, sortField, descending } = args;
+  const qs = new URLSearchParams();
+  qs.set("cursor", String(cursor));
+  qs.set("limit", String(limit));
+  if (sortField) qs.set("sort_field", String(sortField));
+  if (typeof descending === "boolean") qs.set("descending", descending ? "true" : "false");
+  if (constraints?.length) qs.set("constraints", JSON.stringify(constraints));
+
+  const url = `${baseUrl}/api/1.1/obj/${encodeURIComponent(typeName)}?${qs.toString()}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
   const text = await res.text();
   let jsonBody: any = null;
@@ -85,6 +104,14 @@ export async function POST(req: NextRequest) {
     const limit = typeof body?.limit === "number" && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(200, Math.floor(body.limit)) : 100;
     const runId = typeof body?.runId === "string" ? String(body.runId).trim() : "";
     const part = typeof body?.part === "number" && Number.isFinite(body.part) && body.part > 0 ? Math.floor(body.part) : 1;
+    const sortField = typeof body?.sortField === "string" && body.sortField.trim() ? String(body.sortField).trim() : null;
+    const descending = typeof body?.descending === "boolean" ? Boolean(body.descending) : null;
+    const constraints = Array.isArray(body?.constraints)
+      ? (body.constraints as any[])
+          .filter((x) => x && typeof x === "object")
+          .map((x) => ({ key: String((x as any).key ?? "").trim(), constraint_type: String((x as any).constraint_type ?? "").trim(), value: (x as any).value }))
+          .filter((x) => x.key && x.constraint_type)
+      : null;
 
     if (!baseUrl) return json({ ok: false, error: "missing_base_url" }, { status: 400 });
     if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
@@ -109,7 +136,7 @@ export async function POST(req: NextRequest) {
     const objectPath = `user:${userId}/${day}/${runId}/${stamp}-bubble-api-${typeSlug}_part${partLabel}.json`;
     const runPrefix = `user:${userId}/${day}/${runId}`;
 
-    const { results, remaining } = await fetchBubblePage(baseUrl, token, typeName, cursor, limit);
+    const { results, remaining } = await fetchBubblePage({ baseUrl, token, typeName, cursor, limit, constraints, sortField, descending });
     const payload = {
       source: "bubble-data-api",
       type: typeName,
@@ -122,7 +149,18 @@ export async function POST(req: NextRequest) {
     if (error) throw new Error(error.message);
 
     const nextCursor = cursor + results.length;
-    const done = remaining === 0 || results.length === 0;
+    const stalled = typeof remaining === "number" && remaining > 0 && results.length === 0;
+    const done = typeof remaining === "number" ? remaining === 0 : results.length === 0;
+
+    let lastCreatedDate: string | null = null;
+    for (let i = results.length - 1; i >= 0; i--) {
+      const r: any = results[i];
+      const cd = r && typeof r === "object" ? (r.created_date ?? r.created_at ?? r.creation_date) : null;
+      if (typeof cd === "string" && cd.trim()) {
+        lastCreatedDate = cd.trim();
+        break;
+      }
+    }
 
     return json(
       {
@@ -130,6 +168,8 @@ export async function POST(req: NextRequest) {
         type: typeName,
         uploaded: { path: objectPath, rows: results.length, cursor, nextCursor, remaining, part },
         runPrefix,
+        lastCreatedDate,
+        stalled,
         done,
       },
       { status: 200 },

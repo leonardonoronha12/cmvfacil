@@ -105,12 +105,34 @@ export default function ImportarBubbleApiClient() {
         setProgress({ ...prog });
         let cursor = 0;
         let part = 1;
+        let segmentAfter: string | null = null;
+        let lastCreated: string | null = null;
+        const seenSegmentAfter = new Set<string>();
         for (let guard = 0; guard < 100000; guard++) {
           if (stopRef.current) break;
           const res = await fetch("/api/bubble-import/pull-page", {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ baseUrl, token, type: typeName, cursor, limit: 100, runId, part }),
+            body: JSON.stringify({
+              baseUrl,
+              token,
+              type: typeName,
+              cursor,
+              limit: 200,
+              runId,
+              part,
+              sortField: "created_date",
+              descending: false,
+              constraints: segmentAfter
+                ? [
+                    {
+                      key: "created_date",
+                      constraint_type: "greater than",
+                      value: segmentAfter,
+                    },
+                  ]
+                : undefined,
+            }),
           });
           const json = (await res.json().catch(() => null)) as any;
           if (!res.ok || !json?.ok) {
@@ -121,9 +143,9 @@ export default function ImportarBubbleApiClient() {
           if (!runPrefix && typeof json?.runPrefix === "string") runPrefix = json.runPrefix;
           const up = json.uploaded ?? {};
           const rows = typeof up.rows === "number" ? up.rows : 0;
-          cursor = typeof up.nextCursor === "number" ? up.nextCursor : cursor + rows;
+          if (typeof json?.lastCreatedDate === "string" && json.lastCreatedDate.trim()) lastCreated = json.lastCreatedDate.trim();
           prog[typeName] = {
-            status: json.done ? "done" : "pulling",
+            status: json.done ? "done" : json.stalled ? "segmentando" : "pulling",
             fetched: (prog[typeName]?.fetched ?? 0) + rows,
             parts: part,
             remaining: typeof up.remaining === "number" ? up.remaining : null,
@@ -131,6 +153,18 @@ export default function ImportarBubbleApiClient() {
           };
           setProgress({ ...prog });
           part += 1;
+
+          if (json.stalled) {
+            const nextAfter = lastCreated;
+            if (!nextAfter) throw new Error(`${typeName}: paginação travou (cursor=${cursor}) e não consegui ler created_date para segmentar.`);
+            if (seenSegmentAfter.has(nextAfter)) throw new Error(`${typeName}: paginação travou repetidamente no mesmo created_date (${nextAfter}).`);
+            seenSegmentAfter.add(nextAfter);
+            segmentAfter = nextAfter;
+            cursor = 0;
+            continue;
+          }
+
+          cursor = typeof up.nextCursor === "number" ? up.nextCursor : cursor + rows;
           if (json.done) break;
         }
         if (prog[typeName]?.status !== "done") {
