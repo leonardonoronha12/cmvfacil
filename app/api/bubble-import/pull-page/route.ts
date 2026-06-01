@@ -23,12 +23,16 @@ function safeBaseUrl(input: string) {
   const raw = String(input ?? "").trim();
   if (!raw) return "";
   const noTrail = raw.replace(/\/+$/, "");
+  const stripped = noTrail
+    .replace(/\/api\/1\.1\/obj$/i, "")
+    .replace(/\/api\/1\.1$/i, "");
   if (!/^https?:\/\//i.test(noTrail)) return `https://${noTrail}`;
-  return noTrail;
+  return stripped;
 }
 
 function safeToken(input: string) {
-  return String(input ?? "").trim();
+  const t = String(input ?? "").trim();
+  return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
 }
 
 function safeType(input: string) {

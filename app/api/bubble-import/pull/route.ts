@@ -14,15 +14,19 @@ function getEnv(name: string) {
 }
 
 function safeToken(input: string) {
-  return String(input ?? "").trim();
+  const t = String(input ?? "").trim();
+  return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
 }
 
 function safeBaseUrl(input: string) {
   const raw = String(input ?? "").trim();
   if (!raw) return "";
   const noTrail = raw.replace(/\/+$/, "");
-  if (!/^https?:\/\//i.test(noTrail)) return `https://${noTrail}`;
-  return noTrail;
+  const stripped = noTrail
+    .replace(/\/api\/1\.1\/obj$/i, "")
+    .replace(/\/api\/1\.1$/i, "");
+  if (!/^https?:\/\//i.test(stripped)) return `https://${stripped}`;
+  return stripped;
 }
 
 function safeName(input: string) {
@@ -113,4 +117,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
