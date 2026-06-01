@@ -11,6 +11,10 @@ function safeJsonMessage(err: unknown) {
   return String(err);
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
 export default function ImportarBubbleApiClient() {
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
@@ -110,36 +114,50 @@ export default function ImportarBubbleApiClient() {
         const seenSegmentAfter = new Set<string>();
         for (let guard = 0; guard < 100000; guard++) {
           if (stopRef.current) break;
-          const res = await fetch("/api/bubble-import/pull-page", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              baseUrl,
-              token,
-              type: typeName,
-              cursor,
-              limit: 200,
-              runId,
-              part,
-              sortField: "Created Date",
-              descending: false,
-              constraints: segmentAfter
-                ? [
-                    {
-                      key: "Created Date",
-                      constraint_type: "greater than",
-                      value: segmentAfter,
-                    },
-                  ]
-                : undefined,
-            }),
-          });
-          const json = (await res.json().catch(() => null)) as any;
-          if (!res.ok || !json?.ok) {
-            const detail = json?.bubbleStatus ? `bubbleStatus=${json.bubbleStatus}` : `status=${res.status}`;
-            const body = json?.bubbleBody ? `\n${json.bubbleBody}` : "";
-            throw new Error(`${typeName} (cursor=${cursor}) ${detail}: ${json?.error || "failed"}${body}`);
+          const pullPayload = {
+            baseUrl,
+            token,
+            type: typeName,
+            cursor,
+            limit: 200,
+            runId,
+            part,
+            sortField: "Created Date",
+            descending: false,
+            constraints: segmentAfter
+              ? [
+                  {
+                    key: "Created Date",
+                    constraint_type: "greater than",
+                    value: segmentAfter,
+                  },
+                ]
+              : undefined,
+          };
+
+          let json: any = null;
+          for (let attempt = 0; attempt < 10; attempt++) {
+            if (stopRef.current) break;
+            const res = await fetch("/api/bubble-import/pull-page", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(pullPayload) });
+            json = (await res.json().catch(() => null)) as any;
+            if (res.ok && json?.ok) break;
+
+            const bubbleStatus = typeof json?.bubbleStatus === "number" ? json.bubbleStatus : null;
+            const status = res.status;
+            const retriable = bubbleStatus === 429 || bubbleStatus === 502 || bubbleStatus === 503 || bubbleStatus === 504 || status === 429 || status === 502 || status === 503 || status === 504;
+            if (!retriable || attempt >= 9) {
+              const detail = bubbleStatus ? `bubbleStatus=${bubbleStatus}` : `status=${status}`;
+              const body = json?.bubbleBody ? `\n${json.bubbleBody}` : "";
+              throw new Error(`${typeName} (cursor=${cursor}) ${detail}: ${json?.error || "failed"}${body}`);
+            }
+
+            prog[typeName] = { ...(prog[typeName] ?? {}), status: `reintentando (${attempt + 1}/10)` } as any;
+            setProgress({ ...prog });
+            const backoff = Math.min(12_000, 600 * Math.pow(2, attempt));
+            await sleep(backoff);
           }
+          if (!json?.ok) throw new Error(`${typeName} (cursor=${cursor}) failed`);
+
           if (!runPrefix && typeof json?.runPrefix === "string") runPrefix = json.runPrefix;
           const up = json.uploaded ?? {};
           const rows = typeof up.rows === "number" ? up.rows : 0;
