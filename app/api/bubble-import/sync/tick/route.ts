@@ -110,7 +110,7 @@ function typeSlug(typeName: string) {
 }
 
 function isTransient(status: number | null) {
-  return status === 429 || status === 502 || status === 503 || status === 504;
+  return status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || status === 520 || status === 521 || status === 522 || status === 523 || status === 524;
 }
 
 function sleep(ms: number) {
@@ -191,6 +191,15 @@ export async function POST(req: NextRequest) {
           state.currentTypeIndex = idx;
           p.status = p.segmentAfter ? "segmentando" : "pulling";
 
+          const retryAt = typeof p.nextRetryAt === "number" ? p.nextRetryAt : 0;
+          if (retryAt > Date.now()) {
+            const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+            p.status = `aguardando (${seconds}s)`;
+            await persist();
+            ops += 1;
+            break;
+          }
+
           const cursor = typeof p.cursor === "number" && p.cursor >= 0 ? p.cursor : 0;
           const segAfter = typeof p.segmentAfter === "string" && p.segmentAfter.trim() ? p.segmentAfter.trim() : null;
           const constraints = segAfter
@@ -206,6 +215,7 @@ export async function POST(req: NextRequest) {
           let results: unknown[] = [];
           let remaining: number | null = null;
           let lastCreatedDate: string | null = null;
+          let pausedByTransientError = false;
           for (let attempt = 0; attempt < 10; attempt++) {
             try {
               const page = await fetchBubblePage({ baseUrl, token, typeName: t, cursor, limit: 200, sortField: "Created Date", descending: false, constraints });
@@ -214,10 +224,21 @@ export async function POST(req: NextRequest) {
               break;
             } catch (err) {
               const bubbleStatus = err instanceof BubbleApiError ? err.bubbleStatus : null;
-              if (!isTransient(bubbleStatus) || attempt >= 9) throw err;
+              if (!isTransient(bubbleStatus)) throw err;
+              if (attempt >= 9) {
+                p.errorCount = (p.errorCount ?? 0) + 1;
+                p.lastError = err instanceof Error ? err.message : String(err);
+                p.nextRetryAt = Date.now() + 60_000;
+                p.status = "aguardando";
+                await persist();
+                ops += 1;
+                pausedByTransientError = true;
+                break;
+              }
               await sleep(Math.min(12_000, 600 * Math.pow(2, attempt)));
             }
           }
+          if (pausedByTransientError) break;
 
           for (let i = results.length - 1; i >= 0; i--) {
             const r: any = results[i];
