@@ -5,6 +5,7 @@ import { getUserIdFromRequest } from "../../../lib/requestUserId";
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
   return NextResponse.json(data, { ...init, headers });
 }
 
@@ -71,4 +72,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

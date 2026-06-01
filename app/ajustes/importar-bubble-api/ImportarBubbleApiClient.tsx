@@ -43,6 +43,8 @@ export default function ImportarBubbleApiClient() {
   const [progress, setProgress] = useState<Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [countsError, setCountsError] = useState<string>("");
+  const [countsInfo, setCountsInfo] = useState<string>("");
+  const [isRefreshingCounts, setIsRefreshingCounts] = useState(false);
   const [resetError, setResetError] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
   const [syncWarning, setSyncWarning] = useState<string>("");
@@ -59,14 +61,19 @@ export default function ImportarBubbleApiClient() {
 
   async function refreshCounts() {
     setCountsError("");
+    setCountsInfo("");
+    setIsRefreshingCounts(true);
     try {
-      const res = await fetch("/api/bubble-import/stats", { method: "GET" });
+      const res = await fetch(`/api/bubble-import/stats?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const json = (await res.json().catch(() => null)) as { ok?: boolean; counts?: Record<string, number>; error?: string } | null;
       if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
       setCounts(json.counts ?? {});
+      setCountsInfo(`Atualizado em ${new Date().toLocaleString()}`);
     } catch (err) {
       setCounts(null);
       setCountsError(safeJsonMessage(err));
+    } finally {
+      setIsRefreshingCounts(false);
     }
   }
 
@@ -292,7 +299,7 @@ export default function ImportarBubbleApiClient() {
               </div>
               <div className={styles.actions}>
                 <button type="button" className={styles.btn} onClick={refreshCounts} disabled={isRunning}>
-                  Atualizar contagens
+                  {isRefreshingCounts ? "Atualizando..." : "Atualizar contagens"}
                 </button>
                 <button type="button" className={styles.btn} onClick={stop} disabled={!isRunning}>
                   Parar
@@ -351,6 +358,7 @@ export default function ImportarBubbleApiClient() {
                 <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
                   <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
                     <div className={styles.fileName}>Supabase (o que já tem no sistema)</div>
+                    {countsInfo ? <div className={styles.fileMeta}>{countsInfo}</div> : null}
                     {countsError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{countsError}</div> : null}
                     {counts ? (
                       <div className={styles.pathsBox}>
