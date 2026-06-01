@@ -15,6 +15,22 @@ function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
+type SyncState = {
+  v: 1;
+  runId: string;
+  runPrefix: string;
+  statePath: string;
+  phase: "pulling" | "importing" | "done" | "error";
+  types: string[];
+  currentTypeIndex: number;
+  perType: Record<
+    string,
+    { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string; lastError?: string; errorCount?: number }
+  >;
+  import?: { domains: string[]; index: number; status: string; lastError: string };
+  lastError?: string;
+};
+
 export default function ImportarBubbleApiClient() {
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
@@ -28,6 +44,8 @@ export default function ImportarBubbleApiClient() {
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [countsError, setCountsError] = useState<string>("");
   const stopRef = useRef(false);
+  const [syncStatePath, setSyncStatePath] = useState<string>("");
+  const [syncState, setSyncState] = useState<SyncState | null>(null);
 
   const types = useMemo(() => {
     return typesText
@@ -61,6 +79,43 @@ export default function ImportarBubbleApiClient() {
     return () => window.clearInterval(t);
   }, [isRunning]);
 
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("cmvfacil:bubbleSyncStatePath") || "";
+      if (saved) setSyncStatePath(saved);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (syncStatePath) window.localStorage.setItem("cmvfacil:bubbleSyncStatePath", syncStatePath);
+    } catch {}
+  }, [syncStatePath]);
+
+  async function startServerSync() {
+    setResult("");
+    const res = await fetch("/api/bubble-import/sync/start", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ types }) });
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+    const st = json.state as SyncState;
+    setSyncState(st);
+    setSyncStatePath(st.statePath);
+    return st;
+  }
+
+  async function tickServerSync(statePath: string) {
+    const res = await fetch("/api/bubble-import/sync/tick", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12 }),
+    });
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+    const st = json.state as SyncState;
+    setSyncState(st);
+    return st;
+  }
+
   async function runSync() {
     if (isRunning) return;
     setIsRunning(true);
@@ -69,153 +124,41 @@ export default function ImportarBubbleApiClient() {
     setProgress(null);
     stopRef.current = false;
     try {
-      const runId = crypto.randomUUID();
-      let runPrefix = "";
-      const prog: Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> = {};
+      let statePath = syncStatePath;
+      if (!statePath) {
+        const started = await startServerSync();
+        statePath = started.statePath;
+      }
 
-      const importOnly = async (only: string[]) => {
-        if (stopRef.current) return;
-        setStage("importing");
-        const importRes = await fetch("/api/bubble-import/import", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ only, includeUnknown: true, prefix: runPrefix || undefined }),
-        });
-        const importText = await importRes.text();
-        let importJson: unknown = null;
-        try {
-          importJson = JSON.parse(importText);
-        } catch {}
-        if (!importRes.ok || !importJson || (importJson as any).ok !== true) throw new Error((importJson as any)?.error || importText || `failed_${importRes.status}`);
-        await refreshCounts();
-        setStage("pulling");
-      };
-
-      const decideImportDomain = (typeName: string) => {
-        const t = typeName.trim();
-        const lower = t.toLowerCase();
-        if (lower === "item" || lower === "ingredientes" || lower === "custo_medio_item" || lower === "categorias") return ["insumos"];
-        if (lower === "fornecedores" || lower === "itens_fornecedores") return ["fornecedores"];
-        if (lower === "notas_fiscais" || lower === "itens_notas") return ["entradas"];
-        if (lower === "desperdicio" || lower === "motivos_desperdicios") return ["desperdicios"];
-        if (lower === "inventarios" || lower === "itens_inventarios") return ["inventario"];
-        if (lower === "etiquetas") return ["pre_preparo"];
-        return null;
-      };
-
-      for (const typeName of types) {
+      for (let i = 0; i < 2000000; i++) {
         if (stopRef.current) break;
-        prog[typeName] = { status: "pulling", fetched: 0, parts: 0, remaining: null as number | null, lastPath: "" };
-        setProgress({ ...prog });
-        let cursor = 0;
-        let part = 1;
-        let segmentAfter: string | null = null;
-        let lastCreated: string | null = null;
-        const seenSegmentAfter = new Set<string>();
-        for (let guard = 0; guard < 100000; guard++) {
-          if (stopRef.current) break;
-          const pullPayload = {
-            baseUrl,
-            token,
-            type: typeName,
-            cursor,
-            limit: 200,
-            runId,
-            part,
-            sortField: "Created Date",
-            descending: false,
-            constraints: segmentAfter
-              ? [
-                  {
-                    key: "Created Date",
-                    constraint_type: "greater than",
-                    value: segmentAfter,
-                  },
-                ]
-              : undefined,
-          };
-
-          let json: any = null;
-          for (let attempt = 0; attempt < 10; attempt++) {
-            if (stopRef.current) break;
-            const res = await fetch("/api/bubble-import/pull-page", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(pullPayload) });
-            json = (await res.json().catch(() => null)) as any;
-            if (res.ok && json?.ok) break;
-
-            const bubbleStatus = typeof json?.bubbleStatus === "number" ? json.bubbleStatus : null;
-            const status = res.status;
-            const retriable = bubbleStatus === 429 || bubbleStatus === 502 || bubbleStatus === 503 || bubbleStatus === 504 || status === 429 || status === 502 || status === 503 || status === 504;
-            if (!retriable || attempt >= 9) {
-              const detail = bubbleStatus ? `bubbleStatus=${bubbleStatus}` : `status=${status}`;
-              const body = json?.bubbleBody ? `\n${json.bubbleBody}` : "";
-              throw new Error(`${typeName} (cursor=${cursor}) ${detail}: ${json?.error || "failed"}${body}`);
-            }
-
-            prog[typeName] = { ...(prog[typeName] ?? {}), status: `reintentando (${attempt + 1}/10)` } as any;
-            setProgress({ ...prog });
-            const backoff = Math.min(12_000, 600 * Math.pow(2, attempt));
-            await sleep(backoff);
-          }
-          if (!json?.ok) throw new Error(`${typeName} (cursor=${cursor}) failed`);
-
-          if (!runPrefix && typeof json?.runPrefix === "string") runPrefix = json.runPrefix;
-          const up = json.uploaded ?? {};
-          const rows = typeof up.rows === "number" ? up.rows : 0;
-          if (typeof json?.lastCreatedDate === "string" && json.lastCreatedDate.trim()) lastCreated = json.lastCreatedDate.trim();
-          prog[typeName] = {
-            status: json.done ? "done" : json.stalled ? "segmentando" : "pulling",
-            fetched: (prog[typeName]?.fetched ?? 0) + rows,
-            parts: part,
-            remaining: typeof up.remaining === "number" ? up.remaining : null,
-            lastPath: String(up.path ?? ""),
-          };
-          setProgress({ ...prog });
-          part += 1;
-
-          if (json.stalled) {
-            const nextAfter = lastCreated;
-            if (!nextAfter) throw new Error(`${typeName}: paginação travou (cursor=${cursor}) e não consegui ler created_date para segmentar.`);
-            if (seenSegmentAfter.has(nextAfter)) throw new Error(`${typeName}: paginação travou repetidamente no mesmo created_date (${nextAfter}).`);
-            seenSegmentAfter.add(nextAfter);
-            segmentAfter = nextAfter;
-            cursor = 0;
-            continue;
-          }
-
-          cursor = typeof up.nextCursor === "number" ? up.nextCursor : cursor + rows;
-          if (json.done) break;
-        }
-        if (prog[typeName]?.status !== "done") {
-          prog[typeName] = { ...(prog[typeName] ?? {}), status: "stopped" };
-          setProgress({ ...prog });
+        const st = await tickServerSync(statePath);
+        setProgress(
+          Object.fromEntries(
+            Object.entries(st.perType ?? {}).map(([k, v]) => [
+              k,
+              {
+                status: v.status,
+                fetched: v.fetched ?? 0,
+                parts: v.parts ?? 0,
+                remaining: v.remaining ?? null,
+                lastPath: v.lastPath ?? "",
+              },
+            ]),
+          ),
+        );
+        if (st.phase === "importing") setStage("importing");
+        if (st.phase === "done") {
+          setStage("done");
           break;
         }
-
-        const domain = decideImportDomain(typeName);
-        if (domain?.length) await importOnly(domain);
+        if (st.phase === "error") {
+          setStage("error");
+          setResult(st.lastError || st.import?.lastError || "erro");
+          break;
+        }
+        await sleep(400);
       }
-      setResult(JSON.stringify({ runId, progress: prog }, null, 2));
-
-      if (stopRef.current) {
-        setStage("idle");
-        return;
-      }
-
-      setStage("importing");
-      const importRes = await fetch("/api/bubble-import/import", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ includeUnknown: true, prefix: runPrefix || undefined }),
-      });
-      const importText = await importRes.text();
-      let importJson: unknown = null;
-      try {
-        importJson = JSON.parse(importText);
-      } catch {}
-      if (!importRes.ok || !importJson || (importJson as any).ok !== true) throw new Error((importJson as any)?.error || importText || `failed_${importRes.status}`);
-      setResult(JSON.stringify({ runId, progress: prog, import: importJson }, null, 2));
-      await refreshCounts();
-      setStage("done");
     } catch (err) {
       setResult(safeJsonMessage(err));
       setStage("error");
@@ -226,6 +169,14 @@ export default function ImportarBubbleApiClient() {
 
   function stop() {
     stopRef.current = true;
+  }
+
+  function resetServerSync() {
+    try {
+      window.localStorage.removeItem("cmvfacil:bubbleSyncStatePath");
+    } catch {}
+    setSyncStatePath("");
+    setSyncState(null);
   }
 
   const progressList = useMemo(() => {
@@ -259,6 +210,9 @@ export default function ImportarBubbleApiClient() {
                 </button>
                 <button type="button" className={styles.btn} onClick={stop} disabled={!isRunning}>
                   Parar
+                </button>
+                <button type="button" className={styles.btn} onClick={resetServerSync} disabled={isRunning}>
+                  Resetar sync
                 </button>
                 <button type="button" className={`${styles.btn} ${styles.btnPrimary}`} onClick={runSync} disabled={isRunning || !types.length}>
                   {isRunning ? (stage === "importing" ? "Organizando..." : "Puxando...") : "Sincronizar tudo"}
