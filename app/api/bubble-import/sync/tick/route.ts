@@ -283,6 +283,48 @@ function isImportTransientErrorMessage(msg: string) {
   return false;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function extractUuidFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  return m ? String(m[0]).toLowerCase() : null;
+}
+
+function pickUserIdFromRow(row: Record<string, string>) {
+  const direct =
+    pickFirst(row, [
+      "user_id",
+      "usuario_id",
+      "id_usuario",
+      "created_by",
+      "createdby",
+      "created_by_id",
+      "createdby_id",
+      "creator",
+      "creator_id",
+      "criador",
+      "criador_id",
+      "owner",
+      "owner_id",
+      "dono",
+      "dono_id",
+      "responsavel_id",
+      "supabase_user_id",
+      "supabase_uid",
+      "auth_uid",
+      "user",
+      "usuario",
+    ]) ||
+    pickFirst(row, ["created by", "Created By", "Created by", "Criado por", "criado por"]) ||
+    pickFirst(row, ["_user", "user (id)"]);
+  if (!direct) return null;
+  return extractUuidFromText(direct);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -294,7 +336,8 @@ export async function POST(req: NextRequest) {
     const token = safeToken(body?.token ?? "");
     const resume = Boolean(body?.resume);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
-    const importAsUserId = importAsUserIdRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(importAsUserIdRaw) ? importAsUserIdRaw : userId;
+    const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) ? importAsUserIdRaw : "";
+    const resolveImportUserId = (row: Record<string, string>) => overrideImportUserId || pickUserIdFromRow(row) || userId;
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -368,7 +411,7 @@ export async function POST(req: NextRequest) {
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", cookie: req.headers.get("cookie") ?? "" },
-        body: JSON.stringify({ only: [domain], includeUnknown: true, prefix: state.runPrefix, targetUserId: importAsUserId }),
+        body: JSON.stringify({ only: [domain], includeUnknown: true, prefix: state.runPrefix, targetUserId: overrideImportUserId || undefined }),
         cache: "no-store",
       });
       const text = await res.text();
@@ -565,9 +608,9 @@ export async function POST(req: NextRequest) {
                 bucket,
                 accPath,
                 domain === "insumos"
-                  ? { v: 1, categoriasById: {}, custoByItemKey: {}, insumosByKey: {} }
+                  ? { v: 1, categoriasById: {}, users: {} }
                   : domain === "fornecedores"
-                    ? { v: 1, infoMap: {}, produtosMap: {}, equivalenciasMap: {}, fornecedorNameById: {} }
+                    ? { v: 1, users: {} }
                     : { v: 1, contagens: {} },
               );
               work.filesReady = true;
@@ -590,8 +633,23 @@ export async function POST(req: NextRequest) {
 
             if (domain === "insumos") {
               const categoriasById: Record<string, string> = acc?.categoriasById && typeof acc.categoriasById === "object" ? acc.categoriasById : {};
-              const custoByItemKey: Record<string, string> = acc?.custoByItemKey && typeof acc.custoByItemKey === "object" ? acc.custoByItemKey : {};
-              const insumosByKey: Record<string, any> = acc?.insumosByKey && typeof acc.insumosByKey === "object" ? acc.insumosByKey : {};
+              const users: Record<string, any> =
+                acc?.users && typeof acc.users === "object"
+                  ? acc.users
+                  : {
+                      [userId]: {
+                        custoByItemKey: acc?.custoByItemKey && typeof acc.custoByItemKey === "object" ? acc.custoByItemKey : {},
+                        insumosByKey: acc?.insumosByKey && typeof acc.insumosByKey === "object" ? acc.insumosByKey : {},
+                      },
+                    };
+
+              const getUserAcc = (uid: string) => {
+                const got = users[uid];
+                if (got && typeof got === "object") return got;
+                const created = { custoByItemKey: {}, insumosByKey: {} } as any;
+                users[uid] = created;
+                return created;
+              };
 
               for (let i = cursor; i < end; i++) {
                 const partPath = files[i]!;
@@ -614,18 +672,22 @@ export async function POST(req: NextRequest) {
                   for (const r of rows) {
                     const row = normalizeRowObject(r);
                     if (!row) continue;
+                    const uid = resolveImportUserId(row);
+                    const uacc = getUserAcc(uid);
                     const item = guessItemLabel(row);
                     const itemKey = normalizeItemName(item);
                     if (!itemKey) continue;
                     const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "preco_unitario", "custo_unitario", "valor_unitario"]);
                     const num = parsePtNumber(custo);
                     if (!num) continue;
-                    custoByItemKey[itemKey] = formatMoneyBRL(num);
+                    uacc.custoByItemKey[itemKey] = formatMoneyBRL(num);
                   }
                 } else if (typeName === "item" || typeName.includes("ingred")) {
                   for (const r of rows) {
                     const row = normalizeRowObject(r);
                     if (!row) continue;
+                    const uid = resolveImportUserId(row);
+                    const uacc = getUserAcc(uid);
                     const item = guessItemLabel(row);
                     const itemKey = normalizeItemName(item);
                     if (!itemKey) continue;
@@ -636,10 +698,10 @@ export async function POST(req: NextRequest) {
                     const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]);
                     const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]);
                     const custoNum = parsePtNumber(custo);
-                    const custoMedio = custoNum ? formatMoneyBRL(custoNum) : custoByItemKey[itemKey] ?? "";
-                    const prev = insumosByKey[itemKey] ?? {};
-                    insumosByKey[itemKey] = {
-                      id: bubbleId || prev.id || String(Object.keys(insumosByKey).length + 1),
+                    const custoMedio = custoNum ? formatMoneyBRL(custoNum) : uacc.custoByItemKey[itemKey] ?? "";
+                    const prev = uacc.insumosByKey[itemKey] ?? {};
+                    uacc.insumosByKey[itemKey] = {
+                      id: bubbleId || prev.id || String(Object.keys(uacc.insumosByKey).length + 1),
                       item: item.trim(),
                       medida: medida.trim() || prev.medida || "Und",
                       custoMedio: custoMedio || prev.custoMedio || undefined,
@@ -652,41 +714,60 @@ export async function POST(req: NextRequest) {
                 work.lastFile = partPath;
                 work.total = files.length;
                 state.import.work[domain] = work;
-                await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, custoByItemKey, insumosByKey });
+                await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, users });
                 await persist();
                 ops += 1;
                 if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
               }
 
               if (work.cursor >= files.length) {
-                const insumosRows = Object.values(insumosByKey).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
-                const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
-                  a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
-                );
-                const stateId = `user:${importAsUserId}`;
-                const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
-                if (error) throw new Error(`insumos_state:${error.message}`);
+                for (const [uid, uacc] of Object.entries(users)) {
+                  if (!isUuid(uid)) continue;
+                  const insumosRows = Object.values(uacc?.insumosByKey ?? {}).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
+                  const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
+                    a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
+                  );
+                  const stateId = `user:${uid}`;
+                  const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+                  if (error) throw new Error(`insumos_state:${error.message}`);
+                }
                 state.import.index = idx + 1;
                 state.import.lastError = "";
                 await persist();
                 ops += 1;
               }
             } else if (domain === "fornecedores") {
-              const infoMap: Record<string, any> = acc?.infoMap && typeof acc.infoMap === "object" ? acc.infoMap : {};
-              const produtosMap: Record<string, string[]> = acc?.produtosMap && typeof acc.produtosMap === "object" ? acc.produtosMap : {};
-              const equivalenciasMap: Record<string, any[]> = acc?.equivalenciasMap && typeof acc.equivalenciasMap === "object" ? acc.equivalenciasMap : {};
-              const fornecedorNameById: Record<string, string> =
-                acc?.fornecedorNameById && typeof acc.fornecedorNameById === "object" ? acc.fornecedorNameById : {};
+              const users: Record<string, any> =
+                acc?.users && typeof acc.users === "object"
+                  ? acc.users
+                  : {
+                      [userId]: {
+                        infoMap: acc?.infoMap && typeof acc.infoMap === "object" ? acc.infoMap : {},
+                        produtosMap: acc?.produtosMap && typeof acc.produtosMap === "object" ? acc.produtosMap : {},
+                        equivalenciasMap: acc?.equivalenciasMap && typeof acc.equivalenciasMap === "object" ? acc.equivalenciasMap : {},
+                        fornecedorNameById: acc?.fornecedorNameById && typeof acc.fornecedorNameById === "object" ? acc.fornecedorNameById : {},
+                      },
+                    };
+
+              const getUserAcc = (uid: string) => {
+                const got = users[uid];
+                if (got && typeof got === "object") return got;
+                const created = { infoMap: {}, produtosMap: {}, equivalenciasMap: {}, fornecedorNameById: {} } as any;
+                users[uid] = created;
+                return created;
+              };
 
               const handleFornecedorInfo = (row: Record<string, string>) => {
+                const uid = resolveImportUserId(row);
+                const uacc = getUserAcc(uid);
                 const fornecedor =
                   pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
                   pickKeyLike(row, ["fornecedor", "empresa"]);
                 const key = normalizeFornecedorKey(fornecedor);
                 if (!key) return;
                 const fornId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "fornecedor_id"]);
-                if (fornId) fornecedorNameById[fornId.trim()] = fornecedor.trim();
-                infoMap[key] = {
+                if (fornId) uacc.fornecedorNameById[fornId.trim()] = fornecedor.trim();
+                uacc.infoMap[key] = {
                   fornecedor: fornecedor.trim() || fornecedor,
                   vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
                   whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
@@ -695,10 +776,12 @@ export async function POST(req: NextRequest) {
               };
 
               const handleFornecedorProduto = (row: Record<string, string>) => {
+                const uid = resolveImportUserId(row);
+                const uacc = getUserAcc(uid);
                 const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
                 const fornecedor =
                   pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
-                  (fornecedorId ? fornecedorNameById[fornecedorId.trim()] ?? "" : "") ||
+                  (fornecedorId ? uacc.fornecedorNameById[fornecedorId.trim()] ?? "" : "") ||
                   pickKeyLike(row, ["fornecedor", "empresa"]);
                 const itemName =
                   pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
@@ -706,12 +789,14 @@ export async function POST(req: NextRequest) {
                   guessItemLabel(row);
                 const key = normalizeFornecedorKey(fornecedor);
                 if (!key || !String(itemName ?? "").trim()) return;
-                const list = produtosMap[key] ?? [];
+                const list = uacc.produtosMap[key] ?? [];
                 list.push(String(itemName).trim());
-                produtosMap[key] = list;
+                uacc.produtosMap[key] = list;
               };
 
               const handleEquivalencia = (row: Record<string, string>) => {
+                const uid = resolveImportUserId(row);
+                const uacc = getUserAcc(uid);
                 const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
                 const key = normalizeFornecedorKey(fornecedor);
                 if (!key) return;
@@ -724,7 +809,7 @@ export async function POST(req: NextRequest) {
                 const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalentequantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
                 const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteunidade", "unidade_equivalente", "unidade"]) || "";
                 const bubbleId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id"]) || String(Date.now());
-                const list = equivalenciasMap[key] ?? [];
+                const list = uacc.equivalenciasMap[key] ?? [];
                 list.push({
                   id: bubbleId,
                   nomeNaNota: nomeNaNota.trim(),
@@ -733,7 +818,7 @@ export async function POST(req: NextRequest) {
                   equivalenteQuantidade: equivalenteQuantidade.trim(),
                   equivalenteUnidade: equivalenteUnidade.trim(),
                 });
-                equivalenciasMap[key] = list;
+                uacc.equivalenciasMap[key] = list;
               };
 
               for (let i = cursor; i < end; i++) {
@@ -752,22 +837,26 @@ export async function POST(req: NextRequest) {
                 work.lastFile = partPath;
                 work.total = files.length;
                 state.import.work[domain] = work;
-                await uploadJson(supabase, bucket, accPath, { v: 1, infoMap, produtosMap, equivalenciasMap, fornecedorNameById });
+                await uploadJson(supabase, bucket, accPath, { v: 1, users });
                 await persist();
                 ops += 1;
                 if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
               }
 
-              for (const k of Object.keys(produtosMap)) {
-                produtosMap[k] = Array.from(new Set((produtosMap[k] ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
-              }
-
               if (work.cursor >= files.length) {
-                const stateId = `user:${importAsUserId}`;
-                const { error } = await supabase
-                  .from("fornecedores_state")
-                  .upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
-                if (error) throw new Error(`fornecedores_state:${error.message}`);
+                for (const [uid, uacc] of Object.entries(users)) {
+                  if (!isUuid(uid)) continue;
+                  for (const k of Object.keys(uacc.produtosMap ?? {})) {
+                    uacc.produtosMap[k] = Array.from(new Set((uacc.produtosMap[k] ?? []).filter(Boolean))).sort((a, b) =>
+                      String(a).localeCompare(String(b), "pt-BR", { sensitivity: "base", numeric: true }),
+                    );
+                  }
+                  const stateId = `user:${uid}`;
+                  const { error } = await supabase
+                    .from("fornecedores_state")
+                    .upsert({ id: stateId, info: uacc.infoMap ?? {}, produtos: uacc.produtosMap ?? {}, equivalencias: uacc.equivalenciasMap ?? {} } as any, { onConflict: "id" });
+                  if (error) throw new Error(`fornecedores_state:${error.message}`);
+                }
                 state.import.index = idx + 1;
                 state.import.lastError = "";
                 await persist();
@@ -786,7 +875,8 @@ export async function POST(req: NextRequest) {
                   const dataRaw = pickFirst(row, ["data", "date", "data_inventario"]) || pickFirst(row, ["created_date", "created_at"]);
                   const dataLabel = buildDateLabel(dataRaw);
                   if (!dataLabel) continue;
-                  const id = `user:${importAsUserId}:inventario:${bubbleId}`;
+                  const uid = resolveImportUserId(row);
+                  const id = `user:${uid}:inventario:${bubbleId}`;
                   if (!contagens[id]) contagens[id] = { id, data: dataLabel, categorias: [] as any[] };
                 }
                 work.cursor = i + 1;

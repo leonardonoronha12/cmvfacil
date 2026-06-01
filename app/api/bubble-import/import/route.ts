@@ -176,6 +176,43 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function extractUuidFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/i);
+  return m ? String(m[0]).toLowerCase() : null;
+}
+
+function pickUserIdFromRow(row: CsvObjectRow) {
+  const direct =
+    pickFirst(row, [
+      "user_id",
+      "usuario_id",
+      "id_usuario",
+      "created_by",
+      "createdby",
+      "created_by_id",
+      "createdby_id",
+      "creator",
+      "creator_id",
+      "criador",
+      "criador_id",
+      "owner",
+      "owner_id",
+      "dono",
+      "dono_id",
+      "responsavel_id",
+      "supabase_user_id",
+      "supabase_uid",
+      "auth_uid",
+      "user",
+      "usuario",
+    ]) ||
+    pickKeyLike(row, ["user", "usuario", "criador", "created", "owner"], { excludeParts: ["url", "name", "nome"] });
+  if (!direct) return null;
+  return extractUuidFromText(direct);
+}
+
 function normalizeFornecedorKey(value: string) {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -284,7 +321,8 @@ export async function POST(req: NextRequest) {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
-    const targetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : userId;
+    const overrideTargetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : "";
+    const resolveTargetUserId = (row: CsvObjectRow) => overrideTargetUserId || pickUserIdFromRow(row) || userId;
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -329,19 +367,43 @@ export async function POST(req: NextRequest) {
     if (enableInventario) enabledKinds.add("inventario");
     if (includeUnknown) enabledKinds.add("unknown");
 
-    const infoMap: Record<string, any> = {};
-    const produtosMap: Record<string, string[]> = {};
-    const equivalenciasMap: Record<string, any[]> = {};
     const categoriasById = new Map<string, string>();
     const itemById = new Map<string, { nome: string; unidade: string; categoria: string }>();
-    const fornecedorNameById = new Map<string, string>();
     const motivoNameById = new Map<string, string>();
     const inventarioDateById = new Map<string, string>();
 
-    const insumosByKey = new Map<string, any>();
-    const custoByItemKey = new Map<string, string>();
+    const insumosByUser = new Map<string, Map<string, any>>();
+    const custoByUser = new Map<string, Map<string, string>>();
+    const fornecedoresByUser = new Map<
+      string,
+      { infoMap: Record<string, any>; produtosMap: Record<string, string[]>; equivalenciasMap: Record<string, any[]>; fornecedorNameById: Map<string, string> }
+    >();
 
-    const prefix = `user:${targetUserId}:`;
+    const prefixForRow = (row: CsvObjectRow) => `user:${resolveTargetUserId(row)}:`;
+
+    const getInsumosMap = (uid: string) => {
+      const got = insumosByUser.get(uid);
+      if (got) return got;
+      const created = new Map<string, any>();
+      insumosByUser.set(uid, created);
+      return created;
+    };
+
+    const getCustoMap = (uid: string) => {
+      const got = custoByUser.get(uid);
+      if (got) return got;
+      const created = new Map<string, string>();
+      custoByUser.set(uid, created);
+      return created;
+    };
+
+    const getFornecedoresState = (uid: string) => {
+      const got = fornecedoresByUser.get(uid);
+      if (got) return got;
+      const created = { infoMap: {} as Record<string, any>, produtosMap: {} as Record<string, string[]>, equivalenciasMap: {} as Record<string, any[]>, fornecedorNameById: new Map<string, string>() };
+      fornecedoresByUser.set(uid, created);
+      return created;
+    };
 
     function catNameLooksLikePrePreparo(name: string) {
       const s = String(name ?? "")
@@ -364,6 +426,7 @@ export async function POST(req: NextRequest) {
 
     function handleCustoMedio(row: CsvObjectRow) {
       if (!enableInsumos) return;
+      const uid = resolveTargetUserId(row);
       const item = guessItemLabel(row);
       const itemKey = normalizeItemName(item);
       if (!itemKey) return;
@@ -372,11 +435,14 @@ export async function POST(req: NextRequest) {
         pickKeyLike(row, ["custo", "preco", "valor"]);
       const num = parsePtNumber(custo);
       if (!num) return;
-      custoByItemKey.set(itemKey, formatMoneyBRL(num));
+      getCustoMap(uid).set(itemKey, formatMoneyBRL(num));
     }
 
     function handleInsumo(row: CsvObjectRow) {
       if (!enableInsumos) return;
+      const uid = resolveTargetUserId(row);
+      const insumosByKey = getInsumosMap(uid);
+      const custoByItemKey = getCustoMap(uid);
       const item = guessItemLabel(row);
       const itemKey = normalizeItemName(item);
       if (!itemKey) return;
@@ -421,13 +487,15 @@ export async function POST(req: NextRequest) {
 
     function handleFornecedorInfo(row: CsvObjectRow) {
       if (!enableFornecedores) return;
+      const uid = resolveTargetUserId(row);
+      const st = getFornecedoresState(uid);
       const fornecedor =
         pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
       const fornId = pickBubbleId(row) || pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
-      if (fornId) fornecedorNameById.set(fornId, fornecedor.trim());
-      infoMap[key] = {
+      if (fornId) st.fornecedorNameById.set(fornId, fornecedor.trim());
+      st.infoMap[key] = {
         fornecedor: fornecedor.trim() || fornecedor,
         vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
         whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
@@ -437,10 +505,12 @@ export async function POST(req: NextRequest) {
 
     function handleFornecedorProduto(row: CsvObjectRow) {
       if (!enableFornecedores) return;
+      const uid = resolveTargetUserId(row);
+      const st = getFornecedoresState(uid);
       const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
       const fornecedor =
         pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
-        (fornecedorId ? fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
+        (fornecedorId ? st.fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
         pickKeyLike(row, ["fornecedor", "empresa"]);
 
       const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
@@ -452,13 +522,15 @@ export async function POST(req: NextRequest) {
 
       const key = normalizeFornecedorKey(fornecedor);
       if (!key || !String(itemName ?? "").trim()) return;
-      const list = produtosMap[key] ?? [];
+      const list = st.produtosMap[key] ?? [];
       list.push(String(itemName).trim());
-      produtosMap[key] = list;
+      st.produtosMap[key] = list;
     }
 
     function handleEquivalencia(row: CsvObjectRow) {
       if (!enableFornecedores) return;
+      const uid = resolveTargetUserId(row);
+      const st = getFornecedoresState(uid);
       const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
@@ -470,7 +542,7 @@ export async function POST(req: NextRequest) {
       const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalenteQuantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
       const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteUnidade", "unidade_equivalente", "unidade"]) || "";
       const bubbleId = pickBubbleId(row) || String(Date.now());
-      const list = equivalenciasMap[key] ?? [];
+      const list = st.equivalenciasMap[key] ?? [];
       list.push({
         id: bubbleId,
         nomeNaNota: nomeNaNota.trim(),
@@ -479,12 +551,13 @@ export async function POST(req: NextRequest) {
         equivalenteQuantidade: equivalenteQuantidade.trim(),
         equivalenteUnidade: equivalenteUnidade.trim(),
       });
-      equivalenciasMap[key] = list;
+      st.equivalenciasMap[key] = list;
     }
 
     const notaItemsByNotaKey = new Map<string, any[]>();
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
+      const prefix = prefixForRow(row);
     const notaId =
         pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
@@ -513,10 +586,13 @@ export async function POST(req: NextRequest) {
     const entradasRows: any[] = [];
     function handleNotaFiscal(row: CsvObjectRow) {
       if (!enableEntradas) return;
+    const uid = resolveTargetUserId(row);
+    const prefix = `user:${uid}:`;
+    const fornState = getFornecedoresState(uid);
     const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
     const fornecedor =
       pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) ||
-      (fornecedorId ? fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
+      (fornecedorId ? fornState.fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
       pickKeyLike(row, ["fornecedor", "empresa"]);
     if (!fornecedor) return;
     const numero =
@@ -532,7 +608,7 @@ export async function POST(req: NextRequest) {
     const itensCount = itensList.length;
     entradasRows.push({
       id: `${prefix}entrada:${bubbleId}`,
-      user_id: userId,
+      user_id: uid,
       numero: numeroFinal,
       data_lancamento: dataLanc || "-",
       fornecedor: fornecedor.trim(),
@@ -554,6 +630,7 @@ export async function POST(req: NextRequest) {
 
     function handleDesperdicio(row: CsvObjectRow) {
       if (!enableDesperdicios) return;
+    const prefix = prefixForRow(row);
     const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
     const item = guessItemLabel(row) || (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "");
     if (!item) return;
@@ -577,10 +654,48 @@ export async function POST(req: NextRequest) {
     });
   }
 
-    const prePreparoRows: any[] = [];
-    const prePreparoIds = new Set<string>();
+    const prePreparoRowsByUser = new Map<string, any[]>();
+    const prePreparoEtiquetasRowsByUser = new Map<string, any[]>();
+    const fichasRowsByUser = new Map<string, any[]>();
+    const prePreparoIdsByUser = new Map<string, Set<string>>();
+
+    const getPrePreparoRows = (uid: string) => {
+      const got = prePreparoRowsByUser.get(uid);
+      if (got) return got;
+      const created: any[] = [];
+      prePreparoRowsByUser.set(uid, created);
+      return created;
+    };
+
+    const getPrePreparoEtiquetasRows = (uid: string) => {
+      const got = prePreparoEtiquetasRowsByUser.get(uid);
+      if (got) return got;
+      const created: any[] = [];
+      prePreparoEtiquetasRowsByUser.set(uid, created);
+      return created;
+    };
+
+    const getFichasRows = (uid: string) => {
+      const got = fichasRowsByUser.get(uid);
+      if (got) return got;
+      const created: any[] = [];
+      fichasRowsByUser.set(uid, created);
+      return created;
+    };
+
+    const getPrePreparoIds = (uid: string) => {
+      const got = prePreparoIdsByUser.get(uid);
+      if (got) return got;
+      const created = new Set<string>();
+      prePreparoIdsByUser.set(uid, created);
+      return created;
+    };
+
     function handlePrePreparo(row: CsvObjectRow) {
       if (!enablePrePreparo) return;
+    const uid = resolveTargetUserId(row);
+    const prePreparoRows = getPrePreparoRows(uid);
+    const prePreparoIds = getPrePreparoIds(uid);
     const receita =
       pickFirst(row, ["receita", "pre_preparo", "prepreparo", "nome", "recipe"]) ||
       pickKeyLike(row, ["receita", "pre", "preparo", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
@@ -613,11 +728,15 @@ export async function POST(req: NextRequest) {
       ingredientes: ingredientes && ingredientes.length ? ingredientes : undefined,
       modoPreparo: modoPreparo.trim() || undefined,
     });
+    prePreparoIds.add(String(bubbleId));
   }
 
-    const prePreparoEtiquetasRows: any[] = [];
     function handlePrePreparoEtiqueta(row: CsvObjectRow) {
       if (!enablePrePreparo) return;
+      const uid = resolveTargetUserId(row);
+      const prefix = `user:${uid}:`;
+      const prePreparoEtiquetasRows = getPrePreparoEtiquetasRows(uid);
+      const prePreparoIds = getPrePreparoIds(uid);
       const codigo = pickFirst(row, ["codigo", "code"]) || pickKeyLike(row, ["codigo", "code"]);
       const bubbleId = pickBubbleId(row) || codigo || String(prePreparoEtiquetasRows.length + 1);
       const prodRaw = pickFirst(row, ["data_producao", "dataProducao", "producao"]) || pickKeyLike(row, ["data_producao", "producao"]);
@@ -645,6 +764,9 @@ export async function POST(req: NextRequest) {
 
     function handlePrePreparoFromItemRow(row: CsvObjectRow) {
       if (!enablePrePreparo) return;
+      const uid = resolveTargetUserId(row);
+      const prePreparoRows = getPrePreparoRows(uid);
+      const prePreparoIds = getPrePreparoIds(uid);
       const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]) || pickKeyLike(row, ["categoria_id", "categoria", "slug"]);
       const catName = catId ? categoriasById.get(catId.trim()) ?? "" : "";
       if (!catNameLooksLikePrePreparo(catName)) return;
@@ -684,9 +806,10 @@ export async function POST(req: NextRequest) {
       prePreparoIds.add(id);
     }
 
-    const fichasRows: any[] = [];
     function handleFicha(row: CsvObjectRow) {
       if (!enableFichas) return;
+    const uid = resolveTargetUserId(row);
+    const fichasRows = getFichasRows(uid);
     const receita =
       pickFirst(row, ["receita", "nome", "recipe"]) ||
       pickKeyLike(row, ["receita", "recipe", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
@@ -704,7 +827,8 @@ export async function POST(req: NextRequest) {
     const thumb = thumbRaw === "burger" || thumbRaw === "duplo" || thumbRaw === "triplo" ? thumbRaw : "burger";
     const recipeImage = pickFirst(row, ["recipe_image", "recipeImage", "imagem", "image"]) || pickKeyLike(row, ["image", "imagem"]);
     const popularidadeRaw = pickFirst(row, ["popularidade"]) || pickKeyLike(row, ["popular"]);
-    const popularidade = popularidadeRaw.toLowerCase() === "alta" || popularidadeRaw.toLowerCase() === "baixa" ? popularidadeRaw.toLowerCase() : undefined;
+    const pop = String(popularidadeRaw ?? "").trim().toLowerCase();
+    const popularidade = pop === "alta" || pop === "baixa" ? pop : undefined;
     const ingredientsTotal = pickFirst(row, ["ingredients_total", "ingredientsTotal"]) || pickKeyLike(row, ["ingredients", "ingredientes", "total"]);
     const recipeYield = pickFirst(row, ["recipe_yield", "recipeYield", "rendimento"]) || pickKeyLike(row, ["yield", "rendimento"]);
     const ingredientRowsRaw = pickFirst(row, ["ingredient_rows", "ingredientRows", "ingredientes"]) || pickKeyLike(row, ["ingredient", "ingredientes"]);
@@ -741,6 +865,7 @@ export async function POST(req: NextRequest) {
 
     function handleInventarioFlat(row: CsvObjectRow) {
       if (!enableInventario) return;
+    const prefix = prefixForRow(row);
     const dateRaw = pickFirst(row, ["data", "date", "data_inventario", "data_contagem"]) || pickKeyLike(row, ["data", "date"]);
     const d = parseDateLoose(dateRaw);
     if (!d) return;
@@ -797,6 +922,7 @@ export async function POST(req: NextRequest) {
         pickKeyLike(row, ["estoque", "quantidade", "qtd", "final"]);
 
       const fake: CsvObjectRow = {
+        user_id: resolveTargetUserId(row),
         data: dataLabel || pickFirst(row, ["data", "date"]) || "",
         categoria: categoria || "Importado",
         item: item || "",
@@ -878,41 +1004,62 @@ export async function POST(req: NextRequest) {
       await processCsvGroups("itens", (row) => handlePrePreparoFromItemRow(row));
     }
 
-    for (const k of Object.keys(produtosMap)) {
-      produtosMap[k] = Array.from(new Set(produtosMap[k].filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+    for (const st of fornecedoresByUser.values()) {
+      for (const k of Object.keys(st.produtosMap)) {
+        st.produtosMap[k] = Array.from(new Set((st.produtosMap[k] ?? []).filter(Boolean))).sort((a, b) =>
+          a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
+        );
+      }
     }
 
     stage = "save_supabase";
-    const stateId = `user:${targetUserId}`;
 
-    const insumosRows = Array.from(insumosByKey.values()).filter((r) => r && r.item);
-    const insumoCategories = Array.from(new Set(insumosRows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean)));
     if (enableInsumos) {
-      const { error: insErr } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories: insumoCategories } } as any, { onConflict: "id" });
-      if (insErr) return json({ ok: false, error: `insumos_state:${insErr.message}`, stage }, { status: 500 });
+      for (const [uid, map] of insumosByUser.entries()) {
+        const rows = Array.from(map.values()).filter((r) => r && r.item);
+        const categories = Array.from(new Set(rows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean)));
+        const stateId = `user:${uid}`;
+        const { error } = await supabase
+          .from("insumos_state")
+          .upsert({ id: stateId, payload: { rows, categories } } as any, { onConflict: "id" });
+        if (error) return json({ ok: false, error: `insumos_state:${error.message}`, stage }, { status: 500 });
+      }
     }
 
     if (enableFornecedores) {
-      const { error: fornErr } = await supabase
-        .from("fornecedores_state")
-        .upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
-      if (fornErr) return json({ ok: false, error: `fornecedores_state:${fornErr.message}`, stage }, { status: 500 });
+      for (const [uid, st] of fornecedoresByUser.entries()) {
+        const stateId = `user:${uid}`;
+        const { error } = await supabase
+          .from("fornecedores_state")
+          .upsert({ id: stateId, info: st.infoMap, produtos: st.produtosMap, equivalencias: st.equivalenciasMap } as any, { onConflict: "id" });
+        if (error) return json({ ok: false, error: `fornecedores_state:${error.message}`, stage }, { status: 500 });
+      }
     }
 
-    if (enablePrePreparo && prePreparoRows.length) {
-      const { error: ppErr } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: prePreparoRows } as any, { onConflict: "id" });
-      if (ppErr) return json({ ok: false, error: `pre_preparo_state:${ppErr.message}`, stage }, { status: 500 });
-    }
-    if (enablePrePreparo && prePreparoEtiquetasRows.length) {
-      const { error: ppeErr } = await supabase
-        .from("pre_preparo_etiquetas_state")
-        .upsert({ id: stateId, payload: prePreparoEtiquetasRows } as any, { onConflict: "id" });
-      if (ppeErr) return json({ ok: false, error: `pre_preparo_etiquetas_state:${ppeErr.message}`, stage }, { status: 500 });
+    if (enablePrePreparo) {
+      for (const [uid, rows] of prePreparoRowsByUser.entries()) {
+        if (!rows.length) continue;
+        const stateId = `user:${uid}`;
+        const { error } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: rows } as any, { onConflict: "id" });
+        if (error) return json({ ok: false, error: `pre_preparo_state:${error.message}`, stage }, { status: 500 });
+      }
+      for (const [uid, rows] of prePreparoEtiquetasRowsByUser.entries()) {
+        if (!rows.length) continue;
+        const stateId = `user:${uid}`;
+        const { error } = await supabase
+          .from("pre_preparo_etiquetas_state")
+          .upsert({ id: stateId, payload: rows } as any, { onConflict: "id" });
+        if (error) return json({ ok: false, error: `pre_preparo_etiquetas_state:${error.message}`, stage }, { status: 500 });
+      }
     }
 
-    if (enableFichas && fichasRows.length) {
-      const { error: ftErr } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: fichasRows } as any, { onConflict: "id" });
-      if (ftErr) return json({ ok: false, error: `fichas_tecnicas_state:${ftErr.message}`, stage }, { status: 500 });
+    if (enableFichas) {
+      for (const [uid, rows] of fichasRowsByUser.entries()) {
+        if (!rows.length) continue;
+        const stateId = `user:${uid}`;
+        const { error } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: rows } as any, { onConflict: "id" });
+        if (error) return json({ ok: false, error: `fichas_tecnicas_state:${error.message}`, stage }, { status: 500 });
+      }
     }
 
     const inventarioRows: any[] = [];
@@ -944,6 +1091,7 @@ export async function POST(req: NextRequest) {
           } catch {}
         }
         if (dataLabel && categorias.length) {
+          const prefix = prefixForRow(row);
           inventarioRows.push({ id: `${prefix}inventario:${bubbleId}`, data: dataLabel, categorias });
           return;
         }
@@ -993,12 +1141,12 @@ export async function POST(req: NextRequest) {
         filesByKind: fileCountsByKind,
         summary: {
           files: files.length,
-          insumos: enableInsumos ? insumosRows.length : null,
-          fornecedores: enableFornecedores ? Object.keys(infoMap).length : null,
-          fornecedoresProdutos: enableFornecedores ? Object.keys(produtosMap).length : null,
-          fichasTecnicas: enableFichas ? fichasRows.length : null,
-          prePreparo: enablePrePreparo ? prePreparoRows.length : null,
-          etiquetasPrePreparo: enablePrePreparo ? prePreparoEtiquetasRows.length : null,
+          insumos: enableInsumos ? Array.from(insumosByUser.values()).reduce((sum, m) => sum + m.size, 0) : null,
+          fornecedores: enableFornecedores ? Array.from(fornecedoresByUser.values()).reduce((sum, st) => sum + Object.keys(st.infoMap).length, 0) : null,
+          fornecedoresProdutos: enableFornecedores ? Array.from(fornecedoresByUser.values()).reduce((sum, st) => sum + Object.keys(st.produtosMap).length, 0) : null,
+          fichasTecnicas: enableFichas ? Array.from(fichasRowsByUser.values()).reduce((sum, rows) => sum + rows.length, 0) : null,
+          prePreparo: enablePrePreparo ? Array.from(prePreparoRowsByUser.values()).reduce((sum, rows) => sum + rows.length, 0) : null,
+          etiquetasPrePreparo: enablePrePreparo ? Array.from(prePreparoEtiquetasRowsByUser.values()).reduce((sum, rows) => sum + rows.length, 0) : null,
           inventario: enableInventario ? inventarioInserted : null,
           desperdicios: enableDesperdicios ? desperdiciosInserted : null,
           entradas: enableEntradas ? entradasInserted : null,
