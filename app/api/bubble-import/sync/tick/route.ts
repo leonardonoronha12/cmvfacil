@@ -222,6 +222,7 @@ export async function POST(req: NextRequest) {
     const statePath = String(body?.statePath ?? "").trim();
     const baseUrl = safeBaseUrl(body?.baseUrl ?? "");
     const token = safeToken(body?.token ?? "");
+    const resume = Boolean(body?.resume);
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -271,6 +272,18 @@ export async function POST(req: NextRequest) {
     if (state.phase === "done") {
       if (state.import?.status === "done") return json({ ok: true, state }, { status: 200 });
       await ensureImportPlan();
+      state.phase = "importing";
+      await persist();
+    }
+
+    if (state.phase === "error") {
+      if (!resume) return json({ ok: true, state }, { status: 200 });
+      await ensureImportPlan();
+      state.lastError = "";
+      if (state.import) {
+        state.import.status = "pending";
+        state.import.lastError = "";
+      }
       state.phase = "importing";
       await persist();
     }

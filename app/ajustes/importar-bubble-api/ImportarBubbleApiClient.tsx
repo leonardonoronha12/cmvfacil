@@ -27,7 +27,7 @@ type SyncState = {
     string,
     { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string; lastError?: string; errorCount?: number }
   >;
-  import?: { domains: string[]; index: number; status: string; lastError: string };
+  import?: { domains: string[]; index: number; status: string; lastError: string; work?: any };
   lastError?: string;
 };
 
@@ -147,6 +147,19 @@ export default function ImportarBubbleApiClient() {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12 }),
+    });
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+    const st = json.state as SyncState;
+    setSyncState(st);
+    return st;
+  }
+
+  async function resumeServerImport(statePath: string) {
+    const res = await fetch("/api/bubble-import/sync/tick", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true }),
     });
     const json = (await res.json().catch(() => null)) as any;
     if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
@@ -325,7 +338,29 @@ export default function ImportarBubbleApiClient() {
                       <div className={styles.fileName}>Sync no servidor</div>
                       <div className={styles.fileMeta}>statePath: {syncStatePath}</div>
                       {syncState?.phase ? <div className={styles.fileMeta}>fase: {syncState.phase}</div> : null}
+                      {syncState?.import?.domains?.length ? (
+                        <div className={styles.fileMeta}>
+                          import: {syncState.import.status} ({Math.min(syncState.import.index + 1, syncState.import.domains.length)}/{syncState.import.domains.length}){" "}
+                          {syncState.import.domains[syncState.import.index] ? `- ${syncState.import.domains[syncState.import.index]}` : ""}
+                        </div>
+                      ) : null}
+                      {syncState?.lastError || syncState?.import?.lastError ? (
+                        <div className={`${styles.fileMeta} ${styles.statusErr}`}>erro: {syncState.lastError || syncState.import?.lastError}</div>
+                      ) : null}
                       {syncWarning ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>Conexão instável: {syncWarning}</div> : null}
+                      {syncState?.phase === "error" ? (
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                          <button
+                            type="button"
+                            className={styles.btn}
+                            onClick={() => void resumeServerImport(syncStatePath)}
+                            disabled={isRunning}
+                            style={{ borderColor: "#ff2f54", color: "#ff2f54" }}
+                          >
+                            Retomar importação
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
