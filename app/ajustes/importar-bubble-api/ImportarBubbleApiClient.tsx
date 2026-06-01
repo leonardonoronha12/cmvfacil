@@ -34,6 +34,7 @@ type SyncState = {
 export default function ImportarBubbleApiClient() {
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
+  const [importAsUserId, setImportAsUserId] = useState("");
   const [typesText, setTypesText] = useState(
     "categorias\ncusto_medio_item\ndesperdicio\nempresas\netiquetas\nfaturamentos\nfornecedores\nIngredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nItens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real\nUser",
   );
@@ -97,6 +98,19 @@ export default function ImportarBubbleApiClient() {
   }, []);
 
   useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("cmvfacil:bubbleImportAsUserId") || "";
+      if (saved) setImportAsUserId(saved);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (importAsUserId) window.localStorage.setItem("cmvfacil:bubbleImportAsUserId", importAsUserId);
+    } catch {}
+  }, [importAsUserId]);
+
+  useEffect(() => {
     if (!syncStatePath) return;
     void (async () => {
       try {
@@ -146,7 +160,7 @@ export default function ImportarBubbleApiClient() {
     const res = await fetch("/api/bubble-import/sync/tick", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true }),
+      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true, importAsUserId }),
     });
     const json = (await res.json().catch(() => null)) as any;
     if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
@@ -316,6 +330,22 @@ export default function ImportarBubbleApiClient() {
             <section className={styles.panel}>
               <div className={styles.notice}>
                 <span className={styles.noticeStrong}>Passo 2:</span> depois de puxar, vá em /ajustes/importar-bubble e clique em “Importar tudo”.
+              </div>
+
+              <div className={styles.fileList}>
+                <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
+                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className={styles.fileName}>Usuário destino (Supabase)</div>
+                    <div className={styles.fileMeta}>Se preencher, a importação grava no userId informado (UUID), não no seu.</div>
+                    <input
+                      value={importAsUserId}
+                      onChange={(e) => setImportAsUserId(e.currentTarget.value)}
+                      placeholder="UUID do usuário (ex.: 00000000-0000-0000-0000-000000000000)"
+                      className={styles.input}
+                      disabled={isRunning}
+                    />
+                  </div>
+                </div>
               </div>
 
               {syncStatePath ? (

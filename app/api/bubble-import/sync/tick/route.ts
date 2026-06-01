@@ -293,6 +293,8 @@ export async function POST(req: NextRequest) {
     const baseUrl = safeBaseUrl(body?.baseUrl ?? "");
     const token = safeToken(body?.token ?? "");
     const resume = Boolean(body?.resume);
+    const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
+    const importAsUserId = importAsUserIdRaw && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(importAsUserIdRaw) ? importAsUserIdRaw : userId;
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -366,7 +368,7 @@ export async function POST(req: NextRequest) {
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", cookie: req.headers.get("cookie") ?? "" },
-        body: JSON.stringify({ only: [domain], includeUnknown: true, prefix: state.runPrefix }),
+        body: JSON.stringify({ only: [domain], includeUnknown: true, prefix: state.runPrefix, targetUserId: importAsUserId }),
         cache: "no-store",
       });
       const text = await res.text();
@@ -661,7 +663,7 @@ export async function POST(req: NextRequest) {
                 const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
                   a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
                 );
-                const stateId = `user:${userId}`;
+                const stateId = `user:${importAsUserId}`;
                 const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
                 if (error) throw new Error(`insumos_state:${error.message}`);
                 state.import.index = idx + 1;
@@ -761,7 +763,7 @@ export async function POST(req: NextRequest) {
               }
 
               if (work.cursor >= files.length) {
-                const stateId = `user:${userId}`;
+                const stateId = `user:${importAsUserId}`;
                 const { error } = await supabase
                   .from("fornecedores_state")
                   .upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
@@ -784,7 +786,7 @@ export async function POST(req: NextRequest) {
                   const dataRaw = pickFirst(row, ["data", "date", "data_inventario"]) || pickFirst(row, ["created_date", "created_at"]);
                   const dataLabel = buildDateLabel(dataRaw);
                   if (!dataLabel) continue;
-                  const id = `user:${userId}:inventario:${bubbleId}`;
+                  const id = `user:${importAsUserId}:inventario:${bubbleId}`;
                   if (!contagens[id]) contagens[id] = { id, data: dataLabel, categorias: [] as any[] };
                 }
                 work.cursor = i + 1;

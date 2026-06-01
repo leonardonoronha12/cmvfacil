@@ -268,6 +268,7 @@ export async function POST(req: NextRequest) {
     const only = Array.isArray((body as any)?.only) ? ((body as any).only as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : null;
     const includeUnknown = typeof (body as any)?.includeUnknown === "boolean" ? Boolean((body as any).includeUnknown) : true;
     const requestedPrefix = typeof (body as any)?.prefix === "string" ? String((body as any).prefix).trim().replace(/^\/+|\/+$/g, "") : "";
+    const targetUserIdRaw = typeof (body as any)?.targetUserId === "string" ? String((body as any).targetUserId).trim() : "";
 
     const enabled = (k: string) => !only || only.includes(k);
     const enableInsumos = enabled("insumos");
@@ -283,6 +284,7 @@ export async function POST(req: NextRequest) {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
+    const targetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : userId;
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -339,7 +341,7 @@ export async function POST(req: NextRequest) {
     const insumosByKey = new Map<string, any>();
     const custoByItemKey = new Map<string, string>();
 
-    const prefix = `user:${userId}:`;
+    const prefix = `user:${targetUserId}:`;
 
     function catNameLooksLikePrePreparo(name: string) {
       const s = String(name ?? "")
@@ -881,7 +883,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "save_supabase";
-    const stateId = `user:${userId}`;
+    const stateId = `user:${targetUserId}`;
 
     const insumosRows = Array.from(insumosByKey.values()).filter((r) => r && r.item);
     const insumoCategories = Array.from(new Set(insumosRows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean)));
