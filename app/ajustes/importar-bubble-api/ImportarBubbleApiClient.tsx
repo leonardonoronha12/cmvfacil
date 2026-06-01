@@ -90,6 +90,35 @@ export default function ImportarBubbleApiClient() {
   }, []);
 
   useEffect(() => {
+    if (!syncStatePath) return;
+    void (async () => {
+      try {
+        const st = await loadServerSyncStatus(syncStatePath);
+        setProgress(
+          Object.fromEntries(
+            Object.entries(st.perType ?? {}).map(([k, v]) => [
+              k,
+              {
+                status: v.status,
+                fetched: v.fetched ?? 0,
+                parts: v.parts ?? 0,
+                remaining: v.remaining ?? null,
+                lastPath: v.lastPath ?? "",
+              },
+            ]),
+          ),
+        );
+        if (st.phase === "importing") setStage("importing");
+        if (st.phase === "done") setStage("done");
+        if (st.phase === "error") {
+          setStage("error");
+          setResult(st.lastError || st.import?.lastError || "erro");
+        }
+      } catch {}
+    })();
+  }, [syncStatePath]);
+
+  useEffect(() => {
     try {
       if (syncStatePath) window.localStorage.setItem("cmvfacil:bubbleSyncStatePath", syncStatePath);
     } catch {}
@@ -230,6 +259,10 @@ export default function ImportarBubbleApiClient() {
     } catch {}
     setSyncStatePath("");
     setSyncState(null);
+    setProgress(null);
+    setResult("");
+    setSyncWarning("");
+    setStage("idle");
   }
 
   const progressList = useMemo(() => {

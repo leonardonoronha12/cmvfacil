@@ -80,8 +80,11 @@ async function fetchBubblePage(args: {
     jsonBody = JSON.parse(text);
   } catch {}
   if (!res.ok) {
-    const msg = jsonBody?.body?.message || jsonBody?.message || text || `bubble_failed_${res.status}`;
-    throw new BubbleApiError(String(msg).slice(0, 400), res.status, String(text ?? "").slice(0, 2000));
+    const rawText = String(text ?? "");
+    const looksHtml = /<\s*(html|body|doctype)\b/i.test(rawText);
+    const msgRaw = jsonBody?.body?.message || jsonBody?.message || rawText || `bubble_failed_${res.status}`;
+    const msg = looksHtml ? `Bubble retornou HTML (status ${res.status}). Verifique URL base e token da Data API.` : String(msgRaw);
+    throw new BubbleApiError(String(msg).slice(0, 400), res.status, rawText.slice(0, 2000));
   }
   const response = jsonBody?.response ?? jsonBody ?? {};
   const results = Array.isArray(response?.results) ? response.results : Array.isArray(response) ? response : [];
@@ -145,6 +148,11 @@ export async function POST(req: NextRequest) {
     const startMs = Date.now();
     const hardMs = 22_000;
     let ops = 0;
+
+    const persist = async () => {
+      state.updatedAt = nowIso();
+      await uploadJson(supabase, bucket, statePath, state);
+    };
 
     const doImportDomain = async (domain: string) => {
       const url = new URL("/api/bubble-import/import", req.url);
@@ -232,11 +240,12 @@ export async function POST(req: NextRequest) {
               p.lastError = "pagination_stalled_without_created_date";
               state.phase = "error";
               state.lastError = `${t}:pagination_stalled_without_created_date`;
+              await persist();
               break;
             }
             p.segmentAfter = nextAfter;
             p.cursor = 0;
-            state.updatedAt = nowIso();
+            await persist();
             ops += 1;
             break;
           }
@@ -249,6 +258,7 @@ export async function POST(req: NextRequest) {
             await uploadJson(supabase, bucket, path, { source: "bubble-data-api", type: t, pulledAt: nowIso(), cursor, rows: results, remaining });
             p.lastPath = path;
             p.fetched = (typeof p.fetched === "number" ? p.fetched : 0) + results.length;
+            await persist();
           }
 
           p.cursor = cursor + results.length;
@@ -258,9 +268,9 @@ export async function POST(req: NextRequest) {
             p.segmentAfter = null;
             idx += 1;
             state.currentTypeIndex = idx;
+            await persist();
           }
 
-          state.updatedAt = nowIso();
           ops += 1;
           break;
         }
@@ -270,7 +280,7 @@ export async function POST(req: NextRequest) {
           state.phase = "importing";
           state.import.status = "pending";
           state.import.index = 0;
-          state.updatedAt = nowIso();
+          await persist();
         }
       } else if (state.phase === "importing") {
         const domains: string[] = Array.isArray(state.import?.domains) ? state.import.domains : [];
@@ -278,29 +288,29 @@ export async function POST(req: NextRequest) {
         if (idx >= domains.length) {
           state.phase = "done";
           state.import.status = "done";
-          state.updatedAt = nowIso();
+          await persist();
           break;
         }
         const domain = String(domains[idx] ?? "").trim();
         if (!domain) {
           state.import.index = idx + 1;
-          state.updatedAt = nowIso();
+          await persist();
           ops += 1;
           continue;
         }
         state.import.status = "running";
-        state.updatedAt = nowIso();
+        await persist();
         try {
           await doImportDomain(domain);
           state.import.index = idx + 1;
           state.import.lastError = "";
-          state.updatedAt = nowIso();
+          await persist();
         } catch (err) {
           state.import.status = "error";
           state.import.lastError = err instanceof Error ? err.message : String(err);
           state.phase = "error";
           state.lastError = state.import.lastError;
-          state.updatedAt = nowIso();
+          await persist();
         }
         ops += 1;
       } else {
@@ -308,7 +318,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    await uploadJson(supabase, bucket, statePath, state);
+    await persist();
     return json({ ok: true, state, ops }, { status: 200 });
   } catch (err) {
     if (err instanceof BubbleApiError) {
@@ -317,4 +327,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
