@@ -15,7 +15,7 @@ export default function ImportarBubbleApiClient() {
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
   const [typesText, setTypesText] = useState(
-    "categorias\ncusto_medio_item\ndesperdicio\nempresas\netiquetas\nfaturamentos\nfornecedores\ningredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nitens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real\nuser",
+    "categorias\ncusto_medio_item\ndesperdicio\nempresas\netiquetas\nfaturamentos\nfornecedores\nIngredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nItens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real\nUser",
   );
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState<"idle" | "pulling" | "importing" | "done" | "error">("idle");
@@ -67,6 +67,37 @@ export default function ImportarBubbleApiClient() {
     try {
       const runId = crypto.randomUUID();
       const prog: Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> = {};
+
+      const importOnly = async (only: string[]) => {
+        if (stopRef.current) return;
+        setStage("importing");
+        const importRes = await fetch("/api/bubble-import/import", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ only, includeUnknown: true }),
+        });
+        const importText = await importRes.text();
+        let importJson: unknown = null;
+        try {
+          importJson = JSON.parse(importText);
+        } catch {}
+        if (!importRes.ok || !importJson || (importJson as any).ok !== true) throw new Error((importJson as any)?.error || importText || `failed_${importRes.status}`);
+        await refreshCounts();
+        setStage("pulling");
+      };
+
+      const decideImportDomain = (typeName: string) => {
+        const t = typeName.trim();
+        const lower = t.toLowerCase();
+        if (lower === "item" || lower === "ingredientes" || lower === "custo_medio_item" || lower === "categorias") return ["insumos"];
+        if (lower === "fornecedores" || lower === "itens_fornecedores") return ["fornecedores"];
+        if (lower === "notas_fiscais" || lower === "itens_notas") return ["entradas"];
+        if (lower === "desperdicio" || lower === "motivos_desperdicios") return ["desperdicios"];
+        if (lower === "inventarios" || lower === "itens_inventarios") return ["inventario"];
+        if (lower === "etiquetas") return ["pre_preparo"];
+        return null;
+      };
+
       for (const typeName of types) {
         if (stopRef.current) break;
         prog[typeName] = { status: "pulling", fetched: 0, parts: 0, remaining: null as number | null, lastPath: "" };
@@ -101,6 +132,9 @@ export default function ImportarBubbleApiClient() {
           setProgress({ ...prog });
           break;
         }
+
+        const domain = decideImportDomain(typeName);
+        if (domain?.length) await importOnly(domain);
       }
       setResult(JSON.stringify({ runId, progress: prog }, null, 2));
 
@@ -110,7 +144,7 @@ export default function ImportarBubbleApiClient() {
       }
 
       setStage("importing");
-      const importRes = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const importRes = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ includeUnknown: true }) });
       const importText = await importRes.text();
       let importJson: unknown = null;
       try {
