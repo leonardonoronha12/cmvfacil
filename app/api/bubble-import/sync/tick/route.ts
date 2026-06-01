@@ -16,7 +16,31 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 }
 
 async function downloadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const fileName = path.split("/").slice(-1)[0] || "file";
+
+  const parseText = (text: string, contentType: string) => {
+    const ct = (contentType ?? "").toLowerCase();
+    const trimmed = String(text ?? "").trimStart();
+    const looksMarkup = trimmed.startsWith("<") || ct.includes("text/html") || ct.includes("application/xml") || ct.includes("text/xml");
+    if (looksMarkup) throw new Error(`invalid_json_from_storage:${fileName}`);
+    try {
+      return JSON.parse(text) as any;
+    } catch {
+      throw new Error(`invalid_json_from_storage:${fileName}`);
+    }
+  };
+
   for (let attempt = 0; attempt < 4; attempt++) {
+    const dl = await supabase.storage.from(bucket).download(path);
+    if (!dl.error && dl.data) {
+      try {
+        const buf = await dl.data.arrayBuffer();
+        const text = new TextDecoder().decode(buf);
+        return parseText(text, (dl as any)?.data?.type ?? "application/json");
+      } catch (err) {
+        if (attempt >= 3) throw err;
+      }
+    }
     const { data, error } = await supabase.storage.from(bucket).createSignedUrl(path, 60);
     if (error || !data?.signedUrl) throw new Error(error?.message || "failed_to_sign");
     const res = await fetch(data.signedUrl, { cache: "no-store" });
@@ -28,27 +52,17 @@ async function downloadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
       }
       throw new Error(`failed_to_download_${res.status}`);
     }
-    const ct = (res.headers.get("content-type") ?? "").toLowerCase();
-    const trimmed = text.trimStart();
-    const looksMarkup = trimmed.startsWith("<") || ct.includes("text/html") || ct.includes("application/xml") || ct.includes("text/xml");
-    if (looksMarkup) {
-      if (attempt < 3) {
-        await sleep(300 * Math.pow(2, attempt));
-        continue;
-      }
-      throw new Error(`invalid_json_from_storage:${path.split("/").slice(-1)[0] || "file"}`);
-    }
     try {
-      return JSON.parse(text) as any;
-    } catch {
+      return parseText(text, res.headers.get("content-type") ?? "");
+    } catch (err) {
       if (attempt < 3) {
         await sleep(300 * Math.pow(2, attempt));
         continue;
       }
-      throw new Error(`invalid_json_from_storage:${path.split("/").slice(-1)[0] || "file"}`);
+      throw err;
     }
   }
-  throw new Error("failed_to_download");
+  throw new Error(`invalid_json_from_storage:${fileName}`);
 }
 
 async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
@@ -484,13 +498,25 @@ export async function POST(req: NextRequest) {
           continue;
         }
         if (domain === "insumos" || domain === "inventario") {
+          let work: any = null;
           try {
             state.import.status = "running";
             state.import.lastError = "";
             state.import.work = state.import.work && typeof state.import.work === "object" ? state.import.work : {};
-            const work = (state.import.work[domain] && typeof state.import.work[domain] === "object" ? state.import.work[domain] : {}) as any;
+            work = (state.import.work[domain] && typeof state.import.work[domain] === "object" ? state.import.work[domain] : {}) as any;
             const filesPath = typeof work.filesPath === "string" ? String(work.filesPath) : `${state.runPrefix}/import-${domain}-files.json`;
             const accPath = typeof work.accPath === "string" ? String(work.accPath) : `${state.runPrefix}/import-${domain}-acc.json`;
+
+            const retryAt = typeof work.nextRetryAt === "number" ? work.nextRetryAt : 0;
+            if (retryAt > Date.now()) {
+              const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
+              state.import.status = `aguardando (${seconds}s)`;
+              state.import.work[domain] = work;
+              await persist();
+              ops += 1;
+              continue;
+            }
+
             if (!work.filesReady) {
               const all = await listAllPaths(supabase, bucket, state.runPrefix);
               const filtered = all
@@ -651,10 +677,31 @@ export async function POST(req: NextRequest) {
               }
             }
           } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            const transient =
+              msg.startsWith("invalid_json_from_storage:") ||
+              msg.startsWith("failed_to_download_") ||
+              msg === "failed_to_sign" ||
+              msg === "failed_to_download";
+            if (transient) {
+              const next = Date.now() + 3000;
+              if (!work) {
+                state.import.work = state.import.work && typeof state.import.work === "object" ? state.import.work : {};
+                work = (state.import.work[domain] && typeof state.import.work[domain] === "object" ? state.import.work[domain] : {}) as any;
+              }
+              work.nextRetryAt = next;
+              work.lastError = msg;
+              state.import.status = "aguardando";
+              state.import.lastError = msg;
+              state.import.work[domain] = work;
+              await persist();
+              ops += 1;
+              continue;
+            }
             state.import.status = "error";
-            state.import.lastError = err instanceof Error ? err.message : String(err);
+            state.import.lastError = msg;
             state.phase = "error";
-            state.lastError = state.import.lastError;
+            state.lastError = msg;
             await persist();
             ops += 1;
           }
