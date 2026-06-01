@@ -211,6 +211,22 @@ function normalizeItemName(value: string) {
     .toLowerCase();
 }
 
+function normalizeFornecedorKey(value: string) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function pickKeyLike(row: Record<string, string>, parts: string[], opts?: { excludeParts?: string[] }) {
+  const exclude = opts?.excludeParts ?? [];
+  for (const k of Object.keys(row)) {
+    const kk = k.toLowerCase();
+    if (exclude.some((p) => kk.includes(p))) continue;
+    if (!parts.some((p) => kk.includes(p))) continue;
+    const v = String(row[k] ?? "").trim();
+    if (v) return v;
+  }
+  return "";
+}
+
 function guessItemLabel(row: Record<string, string>) {
   const direct = pickFirst(row, ["item", "item_completo", "nome_item", "nome_do_item", "nome", "produto", "descricao", "ingrediente", "insumo", "titulo", "title", "name"]);
   if (direct) return direct;
@@ -252,6 +268,19 @@ function guessItemLabel(row: Record<string, string>) {
 function buildDateLabel(value: string) {
   const d = parseDateLoose(value);
   return d ? formatDateLabelPT(d) : String(value ?? "").trim();
+}
+
+function isImportTransientErrorMessage(msg: string) {
+  const m = String(msg ?? "").toLowerCase();
+  if (!m) return false;
+  if (m.startsWith("invalid_json_from_storage:")) return true;
+  if (m.startsWith("failed_to_download_")) return true;
+  if (m === "failed_to_sign" || m === "failed_to_download") return true;
+  if (m === "fetch failed") return true;
+  if (m.includes("failed_502") || m.includes("failed_503") || m.includes("failed_504")) return true;
+  if (m.includes(" 502") || m.includes(" 503") || m.includes(" 504")) return true;
+  if (m.includes("timeout") || m.includes("timed out") || m.includes("etimedout")) return true;
+  return false;
 }
 
 export async function POST(req: NextRequest) {
@@ -497,7 +526,7 @@ export async function POST(req: NextRequest) {
           ops += 1;
           continue;
         }
-        if (domain === "insumos" || domain === "inventario") {
+        if (domain === "insumos" || domain === "inventario" || domain === "fornecedores") {
           let work: any = null;
           try {
             state.import.status = "running";
@@ -524,11 +553,21 @@ export async function POST(req: NextRequest) {
                 .filter((p) => {
                   const n = p.name.toLowerCase();
                   if (domain === "insumos") return n.includes("-bubble-api-categorias_") || n.includes("-bubble-api-custo_medio_item_") || n.includes("-bubble-api-item_") || n.includes("-bubble-api-ingredientes_");
+                  if (domain === "fornecedores") return n.includes("-bubble-api-fornecedores_") || n.includes("-bubble-api-itens_fornecedores_") || n.includes("-bubble-api-equivalencias_");
                   return n.includes("-bubble-api-inventarios_");
                 })
                 .map((p) => p.path);
               await uploadJson(supabase, bucket, filesPath, { v: 1, files: filtered });
-              await uploadJson(supabase, bucket, accPath, domain === "insumos" ? { v: 1, categoriasById: {}, custoByItemKey: {}, insumosByKey: {} } : { v: 1, contagens: {} });
+              await uploadJson(
+                supabase,
+                bucket,
+                accPath,
+                domain === "insumos"
+                  ? { v: 1, categoriasById: {}, custoByItemKey: {}, insumosByKey: {} }
+                  : domain === "fornecedores"
+                    ? { v: 1, infoMap: {}, produtosMap: {}, equivalenciasMap: {}, fornecedorNameById: {} }
+                    : { v: 1, contagens: {} },
+              );
               work.filesReady = true;
               work.filesPath = filesPath;
               work.accPath = accPath;
@@ -630,6 +669,108 @@ export async function POST(req: NextRequest) {
                 await persist();
                 ops += 1;
               }
+            } else if (domain === "fornecedores") {
+              const infoMap: Record<string, any> = acc?.infoMap && typeof acc.infoMap === "object" ? acc.infoMap : {};
+              const produtosMap: Record<string, string[]> = acc?.produtosMap && typeof acc.produtosMap === "object" ? acc.produtosMap : {};
+              const equivalenciasMap: Record<string, any[]> = acc?.equivalenciasMap && typeof acc.equivalenciasMap === "object" ? acc.equivalenciasMap : {};
+              const fornecedorNameById: Record<string, string> =
+                acc?.fornecedorNameById && typeof acc.fornecedorNameById === "object" ? acc.fornecedorNameById : {};
+
+              const handleFornecedorInfo = (row: Record<string, string>) => {
+                const fornecedor =
+                  pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
+                  pickKeyLike(row, ["fornecedor", "empresa"]);
+                const key = normalizeFornecedorKey(fornecedor);
+                if (!key) return;
+                const fornId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "fornecedor_id"]);
+                if (fornId) fornecedorNameById[fornId.trim()] = fornecedor.trim();
+                infoMap[key] = {
+                  fornecedor: fornecedor.trim() || fornecedor,
+                  vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
+                  whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
+                  endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
+                };
+              };
+
+              const handleFornecedorProduto = (row: Record<string, string>) => {
+                const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
+                const fornecedor =
+                  pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
+                  (fornecedorId ? fornecedorNameById[fornecedorId.trim()] ?? "" : "") ||
+                  pickKeyLike(row, ["fornecedor", "empresa"]);
+                const itemName =
+                  pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
+                  pickKeyLike(row, ["produto", "item", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
+                  guessItemLabel(row);
+                const key = normalizeFornecedorKey(fornecedor);
+                if (!key || !String(itemName ?? "").trim()) return;
+                const list = produtosMap[key] ?? [];
+                list.push(String(itemName).trim());
+                produtosMap[key] = list;
+              };
+
+              const handleEquivalencia = (row: Record<string, string>) => {
+                const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+                const key = normalizeFornecedorKey(fornecedor);
+                if (!key) return;
+                const nomeNaNota =
+                  pickFirst(row, ["nome_na_nota", "nomenanota", "nome", "item", "produto"]) ||
+                  pickKeyLike(row, ["nome", "item", "produto"], { excludeParts: ["fornecedor", "empresa"] });
+                const insumoEquivalente = pickFirst(row, ["insumo_equivalente", "insumoequivalente", "equivalente", "insumo"]) || pickKeyLike(row, ["insumo", "equival"]);
+                if (!nomeNaNota || !insumoEquivalente) return;
+                const unidadeNaNota = pickFirst(row, ["unidade_na_nota", "unidadenanota", "unidade", "medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
+                const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalentequantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
+                const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteunidade", "unidade_equivalente", "unidade"]) || "";
+                const bubbleId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id"]) || String(Date.now());
+                const list = equivalenciasMap[key] ?? [];
+                list.push({
+                  id: bubbleId,
+                  nomeNaNota: nomeNaNota.trim(),
+                  unidadeNaNota: unidadeNaNota.trim() || "Und",
+                  insumoEquivalente: insumoEquivalente.trim(),
+                  equivalenteQuantidade: equivalenteQuantidade.trim(),
+                  equivalenteUnidade: equivalenteUnidade.trim(),
+                });
+                equivalenciasMap[key] = list;
+              };
+
+              for (let i = cursor; i < end; i++) {
+                const partPath = files[i]!;
+                const payload = await downloadJson(supabase, bucket, partPath);
+                const typeName = String(payload?.type ?? "").trim().toLowerCase();
+                const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+                for (const r of rows) {
+                  const row = normalizeRowObject(r);
+                  if (!row) continue;
+                  if (typeName.includes("itens_fornecedores") || typeName.includes("itens-fornecedores")) handleFornecedorProduto(row);
+                  else if (typeName.includes("equival")) handleEquivalencia(row);
+                  else if (typeName.includes("fornecedor")) handleFornecedorInfo(row);
+                }
+                work.cursor = i + 1;
+                work.lastFile = partPath;
+                work.total = files.length;
+                state.import.work[domain] = work;
+                await uploadJson(supabase, bucket, accPath, { v: 1, infoMap, produtosMap, equivalenciasMap, fornecedorNameById });
+                await persist();
+                ops += 1;
+                if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+              }
+
+              for (const k of Object.keys(produtosMap)) {
+                produtosMap[k] = Array.from(new Set((produtosMap[k] ?? []).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+              }
+
+              if (work.cursor >= files.length) {
+                const stateId = `user:${userId}`;
+                const { error } = await supabase
+                  .from("fornecedores_state")
+                  .upsert({ id: stateId, info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap } as any, { onConflict: "id" });
+                if (error) throw new Error(`fornecedores_state:${error.message}`);
+                state.import.index = idx + 1;
+                state.import.lastError = "";
+                await persist();
+                ops += 1;
+              }
             } else {
               const contagens: Record<string, any> = acc?.contagens && typeof acc.contagens === "object" ? acc.contagens : {};
               for (let i = cursor; i < end; i++) {
@@ -678,12 +819,7 @@ export async function POST(req: NextRequest) {
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            const transient =
-              msg.startsWith("invalid_json_from_storage:") ||
-              msg.startsWith("failed_to_download_") ||
-              msg === "failed_to_sign" ||
-              msg === "failed_to_download";
-            if (transient) {
+            if (isImportTransientErrorMessage(msg)) {
               const next = Date.now() + 3000;
               if (!work) {
                 state.import.work = state.import.work && typeof state.import.work === "object" ? state.import.work : {};
@@ -714,11 +850,23 @@ export async function POST(req: NextRequest) {
             state.import.lastError = "";
             await persist();
           } catch (err) {
-            state.import.status = "error";
-            state.import.lastError = err instanceof Error ? err.message : String(err);
-            state.phase = "error";
-            state.lastError = state.import.lastError;
-            await persist();
+            const msg = err instanceof Error ? err.message : String(err);
+            if (isImportTransientErrorMessage(msg)) {
+              state.import.status = "aguardando";
+              state.import.lastError = msg;
+              state.import.work = state.import.work && typeof state.import.work === "object" ? state.import.work : {};
+              const w = (state.import.work[domain] && typeof state.import.work[domain] === "object" ? state.import.work[domain] : {}) as any;
+              w.nextRetryAt = Date.now() + 3000;
+              w.lastError = msg;
+              state.import.work[domain] = w;
+              await persist();
+            } else {
+              state.import.status = "error";
+              state.import.lastError = msg;
+              state.phase = "error";
+              state.lastError = msg;
+              await persist();
+            }
           }
           ops += 1;
         }
