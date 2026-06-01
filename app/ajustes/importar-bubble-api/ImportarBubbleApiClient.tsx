@@ -45,6 +45,7 @@ export default function ImportarBubbleApiClient() {
   const [countsError, setCountsError] = useState<string>("");
   const [resetError, setResetError] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
+  const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
   const [syncState, setSyncState] = useState<SyncState | null>(null);
@@ -118,6 +119,15 @@ export default function ImportarBubbleApiClient() {
     return st;
   }
 
+  async function loadServerSyncStatus(statePath: string) {
+    const res = await fetch(`/api/bubble-import/sync/status?statePath=${encodeURIComponent(statePath)}`, { method: "GET" });
+    const json = (await res.json().catch(() => null)) as any;
+    if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+    const st = json.state as SyncState;
+    setSyncState(st);
+    return st;
+  }
+
   async function resetSupabaseData() {
     if (isResetting) return;
     setResetError("");
@@ -146,6 +156,7 @@ export default function ImportarBubbleApiClient() {
     setIsRunning(true);
     setStage("pulling");
     setResult("");
+    setSyncWarning("");
     setProgress(null);
     stopRef.current = false;
     try {
@@ -155,9 +166,26 @@ export default function ImportarBubbleApiClient() {
         statePath = started.statePath;
       }
 
+      let consecutiveErrors = 0;
       for (let i = 0; i < 2000000; i++) {
         if (stopRef.current) break;
-        const st = await tickServerSync(statePath);
+        let st: SyncState;
+        try {
+          st = await tickServerSync(statePath);
+          consecutiveErrors = 0;
+          setSyncWarning("");
+        } catch (err) {
+          consecutiveErrors += 1;
+          const msg = safeJsonMessage(err);
+          setSyncWarning(msg);
+          try {
+            st = await loadServerSyncStatus(statePath);
+          } catch {
+            await sleep(Math.min(10_000, 500 * Math.pow(2, Math.min(consecutiveErrors, 4))));
+            continue;
+          }
+          await sleep(Math.min(10_000, 500 * Math.pow(2, Math.min(consecutiveErrors, 4))));
+        }
         setProgress(
           Object.fromEntries(
             Object.entries(st.perType ?? {}).map(([k, v]) => [
@@ -249,6 +277,19 @@ export default function ImportarBubbleApiClient() {
               <div className={styles.notice}>
                 <span className={styles.noticeStrong}>Passo 2:</span> depois de puxar, vá em /ajustes/importar-bubble e clique em “Importar tudo”.
               </div>
+
+              {syncStatePath ? (
+                <div className={styles.fileList}>
+                  <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
+                    <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div className={styles.fileName}>Sync no servidor</div>
+                      <div className={styles.fileMeta}>statePath: {syncStatePath}</div>
+                      {syncState?.phase ? <div className={styles.fileMeta}>fase: {syncState.phase}</div> : null}
+                      {syncWarning ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>Conexão instável: {syncWarning}</div> : null}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className={styles.fileList}>
                 <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
