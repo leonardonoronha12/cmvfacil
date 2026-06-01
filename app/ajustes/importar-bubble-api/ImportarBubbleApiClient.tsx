@@ -146,7 +146,7 @@ export default function ImportarBubbleApiClient() {
     const res = await fetch("/api/bubble-import/sync/tick", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12 }),
+      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true }),
     });
     const json = (await res.json().catch(() => null)) as any;
     if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
@@ -342,6 +342,23 @@ export default function ImportarBubbleApiClient() {
                         <div className={styles.fileMeta}>
                           import: {syncState.import.status} ({Math.min(syncState.import.index + 1, syncState.import.domains.length)}/{syncState.import.domains.length}){" "}
                           {syncState.import.domains[syncState.import.index] ? `- ${syncState.import.domains[syncState.import.index]}` : ""}
+                        </div>
+                      ) : null}
+                      {syncState?.import?.domains?.length && syncState?.import?.work && syncState.import.domains[syncState.import.index] ? (
+                        <div className={styles.fileMeta}>
+                          {(() => {
+                            const d = syncState.import?.domains?.[syncState.import.index];
+                            const w = d ? (syncState.import?.work as any)?.[d] : null;
+                            const cur = typeof w?.cursor === "number" ? w.cursor : null;
+                            const tot = typeof w?.total === "number" ? w.total : null;
+                            const last = typeof w?.lastFile === "string" ? w.lastFile : "";
+                            if (cur == null && tot == null && !last) return null;
+                            const parts = [
+                              cur != null && tot != null ? `arquivos: ${cur}/${tot}` : cur != null ? `arquivos: ${cur}` : tot != null ? `total: ${tot}` : "",
+                              last ? `último: ${last.split("/").slice(-1)[0]}` : "",
+                            ].filter(Boolean);
+                            return parts.join(" • ");
+                          })()}
                         </div>
                       ) : null}
                       {syncState?.lastError || syncState?.import?.lastError ? (
