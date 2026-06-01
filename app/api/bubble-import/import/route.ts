@@ -16,27 +16,24 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
 }
 
-async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, userPrefix: string) {
-  const { data: level1, error: err1 } = await supabase.storage.from(bucket).list(userPrefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-  if (err1) throw new Error(err1.message);
+async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
   const paths: { path: string; name: string; updated_at?: string; size?: number }[] = [];
-  const folders = (level1 ?? []).filter((it) => (it as any).id == null);
-  const files = (level1 ?? []).filter((it) => (it as any).id != null);
 
-  for (const f of files) {
-    paths.push({ path: `${userPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
-  }
-
-  for (const folder of folders) {
-    const prefix2 = `${userPrefix}/${folder.name}`;
-    const { data: level2, error: err2 } = await supabase.storage.from(bucket).list(prefix2, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-    if (err2) continue;
-    for (const f of level2 ?? []) {
-      if ((f as any).id == null) continue;
-      paths.push({ path: `${prefix2}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
+  async function walk(currentPrefix: string, depth: number) {
+    if (depth > 6) return;
+    const { data, error } = await supabase.storage.from(bucket).list(currentPrefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
+    if (error) throw new Error(error.message);
+    const folders = (data ?? []).filter((it) => (it as any).id == null);
+    const files = (data ?? []).filter((it) => (it as any).id != null);
+    for (const f of files) {
+      paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
+    }
+    for (const folder of folders) {
+      await walk(`${currentPrefix}/${folder.name}`, depth + 1);
     }
   }
 
+  await walk(prefix, 0);
   const okExt = (name: string) => {
     const n = name.toLowerCase();
     return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
@@ -264,6 +261,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as unknown;
     const only = Array.isArray((body as any)?.only) ? ((body as any).only as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : null;
     const includeUnknown = typeof (body as any)?.includeUnknown === "boolean" ? Boolean((body as any).includeUnknown) : true;
+    const requestedPrefix = typeof (body as any)?.prefix === "string" ? String((body as any).prefix).trim().replace(/^\/+|\/+$/g, "") : "";
 
     const enabled = (k: string) => !only || only.includes(k);
     const enableInsumos = enabled("insumos");
@@ -292,7 +290,8 @@ export async function POST(req: NextRequest) {
     await ensureBucket(supabase, bucket);
     const userPrefix = `user:${userId}`;
 
-    const files = await listAllPaths(supabase, bucket, userPrefix);
+    const prefixToUse = requestedPrefix && requestedPrefix.startsWith(`${userPrefix}/`) ? requestedPrefix : userPrefix;
+    const files = await listAllPaths(supabase, bucket, prefixToUse);
     const groups = groupParts(files);
     const byKind = new Map<string, { base: string; parts: { path: string; name: string; part: number }[] }[]>();
     for (const g of groups) {

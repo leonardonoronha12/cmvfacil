@@ -66,6 +66,7 @@ export default function ImportarBubbleApiClient() {
     stopRef.current = false;
     try {
       const runId = crypto.randomUUID();
+      let runPrefix = "";
       const prog: Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> = {};
 
       const importOnly = async (only: string[]) => {
@@ -74,7 +75,7 @@ export default function ImportarBubbleApiClient() {
         const importRes = await fetch("/api/bubble-import/import", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ only, includeUnknown: true }),
+          body: JSON.stringify({ only, includeUnknown: true, prefix: runPrefix || undefined }),
         });
         const importText = await importRes.text();
         let importJson: unknown = null;
@@ -112,7 +113,12 @@ export default function ImportarBubbleApiClient() {
             body: JSON.stringify({ baseUrl, token, type: typeName, cursor, limit: 100, runId, part }),
           });
           const json = (await res.json().catch(() => null)) as any;
-          if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+          if (!res.ok || !json?.ok) {
+            const detail = json?.bubbleStatus ? `bubbleStatus=${json.bubbleStatus}` : `status=${res.status}`;
+            const body = json?.bubbleBody ? `\n${json.bubbleBody}` : "";
+            throw new Error(`${typeName} (cursor=${cursor}) ${detail}: ${json?.error || "failed"}${body}`);
+          }
+          if (!runPrefix && typeof json?.runPrefix === "string") runPrefix = json.runPrefix;
           const up = json.uploaded ?? {};
           const rows = typeof up.rows === "number" ? up.rows : 0;
           cursor = typeof up.nextCursor === "number" ? up.nextCursor : cursor + rows;
@@ -144,7 +150,11 @@ export default function ImportarBubbleApiClient() {
       }
 
       setStage("importing");
-      const importRes = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ includeUnknown: true }) });
+      const importRes = await fetch("/api/bubble-import/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ includeUnknown: true, prefix: runPrefix || undefined }),
+      });
       const importText = await importRes.text();
       let importJson: unknown = null;
       try {

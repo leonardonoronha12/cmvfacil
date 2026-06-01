@@ -8,6 +8,17 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+class BubbleApiError extends Error {
+  bubbleStatus: number;
+  bubbleBody: string;
+  constructor(message: string, bubbleStatus: number, bubbleBody: string) {
+    super(message);
+    this.name = "BubbleApiError";
+    this.bubbleStatus = bubbleStatus;
+    this.bubbleBody = bubbleBody;
+  }
+}
+
 function safeBaseUrl(input: string) {
   const raw = String(input ?? "").trim();
   if (!raw) return "";
@@ -49,7 +60,7 @@ async function fetchBubblePage(baseUrl: string, token: string, typeName: string,
   } catch {}
   if (!res.ok) {
     const msg = jsonBody?.body?.message || jsonBody?.message || text || `bubble_failed_${res.status}`;
-    throw new Error(msg);
+    throw new BubbleApiError(String(msg).slice(0, 400), res.status, String(text ?? "").slice(0, 2000));
   }
   const response = jsonBody?.response ?? jsonBody ?? {};
   const results = Array.isArray(response?.results) ? response.results : Array.isArray(response) ? response : [];
@@ -92,6 +103,7 @@ export async function POST(req: NextRequest) {
     const typeSlug = safeFilePart(typeName) || "type";
     const partLabel = String(part).padStart(4, "0");
     const objectPath = `user:${userId}/${day}/${runId}/${stamp}-bubble-api-${typeSlug}_part${partLabel}.json`;
+    const runPrefix = `user:${userId}/${day}/${runId}`;
 
     const { results, remaining } = await fetchBubblePage(baseUrl, token, typeName, cursor, limit);
     const payload = {
@@ -113,12 +125,15 @@ export async function POST(req: NextRequest) {
         ok: true,
         type: typeName,
         uploaded: { path: objectPath, rows: results.length, cursor, nextCursor, remaining, part },
+        runPrefix,
         done,
       },
       { status: 200 },
     );
   } catch (err) {
+    if (err instanceof BubbleApiError) {
+      return json({ ok: false, error: err.message, bubbleStatus: err.bubbleStatus, bubbleBody: err.bubbleBody }, { status: 502 });
+    }
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
