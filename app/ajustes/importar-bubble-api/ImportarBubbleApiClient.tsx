@@ -155,19 +155,6 @@ export default function ImportarBubbleApiClient() {
     return st;
   }
 
-  async function resumeServerImport(statePath: string) {
-    const res = await fetch("/api/bubble-import/sync/tick", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true }),
-    });
-    const json = (await res.json().catch(() => null)) as any;
-    if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
-    const st = json.state as SyncState;
-    setSyncState(st);
-    return st;
-  }
-
   async function loadServerSyncStatus(statePath: string) {
     const res = await fetch(`/api/bubble-import/sync/status?statePath=${encodeURIComponent(statePath)}`, { method: "GET" });
     const json = (await res.json().catch(() => null)) as any;
@@ -370,7 +357,7 @@ export default function ImportarBubbleApiClient() {
                           <button
                             type="button"
                             className={styles.btn}
-                            onClick={() => void resumeServerImport(syncStatePath)}
+                            onClick={() => void runSync()}
                             disabled={isRunning}
                             style={{ borderColor: "#ff2f54", color: "#ff2f54" }}
                           >
