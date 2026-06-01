@@ -43,6 +43,8 @@ export default function ImportarBubbleApiClient() {
   const [progress, setProgress] = useState<Record<string, { status: string; fetched: number; parts: number; remaining: number | null; lastPath: string }> | null>(null);
   const [counts, setCounts] = useState<Record<string, number> | null>(null);
   const [countsError, setCountsError] = useState<string>("");
+  const [resetError, setResetError] = useState<string>("");
+  const [isResetting, setIsResetting] = useState(false);
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
   const [syncState, setSyncState] = useState<SyncState | null>(null);
@@ -114,6 +116,29 @@ export default function ImportarBubbleApiClient() {
     const st = json.state as SyncState;
     setSyncState(st);
     return st;
+  }
+
+  async function resetSupabaseData() {
+    if (isResetting) return;
+    setResetError("");
+    const confirm = window.prompt('Digite DELETE_ALL para apagar os dados do Supabase (insumos, fornecedores, entradas, desperdícios, inventário e estados):', "");
+    if (!confirm) return;
+    if (confirm.trim() !== "DELETE_ALL") {
+      setResetError("Confirmação incorreta.");
+      return;
+    }
+    setIsResetting(true);
+    try {
+      const res = await fetch("/api/bubble-import/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: "DELETE_ALL" }) });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      await refreshCounts();
+      resetServerSync();
+    } catch (err) {
+      setResetError(safeJsonMessage(err));
+    } finally {
+      setIsResetting(false);
+    }
   }
 
   async function runSync() {
@@ -228,6 +253,29 @@ export default function ImportarBubbleApiClient() {
               <div className={styles.fileList}>
                 <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
                   <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className={styles.fileName}>Para onde vai no Supabase</div>
+                    <div className={styles.pathsBox}>
+                      {JSON.stringify(
+                        {
+                          "categorias + custo_medio_item + item + Ingredientes": "insumos_state (payload.rows + payload.categories)",
+                          "fornecedores + itens_fornecedores + equivalencias": "fornecedores_state (info/produtos/equivalencias)",
+                          "notas_fiscais + itens_notas": "entradas (linhas, id prefixado por user:<id>:entrada:...)",
+                          "desperdicio + motivos_desperdicios": "desperdicios (linhas, id prefixado por user:<id>:desperdicio:...)",
+                          "inventarios + itens_inventarios": "inventario (linhas, id prefixado por user:<id>:inventario:...)",
+                          "pre_preparo + pre_preparo_etiquetas (se existirem)": "pre_preparo_state + pre_preparo_etiquetas_state",
+                          "fichas_tecnicas (se existir)": "fichas_tecnicas_state",
+                        },
+                        null,
+                        2,
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className={styles.fileList}>
+                <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
+                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
                     <div className={styles.fileName}>Supabase (o que já tem no sistema)</div>
                     {countsError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{countsError}</div> : null}
                     {counts ? (
@@ -303,6 +351,18 @@ export default function ImportarBubbleApiClient() {
               <div className={styles.fileList} style={{ marginTop: 12 }}>
                 <div className={styles.fileRow} style={{ alignItems: "stretch" }}>
                   <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={resetSupabaseData}
+                        disabled={isRunning || isResetting}
+                        style={{ borderColor: "#ff2f54", color: "#ff2f54" }}
+                      >
+                        {isResetting ? "Apagando..." : "Apagar dados do Supabase"}
+                      </button>
+                      {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
+                    </div>
                     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <div className={styles.fileMeta}>URL do Bubble</div>
                       <input className={styles.input} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://seuapp.bubbleapps.io" />
