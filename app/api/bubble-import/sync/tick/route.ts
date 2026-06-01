@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
+import { formatDateLabelPT, formatMoneyBRL, normalizeKey, parseDateLoose, parsePtNumber, pickFirst } from "../../../../lib/bubbleCsv";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -26,6 +27,31 @@ async function downloadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
   const { error } = await supabase.storage.from(bucket).upload(path, JSON.stringify(payload), { contentType: "application/json", upsert: true });
   if (error) throw new Error(error.message);
+}
+
+async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
+  const paths: { path: string; name: string }[] = [];
+  async function walk(currentPrefix: string, depth: number) {
+    if (depth > 6) return;
+    const folders: any[] = [];
+    const files: any[] = [];
+    for (let offset = 0; offset < 200000; offset += 1000) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(currentPrefix, { limit: 1000, offset, sortBy: { column: "name", order: "asc" } } as any);
+      if (error) throw new Error(error.message);
+      const batch = data ?? [];
+      for (const it of batch) {
+        if ((it as any).id == null) folders.push(it);
+        else files.push(it);
+      }
+      if (batch.length < 1000) break;
+    }
+    for (const f of files) paths.push({ path: `${currentPrefix}/${f.name}`, name: String(f.name ?? "") });
+    for (const folder of folders) await walk(`${currentPrefix}/${folder.name}`, depth + 1);
+  }
+  await walk(prefix, 0);
+  return paths;
 }
 
 function safeBaseUrl(input: string) {
@@ -115,6 +141,76 @@ function isTransient(status: number | null) {
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function toCell(v: unknown) {
+  if (v == null) return "";
+  if (typeof v === "string") return v.trim();
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  try {
+    return JSON.stringify(v);
+  } catch {
+    return String(v);
+  }
+}
+
+function normalizeRowObject(raw: unknown) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) out[normalizeKey(k)] = toCell(v);
+  return out;
+}
+
+function normalizeItemName(value: string) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function guessItemLabel(row: Record<string, string>) {
+  const direct = pickFirst(row, ["item", "item_completo", "nome_item", "nome_do_item", "nome", "produto", "descricao", "ingrediente", "insumo", "titulo", "title", "name"]);
+  if (direct) return direct;
+  let best = "";
+  for (const [k, v] of Object.entries(row)) {
+    const kk = k.toLowerCase();
+    if (
+      kk.includes("id") ||
+      kk.includes("unique") ||
+      kk.includes("created") ||
+      kk.includes("updated") ||
+      kk.includes("data") ||
+      kk.includes("date") ||
+      kk.includes("custo") ||
+      kk.includes("preco") ||
+      kk.includes("valor") ||
+      kk.includes("quant") ||
+      kk.includes("qtd") ||
+      kk.includes("medida") ||
+      kk.includes("unidade") ||
+      kk.includes("categoria") ||
+      kk.includes("fornecedor") ||
+      kk.includes("empresa") ||
+      kk.includes("whatsapp") ||
+      kk.includes("telefone") ||
+      kk.includes("celular")
+    ) {
+      continue;
+    }
+    const s = String(v ?? "").trim();
+    if (!s) continue;
+    if (parsePtNumber(s) !== 0) continue;
+    if (!/[A-Za-zÀ-ÿ]/.test(s)) continue;
+    if (s.length > best.length) best = s;
+  }
+  return best;
+}
+
+function buildDateLabel(value: string) {
+  const d = parseDateLoose(value);
+  return d ? formatDateLabelPT(d) : String(value ?? "").trim();
 }
 
 export async function POST(req: NextRequest) {
@@ -319,21 +415,187 @@ export async function POST(req: NextRequest) {
           ops += 1;
           continue;
         }
-        state.import.status = "running";
-        await persist();
-        try {
-          await doImportDomain(domain);
-          state.import.index = idx + 1;
+        if (domain === "insumos" || domain === "inventario") {
+          state.import.status = "running";
           state.import.lastError = "";
+          state.import.work = state.import.work && typeof state.import.work === "object" ? state.import.work : {};
+          const work = (state.import.work[domain] && typeof state.import.work[domain] === "object" ? state.import.work[domain] : {}) as any;
+          const filesPath = typeof work.filesPath === "string" ? String(work.filesPath) : `${state.runPrefix}/import-${domain}-files.json`;
+          const accPath = typeof work.accPath === "string" ? String(work.accPath) : `${state.runPrefix}/import-${domain}-acc.json`;
+          if (!work.filesReady) {
+            const all = await listAllPaths(supabase, bucket, state.runPrefix);
+            const filtered = all
+              .filter((p) => p.name.toLowerCase().endsWith(".json"))
+              .filter((p) => {
+                const n = p.name.toLowerCase();
+                if (domain === "insumos") return n.includes("-bubble-api-categorias_") || n.includes("-bubble-api-custo_medio_item_") || n.includes("-bubble-api-item_") || n.includes("-bubble-api-ingredientes_");
+                return n.includes("-bubble-api-inventarios_");
+              })
+              .map((p) => p.path);
+            await uploadJson(supabase, bucket, filesPath, { v: 1, files: filtered });
+            await uploadJson(supabase, bucket, accPath, domain === "insumos" ? { v: 1, categoriasById: {}, custoByItemKey: {}, insumosByKey: {} } : { v: 1, contagens: {} });
+            work.filesReady = true;
+            work.filesPath = filesPath;
+            work.accPath = accPath;
+            work.cursor = 0;
+            work.total = filtered.length;
+            state.import.work[domain] = work;
+            await persist();
+            ops += 1;
+            continue;
+          }
+
+          const filesDoc = await downloadJson(supabase, bucket, filesPath);
+          const files: string[] = Array.isArray(filesDoc?.files) ? (filesDoc.files as any).map((x: any) => String(x ?? "")).filter(Boolean) : [];
+          const cursor = typeof work.cursor === "number" && Number.isFinite(work.cursor) && work.cursor >= 0 ? Math.floor(work.cursor) : 0;
+          const maxFilesPerTick = domain === "insumos" ? 6 : 6;
+          const end = Math.min(files.length, cursor + maxFilesPerTick);
+          const acc = await downloadJson(supabase, bucket, accPath);
+
+          if (domain === "insumos") {
+            const categoriasById: Record<string, string> = acc?.categoriasById && typeof acc.categoriasById === "object" ? acc.categoriasById : {};
+            const custoByItemKey: Record<string, string> = acc?.custoByItemKey && typeof acc.custoByItemKey === "object" ? acc.custoByItemKey : {};
+            const insumosByKey: Record<string, any> = acc?.insumosByKey && typeof acc.insumosByKey === "object" ? acc.insumosByKey : {};
+
+            for (let i = cursor; i < end; i++) {
+              const partPath = files[i]!;
+              const payload = await downloadJson(supabase, bucket, partPath);
+              const typeName = String(payload?.type ?? "").trim().toLowerCase();
+              const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+              if (typeName.includes("categoria")) {
+                for (const r of rows) {
+                  const row = normalizeRowObject(r);
+                  if (!row) continue;
+                  const nome = pickFirst(row, ["nome", "titulo", "name"]);
+                  if (!nome) continue;
+                  const slug = pickFirst(row, ["slug"]);
+                  const id = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "categoria_id", "id_categoria"]);
+                  const cleaned = nome.trim();
+                  if (id) categoriasById[id.trim()] = cleaned;
+                  if (slug) categoriasById[slug.trim()] = cleaned;
+                }
+              } else if (typeName.includes("custo_medio")) {
+                for (const r of rows) {
+                  const row = normalizeRowObject(r);
+                  if (!row) continue;
+                  const item = guessItemLabel(row);
+                  const itemKey = normalizeItemName(item);
+                  if (!itemKey) continue;
+                  const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "preco_unitario", "custo_unitario", "valor_unitario"]);
+                  const num = parsePtNumber(custo);
+                  if (!num) continue;
+                  custoByItemKey[itemKey] = formatMoneyBRL(num);
+                }
+              } else if (typeName === "item" || typeName.includes("ingred")) {
+                for (const r of rows) {
+                  const row = normalizeRowObject(r);
+                  if (!row) continue;
+                  const item = guessItemLabel(row);
+                  const itemKey = normalizeItemName(item);
+                  if (!itemKey) continue;
+                  const bubbleId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "item_id"]);
+                  const medida = pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) || "Und";
+                  const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]);
+                  const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || (catId ? categoriasById[catId.trim()] ?? "" : "");
+                  const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]);
+                  const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]);
+                  const custoNum = parsePtNumber(custo);
+                  const custoMedio = custoNum ? formatMoneyBRL(custoNum) : custoByItemKey[itemKey] ?? "";
+                  const prev = insumosByKey[itemKey] ?? {};
+                  insumosByKey[itemKey] = {
+                    id: bubbleId || prev.id || String(Object.keys(insumosByKey).length + 1),
+                    item: item.trim(),
+                    medida: medida.trim() || prev.medida || "Und",
+                    custoMedio: custoMedio || prev.custoMedio || undefined,
+                    categoria: categoria.trim() || prev.categoria || undefined,
+                    especificacao: especificacao.trim() || prev.especificacao || undefined,
+                  };
+                }
+              }
+              work.cursor = i + 1;
+              work.lastFile = partPath;
+              state.import.work[domain] = work;
+              await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, custoByItemKey, insumosByKey });
+              await persist();
+              ops += 1;
+              if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+            }
+
+            if (work.cursor >= files.length) {
+              const insumosRows = Object.values(insumosByKey).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
+              const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+              const stateId = `user:${userId}`;
+              const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+              if (error) throw new Error(`insumos_state:${error.message}`);
+              state.import.index = idx + 1;
+              state.import.lastError = "";
+              await persist();
+              ops += 1;
+            }
+          } else {
+            const contagens: Record<string, any> = acc?.contagens && typeof acc.contagens === "object" ? acc.contagens : {};
+            const batch: any[] = [];
+            for (let i = cursor; i < end; i++) {
+              const partPath = files[i]!;
+              const payload = await downloadJson(supabase, bucket, partPath);
+              const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+              for (const r of rows) {
+                const row = normalizeRowObject(r);
+                if (!row) continue;
+                const bubbleId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "inventario_id", "inventarios_id"]) || String(Object.keys(contagens).length + 1);
+                const dataRaw = pickFirst(row, ["data", "date", "data_inventario"]) || pickFirst(row, ["created_date", "created_at"]);
+                const dataLabel = buildDateLabel(dataRaw);
+                if (!dataLabel) continue;
+                const id = `user:${userId}:inventario:${bubbleId}`;
+                if (!contagens[id]) contagens[id] = { id, data: dataLabel, categorias: [] as any[] };
+              }
+              work.cursor = i + 1;
+              work.lastFile = partPath;
+              state.import.work[domain] = work;
+              await uploadJson(supabase, bucket, accPath, { v: 1, contagens });
+              await persist();
+              ops += 1;
+              if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+            }
+
+            const allRows = Object.values(contagens);
+            for (let i = 0; i < allRows.length; i += 500) {
+              const chunk = allRows.slice(i, i + 500);
+              if (!chunk.length) continue;
+              batch.push(...chunk);
+              const { error } = await supabase.from("inventario").upsert(chunk as any, { onConflict: "id" });
+              if (error) throw new Error(`inventario:${error.message}`);
+              ops += 1;
+              if (ops >= maxOps || Date.now() - startMs >= hardMs) {
+                await uploadJson(supabase, bucket, accPath, { v: 1, contagens });
+                await persist();
+                return json({ ok: true, state, ops }, { status: 200 });
+              }
+            }
+            if (work.cursor >= files.length) {
+              state.import.index = idx + 1;
+              state.import.lastError = "";
+              await persist();
+              ops += 1;
+            }
+          }
+        } else {
+          state.import.status = "running";
           await persist();
-        } catch (err) {
-          state.import.status = "error";
-          state.import.lastError = err instanceof Error ? err.message : String(err);
-          state.phase = "error";
-          state.lastError = state.import.lastError;
-          await persist();
+          try {
+            await doImportDomain(domain);
+            state.import.index = idx + 1;
+            state.import.lastError = "";
+            await persist();
+          } catch (err) {
+            state.import.status = "error";
+            state.import.lastError = err instanceof Error ? err.message : String(err);
+            state.phase = "error";
+            state.lastError = state.import.lastError;
+            await persist();
+          }
+          ops += 1;
         }
-        ops += 1;
       } else {
         break;
       }

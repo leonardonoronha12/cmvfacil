@@ -21,16 +21,22 @@ async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 
   async function walk(currentPrefix: string, depth: number) {
     if (depth > 6) return;
-    const { data, error } = await supabase.storage.from(bucket).list(currentPrefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-    if (error) throw new Error(error.message);
-    const folders = (data ?? []).filter((it) => (it as any).id == null);
-    const files = (data ?? []).filter((it) => (it as any).id != null);
-    for (const f of files) {
-      paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
+    const folders: any[] = [];
+    const files: any[] = [];
+    for (let offset = 0; offset < 200000; offset += 1000) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(currentPrefix, { limit: 1000, offset, sortBy: { column: "name", order: "asc" } } as any);
+      if (error) throw new Error(error.message);
+      const batch = data ?? [];
+      for (const it of batch) {
+        if ((it as any).id == null) folders.push(it);
+        else files.push(it);
+      }
+      if (batch.length < 1000) break;
     }
-    for (const folder of folders) {
-      await walk(`${currentPrefix}/${folder.name}`, depth + 1);
-    }
+    for (const f of files) paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
+    for (const folder of folders) await walk(`${currentPrefix}/${folder.name}`, depth + 1);
   }
 
   await walk(prefix, 0);
