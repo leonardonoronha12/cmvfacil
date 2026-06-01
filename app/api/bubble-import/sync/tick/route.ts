@@ -294,7 +294,14 @@ function extractUuidFromText(input: string) {
   return m ? String(m[0]).toLowerCase() : null;
 }
 
-function pickUserIdFromRow(row: Record<string, string>) {
+function extractEmailFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return m ? String(m[0]).trim().toLowerCase() : null;
+}
+
+function pickUserRefFromRow(row: Record<string, string>) {
   const direct =
     pickFirst(row, [
       "user_id",
@@ -304,25 +311,50 @@ function pickUserIdFromRow(row: Record<string, string>) {
       "createdby",
       "created_by_id",
       "createdby_id",
+      "created_by_email",
+      "createdby_email",
       "creator",
       "creator_id",
+      "creator_email",
       "criador",
       "criador_id",
+      "criador_email",
       "owner",
       "owner_id",
+      "owner_email",
       "dono",
       "dono_id",
       "responsavel_id",
+      "responsavel_email",
       "supabase_user_id",
       "supabase_uid",
       "auth_uid",
       "user",
       "usuario",
+      "user_email",
+      "usuario_email",
+      "email",
     ]) ||
     pickFirst(row, ["created by", "Created By", "Created by", "Criado por", "criado por"]) ||
     pickFirst(row, ["_user", "user (id)"]);
   if (!direct) return null;
-  return extractUuidFromText(direct);
+  return String(direct);
+}
+
+async function loadAuthEmailToIdMap(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const emailToId: Record<string, string> = {};
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`auth_list_users:${error.message}`);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const email = String(u?.email ?? "").trim().toLowerCase();
+      if (id && email) emailToId[email] = id;
+    }
+    if (users.length < 1000) break;
+  }
+  return emailToId;
 }
 
 export async function POST(req: NextRequest) {
@@ -337,7 +369,6 @@ export async function POST(req: NextRequest) {
     const resume = Boolean(body?.resume);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
     const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) ? importAsUserIdRaw : "";
-    const resolveImportUserId = (row: Record<string, string>) => overrideImportUserId || pickUserIdFromRow(row) || userId;
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -361,6 +392,29 @@ export async function POST(req: NextRequest) {
     const persist = async () => {
       state.updatedAt = nowIso();
       await uploadJson(supabase, bucket, statePath, state);
+    };
+
+    const ensureUserMap = async () => {
+      if (overrideImportUserId) return;
+      const existing = state.userMap && typeof state.userMap === "object" ? state.userMap : null;
+      const emailToIdExisting = existing && existing.emailToId && typeof existing.emailToId === "object" ? existing.emailToId : null;
+      if (existing?.v === 1 && emailToIdExisting && Object.keys(emailToIdExisting).length) return;
+      try {
+        const emailToId = await loadAuthEmailToIdMap(supabase);
+        state.userMap = { v: 1, emailToId, updatedAt: nowIso() };
+        await persist();
+      } catch {}
+    };
+
+    const resolveImportUserId = (row: Record<string, string>) => {
+      if (overrideImportUserId) return overrideImportUserId;
+      const ref = pickUserRefFromRow(row);
+      const uuid = ref ? extractUuidFromText(ref) : null;
+      if (uuid) return uuid;
+      const email = ref ? extractEmailFromText(ref) : null;
+      const emailToId = state.userMap && typeof state.userMap === "object" && state.userMap.emailToId && typeof state.userMap.emailToId === "object" ? state.userMap.emailToId : {};
+      const mapped = email ? String((emailToId as any)[email] ?? "").trim() : "";
+      return mapped && isUuid(mapped) ? mapped : userId;
     };
 
     const ensureImportPlan = async () => {
@@ -556,6 +610,7 @@ export async function POST(req: NextRequest) {
           await persist();
         }
       } else if (state.phase === "importing") {
+        await ensureUserMap();
         const domains: string[] = Array.isArray(state.import?.domains) ? state.import.domains : [];
         const idx = typeof state.import?.index === "number" ? state.import.index : 0;
         if (idx >= domains.length) {

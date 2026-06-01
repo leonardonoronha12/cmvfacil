@@ -183,7 +183,14 @@ function extractUuidFromText(input: string) {
   return m ? String(m[0]).toLowerCase() : null;
 }
 
-function pickUserIdFromRow(row: CsvObjectRow) {
+function extractEmailFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return m ? String(m[0]).trim().toLowerCase() : null;
+}
+
+function pickUserRefFromRow(row: CsvObjectRow) {
   const direct =
     pickFirst(row, [
       "user_id",
@@ -193,24 +200,49 @@ function pickUserIdFromRow(row: CsvObjectRow) {
       "createdby",
       "created_by_id",
       "createdby_id",
+      "created_by_email",
+      "createdby_email",
       "creator",
       "creator_id",
+      "creator_email",
       "criador",
       "criador_id",
+      "criador_email",
       "owner",
       "owner_id",
+      "owner_email",
       "dono",
       "dono_id",
       "responsavel_id",
+      "responsavel_email",
       "supabase_user_id",
       "supabase_uid",
       "auth_uid",
+      "user_email",
+      "usuario_email",
+      "email",
       "user",
       "usuario",
     ]) ||
     pickKeyLike(row, ["user", "usuario", "criador", "created", "owner"], { excludeParts: ["url", "name", "nome"] });
   if (!direct) return null;
-  return extractUuidFromText(direct);
+  return String(direct);
+}
+
+async function loadAuthEmailToIdMap(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  const map = new Map<string, string>();
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`auth_list_users:${error.message}`);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const email = String(u?.email ?? "").trim().toLowerCase();
+      if (id && email) map.set(email, id);
+    }
+    if (users.length < 1000) break;
+  }
+  return map;
 }
 
 function normalizeFornecedorKey(value: string) {
@@ -322,7 +354,6 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
     const overrideTargetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : "";
-    const resolveTargetUserId = (row: CsvObjectRow) => overrideTargetUserId || pickUserIdFromRow(row) || userId;
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -330,6 +361,18 @@ export async function POST(req: NextRequest) {
     } catch {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
+
+    stage = "load_auth_users";
+    const emailToId = !overrideTargetUserId ? await loadAuthEmailToIdMap(supabase) : new Map<string, string>();
+    const resolveTargetUserId = (row: CsvObjectRow) => {
+      if (overrideTargetUserId) return overrideTargetUserId;
+      const ref = pickUserRefFromRow(row);
+      const uuid = ref ? extractUuidFromText(ref) : null;
+      if (uuid) return uuid;
+      const email = ref ? extractEmailFromText(ref) : null;
+      const byEmail = email ? emailToId.get(email) ?? null : null;
+      return byEmail || userId;
+    };
 
     stage = "list_files";
     const bucket = "bubble-imports";
