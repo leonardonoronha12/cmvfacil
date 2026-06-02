@@ -27,40 +27,40 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 
 type StoredPath = { path: string; name: string; created_at?: string; updated_at?: string; size?: number };
 
-async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, userPrefix: string) {
-  const { data: level1, error: err1 } = await supabase.storage.from(bucket).list(userPrefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-  if (err1) throw new Error(err1.message);
-  const paths: StoredPath[] = [];
-  const folders = (level1 ?? []).filter((it) => (it as any).id == null);
-  const files = (level1 ?? []).filter((it) => (it as any).id != null);
+async function listAllPathsDeep(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, rootPrefix: string, maxDepth = 6, maxItems = 5000) {
+  const out: StoredPath[] = [];
+  const seen = new Set<string>();
+  const queue: Array<{ prefix: string; depth: number }> = [{ prefix: rootPrefix, depth: 0 }];
 
-  for (const f of files) {
-    paths.push({
-      path: `${userPrefix}/${f.name}`,
-      name: f.name,
-      created_at: (f as any).created_at,
-      updated_at: (f as any).updated_at,
-      size: (f as any)?.metadata?.size,
-    });
-  }
+  while (queue.length && out.length < maxItems) {
+    const cur = queue.shift()!;
+    if (seen.has(cur.prefix)) continue;
+    seen.add(cur.prefix);
 
-  for (const folder of folders) {
-    const prefix2 = `${userPrefix}/${folder.name}`;
-    const { data: level2, error: err2 } = await supabase.storage.from(bucket).list(prefix2, { limit: 1000, sortBy: { column: "name", order: "asc" } });
-    if (err2) continue;
-    for (const f of level2 ?? []) {
-      if ((f as any).id == null) continue;
-      paths.push({
-        path: `${prefix2}/${f.name}`,
-        name: f.name,
-        created_at: (f as any).created_at,
-        updated_at: (f as any).updated_at,
-        size: (f as any)?.metadata?.size,
+    const { data, error } = await supabase.storage.from(bucket).list(cur.prefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
+    if (error) continue;
+
+    for (const it of data ?? []) {
+      const name = String((it as any)?.name ?? "").trim();
+      if (!name) continue;
+      const fullPath = `${cur.prefix}/${name}`;
+      if ((it as any).id == null) {
+        if (cur.depth < maxDepth) queue.push({ prefix: fullPath, depth: cur.depth + 1 });
+        continue;
+      }
+
+      out.push({
+        path: fullPath,
+        name,
+        created_at: (it as any).created_at,
+        updated_at: (it as any).updated_at,
+        size: (it as any)?.metadata?.size,
       });
+      if (out.length >= maxItems) break;
     }
   }
 
-  return paths.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
+  return out.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
 }
 
 async function downloadText(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
@@ -175,12 +175,27 @@ export async function GET(req: NextRequest) {
     await ensureBucket(supabase, bucket);
 
     const userPrefix = `user:${userId}`;
-    const paths = await listAllPaths(supabase, bucket, userPrefix);
-    const candidates = paths
+    const paths = await listAllPathsDeep(supabase, bucket, userPrefix);
+    const filesCount = paths.length;
+    const candidatesAll = paths
       .filter((p) => {
         const n = p.name.toLowerCase();
         return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
-      })
+      });
+
+    const score = (p: StoredPath) => {
+      const n = p.name.toLowerCase();
+      const path = p.path.toLowerCase();
+      let s = 0;
+      if (n.includes("user") || n.includes("usu")) s += 50;
+      if (path.includes("/users") || path.includes("/usuarios") || path.includes("/usuario")) s += 50;
+      if (n === "users.csv" || n === "usuarios.csv") s += 50;
+      return s;
+    };
+
+    const candidates = candidatesAll
+      .slice()
+      .sort((a, b) => score(b) - score(a) || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
       .slice(0, maxFiles);
 
     const scanned: string[] = [];
@@ -210,13 +225,46 @@ export async function GET(req: NextRequest) {
 
       const emails = collectBubbleUserEmails(parsed.rows);
       if (emails.length) {
-        return json({ ok: true, sourcePath: part.path, emailsCount: emails.length, emails, scannedCount: scanned.length, scanned }, { status: 200 });
+        return json(
+          {
+            ok: true,
+            sourcePath: part.path,
+            emailsCount: emails.length,
+            emails,
+            scannedCount: scanned.length,
+            scanned,
+            debug: {
+              searchedPrefix: userPrefix,
+              filesCount,
+              candidatesCount: candidatesAll.length,
+              candidatesUsed: candidates.length,
+            },
+          },
+          { status: 200 },
+        );
       }
     }
 
-    return json({ ok: true, sourcePath: null, emailsCount: 0, emails: [], scannedCount: scanned.length, scanned }, { status: 200 });
+    const sampleFiles = candidatesAll.slice(0, 30).map((p) => p.path);
+    return json(
+      {
+        ok: true,
+        sourcePath: null,
+        emailsCount: 0,
+        emails: [],
+        scannedCount: scanned.length,
+        scanned,
+        debug: {
+          searchedPrefix: userPrefix,
+          filesCount,
+          candidatesCount: candidatesAll.length,
+          candidatesUsed: candidates.length,
+          sampleFiles,
+        },
+      },
+      { status: 200 },
+    );
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

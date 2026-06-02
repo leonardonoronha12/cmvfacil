@@ -33,6 +33,7 @@ export default function EmailsUsuariosClient() {
   const [rows, setRows] = useState<ApiUser[]>([]);
   const [bubbleEmails, setBubbleEmails] = useState<string[]>([]);
   const [bubbleSourcePath, setBubbleSourcePath] = useState<string>("");
+  const [bubbleDebug, setBubbleDebug] = useState<any>(null);
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState(false);
 
@@ -63,9 +64,11 @@ export default function EmailsUsuariosClient() {
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `failed_${res.status}`));
       setBubbleEmails(Array.isArray(json?.emails) ? (json.emails as string[]) : []);
       setBubbleSourcePath(String(json?.sourcePath ?? ""));
+      setBubbleDebug(json?.debug ?? null);
     } catch (err) {
       setBubbleEmails([]);
       setBubbleSourcePath("");
+      setBubbleDebug(null);
       setError(safeMsg(err));
     } finally {
       setIsLoading(false);
@@ -193,7 +196,20 @@ export default function EmailsUsuariosClient() {
                     <div className={styles.helpText} style={{ marginBottom: 8 }}>
                       {bubbleSourcePath ? `Arquivo detectado: ${bubbleSourcePath}` : "Nenhum arquivo de Users do Bubble encontrado ainda."}
                     </div>
+                    {!bubbleSourcePath && bubbleDebug ? (
+                      <div className={styles.helpText} style={{ marginBottom: 8 }}>
+                        Prefixo: {String(bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Candidatos:{" "}
+                        {String(bubbleDebug?.candidatesCount ?? "—")} • Testados: {String(bubbleDebug?.candidatesUsed ?? "—")}
+                      </div>
+                    ) : null}
                     <textarea className={styles.input} value={emailsText} readOnly style={{ height: "auto", minHeight: 260, padding: "10px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace" }} />
+                    {!bubbleSourcePath && Array.isArray(bubbleDebug?.sampleFiles) && bubbleDebug.sampleFiles.length ? (
+                      <div className={styles.helpText} style={{ marginTop: 8 }}>
+                        Exemplo de arquivos encontrados:
+                        {"\n"}
+                        {bubbleDebug.sampleFiles.slice(0, 10).join("\n")}
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
 
