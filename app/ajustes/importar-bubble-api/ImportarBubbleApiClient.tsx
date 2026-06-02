@@ -48,6 +48,8 @@ export default function ImportarBubbleApiClient() {
   const [isRefreshingCounts, setIsRefreshingCounts] = useState(false);
   const [resetError, setResetError] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
+  const [dangerAction, setDangerAction] = useState<null | "delete" | "rebuild">(null);
+  const [dangerConfirm, setDangerConfirm] = useState("");
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
@@ -181,19 +183,51 @@ export default function ImportarBubbleApiClient() {
   async function resetSupabaseData() {
     if (isResetting) return;
     setResetError("");
-    const confirm = window.prompt('Digite DELETE_ALL para apagar os dados do Supabase (insumos, fornecedores, entradas, desperdícios, inventário e estados):', "");
-    if (!confirm) return;
-    if (confirm.trim() !== "DELETE_ALL") {
+    setDangerConfirm("");
+    setDangerAction("delete");
+  }
+
+  async function rebuildFromFiles() {
+    if (isRunning || isResetting) return;
+    setResetError("");
+    setDangerConfirm("");
+    setDangerAction("rebuild");
+  }
+
+  async function confirmDanger() {
+    if (!dangerAction || isRunning || isResetting) return;
+    setResetError("");
+    const required = dangerAction === "delete" ? "DELETE_ALL" : "RESET_AND_REIMPORT";
+    if (dangerConfirm.trim() !== required) {
       setResetError("Confirmação incorreta.");
       return;
     }
     setIsResetting(true);
     try {
-      const res = await fetch("/api/bubble-import/reset", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ confirm: "DELETE_ALL" }) });
-      const json = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
-      await refreshCounts();
-      resetServerSync();
+      if (dangerAction === "delete") {
+        const res = await fetch("/api/bubble-import/reset", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ confirm: "DELETE_ALL" }),
+        });
+        const json = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+        await refreshCounts();
+        resetServerSync();
+      } else {
+        const res = await fetch("/api/bubble-import/rebuild", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ confirm: "RESET_AND_REIMPORT", storageOwnerUserId: "", only: null, includeUnknown: true }),
+        });
+        const json = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+        await refreshCounts();
+        resetServerSync();
+        setResult(JSON.stringify(json, null, 2));
+      }
+      setDangerAction(null);
+      setDangerConfirm("");
     } catch (err) {
       setResetError(safeJsonMessage(err));
     } finally {
@@ -201,32 +235,9 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
-  async function rebuildFromFiles() {
-    if (isRunning || isResetting) return;
-    setResetError("");
-    const confirm = window.prompt('Digite RESET_AND_REIMPORT para apagar TODOS os dados e reimportar a partir dos arquivos do bucket:', "");
-    if (!confirm) return;
-    if (confirm.trim() !== "RESET_AND_REIMPORT") {
-      setResetError("Confirmação incorreta.");
-      return;
-    }
-    setIsResetting(true);
-    try {
-      const res = await fetch("/api/bubble-import/rebuild", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirm: "RESET_AND_REIMPORT", storageOwnerUserId: "", only: null, includeUnknown: true }),
-      });
-      const json = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
-      await refreshCounts();
-      resetServerSync();
-      setResult(JSON.stringify(json, null, 2));
-    } catch (err) {
-      setResetError(safeJsonMessage(err));
-    } finally {
-      setIsResetting(false);
-    }
+  function cancelDanger() {
+    setDangerAction(null);
+    setDangerConfirm("");
   }
 
   async function runSync() {
@@ -545,6 +556,23 @@ export default function ImportarBubbleApiClient() {
                       </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
                     </div>
+                    {dangerAction ? (
+                      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                        <input
+                          className={styles.input}
+                          value={dangerConfirm}
+                          onChange={(e) => setDangerConfirm(e.target.value)}
+                          placeholder={dangerAction === "delete" ? "Digite DELETE_ALL" : "Digite RESET_AND_REIMPORT"}
+                          style={{ maxWidth: 260 }}
+                        />
+                        <button type="button" className={styles.btn} onClick={confirmDanger} disabled={isRunning || isResetting}>
+                          Confirmar
+                        </button>
+                        <button type="button" className={styles.btn} onClick={cancelDanger} disabled={isRunning || isResetting}>
+                          Cancelar
+                        </button>
+                      </div>
+                    ) : null}
                     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <div className={styles.fileMeta}>URL do Bubble</div>
                       <input className={styles.input} value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} placeholder="https://seuapp.bubbleapps.io" />
