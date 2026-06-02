@@ -16,24 +16,6 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
-function parseCsvEnv(value: string | undefined) {
-  return String(value ?? "")
-    .split(/[,\n;]/g)
-    .map((x) => x.trim())
-    .filter(Boolean);
-}
-
-function isAdminUserId(userId: string) {
-  const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
-  const emails = new Set(parseCsvEnv(process.env.ADMIN_USER_EMAILS).map((x) => x.toLowerCase()));
-  const raw = userId.toLowerCase();
-  if (!raw) return false;
-  if (raw.includes("@") && process.env.ADMIN_SECRET) return true;
-  if (ids.size && ids.has(raw)) return true;
-  if (emails.size && emails.has(raw)) return true;
-  return false;
-}
-
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -250,7 +232,6 @@ export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
