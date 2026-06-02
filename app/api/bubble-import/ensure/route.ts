@@ -1,0 +1,219 @@
+import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { getUserIdFromRequest } from "../../../lib/requestUserId";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
+function json(data: unknown, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
+  return NextResponse.json(data, { ...init, headers });
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
+  const got = await supabase.storage.getBucket(bucket);
+  if (!got.error) return;
+  await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
+}
+
+async function downloadJsonFromStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const dl = await supabase.storage.from(bucket).download(path);
+  if (dl.error || !dl.data) return null;
+  try {
+    const buf = await dl.data.arrayBuffer();
+    const text = new TextDecoder().decode(buf);
+    return JSON.parse(text) as any;
+  } catch {
+    return null;
+  }
+}
+
+async function uploadJsonToStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
+  const { error } = await supabase.storage.from(bucket).upload(path, JSON.stringify(payload), { contentType: "application/json", upsert: true });
+  if (error) throw new Error(error.message);
+}
+
+function looksDataLikeFile(name: string) {
+  const n = name.toLowerCase();
+  return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+}
+
+async function listPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
+  const { data, error } = await supabase.storage.from(bucket).list(prefix, {
+    limit: 1000,
+    offset: 0,
+    sortBy: { column: "name", order: "desc" },
+  } as any);
+  if (error) throw new Error(error.message);
+  return (data ?? []) as any[];
+}
+
+async function findBestImportPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, userPrefix: string) {
+  const hasFilesAt = async (p: string) => {
+    const items = await listPrefix(supabase, bucket, p);
+    return items.some((it) => (it as any)?.id != null && looksDataLikeFile(String(it?.name ?? "")));
+  };
+
+  try {
+    if (await hasFilesAt(userPrefix)) return userPrefix;
+  } catch {
+    // ignore
+  }
+
+  let days: string[] = [];
+  try {
+    const items = await listPrefix(supabase, bucket, userPrefix);
+    days = items.filter((it) => (it as any)?.id == null).map((it) => String(it?.name ?? "").trim()).filter(Boolean);
+  } catch {
+    days = [];
+  }
+  days.sort((a, b) => b.localeCompare(a));
+
+  for (const day of days.slice(0, 20)) {
+    const dayPrefix = `${userPrefix}/${day}`;
+    try {
+      if (await hasFilesAt(dayPrefix)) return dayPrefix;
+    } catch {
+      // ignore
+    }
+
+    let runs: string[] = [];
+    try {
+      const items = await listPrefix(supabase, bucket, dayPrefix);
+      runs = items.filter((it) => (it as any)?.id == null).map((it) => String(it?.name ?? "").trim()).filter(Boolean);
+    } catch {
+      runs = [];
+    }
+    runs.sort((a, b) => b.localeCompare(a));
+    for (const run of runs.slice(0, 20)) {
+      const runPrefix = `${dayPrefix}/${run}`;
+      try {
+        if (await hasFilesAt(runPrefix)) return runPrefix;
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  return userPrefix;
+}
+
+async function userHasAnyData(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
+  const stateId = `user:${userId}`;
+  const prefix = `user:${userId}:`;
+
+  const hasState = async (table: string) => {
+    const { data } = await supabase.from(table).select("id").eq("id", stateId).maybeSingle();
+    return Boolean((data as any)?.id);
+  };
+
+  const hasRowsLike = async (table: string, likePrefix: string) => {
+    const { data } = await supabase.from(table).select("id").like("id", `${likePrefix}%`).limit(1);
+    return Array.isArray(data) && data.length > 0;
+  };
+
+  if (await hasState("insumos_state")) return true;
+  if (await hasState("fornecedores_state")) return true;
+  if (await hasState("pre_preparo_state")) return true;
+  if (await hasState("fichas_tecnicas_state")) return true;
+
+  if (await hasRowsLike("entradas", `${prefix}entrada:`)) return true;
+  if (await hasRowsLike("inventario", `${prefix}inventario:`)) return true;
+  if (await hasRowsLike("desperdicios", `${prefix}desperdicio:`)) return true;
+
+  return false;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
+
+    let supabase: ReturnType<typeof getSupabaseAdmin>;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch {
+      return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    }
+
+    const bucket = "bubble-imports";
+    await ensureBucket(supabase, bucket);
+
+    const already = await userHasAnyData(supabase, userId);
+    if (already) return json({ ok: true, status: "ready" }, { status: 200 });
+
+    const userPrefix = `user:${userId}`;
+    const bestPrefix = await findBestImportPrefix(supabase, bucket, userPrefix);
+
+    let hasAnyFile = false;
+    try {
+      const root = await listPrefix(supabase, bucket, bestPrefix);
+      hasAnyFile = root.some((it) => (it as any)?.id != null && looksDataLikeFile(String(it?.name ?? "")));
+    } catch {
+      hasAnyFile = false;
+    }
+    if (!hasAnyFile) return json({ ok: true, status: "no_files", prefix: bestPrefix }, { status: 200 });
+
+    const runId = crypto.randomUUID();
+    const runPrefix = `${userPrefix}/bootstrap`;
+    const statePath = `${runPrefix}/ensure-state.json`;
+    const mappingPath = `${runPrefix}/ensure-mapping.json`;
+
+    const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
+    if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+      return json({ ok: true, status: "running", state: existing }, { status: 200 });
+    }
+
+    const now = new Date().toISOString();
+    const stepsBase: Array<{ key: string; label: string; kinds: string[] }> = [
+      { key: "users", label: "Users", kinds: ["users"] },
+      { key: "empresas", label: "Empresas", kinds: ["empresas"] },
+      { key: "categorias", label: "Categorias", kinds: ["categorias"] },
+      { key: "insumos_custo_medio", label: "Insumos (Custo Médio)", kinds: ["custo_medio"] },
+      { key: "insumos_ingredientes", label: "Insumos (Ingredientes)", kinds: ["ingredientes"] },
+      { key: "insumos_itens", label: "Insumos (Itens)", kinds: ["itens"] },
+      { key: "fornecedores_info", label: "Fornecedores (Info)", kinds: ["fornecedores"] },
+      { key: "fornecedores_itens", label: "Fornecedores (Itens)", kinds: ["itens_fornecedores"] },
+      { key: "fornecedores_equivalencias", label: "Fornecedores (Equivalências)", kinds: ["equivalencias"] },
+      { key: "entradas_notas", label: "Entradas (Notas)", kinds: ["notas_fiscais"] },
+      { key: "entradas_itens", label: "Entradas (Itens)", kinds: ["itens_notas"] },
+      { key: "inventario", label: "Inventário", kinds: ["inventario"] },
+      { key: "desperdicios_motivos", label: "Desperdícios (Motivos)", kinds: ["motivos_desperdicios"] },
+      { key: "desperdicios", label: "Desperdícios", kinds: ["desperdicios"] },
+      { key: "pre_preparo", label: "Pré-preparo", kinds: ["pre_preparo", "pre_preparo_etiquetas"] },
+      { key: "fichas_tecnicas", label: "Fichas Técnicas", kinds: ["fichas_tecnicas"] },
+      { key: "unknown", label: "Desconhecidos", kinds: ["unknown"] },
+    ];
+
+    const state = {
+      v: 1,
+      runId,
+      runPrefix,
+      statePath,
+      mappingPath,
+      startedAt: now,
+      updatedAt: now,
+      phase: "importing",
+      storageOwnerUserId: userId,
+      prefix: bestPrefix,
+      includeUnknown: true,
+      only: null as string[] | null,
+      steps: stepsBase.map((s) => ({ ...s, status: "pending", lastError: "", startedAt: null, finishedAt: null, lastResult: null })),
+    };
+
+    await uploadJsonToStorage(supabase, bucket, statePath, state);
+    return json({ ok: true, status: "started", state }, { status: 200 });
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+

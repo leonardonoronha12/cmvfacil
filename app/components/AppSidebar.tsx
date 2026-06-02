@@ -56,6 +56,10 @@ function parseDateLabelLoose(value: string) {
   return d;
 }
 
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
 type SidebarKey =
   | "dashboard"
   | "lista-compras"
@@ -282,6 +286,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string }>({ status: "idle", message: "" });
 
   useEffect(() => {
     setEtiquetas(readPrePreparoEtiquetasFromStore());
@@ -338,6 +343,99 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isDrawerOpen]);
+
+  useEffect(() => {
+    if (active === "ajustes") return;
+    if (bootstrap.status === "running") return;
+    try {
+      if (window.sessionStorage.getItem("cmvfacil:bootstrapDone") === "1") return;
+    } catch {
+      // ignore
+    }
+
+    setBootstrap({ status: "running", message: "Preparando seus dados..." });
+    void (async () => {
+      try {
+        const res = await fetch("/api/bubble-import/ensure", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: "{}",
+          cache: "no-store",
+        });
+        const json = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !json?.ok) {
+          const msg = String(json?.error ?? `failed_${res.status}`);
+          setBootstrap({ status: "error", message: msg });
+          return;
+        }
+
+        const status = String(json?.status ?? "");
+        if (status === "ready" || status === "no_files") {
+          try {
+            window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
+            window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+          } catch {}
+          setBootstrap({ status: "done", message: "" });
+          return;
+        }
+
+        const statePath = String(json?.state?.statePath ?? "");
+        if (!statePath) {
+          setBootstrap({ status: "done", message: "" });
+          return;
+        }
+
+        try {
+          window.sessionStorage.setItem("cmvfacil:bootstrapRunning", "1");
+        } catch {}
+
+        for (let i = 0; i < 2000; i++) {
+          await sleep(1200);
+          const tickRes = await fetch("/api/bubble-import/rebuild/tick", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ statePath }),
+            cache: "no-store",
+          });
+          const tickJson = (await tickRes.json().catch(() => null)) as any;
+          if (!tickRes.ok || !tickJson?.ok) {
+            const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
+            setBootstrap({ status: "error", message: msg });
+            try {
+              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+            } catch {}
+            return;
+          }
+
+          const phase = String(tickJson?.state?.phase ?? "");
+          if (phase === "done") {
+            try {
+              window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
+              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+            } catch {}
+            setBootstrap({ status: "done", message: "" });
+            window.location.reload();
+            return;
+          }
+          if (phase === "error") {
+            const msg =
+              String(tickJson?.state?.delete?.lastError ?? "") ||
+              String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
+              "failed";
+            setBootstrap({ status: "error", message: msg });
+            try {
+              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+            } catch {}
+            return;
+          }
+        }
+
+        setBootstrap({ status: "error", message: "timeout" });
+      } catch (err) {
+        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err) });
+      }
+    })();
+  }, [active, bootstrap.status]);
 
   const etiquetasVencidasPendentes = useMemo(() => {
     const now = new Date();
@@ -489,6 +587,57 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
   return (
     <>
+      {bootstrap.status === "running"
+        ? createPortal(
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.18)",
+                zIndex: 90,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e4e8e7",
+                  borderRadius: 14,
+                  padding: "12px 14px",
+                  maxWidth: 520,
+                  width: "100%",
+                  boxShadow: "0 18px 50px rgba(0,0,0,0.16)",
+                }}
+              >
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#01040e", marginBottom: 6 }}>Preparando seus dados</div>
+                <div style={{ fontSize: 13, color: "#292d2d", lineHeight: "18px" }}>
+                  Estamos importando seus arquivos para o Supabase. Isso pode levar alguns minutos.
+                </div>
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
+      {bootstrap.status === "error" && bootstrap.message ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 10, zIndex: 91 }}>
+          <div
+            style={{
+              background: "#fff3f5",
+              border: "1px solid #ffd0d8",
+              borderRadius: 12,
+              padding: "10px 12px",
+              color: "#b1002c",
+              fontSize: 13,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+            }}
+          >
+            Falha ao preparar seus dados: {bootstrap.message}
+          </div>
+        </div>
+      ) : null}
       <div className={dash.mobileTopBar}>
         <div className={dash.mobileDrawerBrand}>
           <img src="/dashboard/ml7hdudz-jry958l.svg" alt="CMV Fácil" className={dash.brandImg} />
