@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 
@@ -21,20 +22,50 @@ function getEnv(name: string) {
   return v || null;
 }
 
-function buildCookieHeader(req: NextRequest) {
-  const raw = (req.headers.get("cookie") ?? "").trim();
-  if (raw) return raw;
-  try {
-    const all = req.cookies.getAll();
-    if (!all.length) return "";
-    return all.map((c) => `${c.name}=${c.value}`).join("; ");
-  } catch {
-    return "";
-  }
+async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
+  const got = await supabase.storage.getBucket(bucket);
+  if (!got.error) return;
+  await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
 }
 
+async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
+  const { error } = await supabase.storage.from(bucket).upload(path, JSON.stringify(payload), { contentType: "application/json", upsert: true });
+  if (error) throw new Error(error.message);
+}
+
+type RebuildStep = {
+  key: string;
+  label: string;
+  kinds: string[];
+  status: "pending" | "running" | "done" | "error";
+  lastError: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastResult: any;
+};
+
+type RebuildState = {
+  v: 1;
+  runId: string;
+  runPrefix: string;
+  statePath: string;
+  startedAt: string;
+  updatedAt: string;
+  phase: "deleting" | "importing" | "done" | "error";
+  storageOwnerUserId: string;
+  prefix: string;
+  includeUnknown: boolean;
+  only: string[] | null;
+  delete: {
+    tables: string[];
+    index: number;
+    status: "pending" | "running" | "done" | "error";
+    lastError: string;
+  };
+  steps: RebuildStep[];
+};
+
 export async function POST(req: NextRequest) {
-  let stage = "init";
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -57,8 +88,8 @@ export async function POST(req: NextRequest) {
     const includeUnknown = typeof body?.includeUnknown === "boolean" ? Boolean(body.includeUnknown) : true;
 
     const supabase = getSupabaseAdmin();
+    await ensureBucket(supabase, bucket);
 
-    stage = "delete";
     const toDeleteByIdLike = [
       "insumos_state",
       "fornecedores_state",
@@ -72,47 +103,53 @@ export async function POST(req: NextRequest) {
       "entradas",
     ] as const;
 
-    const deleted: Record<string, { ok: boolean; error?: string }> = {};
-    for (const table of toDeleteByIdLike) {
-      try {
-        const { error } = await supabase.from(table).delete().like("id", "user:%");
-        if (error) deleted[table] = { ok: false, error: error.message };
-        else deleted[table] = { ok: true };
-      } catch (err) {
-        deleted[table] = { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    }
+    const stepsBase: Array<{ key: string; label: string; kinds: string[] }> = [
+      { key: "users", label: "Users", kinds: ["users"] },
+      { key: "empresas", label: "Empresas", kinds: ["empresas"] },
+      { key: "categorias", label: "Categorias", kinds: ["categorias"] },
+      { key: "insumos", label: "Insumos", kinds: ["custo_medio", "ingredientes", "itens"] },
+      { key: "fornecedores", label: "Fornecedores", kinds: ["fornecedores", "itens_fornecedores", "equivalencias"] },
+      { key: "entradas", label: "Entradas", kinds: ["notas_fiscais", "itens_notas"] },
+      { key: "inventario", label: "Inventário", kinds: ["inventario"] },
+      { key: "desperdicios", label: "Desperdícios", kinds: ["motivos_desperdicios", "desperdicios"] },
+      { key: "pre_preparo", label: "Pré-preparo", kinds: ["pre_preparo", "pre_preparo_etiquetas"] },
+      { key: "fichas_tecnicas", label: "Fichas Técnicas", kinds: ["fichas_tecnicas"] },
+    ];
+    const stepsList = includeUnknown ? [...stepsBase, { key: "unknown", label: "Desconhecidos", kinds: ["unknown"] }] : stepsBase;
+    const steps: RebuildStep[] = stepsList.map((s) => ({
+      ...s,
+      status: "pending",
+      lastError: "",
+      startedAt: null,
+      finishedAt: null,
+      lastResult: null,
+    }));
 
-    stage = "import";
-    const importUrl = new URL("/api/bubble-import/import", req.url);
-    const cookie = buildCookieHeader(req);
-    const importRes = await fetch(importUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json", cookie },
-      body: JSON.stringify({ prefix, only, includeUnknown }),
-      cache: "no-store",
-    });
-    const importText = await importRes.text().catch(() => "");
-    let importJson: any = null;
-    if (importText) {
-      try {
-        importJson = JSON.parse(importText);
-      } catch {
-        importJson = null;
-      }
-    }
-    if (!importRes.ok || !importJson) {
-      const stageHint = importJson && typeof importJson === "object" && importJson.stage ? String(importJson.stage) : "";
-      const errHint = importJson && typeof importJson === "object" && importJson.error ? importJson.error : "";
-      const error = stageHint ? `import_failed:${stageHint}` : errHint ? `import_failed:${String(errHint)}` : "import_failed";
-      return json(
-        { ok: false, error, stage, deleted, importStatus: importRes.status, import: importJson, importText: importJson ? null : importText?.slice(0, 2000) || null },
-        { status: 500 },
-      );
-    }
+    const runId = crypto.randomUUID();
+    const day = new Date().toISOString().slice(0, 10);
+    const runPrefix = `user:${storageOwnerUserId}/${day}/${runId}`;
+    const statePath = `${runPrefix}/rebuild-state.json`;
+    const now = new Date().toISOString();
 
-    return json({ ok: true, deleted, import: importJson, ran: { prefix, bucket } }, { status: 200 });
+    const state: RebuildState = {
+      v: 1,
+      runId,
+      runPrefix,
+      statePath,
+      startedAt: now,
+      updatedAt: now,
+      phase: "deleting",
+      storageOwnerUserId,
+      prefix,
+      includeUnknown,
+      only,
+      delete: { tables: Array.from(toDeleteByIdLike), index: 0, status: "pending", lastError: "" },
+      steps,
+    };
+
+    await uploadJson(supabase, bucket, statePath, state);
+    return json({ ok: true, state }, { status: 200 });
   } catch (err) {
-    return json({ ok: false, error: err instanceof Error ? err.message : String(err), stage }, { status: 500 });
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }

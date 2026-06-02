@@ -349,17 +349,18 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as unknown;
     const only = Array.isArray((body as any)?.only) ? ((body as any).only as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : null;
     const includeUnknown = typeof (body as any)?.includeUnknown === "boolean" ? Boolean((body as any).includeUnknown) : true;
+    const kinds = Array.isArray((body as any)?.kinds) ? ((body as any).kinds as unknown[]).map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean) : null;
     const requestedPrefix = typeof (body as any)?.prefix === "string" ? String((body as any).prefix).trim().replace(/^\/+|\/+$/g, "") : "";
     const targetUserIdRaw = typeof (body as any)?.targetUserId === "string" ? String((body as any).targetUserId).trim() : "";
 
     const enabled = (k: string) => !only || only.includes(k);
-    const enableInsumos = enabled("insumos");
-    const enableFornecedores = enabled("fornecedores");
-    const enableDesperdicios = enabled("desperdicios");
-    const enableEntradas = enabled("entradas");
-    const enablePrePreparo = enabled("pre_preparo");
-    const enableFichas = enabled("fichas_tecnicas");
-    const enableInventario = enabled("inventario");
+    let enableInsumos = enabled("insumos");
+    let enableFornecedores = enabled("fornecedores");
+    let enableDesperdicios = enabled("desperdicios");
+    let enableEntradas = enabled("entradas");
+    let enablePrePreparo = enabled("pre_preparo");
+    let enableFichas = enabled("fichas_tecnicas");
+    let enableInventario = enabled("inventario");
 
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -433,6 +434,24 @@ export async function POST(req: NextRequest) {
     enabledKinds.add("users");
     enabledKinds.add("empresas");
     if (includeUnknown) enabledKinds.add("unknown");
+
+    if (kinds && kinds.length) {
+      enabledKinds.clear();
+      for (const k of kinds) enabledKinds.add(k);
+      enabledKinds.add("users");
+      const onlyUsers = kinds.length === 1 && String(kinds[0] ?? "").toLowerCase() === "users";
+      if (!onlyUsers) enabledKinds.add("empresas");
+      if (includeUnknown && enabledKinds.has("unknown")) enabledKinds.add("unknown");
+      if (!includeUnknown) enabledKinds.delete("unknown");
+
+      enableInsumos = enabledKinds.has("custo_medio") || enabledKinds.has("ingredientes") || enabledKinds.has("itens");
+      enableFornecedores = enabledKinds.has("fornecedores") || enabledKinds.has("itens_fornecedores") || enabledKinds.has("equivalencias");
+      enableDesperdicios = enabledKinds.has("desperdicios") || enabledKinds.has("motivos_desperdicios");
+      enableEntradas = enabledKinds.has("itens_notas") || enabledKinds.has("notas_fiscais");
+      enablePrePreparo = enabledKinds.has("pre_preparo") || enabledKinds.has("pre_preparo_etiquetas") || enabledKinds.has("categorias");
+      enableFichas = enabledKinds.has("fichas_tecnicas");
+      enableInventario = enabledKinds.has("inventario");
+    }
 
     const categoriasById = new Map<string, string>();
     const itemById = new Map<string, { nome: string; unidade: string; categoria: string }>();

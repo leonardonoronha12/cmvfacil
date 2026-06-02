@@ -55,6 +55,8 @@ export default function ImportarBubbleApiClient() {
   const [globalTotalsError, setGlobalTotalsError] = useState("");
   const [userProgress, setUserProgress] = useState<any>(null);
   const [userProgressError, setUserProgressError] = useState("");
+  const [rebuildState, setRebuildState] = useState<any>(null);
+  const rebuildStopRef = useRef(false);
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
@@ -254,6 +256,7 @@ export default function ImportarBubbleApiClient() {
       await refreshGlobalTotals();
       await refreshUserProgress();
       if (dangerAction === "delete") {
+        setRebuildState(null);
         const res = await fetch("/api/bubble-import/reset", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -270,6 +273,8 @@ export default function ImportarBubbleApiClient() {
         await refreshCounts();
         resetServerSync();
       } else {
+        setRebuildState(null);
+        rebuildStopRef.current = false;
         const res = await fetch("/api/bubble-import/rebuild", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -279,17 +284,47 @@ export default function ImportarBubbleApiClient() {
         if (!res.ok || !json?.ok) {
           const errPayload = json && typeof json === "object" ? json : { error: `failed_${res.status}` };
           const errValue = (errPayload as any)?.error ?? `failed_${res.status}`;
-          const stage = String((errPayload as any)?.stage ?? "").trim();
           const msgBase = typeof errValue === "string" ? errValue : JSON.stringify(errValue);
-          const msg = stage ? `${msgBase} (stage: ${stage})` : msgBase;
           setResult(JSON.stringify(errPayload, null, 2));
-          throw new Error(msg);
+          throw new Error(msgBase);
         }
-        await refreshCounts();
-        await refreshGlobalTotals();
-        await refreshUserProgress();
+        const st = json.state;
+        setRebuildState(st);
+        setResult(JSON.stringify(st, null, 2));
+
+        const statePath = String(st?.statePath ?? "").trim();
+        if (!statePath) throw new Error("missing_statePath");
+
+        for (let i = 0; i < 10_000; i++) {
+          if (rebuildStopRef.current) break;
+          await sleep(1200);
+          const tickRes = await fetch("/api/bubble-import/rebuild/tick", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ statePath }),
+            cache: "no-store",
+          });
+          const tickJson = (await tickRes.json().catch(() => null)) as any;
+          if (!tickRes.ok || !tickJson?.ok) {
+            const errPayload = tickJson && typeof tickJson === "object" ? tickJson : { error: `failed_${tickRes.status}` };
+            setResult(JSON.stringify(errPayload, null, 2));
+            throw new Error(String((errPayload as any)?.error ?? `failed_${tickRes.status}`));
+          }
+
+          const next = tickJson.state;
+          setRebuildState(next);
+          setResult(JSON.stringify(next, null, 2));
+
+          await refreshCounts();
+          await refreshGlobalTotals();
+          await refreshUserProgress();
+
+          const phase = String(next?.phase ?? "").trim();
+          if (phase === "done") break;
+          if (phase === "error") throw new Error(String(next?.delete?.lastError || next?.steps?.find((s: any) => s?.status === "error")?.lastError || "failed"));
+        }
+
         resetServerSync();
-        setResult(JSON.stringify(json, null, 2));
       }
       setDangerAction(null);
       setDangerConfirm("");
@@ -628,6 +663,18 @@ export default function ImportarBubbleApiClient() {
                       </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
                     </div>
+                    {rebuildState ? (
+                      <div className={styles.fileMeta}>
+                        Rebuild: {String(rebuildState?.phase ?? "—")} • Delete {Number(rebuildState?.delete?.index ?? 0)}/{Array.isArray(rebuildState?.delete?.tables) ? rebuildState.delete.tables.length : "—"}
+                        {" • "}
+                        Etapas{" "}
+                        {Array.isArray(rebuildState?.steps)
+                          ? `${(rebuildState.steps as any[]).filter((s) => s?.status === "done").length}/${(rebuildState.steps as any[]).length}`
+                          : "—"}
+                        {" • "}
+                        Atualizado {String(rebuildState?.updatedAt ?? "—")}
+                      </div>
+                    ) : null}
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                       <div className={styles.fileMeta}>
                         Global: Auth {globalTotals?.authUsers ?? "—"} • Usuários com insumos {globalTotals?.usersWith?.insumos_state ?? "—"} • fornecedores{" "}
