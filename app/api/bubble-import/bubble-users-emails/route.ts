@@ -156,6 +156,19 @@ function collectBubbleUserEmails(rows: CsvObjectRow[]) {
   return Array.from(emails).sort();
 }
 
+function collectEmailsFromAnyRow(rows: CsvObjectRow[]) {
+  const emails = new Set<string>();
+  for (const raw of rows) {
+    for (const v of Object.values(raw)) {
+      const s = String(v ?? "");
+      if (!s.includes("@")) continue;
+      const email = extractEmail(s);
+      if (email) emails.add(email);
+    }
+  }
+  return Array.from(emails).sort();
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -221,9 +234,9 @@ export async function GET(req: NextRequest) {
       }
 
       if (!parsed.rows.length) continue;
-      if (!looksLikeUsersHeader(parsed.header.map(normalizeKey))) continue;
-
-      const emails = collectBubbleUserEmails(parsed.rows);
+      const isUsersLike = looksLikeUsersHeader(parsed.header.map(normalizeKey));
+      const isUsersName = score(part) > 0;
+      const emails = isUsersLike ? collectBubbleUserEmails(parsed.rows) : isUsersName ? collectEmailsFromAnyRow(parsed.rows) : [];
       if (emails.length) {
         return json(
           {
