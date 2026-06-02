@@ -201,6 +201,34 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
+  async function rebuildFromFiles() {
+    if (isRunning || isResetting) return;
+    setResetError("");
+    const confirm = window.prompt('Digite RESET_AND_REIMPORT para apagar TODOS os dados e reimportar a partir dos arquivos do bucket:', "");
+    if (!confirm) return;
+    if (confirm.trim() !== "RESET_AND_REIMPORT") {
+      setResetError("Confirmação incorreta.");
+      return;
+    }
+    setIsResetting(true);
+    try {
+      const res = await fetch("/api/bubble-import/rebuild", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirm: "RESET_AND_REIMPORT", storageOwnerUserId: "", only: null, includeUnknown: true }),
+      });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      await refreshCounts();
+      resetServerSync();
+      setResult(JSON.stringify(json, null, 2));
+    } catch (err) {
+      setResetError(safeJsonMessage(err));
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
   async function runSync() {
     if (isRunning) return;
     setIsRunning(true);
@@ -511,6 +539,9 @@ export default function ImportarBubbleApiClient() {
                         style={{ borderColor: "#ff2f54", color: "#ff2f54" }}
                       >
                         {isResetting ? "Apagando..." : "Apagar dados do Supabase"}
+                      </button>
+                      <button type="button" className={styles.btn} onClick={rebuildFromFiles} disabled={isRunning || isResetting}>
+                        {isResetting ? "Reimportando..." : "Reset + Reimportar (Arquivos)"}
                       </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
                     </div>
