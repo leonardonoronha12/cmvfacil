@@ -18,6 +18,28 @@ function safeType(input: unknown) {
   return String(input ?? "").trim();
 }
 
+function prioritizeTypes(types: string[]) {
+  const priority = ["User", "empresas"];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    if (!t) return;
+    if (seen.has(t)) return;
+    seen.add(t);
+    out.push(t);
+  };
+  for (const p of priority) {
+    const exact = types.find((t) => t === p);
+    if (exact) push(exact);
+    else {
+      const ci = types.find((t) => t.toLowerCase() === p.toLowerCase());
+      if (ci) push(ci);
+    }
+  }
+  for (const t of types) push(t);
+  return out;
+}
+
 type SyncState = {
   v: 1;
   runId: string;
@@ -90,7 +112,7 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => null)) as any;
     const typesRaw = Array.isArray(body?.types) ? (body.types as unknown[]) : [];
-    const types = typesRaw.map((t) => safeType(t)).filter(Boolean);
+    const types = prioritizeTypes(typesRaw.map((t) => safeType(t)).filter(Boolean));
     if (!types.length) return json({ ok: false, error: "missing_types" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
@@ -118,4 +140,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

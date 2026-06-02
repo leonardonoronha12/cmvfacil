@@ -154,6 +154,7 @@ function groupParts(files: { path: string; name: string }[]) {
 function classifyFile(name: string) {
   const n = name.toLowerCase();
   if (/(^|[^a-z])user([^a-z]|$)/.test(n) || n.includes("usuarios") || n.includes("usuario")) return "users";
+  if (n.includes("empresas") || n.includes("empresa")) return "empresas";
   if (n.includes("categoria")) return "categorias";
   if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
@@ -343,6 +344,7 @@ async function upsertInBatches<T extends Record<string, unknown>>(supabase: Retu
 }
 
 export async function POST(req: NextRequest) {
+  let stage = "init";
   try {
     const body = (await req.json().catch(() => null)) as unknown;
     const only = Array.isArray((body as any)?.only) ? ((body as any).only as unknown[]).map((x) => String(x ?? "").trim()).filter(Boolean) : null;
@@ -359,8 +361,6 @@ export async function POST(req: NextRequest) {
     const enableFichas = enabled("fichas_tecnicas");
     const enableInventario = enabled("inventario");
 
-    let stage = "init";
-
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
@@ -374,6 +374,7 @@ export async function POST(req: NextRequest) {
     }
 
     const bubbleUserIdToEmail = new Map<string, string>();
+    const bubbleCompanyIdToUserId = new Map<string, string>();
 
     stage = "load_auth_users";
     const emailToId = !overrideTargetUserId ? await loadAuthEmailToIdMap(supabase) : new Map<string, string>();
@@ -386,7 +387,13 @@ export async function POST(req: NextRequest) {
       const bubbleIdCandidate = !email && ref ? extractBubbleIdFromText(ref) || String(ref).trim() : null;
       const byBubbleId = bubbleIdCandidate ? bubbleUserIdToEmail.get(bubbleIdCandidate) ?? null : null;
       const byEmail = (email || byBubbleId) ? emailToId.get(String(email || byBubbleId)) ?? null : null;
-      return byEmail || userId;
+      if (byEmail) return byEmail;
+      const companyRef =
+        pickFirst(row, ["empresa_id", "empresa", "empresaid", "company_id", "company", "restaurante_id", "restaurante"]) ||
+        pickKeyLike(row, ["empresa", "company", "restaurante"], { excludeParts: ["nome", "name", "fantasy", "legal", "cnpj"] });
+      const companyIdCandidate = companyRef ? extractBubbleIdFromText(String(companyRef)) || String(companyRef).trim() : null;
+      const byCompany = companyIdCandidate ? bubbleCompanyIdToUserId.get(companyIdCandidate) ?? null : null;
+      return byCompany || userId;
     };
 
     stage = "list_files";
@@ -424,6 +431,7 @@ export async function POST(req: NextRequest) {
     if (enableFichas) enabledKinds.add("fichas_tecnicas");
     if (enableInventario) enabledKinds.add("inventario");
     enabledKinds.add("users");
+    enabledKinds.add("empresas");
     if (includeUnknown) enabledKinds.add("unknown");
 
     const categoriasById = new Map<string, string>();
@@ -470,6 +478,32 @@ export async function POST(req: NextRequest) {
       const emailRaw = pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]);
       const email = emailRaw ? extractEmailFromText(emailRaw) : null;
       if (email) bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
+    }
+
+    function handleEmpresaRow(row: CsvObjectRow) {
+      const companyId = pickBubbleId(row) || pickFirst(row, ["empresa_id", "id", "_id", "unique_id", "bubble_id"]);
+      if (!companyId) return;
+      const ownerRef =
+        pickFirst(row, ["user_id", "usuario_id", "id_usuario", "owner", "owner_id", "created_by", "createdby", "criador", "criador_id", "responsavel_id"]) ||
+        pickKeyLike(row, ["user", "usuario", "owner", "created", "criador", "responsavel"], { excludeParts: ["email", "nome", "name"] });
+      if (!ownerRef) return;
+      const ownerText = String(ownerRef).trim();
+      const ownerUuid = extractUuidFromText(ownerText);
+      if (ownerUuid) {
+        bubbleCompanyIdToUserId.set(String(companyId).trim(), ownerUuid);
+        return;
+      }
+      const ownerEmail = extractEmailFromText(ownerText);
+      if (ownerEmail) {
+        const mapped = emailToId.get(ownerEmail) ?? null;
+        if (mapped) bubbleCompanyIdToUserId.set(String(companyId).trim(), mapped);
+        return;
+      }
+      const ownerBubbleId = extractBubbleIdFromText(ownerText) || ownerText;
+      const emailFromUser = bubbleUserIdToEmail.get(String(ownerBubbleId).trim()) ?? null;
+      if (!emailFromUser) return;
+      const mapped = emailToId.get(emailFromUser) ?? null;
+      if (mapped) bubbleCompanyIdToUserId.set(String(companyId).trim(), mapped);
     }
 
     function catNameLooksLikePrePreparo(name: string) {
@@ -1006,6 +1040,7 @@ export async function POST(req: NextRequest) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
     if (has("email") && (has("user") || has("usuario") || has("created_by") || has("owner"))) return "users";
+    if ((has("empresa") || has("company") || has("restaurante")) && (has("cnpj") || has("fantasy") || has("razao") || has("legal") || has("ramo"))) return "empresas";
     if (has("valor_nota") || (has("fornecedor") && (has("numero") || has("nf")) && has("data"))) return "notas_fiscais";
     if ((has("nota") || has("entrada")) && has("quantidade") && (has("subtotal") || has("total") || has("valor"))) return "itens_notas";
     if ((has("fornecedor") || has("empresa")) && (has("whatsapp") || has("telefone") || has("endereco") || has("vendedor"))) return "fornecedores";
@@ -1022,6 +1057,9 @@ export async function POST(req: NextRequest) {
 
     stage = "process_users";
     await processCsvGroups("users", (row) => handleUserRow(row));
+
+    stage = "process_empresas";
+    await processCsvGroups("empresas", (row) => handleEmpresaRow(row));
 
     stage = "process_unknown";
     if (includeUnknown && enabledKinds.has("unknown")) {
@@ -1061,6 +1099,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "process_files";
+    await processCsvGroups("empresas", (row) => handleEmpresaRow(row));
     await processCsvGroups("categorias", (row) => handleCategoria(row));
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
     await processCsvGroups("ingredientes", (row) => handleInsumo(row));
@@ -1229,11 +1268,12 @@ export async function POST(req: NextRequest) {
           pre_preparo_state: enablePrePreparo ? prePreparoRowsByUser.size : null,
           fichas_tecnicas_state: enableFichas ? fichasRowsByUser.size : null,
           userMap_bubbleUsers: bubbleUserIdToEmail.size,
+          userMap_empresas: bubbleCompanyIdToUserId.size,
         },
       },
       { status: 200 },
     );
   } catch (err) {
-    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err), stage }, { status: 500 });
   }
 }

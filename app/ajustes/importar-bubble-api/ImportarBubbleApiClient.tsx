@@ -36,7 +36,7 @@ export default function ImportarBubbleApiClient() {
   const [token, setToken] = useState("");
   const [importAsUserId, setImportAsUserId] = useState("");
   const [typesText, setTypesText] = useState(
-    "categorias\ncusto_medio_item\ndesperdicio\nempresas\netiquetas\nfaturamentos\nfornecedores\nIngredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nItens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real\nUser",
+    "User\nempresas\ncategorias\ncusto_medio_item\ndesperdicio\netiquetas\nfaturamentos\nfornecedores\nIngredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nItens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real",
   );
   const [isRunning, setIsRunning] = useState(false);
   const [stage, setStage] = useState<"idle" | "pulling" | "importing" | "done" | "error">("idle");
@@ -260,7 +260,13 @@ export default function ImportarBubbleApiClient() {
           body: JSON.stringify({ confirm: "DELETE_ALL" }),
         });
         const json = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+        if (!res.ok || !json?.ok) {
+          const errPayload = json && typeof json === "object" ? json : { error: `failed_${res.status}` };
+          const errValue = (errPayload as any)?.error ?? `failed_${res.status}`;
+          const msg = typeof errValue === "string" ? errValue : JSON.stringify(errValue);
+          setResult(JSON.stringify(errPayload, null, 2));
+          throw new Error(msg);
+        }
         await refreshCounts();
         resetServerSync();
       } else {
@@ -270,7 +276,15 @@ export default function ImportarBubbleApiClient() {
           body: JSON.stringify({ confirm: "RESET_AND_REIMPORT", storageOwnerUserId: "", only: null, includeUnknown: true }),
         });
         const json = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+        if (!res.ok || !json?.ok) {
+          const errPayload = json && typeof json === "object" ? json : { error: `failed_${res.status}` };
+          const errValue = (errPayload as any)?.error ?? `failed_${res.status}`;
+          const stage = String((errPayload as any)?.stage ?? "").trim();
+          const msgBase = typeof errValue === "string" ? errValue : JSON.stringify(errValue);
+          const msg = stage ? `${msgBase} (stage: ${stage})` : msgBase;
+          setResult(JSON.stringify(errPayload, null, 2));
+          throw new Error(msg);
+        }
         await refreshCounts();
         await refreshGlobalTotals();
         await refreshUserProgress();
