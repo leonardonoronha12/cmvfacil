@@ -149,6 +149,7 @@ function groupParts(files: { path: string; name: string }[]) {
 
 function classifyFile(name: string) {
   const n = name.toLowerCase();
+  if (/(^|[^a-z])user([^a-z]|$)/.test(n) || n.includes("usuarios") || n.includes("usuario")) return "users";
   if (n.includes("categoria")) return "categorias";
   if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
@@ -190,6 +191,13 @@ function extractEmailFromText(input: string) {
   return m ? String(m[0]).trim().toLowerCase() : null;
 }
 
+function extractBubbleIdFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/"(?:unique_id|_id|id|bubble_id|user_id)"\s*:\s*"([^"]+)"/i);
+  return m ? String(m[1] ?? "").trim() : null;
+}
+
 function pickUserRefFromRow(row: CsvObjectRow) {
   const direct =
     pickFirst(row, [
@@ -220,7 +228,6 @@ function pickUserRefFromRow(row: CsvObjectRow) {
       "auth_uid",
       "user_email",
       "usuario_email",
-      "email",
       "user",
       "usuario",
     ]) ||
@@ -362,6 +369,8 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
+    const bubbleUserIdToEmail = new Map<string, string>();
+
     stage = "load_auth_users";
     const emailToId = !overrideTargetUserId ? await loadAuthEmailToIdMap(supabase) : new Map<string, string>();
     const resolveTargetUserId = (row: CsvObjectRow) => {
@@ -370,7 +379,9 @@ export async function POST(req: NextRequest) {
       const uuid = ref ? extractUuidFromText(ref) : null;
       if (uuid) return uuid;
       const email = ref ? extractEmailFromText(ref) : null;
-      const byEmail = email ? emailToId.get(email) ?? null : null;
+      const bubbleIdCandidate = !email && ref ? extractBubbleIdFromText(ref) || String(ref).trim() : null;
+      const byBubbleId = bubbleIdCandidate ? bubbleUserIdToEmail.get(bubbleIdCandidate) ?? null : null;
+      const byEmail = (email || byBubbleId) ? emailToId.get(String(email || byBubbleId)) ?? null : null;
       return byEmail || userId;
     };
 
@@ -408,6 +419,7 @@ export async function POST(req: NextRequest) {
     if (enablePrePreparo) ["pre_preparo", "pre_preparo_etiquetas", "categorias", "itens"].forEach((k) => enabledKinds.add(k));
     if (enableFichas) enabledKinds.add("fichas_tecnicas");
     if (enableInventario) enabledKinds.add("inventario");
+    enabledKinds.add("users");
     if (includeUnknown) enabledKinds.add("unknown");
 
     const categoriasById = new Map<string, string>();
@@ -447,6 +459,14 @@ export async function POST(req: NextRequest) {
       fornecedoresByUser.set(uid, created);
       return created;
     };
+
+    function handleUserRow(row: CsvObjectRow) {
+      const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
+      if (!bubbleId) return;
+      const emailRaw = pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]);
+      const email = emailRaw ? extractEmailFromText(emailRaw) : null;
+      if (email) bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
+    }
 
     function catNameLooksLikePrePreparo(name: string) {
       const s = String(name ?? "")
@@ -981,6 +1001,7 @@ export async function POST(req: NextRequest) {
     function detectUnknownKind(row: CsvObjectRow) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
+    if (has("email") && (has("user") || has("usuario") || has("created_by") || has("owner"))) return "users";
     if (has("valor_nota") || (has("fornecedor") && (has("numero") || has("nf")) && has("data"))) return "notas_fiscais";
     if ((has("nota") || has("entrada")) && has("quantidade") && (has("subtotal") || has("total") || has("valor"))) return "itens_notas";
     if ((has("fornecedor") || has("empresa")) && (has("whatsapp") || has("telefone") || has("endereco") || has("vendedor"))) return "fornecedores";
@@ -994,6 +1015,9 @@ export async function POST(req: NextRequest) {
     if (has("custo_medio") || (has("custo") && (has("medida") || has("unidade")))) return "itens";
     return "unknown";
   }
+
+    stage = "process_users";
+    await processCsvGroups("users", (row) => handleUserRow(row));
 
     stage = "process_unknown";
     if (includeUnknown && enabledKinds.has("unknown")) {
@@ -1010,6 +1034,7 @@ export async function POST(req: NextRequest) {
             else if (kind === "itens_fornecedores" && enableFornecedores) handleFornecedorProduto(r);
             else if (kind === "equivalencias" && enableFornecedores) handleEquivalencia(r);
             else if (kind === "desperdicios" && enableDesperdicios) handleDesperdicio(r);
+            else if (kind === "users") handleUserRow(r);
             else if (kind === "pre_preparo" && enablePrePreparo) handlePrePreparo(r);
             else if (kind === "pre_preparo_etiquetas" && enablePrePreparo) handlePrePreparoEtiqueta(r);
             else if (kind === "fichas_tecnicas" && enableFichas) handleFicha(r);
@@ -1193,6 +1218,13 @@ export async function POST(req: NextRequest) {
           inventario: enableInventario ? inventarioInserted : null,
           desperdicios: enableDesperdicios ? desperdiciosInserted : null,
           entradas: enableEntradas ? entradasInserted : null,
+        },
+        usersTouched: {
+          insumos_state: enableInsumos ? insumosByUser.size : null,
+          fornecedores_state: enableFornecedores ? fornecedoresByUser.size : null,
+          pre_preparo_state: enablePrePreparo ? prePreparoRowsByUser.size : null,
+          fichas_tecnicas_state: enableFichas ? fichasRowsByUser.size : null,
+          userMap_bubbleUsers: bubbleUserIdToEmail.size,
         },
       },
       { status: 200 },

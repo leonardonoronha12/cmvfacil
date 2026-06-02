@@ -301,6 +301,13 @@ function extractEmailFromText(input: string) {
   return m ? String(m[0]).trim().toLowerCase() : null;
 }
 
+function extractBubbleIdFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/"(?:unique_id|_id|id|bubble_id|user_id)"\s*:\s*"([^"]+)"/i);
+  return m ? String(m[1] ?? "").trim() : null;
+}
+
 function pickUserRefFromRow(row: Record<string, string>) {
   const direct =
     pickFirst(row, [
@@ -333,7 +340,6 @@ function pickUserRefFromRow(row: Record<string, string>) {
       "usuario",
       "user_email",
       "usuario_email",
-      "email",
     ]) ||
     pickFirst(row, ["created by", "Created By", "Created by", "Criado por", "criado por"]) ||
     pickFirst(row, ["_user", "user (id)"]);
@@ -398,10 +404,40 @@ export async function POST(req: NextRequest) {
       if (overrideImportUserId) return;
       const existing = state.userMap && typeof state.userMap === "object" ? state.userMap : null;
       const emailToIdExisting = existing && existing.emailToId && typeof existing.emailToId === "object" ? existing.emailToId : null;
-      if (existing?.v === 1 && emailToIdExisting && Object.keys(emailToIdExisting).length) return;
+      const bubbleIdToEmailExisting = existing && existing.bubbleIdToEmail && typeof existing.bubbleIdToEmail === "object" ? existing.bubbleIdToEmail : null;
+      const hasEmailToId = Boolean(existing?.v === 1 && emailToIdExisting && Object.keys(emailToIdExisting).length);
+      const hasBubbleIdToEmail = Boolean(existing?.v === 1 && bubbleIdToEmailExisting && Object.keys(bubbleIdToEmailExisting).length);
+      if (hasEmailToId && hasBubbleIdToEmail) return;
       try {
-        const emailToId = await loadAuthEmailToIdMap(supabase);
-        state.userMap = { v: 1, emailToId, updatedAt: nowIso() };
+        const next: any = existing && typeof existing === "object" ? { ...existing } : {};
+        if (!hasEmailToId) next.emailToId = await loadAuthEmailToIdMap(supabase);
+        if (!hasBubbleIdToEmail && typeof state.runPrefix === "string" && state.runPrefix) {
+          const all = await listAllPaths(supabase, bucket, state.runPrefix);
+          const userFiles = all
+            .filter((p) => {
+              const n = String(p.name ?? "").toLowerCase();
+              return n.includes("-bubble-api-user_") || n.includes("-bubble-api-users_") || n.includes("-bubble-api-usuario_") || n.includes("-bubble-api-usuarios_");
+            })
+            .slice(-500);
+          const bubbleIdToEmail: Record<string, string> = {};
+          for (const f of userFiles) {
+            const payload = await downloadJson(supabase, bucket, f.path);
+            const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+            for (const r of rows) {
+              const row = normalizeRowObject(r);
+              if (!row) continue;
+              const bubbleId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "user_id", "usuario_id", "id_usuario"]);
+              if (!bubbleId) continue;
+              const emailRaw = pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]);
+              const email = emailRaw ? extractEmailFromText(emailRaw) : null;
+              if (email) bubbleIdToEmail[String(bubbleId).trim()] = email;
+            }
+          }
+          next.bubbleIdToEmail = bubbleIdToEmail;
+        }
+        next.v = 1;
+        next.updatedAt = nowIso();
+        state.userMap = next;
         await persist();
       } catch {}
     };
@@ -413,7 +449,11 @@ export async function POST(req: NextRequest) {
       if (uuid) return uuid;
       const email = ref ? extractEmailFromText(ref) : null;
       const emailToId = state.userMap && typeof state.userMap === "object" && state.userMap.emailToId && typeof state.userMap.emailToId === "object" ? state.userMap.emailToId : {};
-      const mapped = email ? String((emailToId as any)[email] ?? "").trim() : "";
+      const bubbleIdToEmail =
+        state.userMap && typeof state.userMap === "object" && state.userMap.bubbleIdToEmail && typeof state.userMap.bubbleIdToEmail === "object" ? state.userMap.bubbleIdToEmail : {};
+      const bubbleIdCandidate = !email && ref ? extractBubbleIdFromText(ref) || String(ref).trim() : null;
+      const fromBubbleId = bubbleIdCandidate ? extractEmailFromText(String((bubbleIdToEmail as any)[bubbleIdCandidate] ?? "")) : null;
+      const mapped = (email || fromBubbleId) ? String((emailToId as any)[String(email || fromBubbleId)] ?? "").trim() : "";
       return mapped && isUuid(mapped) ? mapped : userId;
     };
 
