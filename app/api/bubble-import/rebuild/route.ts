@@ -21,7 +21,20 @@ function getEnv(name: string) {
   return v || null;
 }
 
+function buildCookieHeader(req: NextRequest) {
+  const raw = (req.headers.get("cookie") ?? "").trim();
+  if (raw) return raw;
+  try {
+    const all = req.cookies.getAll();
+    if (!all.length) return "";
+    return all.map((c) => `${c.name}=${c.value}`).join("; ");
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(req: NextRequest) {
+  let stage = "init";
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -45,6 +58,7 @@ export async function POST(req: NextRequest) {
 
     const supabase = getSupabaseAdmin();
 
+    stage = "delete";
     const toDeleteByIdLike = [
       "insumos_state",
       "fornecedores_state",
@@ -69,18 +83,36 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    stage = "import";
     const importUrl = new URL("/api/bubble-import/import", req.url);
+    const cookie = buildCookieHeader(req);
     const importRes = await fetch(importUrl, {
       method: "POST",
-      headers: { "content-type": "application/json", cookie: req.headers.get("cookie") ?? "" },
+      headers: { "content-type": "application/json", cookie },
       body: JSON.stringify({ prefix, only, includeUnknown }),
       cache: "no-store",
     });
-    const importJson = await importRes.json().catch(() => null);
-    if (!importRes.ok || !importJson) return json({ ok: false, error: "import_failed", deleted, import: importJson }, { status: 500 });
+    const importText = await importRes.text().catch(() => "");
+    let importJson: any = null;
+    if (importText) {
+      try {
+        importJson = JSON.parse(importText);
+      } catch {
+        importJson = null;
+      }
+    }
+    if (!importRes.ok || !importJson) {
+      const stageHint = importJson && typeof importJson === "object" && importJson.stage ? String(importJson.stage) : "";
+      const errHint = importJson && typeof importJson === "object" && importJson.error ? importJson.error : "";
+      const error = stageHint ? `import_failed:${stageHint}` : errHint ? `import_failed:${String(errHint)}` : "import_failed";
+      return json(
+        { ok: false, error, stage, deleted, importStatus: importRes.status, import: importJson, importText: importJson ? null : importText?.slice(0, 2000) || null },
+        { status: 500 },
+      );
+    }
 
     return json({ ok: true, deleted, import: importJson, ran: { prefix, bucket } }, { status: 200 });
   } catch (err) {
-    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err), stage }, { status: 500 });
   }
 }
