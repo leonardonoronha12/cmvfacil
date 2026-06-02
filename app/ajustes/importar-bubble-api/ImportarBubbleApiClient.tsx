@@ -49,6 +49,7 @@ export default function ImportarBubbleApiClient() {
   const [resetError, setResetError] = useState<string>("");
   const [isResetting, setIsResetting] = useState(false);
   const [dangerAction, setDangerAction] = useState<null | "delete" | "rebuild">(null);
+  const [dangerInFlight, setDangerInFlight] = useState<null | "delete" | "rebuild">(null);
   const [dangerConfirm, setDangerConfirm] = useState("");
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
@@ -203,6 +204,7 @@ export default function ImportarBubbleApiClient() {
       return;
     }
     setIsResetting(true);
+    setDangerInFlight(dangerAction);
     try {
       if (dangerAction === "delete") {
         const res = await fetch("/api/bubble-import/reset", {
@@ -232,6 +234,7 @@ export default function ImportarBubbleApiClient() {
       setResetError(safeJsonMessage(err));
     } finally {
       setIsResetting(false);
+      setDangerInFlight(null);
     }
   }
 
@@ -546,13 +549,18 @@ export default function ImportarBubbleApiClient() {
                         type="button"
                         className={styles.btn}
                         onClick={resetSupabaseData}
-                        disabled={isRunning || isResetting}
+                        disabled={isRunning || isResetting || dangerAction === "rebuild"}
                         style={{ borderColor: "#ff2f54", color: "#ff2f54" }}
                       >
-                        {isResetting ? "Apagando..." : "Apagar dados do Supabase"}
+                        {dangerInFlight === "delete" ? "Apagando..." : "Apagar dados do Supabase"}
                       </button>
-                      <button type="button" className={styles.btn} onClick={rebuildFromFiles} disabled={isRunning || isResetting}>
-                        {isResetting ? "Reimportando..." : "Reset + Reimportar (Arquivos)"}
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={rebuildFromFiles}
+                        disabled={isRunning || isResetting || dangerAction === "delete"}
+                      >
+                        {dangerInFlight === "rebuild" ? "Reimportando..." : "Reset + Reimportar (Arquivos)"}
                       </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
                     </div>
