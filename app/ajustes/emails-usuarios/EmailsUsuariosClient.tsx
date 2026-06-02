@@ -15,6 +15,9 @@ type ApiUser = {
 
 type Mode = "bubble" | "supabase";
 
+type BubbleCompany = { id: string; name: string };
+type BubbleRow = { email: string; authUserId: string | null; companies: BubbleCompany[]; companiesCount: number };
+
 function safeMsg(err: unknown) {
   if (err instanceof Error) return err.message;
   return String(err ?? "");
@@ -31,11 +34,12 @@ export default function EmailsUsuariosClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [rows, setRows] = useState<ApiUser[]>([]);
-  const [bubbleEmails, setBubbleEmails] = useState<string[]>([]);
+  const [bubbleRows, setBubbleRows] = useState<BubbleRow[]>([]);
   const [bubbleSourcePath, setBubbleSourcePath] = useState<string>("");
   const [bubbleDebug, setBubbleDebug] = useState<any>(null);
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState(false);
+  const [impersonating, setImpersonating] = useState<string>("");
 
   async function loadSupabase() {
     setIsLoading(true);
@@ -59,14 +63,16 @@ export default function EmailsUsuariosClient() {
     setError("");
     setCopied(false);
     try {
-      const res = await fetch(`/api/bubble-import/bubble-users-emails?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const res = await fetch(`/api/admin/bubble-users-table?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const json = (await res.json().catch(() => null)) as any;
       if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `failed_${res.status}`));
-      setBubbleEmails(Array.isArray(json?.emails) ? (json.emails as string[]) : []);
-      setBubbleSourcePath(String(json?.sourcePath ?? ""));
+      setBubbleRows(Array.isArray(json?.rows) ? (json.rows as BubbleRow[]) : []);
+      const usersPath = String(json?.files?.users?.path ?? "");
+      const empresasPath = String(json?.files?.empresas?.path ?? "");
+      setBubbleSourcePath(usersPath || empresasPath);
       setBubbleDebug(json?.debug ?? null);
     } catch (err) {
-      setBubbleEmails([]);
+      setBubbleRows([]);
       setBubbleSourcePath("");
       setBubbleDebug(null);
       setError(safeMsg(err));
@@ -83,12 +89,17 @@ export default function EmailsUsuariosClient() {
 
   const filteredBubble = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    if (!q) return bubbleEmails;
-    return bubbleEmails.filter((e) => String(e ?? "").toLowerCase().includes(q));
-  }, [bubbleEmails, filter]);
+    if (!q) return bubbleRows;
+    return bubbleRows.filter((r) => {
+      const email = String(r.email ?? "").toLowerCase();
+      if (email.includes(q)) return true;
+      const companies = Array.isArray(r.companies) ? r.companies : [];
+      return companies.some((c) => String(c?.name ?? "").toLowerCase().includes(q));
+    });
+  }, [bubbleRows, filter]);
 
   const emailsText = useMemo(() => {
-    if (mode === "bubble") return filteredBubble.join("\n");
+    if (mode === "bubble") return filteredBubble.map((r) => String(r.email ?? "").trim().toLowerCase()).filter(Boolean).join("\n");
     const emails = filteredSupabase
       .map((r) => (r.email ? String(r.email).trim().toLowerCase() : ""))
       .filter((e) => Boolean(e && e.includes("@")));
@@ -107,6 +118,25 @@ export default function EmailsUsuariosClient() {
     } catch (err) {
       setCopied(false);
       setError(safeMsg(err) || "copy_failed");
+    }
+  }
+
+  async function loginAs(email: string) {
+    const e = String(email ?? "").trim().toLowerCase();
+    if (!e || !e.includes("@")) return;
+    setImpersonating(e);
+    setError("");
+    try {
+      const res = await fetch(`/api/admin/impersonate-link?email=${encodeURIComponent(e)}&ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(String(json?.error ?? `failed_${res.status}`));
+      const link = String(json?.actionLink ?? "");
+      if (!link) throw new Error("missing_action_link");
+      window.location.href = link;
+    } catch (err) {
+      setError(safeMsg(err));
+    } finally {
+      setImpersonating("");
     }
   }
 
@@ -186,7 +216,7 @@ export default function EmailsUsuariosClient() {
                       {copied ? "Copiado" : "Copiar emails"}
                     </button>
                   </div>
-                  <div className={styles.helpText}>{mode === "bubble" ? `${filteredBubble.length}/${bubbleEmails.length}` : `${filteredSupabase.length}/${rows.length}`}</div>
+                  <div className={styles.helpText}>{mode === "bubble" ? `${filteredBubble.length}/${bubbleRows.length}` : `${filteredSupabase.length}/${rows.length}`}</div>
                 </div>
 
                 {error ? <div className={styles.dangerHelp}>{error}</div> : null}
@@ -194,22 +224,56 @@ export default function EmailsUsuariosClient() {
                 {mode === "bubble" ? (
                   <div style={{ marginTop: 14 }}>
                     <div className={styles.helpText} style={{ marginBottom: 8 }}>
-                      {bubbleSourcePath ? `Arquivo detectado: ${bubbleSourcePath}` : "Nenhum arquivo de Users do Bubble encontrado ainda."}
+                      {bubbleSourcePath ? `Arquivos detectados dentro do seu upload.` : "Nenhum arquivo do Bubble encontrado ainda."}
                     </div>
                     {!bubbleSourcePath && bubbleDebug ? (
                       <div className={styles.helpText} style={{ marginBottom: 8 }}>
-                        Prefixo: {String(bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Candidatos:{" "}
-                        {String(bubbleDebug?.candidatesCount ?? "—")} • Testados: {String(bubbleDebug?.candidatesUsed ?? "—")}
+                        Prefixo: {String(bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Candidates Users:{" "}
+                        {String(bubbleDebug?.usersCandidates ?? "—")} • Candidates Empresas: {String(bubbleDebug?.empresasCandidates ?? "—")}
                       </div>
                     ) : null}
-                    <textarea className={styles.input} value={emailsText} readOnly style={{ height: "auto", minHeight: 260, padding: "10px 12px", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, \"Liberation Mono\", \"Courier New\", monospace" }} />
-                    {!bubbleSourcePath && Array.isArray(bubbleDebug?.sampleFiles) && bubbleDebug.sampleFiles.length ? (
-                      <div className={styles.helpText} style={{ marginTop: 8 }}>
-                        Exemplo de arquivos encontrados:
-                        {"\n"}
-                        {bubbleDebug.sampleFiles.slice(0, 10).join("\n")}
-                      </div>
-                    ) : null}
+                    <div style={{ overflowX: "auto", marginTop: 14 }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ textAlign: "left", borderBottom: "1px solid #e4e8e7" }}>
+                            <th style={{ padding: "10px 8px" }}>Email</th>
+                            <th style={{ padding: "10px 8px" }}>Empresas</th>
+                            <th style={{ padding: "10px 8px" }}>Auth</th>
+                            <th style={{ padding: "10px 8px" }}>Login</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredBubble.map((r) => (
+                            <tr key={r.email} style={{ borderBottom: "1px solid #f0f2f1" }}>
+                              <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.email}</td>
+                              <td style={{ padding: "10px 8px", minWidth: 240 }}>
+                                {Array.isArray(r.companies) && r.companies.length
+                                  ? r.companies.map((c) => String(c?.name ?? "—")).join(" • ")
+                                  : "—"}
+                              </td>
+                              <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>{r.authUserId ? "OK" : "—"}</td>
+                              <td style={{ padding: "10px 8px", whiteSpace: "nowrap" }}>
+                                <button
+                                  type="button"
+                                  className={styles.btnPrimary}
+                                  disabled={!r.authUserId || isLoading || Boolean(impersonating)}
+                                  onClick={() => loginAs(r.email)}
+                                >
+                                  {impersonating === r.email ? "Entrando..." : "Login"}
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                          {!filteredBubble.length ? (
+                            <tr>
+                              <td colSpan={4} style={{ padding: "12px 8px", color: "#4d4f56" }}>
+                                Nenhum usuário encontrado.
+                              </td>
+                            </tr>
+                          ) : null}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 ) : null}
 
