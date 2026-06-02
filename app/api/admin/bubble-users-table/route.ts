@@ -348,27 +348,99 @@ export async function GET(req: NextRequest) {
     }
 
     const emailToCompanies = new Map<string, Array<{ id: string; name: string }>>();
-    if (empresasFile) {
-      const rawRows = await loadRowsForPath(supabase, bucket, empresasFile.path, empresasFile.name);
+    const bubbleUserIds = new Set(Array.from(bubbleUserIdToEmail.keys()).map((x) => String(x ?? "").trim()));
+
+    const resolveEmailFromValue = (value: string) => {
+      const raw = String(value ?? "").trim();
+      if (!raw) return null;
+      const em = extractEmail(raw);
+      if (em) return em;
+      if (isUuid(raw)) return authIdToEmail.get(raw.toLowerCase()) ?? null;
+      if (bubbleUserIdToEmail.has(raw)) return bubbleUserIdToEmail.get(raw) ?? null;
+      const bubbleIdInJson = raw.match(/"(?:unique_id|_id|id|bubble_id|user_id)"\s*:\s*"([^"]+)"/i);
+      const extracted = bubbleIdInJson ? String(bubbleIdInJson[1] ?? "").trim() : "";
+      if (extracted && bubbleUserIds.has(extracted)) return bubbleUserIdToEmail.get(extracted) ?? null;
+      const loose = raw.match(/\b\d{9,}x\d+\b/);
+      if (loose) {
+        const v = String(loose[0] ?? "").trim();
+        if (v && bubbleUserIds.has(v)) return bubbleUserIdToEmail.get(v) ?? null;
+      }
+      return null;
+    };
+
+    const resolveOwnerEmailFromCompanyRow = (row: CsvObjectRow) => {
+      const ownerRef =
+        pickFirst(row, [
+          "user_id",
+          "usuario_id",
+          "id_usuario",
+          "owner",
+          "owner_id",
+          "created_by",
+          "createdby",
+          "created_by_user",
+          "created_by_id",
+          "criador",
+          "criador_id",
+          "responsavel",
+          "responsavel_id",
+          "account",
+          "account_id",
+          "user",
+          "usuario",
+        ]) || pickKeyLike(row, ["user", "usuario", "owner", "created", "criador", "responsavel", "account"], ["nome", "name", "empresa", "company", "restaurante"]);
+
+      const direct = resolveEmailFromValue(ownerRef);
+      if (direct) return direct;
+
+      for (const v of Object.values(row)) {
+        const em = resolveEmailFromValue(String(v ?? ""));
+        if (em) return em;
+      }
+      return null;
+    };
+
+    const parseEmpresasFile = async (file: StoredPath) => {
+      const rawRows = await loadRowsForPath(supabase, bucket, file.path, file.name);
+      let linked = 0;
+      let scanned = 0;
       for (const rr of rawRows) {
+        scanned++;
         const row = normalizeRowKeys(rr);
-        const companyId = pickBubbleId(row) || pickFirst(row, ["empresa_id", "id", "_id", "unique_id", "bubble_id"]);
-        if (!companyId) continue;
+        const companyId = pickBubbleId(row) || pickFirst(row, ["empresa_id", "company_id", "restaurante_id", "id", "_id", "unique_id", "bubble_id"]);
         const name = guessCompanyName(row);
-        const ownerRef =
-          pickFirst(row, ["user_id", "usuario_id", "id_usuario", "owner", "owner_id", "created_by", "createdby", "criador", "criador_id", "responsavel_id"]) ||
-          pickKeyLike(row, ["user", "usuario", "owner", "created", "criador", "responsavel"], ["email", "nome", "name"]);
-        if (!ownerRef) continue;
-        const ownerText = String(ownerRef).trim();
-        const ownerEmail = extractEmail(ownerText);
-        const ownerUuidEmail = !ownerEmail && isUuid(ownerText) ? authIdToEmail.get(ownerText.toLowerCase()) ?? null : null;
-        const ownerBubbleEmail = !ownerEmail && !ownerUuidEmail ? bubbleUserIdToEmail.get(ownerText) ?? null : null;
-        const email = ownerEmail || ownerUuidEmail || ownerBubbleEmail;
+        const email = resolveOwnerEmailFromCompanyRow(row);
         if (!email) continue;
         bubbleEmails.add(email);
         const list = emailToCompanies.get(email) ?? [];
-        list.push({ id: String(companyId).trim(), name });
+        list.push({ id: String(companyId || `${file.path}:${scanned}`).trim(), name });
         emailToCompanies.set(email, list);
+        linked++;
+      }
+      return { linked, scanned };
+    };
+
+    let empresasStats: { linked: number; scanned: number } | null = null;
+    if (empresasFile) {
+      empresasStats = await parseEmpresasFile(empresasFile);
+      if (empresasStats.linked === 0) {
+        const candidates = paths
+          .filter((p) => {
+            const n = p.name.toLowerCase();
+            return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+          })
+          .slice()
+          .sort((a, b) => scoreFile(b, "empresas") - scoreFile(a, "empresas") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
+          .slice(0, 20);
+        for (const cand of candidates) {
+          if (cand.path === empresasFile.path) continue;
+          const before = emailToCompanies.size;
+          const st = await parseEmpresasFile(cand);
+          if (st.linked > 0 && emailToCompanies.size > before) {
+            empresasStats = st;
+            break;
+          }
+        }
       }
     }
 
@@ -406,6 +478,7 @@ export async function GET(req: NextRequest) {
           filesCount: paths.length,
           usersCandidates: usersPick.candidatesCount,
           empresasCandidates: empresasPick.candidatesCount,
+          empresasStats,
           sampleFiles: Array.from(new Set([...usersPick.sampleFiles, ...empresasPick.sampleFiles])).slice(0, 30),
         },
         cache: { path: cachePath, updatedAt: now },
