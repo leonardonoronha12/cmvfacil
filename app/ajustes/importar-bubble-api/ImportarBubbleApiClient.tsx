@@ -53,6 +53,8 @@ export default function ImportarBubbleApiClient() {
   const [dangerConfirm, setDangerConfirm] = useState("");
   const [globalTotals, setGlobalTotals] = useState<any>(null);
   const [globalTotalsError, setGlobalTotalsError] = useState("");
+  const [userProgress, setUserProgress] = useState<any>(null);
+  const [userProgressError, setUserProgressError] = useState("");
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
@@ -96,9 +98,23 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
+  async function refreshUserProgress() {
+    setUserProgressError("");
+    try {
+      const res = await fetch(`/api/bubble-import/progress-users?limit=200&ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      setUserProgress(json);
+    } catch (err) {
+      setUserProgress(null);
+      setUserProgressError(safeJsonMessage(err));
+    }
+  }
+
   useEffect(() => {
     void refreshCounts();
     void refreshGlobalTotals();
+    void refreshUserProgress();
   }, []);
 
   useEffect(() => {
@@ -106,6 +122,7 @@ export default function ImportarBubbleApiClient() {
     const t = window.setInterval(() => {
       void refreshCounts();
       void refreshGlobalTotals();
+      void refreshUserProgress();
     }, 2000);
     return () => window.clearInterval(t);
   }, [isRunning]);
@@ -115,6 +132,7 @@ export default function ImportarBubbleApiClient() {
     const t = window.setInterval(() => {
       void refreshCounts();
       void refreshGlobalTotals();
+      void refreshUserProgress();
     }, 2000);
     return () => window.clearInterval(t);
   }, [dangerInFlight]);
@@ -234,6 +252,7 @@ export default function ImportarBubbleApiClient() {
     try {
       await refreshCounts();
       await refreshGlobalTotals();
+      await refreshUserProgress();
       if (dangerAction === "delete") {
         const res = await fetch("/api/bubble-import/reset", {
           method: "POST",
@@ -254,6 +273,7 @@ export default function ImportarBubbleApiClient() {
         if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
         await refreshCounts();
         await refreshGlobalTotals();
+        await refreshUserProgress();
         resetServerSync();
         setResult(JSON.stringify(json, null, 2));
       }
@@ -602,6 +622,30 @@ export default function ImportarBubbleApiClient() {
                         {globalTotals?.rows?.inventario ?? "—"} • desperdícios {globalTotals?.rows?.desperdicios ?? "—"}
                       </div>
                       {globalTotalsError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{globalTotalsError}</div> : null}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div className={styles.fileMeta}>
+                        Por usuário: Total {userProgress?.totals?.users ?? "—"} • Completos (insumos+fornecedores+pré-preparo+fichas) {userProgress?.totals?.done?.all ?? "—"} •
+                        Insumos {userProgress?.totals?.done?.insumos ?? "—"} • Fornecedores {userProgress?.totals?.done?.fornecedores ?? "—"} • Pré-preparo{" "}
+                        {userProgress?.totals?.done?.prePreparo ?? "—"} • Fichas {userProgress?.totals?.done?.fichas ?? "—"}
+                      </div>
+                      {userProgressError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{userProgressError}</div> : null}
+                      {Array.isArray(userProgress?.users) && userProgress.users.length ? (
+                        <div className={styles.pathsBox} style={{ maxHeight: 240, overflow: "auto" }}>
+                          {(userProgress.users as any[]).map((u) => {
+                            const email = String(u?.email ?? "").trim() || String(u?.id ?? "").slice(0, 8);
+                            const has = u?.has ?? {};
+                            const line =
+                              `${email} • ` +
+                              `Insumos:${has.insumos ? "OK" : "Falta"} • ` +
+                              `Fornecedores:${has.fornecedores ? "OK" : "Falta"} • ` +
+                              `Pré-preparo:${has.prePreparo ? "OK" : "Falta"} • ` +
+                              `Fichas:${has.fichas ? "OK" : "Falta"}`;
+                            return <div key={String(u?.id ?? email)} className={styles.fileMeta}>{line}</div>;
+                          })}
+                          {userProgress?.truncated ? <div className={styles.fileMeta}>Lista truncada (mostrando 200)</div> : null}
+                        </div>
+                      ) : null}
                     </div>
                     {dangerAction ? (
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
