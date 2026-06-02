@@ -57,6 +57,7 @@ export default function ImportarBubbleApiClient() {
   const [userProgressError, setUserProgressError] = useState("");
   const [rebuildState, setRebuildState] = useState<any>(null);
   const rebuildStopRef = useRef(false);
+  const [versionInfo, setVersionInfo] = useState<any>(null);
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
@@ -113,10 +114,22 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
+  async function refreshVersionInfo() {
+    try {
+      const res = await fetch(`/api/version?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json) return;
+      setVersionInfo(json);
+    } catch {
+      // ignore
+    }
+  }
+
   useEffect(() => {
     void refreshCounts();
     void refreshGlobalTotals();
     void refreshUserProgress();
+    void refreshVersionInfo();
   }, []);
 
   useEffect(() => {
@@ -125,6 +138,7 @@ export default function ImportarBubbleApiClient() {
       void refreshCounts();
       void refreshGlobalTotals();
       void refreshUserProgress();
+      void refreshVersionInfo();
     }, 2000);
     return () => window.clearInterval(t);
   }, [isRunning]);
@@ -135,6 +149,7 @@ export default function ImportarBubbleApiClient() {
       void refreshCounts();
       void refreshGlobalTotals();
       void refreshUserProgress();
+      void refreshVersionInfo();
     }, 2000);
     return () => window.clearInterval(t);
   }, [dangerInFlight]);
@@ -673,6 +688,12 @@ export default function ImportarBubbleApiClient() {
                           : "—"}
                         {" • "}
                         Atualizado {String(rebuildState?.updatedAt ?? "—")}
+                      </div>
+                    ) : null}
+                    {versionInfo ? (
+                      <div className={styles.fileMeta}>
+                        Versão: {(String(versionInfo?.vercel?.gitCommitSha ?? "") || "—").slice(0, 12)} • Deploy {String(versionInfo?.vercel?.deploymentUrl ?? "—")} • Agora{" "}
+                        {String(versionInfo?.now ?? "—")}
                       </div>
                     ) : null}
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
