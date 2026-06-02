@@ -293,7 +293,7 @@ export async function GET(req: NextRequest) {
     const usersPick = pickBest(paths, "users");
     const empresasPick = pickBest(paths, "empresas");
     let usersFile = usersPick.best;
-    const empresasFile = empresasPick.best;
+    let empresasFile = empresasPick.best;
 
     const emailToAuthId = await loadAuthEmailToIdMap(supabase);
     const authIdToEmail = await loadAuthIdToEmailMap(supabase);
@@ -303,6 +303,8 @@ export async function GET(req: NextRequest) {
 
     const parseUsersFile = async (file: StoredPath) => {
       const rawRows = await loadRowsForPath(supabase, bucket, file.path, file.name);
+      let emailRows = 0;
+      let idMapRows = 0;
       for (const rr of rawRows) {
         const row = normalizeRowKeys(rr);
         const emailRaw =
@@ -315,36 +317,64 @@ export async function GET(req: NextRequest) {
             if (email) break;
           }
         }
-        if (email) bubbleEmails.add(email);
+        if (email) {
+          bubbleEmails.add(email);
+          emailRows++;
+        }
         const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
-        if (bubbleId && email) bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
-      }
-    };
-
-    if (usersFile) {
-      await parseUsersFile(usersFile);
-    }
-
-    if (!bubbleEmails.size) {
-      const candidates = paths
-        .filter((p) => {
-          const n = p.name.toLowerCase();
-          return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
-        })
-        .slice()
-        .sort((a, b) => scoreFile(b, "users") - scoreFile(a, "users") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
-        .slice(0, 20);
-
-      for (const cand of candidates) {
-        if (usersFile?.path && cand.path === usersFile.path) continue;
-        bubbleEmails.clear();
-        bubbleUserIdToEmail.clear();
-        await parseUsersFile(cand);
-        if (bubbleEmails.size) {
-          usersFile = cand;
-          break;
+        if (bubbleId && email) {
+          bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
+          idMapRows++;
         }
       }
+      return { emailRows, idMapRows, rowsScanned: rawRows.length };
+    };
+
+    const fileCandidates = paths
+      .filter((p) => {
+        const n = p.name.toLowerCase();
+        return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+      })
+      .slice()
+      .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
+
+    const usersCandidates = fileCandidates
+      .slice()
+      .sort((a, b) => scoreFile(b, "users") - scoreFile(a, "users") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
+      .slice(0, 30);
+
+    let usersStats: { emailRows: number; idMapRows: number; rowsScanned: number } | null = null;
+    let bestUsers: { file: StoredPath; stats: { emailRows: number; idMapRows: number; rowsScanned: number }; emails: string[]; idMap: Array<[string, string]> } | null =
+      null;
+
+    for (const cand of usersCandidates) {
+      const tmpEmails = new Set<string>();
+      const tmpMap = new Map<string, string>();
+      bubbleEmails.clear();
+      bubbleUserIdToEmail.clear();
+      const st = await parseUsersFile(cand);
+      for (const e of bubbleEmails) tmpEmails.add(e);
+      for (const [k, v] of bubbleUserIdToEmail.entries()) tmpMap.set(k, v);
+      if (!tmpEmails.size) continue;
+      if (
+        !bestUsers ||
+        st.idMapRows > bestUsers.stats.idMapRows ||
+        (st.idMapRows === bestUsers.stats.idMapRows && st.emailRows > bestUsers.stats.emailRows) ||
+        (st.idMapRows === bestUsers.stats.idMapRows && st.emailRows === bestUsers.stats.emailRows && scoreFile(cand, "users") > scoreFile(bestUsers.file, "users"))
+      ) {
+        bestUsers = { file: cand, stats: st, emails: Array.from(tmpEmails), idMap: Array.from(tmpMap.entries()) };
+      }
+    }
+
+    bubbleEmails.clear();
+    bubbleUserIdToEmail.clear();
+    if (bestUsers) {
+      usersFile = bestUsers.file;
+      usersStats = bestUsers.stats;
+      for (const e of bestUsers.emails) bubbleEmails.add(e);
+      for (const [k, v] of bestUsers.idMap) bubbleUserIdToEmail.set(k, v);
+    } else if (usersFile) {
+      usersStats = await parseUsersFile(usersFile);
     }
 
     const emailToCompanies = new Map<string, Array<{ id: string; name: string }>>();
@@ -400,15 +430,18 @@ export async function GET(req: NextRequest) {
       return null;
     };
 
-    const parseEmpresasFile = async (file: StoredPath) => {
+    const parseEmpresasFile = async (file: StoredPath, fileScore: number) => {
       const rawRows = await loadRowsForPath(supabase, bucket, file.path, file.name);
       let linked = 0;
       let scanned = 0;
       for (const rr of rawRows) {
         scanned++;
         const row = normalizeRowKeys(rr);
+        const hasCompanyKey = Object.keys(row).some((k) => k.includes("empresa") || k.includes("company") || k.includes("restaurante") || k.includes("restaurant"));
+        if (!hasCompanyKey && fileScore <= 0) continue;
         const companyId = pickBubbleId(row) || pickFirst(row, ["empresa_id", "company_id", "restaurante_id", "id", "_id", "unique_id", "bubble_id"]);
         const name = guessCompanyName(row);
+        if (!name || name === "—") continue;
         const email = resolveOwnerEmailFromCompanyRow(row);
         if (!email) continue;
         bubbleEmails.add(email);
@@ -421,26 +454,18 @@ export async function GET(req: NextRequest) {
     };
 
     let empresasStats: { linked: number; scanned: number } | null = null;
-    if (empresasFile) {
-      empresasStats = await parseEmpresasFile(empresasFile);
-      if (empresasStats.linked === 0) {
-        const candidates = paths
-          .filter((p) => {
-            const n = p.name.toLowerCase();
-            return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
-          })
-          .slice()
-          .sort((a, b) => scoreFile(b, "empresas") - scoreFile(a, "empresas") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
-          .slice(0, 20);
-        for (const cand of candidates) {
-          if (cand.path === empresasFile.path) continue;
-          const before = emailToCompanies.size;
-          const st = await parseEmpresasFile(cand);
-          if (st.linked > 0 && emailToCompanies.size > before) {
-            empresasStats = st;
-            break;
-          }
-        }
+    const empresasCandidates = fileCandidates
+      .slice()
+      .sort((a, b) => scoreFile(b, "empresas") - scoreFile(a, "empresas") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
+      .slice(0, 30);
+
+    for (const cand of empresasCandidates) {
+      const st = await parseEmpresasFile(cand, scoreFile(cand, "empresas"));
+      if (!empresasStats) empresasStats = st;
+      if (st.linked > 0) {
+        empresasFile = cand;
+        empresasStats = st;
+        break;
       }
     }
 
@@ -478,6 +503,7 @@ export async function GET(req: NextRequest) {
           filesCount: paths.length,
           usersCandidates: usersPick.candidatesCount,
           empresasCandidates: empresasPick.candidatesCount,
+          usersStats,
           empresasStats,
           sampleFiles: Array.from(new Set([...usersPick.sampleFiles, ...empresasPick.sampleFiles])).slice(0, 30),
         },

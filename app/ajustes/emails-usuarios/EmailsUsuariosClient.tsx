@@ -229,7 +229,8 @@ export default function EmailsUsuariosClient() {
                     {bubbleDebug ? (
                       <div className={styles.helpText} style={{ marginBottom: 8 }}>
                         Prefixo: {String(bubbleDebug?.selectedPrefix ?? bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Users file:{" "}
-                        {String(bubbleDebug?.files?.users?.name ?? "—")} • Empresas file: {String(bubbleDebug?.files?.empresas?.name ?? "—")}
+                        {String(bubbleDebug?.files?.users?.name ?? "—")} • Empresas file: {String(bubbleDebug?.files?.empresas?.name ?? "—")} • Empresas links:{" "}
+                        {String(bubbleDebug?.empresasStats?.linked ?? 0)}/{String(bubbleDebug?.empresasStats?.scanned ?? 0)}
                       </div>
                     ) : null}
                     {bubbleDebug && Array.isArray(bubbleDebug?.sampleFiles) && bubbleDebug.sampleFiles.length ? (
