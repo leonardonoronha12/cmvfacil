@@ -256,7 +256,7 @@ export default function EmailsUsuariosClient() {
                                 <button
                                   type="button"
                                   className={styles.btnPrimary}
-                                  disabled={!r.authUserId || isLoading || Boolean(impersonating)}
+                                  disabled={isLoading || Boolean(impersonating)}
                                   onClick={() => loginAs(r.email)}
                                 >
                                   {impersonating === r.email ? "Entrando..." : "Login"}

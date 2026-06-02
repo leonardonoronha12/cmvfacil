@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
@@ -35,6 +36,10 @@ function normalizeEmail(value: string) {
   return String(value ?? "").trim().toLowerCase();
 }
 
+function randomPassword() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -53,7 +58,25 @@ export async function GET(req: NextRequest) {
     }
 
     const redirectTo = `${url.origin}/dashboard`;
-    const { data, error } = await supabase.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } } as any);
+    await supabase.auth.admin
+      .createUser({
+        email,
+        password: randomPassword(),
+        email_confirm: true,
+        user_metadata: { source: "bubble-import" },
+      } as any)
+      .catch(() => null);
+
+    let data: any = null;
+    let error: any = null;
+    const magic = await supabase.auth.admin.generateLink({ type: "magiclink", email, options: { redirectTo } } as any);
+    data = magic.data as any;
+    error = magic.error as any;
+    if (error) {
+      const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
+      data = invite.data as any;
+      error = invite.error as any;
+    }
     if (error) return json({ ok: false, error: error.message }, { status: 500 });
 
     const actionLink = (data as any)?.properties?.action_link ? String((data as any).properties.action_link) : "";
@@ -64,4 +87,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

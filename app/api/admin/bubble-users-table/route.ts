@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
@@ -209,6 +210,10 @@ function guessCompanyName(rowNorm: CsvObjectRow) {
   return v || "—";
 }
 
+function randomPassword() {
+  return crypto.randomBytes(18).toString("base64url");
+}
+
 async function loadAuthEmailToIdMap(supabase: ReturnType<typeof getSupabaseAdmin>) {
   const map = new Map<string, string>();
   for (let page = 1; page <= 2000; page++) {
@@ -270,6 +275,33 @@ export async function GET(req: NextRequest) {
 
     const emailToAuthId = await loadAuthEmailToIdMap(supabase);
     const authIdToEmail = await loadAuthIdToEmailMap(supabase);
+    let refreshedAuth = false;
+    const ensureAuthUserId = async (email: string) => {
+      const normalized = String(email ?? "").trim().toLowerCase();
+      if (!normalized) return null;
+      const existing = emailToAuthId.get(normalized) ?? null;
+      if (existing) return existing;
+      const created = await supabase.auth.admin
+        .createUser({
+          email: normalized,
+          password: randomPassword(),
+          email_confirm: true,
+          user_metadata: { source: "bubble-import" },
+        } as any)
+        .catch((e: any) => ({ error: e, data: null }));
+      const newId = (created as any)?.data?.user?.id ? String((created as any).data.user.id).trim() : "";
+      if (newId) {
+        emailToAuthId.set(normalized, newId);
+        authIdToEmail.set(newId.toLowerCase(), normalized);
+        return newId;
+      }
+      if (!refreshedAuth) {
+        refreshedAuth = true;
+        const fresh = await loadAuthEmailToIdMap(supabase).catch(() => null);
+        if (fresh) for (const [k, v] of fresh.entries()) emailToAuthId.set(k, v);
+      }
+      return emailToAuthId.get(normalized) ?? null;
+    };
 
     const bubbleUserIdToEmail = new Map<string, string>();
     const bubbleEmails = new Set<string>();
@@ -313,9 +345,12 @@ export async function GET(req: NextRequest) {
     }
 
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
-    const rows = Array.from(bubbleEmails)
-      .sort((a, b) => collator.compare(a, b))
-      .map((email) => {
+    const emailsSorted = Array.from(bubbleEmails).sort((a, b) => collator.compare(a, b));
+    for (const email of emailsSorted) {
+      await ensureAuthUserId(email);
+    }
+
+    const rows = emailsSorted.map((email) => {
         const companiesRaw = emailToCompanies.get(email) ?? [];
         const companies = companiesRaw
           .slice()
