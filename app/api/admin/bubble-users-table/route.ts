@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import crypto from "crypto";
 import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
@@ -66,6 +65,11 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
   await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
+}
+
+async function uploadJsonToStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
+  const { error } = await supabase.storage.from(bucket).upload(path, JSON.stringify(payload), { contentType: "application/json", upsert: true });
+  if (error) throw new Error(error.message);
 }
 
 type StoredPath = { path: string; name: string; created_at?: string; updated_at?: string; size?: number };
@@ -192,8 +196,21 @@ function guessCompanyName(rowNorm: CsvObjectRow) {
   return v || "—";
 }
 
-function randomPassword() {
-  return crypto.randomBytes(18).toString("base64url");
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = String(email ?? "").trim().toLowerCase();
+  if (!target || !target.includes("@")) return null;
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`auth_list_users:${error.message}`);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const em = String(u?.email ?? "").trim().toLowerCase();
+      if (id && em === target) return id;
+    }
+    if (users.length < 1000) break;
+  }
+  return null;
 }
 
 async function loadAuthEmailToIdMap(supabase: ReturnType<typeof getSupabaseAdmin>) {
@@ -240,14 +257,38 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const url = new URL(req.url);
-    const targetUserId = isUuid(userId) ? userId : String(url.searchParams.get("userId") ?? "").trim();
-    if (!targetUserId || !isUuid(targetUserId)) return json({ ok: false, error: "missing_or_invalid_userId" }, { status: 400 });
+    const requesterRaw = String(userId ?? "").trim().toLowerCase();
+    const requesterUuid = isUuid(requesterRaw) ? requesterRaw : requesterRaw.includes("@") ? await findAuthUserIdByEmail(supabase, requesterRaw) : null;
 
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
-    const userPrefix = `user:${targetUserId}`;
-    const paths = await listAllPathsDeep(supabase, bucket, userPrefix);
+
+    const candidatePrefixes = (() => {
+      const out = new Set<string>();
+      if (isUuid(requesterRaw)) out.add(`user:${requesterRaw}`);
+      if (requesterRaw.includes("@")) out.add(`user:${requesterRaw}`);
+      if (requesterUuid && isUuid(requesterUuid)) out.add(`user:${requesterUuid}`);
+      return Array.from(out);
+    })();
+
+    if (!candidatePrefixes.length) return json({ ok: false, error: "cannot_resolve_user_prefix", requester: requesterRaw }, { status: 400 });
+
+    let userPrefix = candidatePrefixes[0]!;
+    let paths: StoredPath[] = [];
+    let bestUsersScore = -1;
+    for (const prefix of candidatePrefixes) {
+      const p = await listAllPathsDeep(supabase, bucket, prefix);
+      const usersCandidates = p.filter((x) => {
+        const n = x.name.toLowerCase();
+        return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+      });
+      const scoreTop = usersCandidates.length ? Math.max(...usersCandidates.map((x) => scoreFile(x, "users"))) : -1;
+      if (scoreTop > bestUsersScore || (scoreTop === bestUsersScore && p.length > paths.length)) {
+        bestUsersScore = scoreTop;
+        userPrefix = prefix;
+        paths = p;
+      }
+    }
 
     const usersPick = pickBest(paths, "users");
     const empresasPick = pickBest(paths, "empresas");
@@ -256,33 +297,6 @@ export async function GET(req: NextRequest) {
 
     const emailToAuthId = await loadAuthEmailToIdMap(supabase);
     const authIdToEmail = await loadAuthIdToEmailMap(supabase);
-    let refreshedAuth = false;
-    const ensureAuthUserId = async (email: string) => {
-      const normalized = String(email ?? "").trim().toLowerCase();
-      if (!normalized) return null;
-      const existing = emailToAuthId.get(normalized) ?? null;
-      if (existing) return existing;
-      const created = await supabase.auth.admin
-        .createUser({
-          email: normalized,
-          password: randomPassword(),
-          email_confirm: true,
-          user_metadata: { source: "bubble-import" },
-        } as any)
-        .catch((e: any) => ({ error: e, data: null }));
-      const newId = (created as any)?.data?.user?.id ? String((created as any).data.user.id).trim() : "";
-      if (newId) {
-        emailToAuthId.set(normalized, newId);
-        authIdToEmail.set(newId.toLowerCase(), normalized);
-        return newId;
-      }
-      if (!refreshedAuth) {
-        refreshedAuth = true;
-        const fresh = await loadAuthEmailToIdMap(supabase).catch(() => null);
-        if (fresh) for (const [k, v] of fresh.entries()) emailToAuthId.set(k, v);
-      }
-      return emailToAuthId.get(normalized) ?? null;
-    };
 
     const bubbleUserIdToEmail = new Map<string, string>();
     const bubbleEmails = new Set<string>();
@@ -327,9 +341,6 @@ export async function GET(req: NextRequest) {
 
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
     const emailsSorted = Array.from(bubbleEmails).sort((a, b) => collator.compare(a, b));
-    for (const email of emailsSorted) {
-      await ensureAuthUserId(email);
-    }
 
     const rows = emailsSorted.map((email) => {
         const companiesRaw = emailToCompanies.get(email) ?? [];
@@ -341,21 +352,30 @@ export async function GET(req: NextRequest) {
         return { email, authUserId, companies, companiesCount: companies.length };
       });
 
+    const now = new Date().toISOString();
+    const cachePath = `${userPrefix}/_cache/bubble-users-emails.json`;
+    await uploadJsonToStorage(supabase, bucket, cachePath, { v: 1, updatedAt: now, emails: emailsSorted }).catch(() => null);
+
     return json(
       {
         ok: true,
-        targetUserId,
+        targetUserId: requesterUuid,
         files: {
           users: usersFile ? { path: usersFile.path, name: usersFile.name } : null,
           empresas: empresasFile ? { path: empresasFile.path, name: empresasFile.name } : null,
         },
         debug: {
+          requester: requesterRaw,
+          requesterUuid,
+          candidatePrefixes,
+          selectedPrefix: userPrefix,
           searchedPrefix: userPrefix,
           filesCount: paths.length,
           usersCandidates: usersPick.candidatesCount,
           empresasCandidates: empresasPick.candidatesCount,
           sampleFiles: Array.from(new Set([...usersPick.sampleFiles, ...empresasPick.sampleFiles])).slice(0, 30),
         },
+        cache: { path: cachePath, updatedAt: now },
         rows,
       },
       { status: 200 },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
+import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 import { parseBubbleCsvToObjects, type CsvObjectRow, normalizeKey as normalizeKeyFromLib } from "../../../lib/bubbleCsv";
@@ -34,6 +35,10 @@ function extractEmail(value: string) {
   return m ? String(m[0]).trim().toLowerCase() : null;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -41,6 +46,23 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 }
 
 type StoredPath = { path: string; name: string; updated_at?: string };
+
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = String(email ?? "").trim().toLowerCase();
+  if (!target || !target.includes("@")) return null;
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(`auth_list_users:${error.message}`);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const em = String(u?.email ?? "").trim().toLowerCase();
+      if (id && em === target) return id;
+    }
+    if (users.length < 1000) break;
+  }
+  return null;
+}
 
 async function listAllPathsDeep(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, rootPrefix: string, maxDepth = 8, maxItems = 8000) {
   const out: StoredPath[] = [];
@@ -86,16 +108,53 @@ async function downloadText(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   return new TextDecoder().decode(buf);
 }
 
+async function downloadBytes(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const dl = await supabase.storage.from(bucket).download(path);
+  if (dl.error || !dl.data) throw new Error(dl.error?.message || "download_failed");
+  return await dl.data.arrayBuffer();
+}
+
+async function downloadJsonFromStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const dl = await supabase.storage.from(bucket).download(path);
+  if (dl.error || !dl.data) return null;
+  try {
+    const buf = await dl.data.arrayBuffer();
+    const text = new TextDecoder().decode(buf);
+    return JSON.parse(text) as any;
+  } catch {
+    return null;
+  }
+}
+
 function normalizeRowKeys(row: CsvObjectRow) {
   const out: CsvObjectRow = {};
   for (const [k, v] of Object.entries(row)) (out as any)[normalizeKey(k)] = String(v ?? "").trim();
   return out;
 }
 
-async function emailExistsInUsersUpload(supabase: ReturnType<typeof getSupabaseAdmin>, ownerUserId: string, email: string) {
+function parseBubbleXlsxToRows(buf: ArrayBuffer) {
+  const wb = XLSX.read(buf, { type: "array" });
+  const sheetName = wb.SheetNames?.[0];
+  if (!sheetName) return [] as CsvObjectRow[];
+  const sheet = wb.Sheets[sheetName];
+  const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, defval: "" }) as unknown[][];
+  const headerRaw = (grid[0] ?? []) as unknown[];
+  const header = headerRaw.map((h, i) => normalizeKey(String(h ?? "")) || `col_${i + 1}`);
+  const rows: CsvObjectRow[] = [];
+  for (let i = 1; i < grid.length; i++) {
+    const r = (grid[i] ?? []) as unknown[];
+    if (!r.length) continue;
+    const obj: CsvObjectRow = {};
+    for (let c = 0; c < header.length; c++) (obj as any)[header[c]] = String(r[c] ?? "").trim();
+    const hasAny = Object.values(obj).some((v) => String(v).trim());
+    if (hasAny) rows.push(obj);
+  }
+  return rows;
+}
+
+async function emailExistsInUsersUpload(supabase: ReturnType<typeof getSupabaseAdmin>, userPrefix: string, email: string) {
   const bucket = "bubble-imports";
   await ensureBucket(supabase, bucket);
-  const userPrefix = `user:${ownerUserId}`;
   const paths = await listAllPathsDeep(supabase, bucket, userPrefix);
   const candidates = paths
     .filter((p) => {
@@ -107,10 +166,25 @@ async function emailExistsInUsersUpload(supabase: ReturnType<typeof getSupabaseA
 
   const target = normalizeEmail(email);
   for (const f of candidates) {
-    const text = await downloadText(supabase, bucket, f.path).catch(() => "");
-    if (!text) continue;
-    const parsed = parseBubbleCsvToObjects(text);
-    for (const rr of parsed.rows) {
+    const lower = f.name.toLowerCase();
+    let rawRows: CsvObjectRow[] = [];
+    if (lower.endsWith(".csv")) {
+      const text = await downloadText(supabase, bucket, f.path).catch(() => "");
+      if (!text) continue;
+      rawRows = parseBubbleCsvToObjects(text).rows;
+    } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+      const buf = await downloadBytes(supabase, bucket, f.path).catch(() => null);
+      if (!buf) continue;
+      rawRows = parseBubbleXlsxToRows(buf);
+    } else if (lower.endsWith(".json")) {
+      const text = await downloadText(supabase, bucket, f.path).catch(() => "");
+      if (!text) continue;
+      const raw = JSON.parse(text) as any;
+      const arr: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.rows) ? raw.rows : [];
+      rawRows = arr.filter((x) => x && typeof x === "object").map((x) => x as CsvObjectRow);
+    }
+
+    for (const rr of rawRows) {
       const row = normalizeRowKeys(rr);
       const emailRaw = String((row as any).email ?? (row as any).user_email ?? (row as any).usuario_email ?? (row as any).login ?? (row as any).username ?? "").trim();
       const found = emailRaw ? extractEmail(emailRaw) : null;
@@ -118,6 +192,16 @@ async function emailExistsInUsersUpload(supabase: ReturnType<typeof getSupabaseA
     }
   }
   return false;
+}
+
+async function emailAllowedByCache(supabase: ReturnType<typeof getSupabaseAdmin>, userPrefix: string, email: string) {
+  const bucket = "bubble-imports";
+  await ensureBucket(supabase, bucket);
+  const cachePath = `${userPrefix}/_cache/bubble-users-emails.json`;
+  const payload = await downloadJsonFromStorage(supabase, bucket, cachePath);
+  const list = Array.isArray(payload?.emails) ? (payload.emails as unknown[]) : [];
+  const normalized = normalizeEmail(email);
+  return list.some((e) => normalizeEmail(String(e ?? "")) === normalized);
 }
 
 export async function GET(req: NextRequest) {
@@ -136,7 +220,22 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const allowed = await emailExistsInUsersUpload(supabase, userId, email);
+    const requesterRaw = String(userId ?? "").trim().toLowerCase();
+    const requesterUuid = isUuid(requesterRaw) ? requesterRaw : requesterRaw.includes("@") ? await findAuthUserIdByEmail(supabase, requesterRaw) : null;
+    const candidatePrefixes = (() => {
+      const out = new Set<string>();
+      if (isUuid(requesterRaw)) out.add(`user:${requesterRaw}`);
+      if (requesterRaw.includes("@")) out.add(`user:${requesterRaw}`);
+      if (requesterUuid && isUuid(requesterUuid)) out.add(`user:${requesterUuid}`);
+      return Array.from(out);
+    })();
+    if (!candidatePrefixes.length) return json({ ok: false, error: "cannot_resolve_user_prefix", requester: requesterRaw }, { status: 400 });
+
+    let allowed = false;
+    for (const prefix of candidatePrefixes) {
+      allowed = (await emailAllowedByCache(supabase, prefix, email)) || (await emailExistsInUsersUpload(supabase, prefix, email));
+      if (allowed) break;
+    }
     if (!allowed) return json({ ok: false, error: "email_not_in_upload" }, { status: 403 });
 
     const redirectTo = `${url.origin}/dashboard`;
