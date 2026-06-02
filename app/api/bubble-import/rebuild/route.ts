@@ -49,6 +49,7 @@ type RebuildState = {
   runId: string;
   runPrefix: string;
   statePath: string;
+  mappingPath: string;
   startedAt: string;
   updatedAt: string;
   phase: "deleting" | "importing" | "done" | "error";
@@ -135,6 +136,7 @@ export async function POST(req: NextRequest) {
     const day = new Date().toISOString().slice(0, 10);
     const runPrefix = `user:${storageOwnerUserId}/${day}/${runId}`;
     const statePath = `${runPrefix}/rebuild-state.json`;
+    const mappingPath = `${runPrefix}/rebuild-mapping.json`;
     const now = new Date().toISOString();
 
     const state: RebuildState = {
@@ -142,6 +144,7 @@ export async function POST(req: NextRequest) {
       runId,
       runPrefix,
       statePath,
+      mappingPath,
       startedAt: now,
       updatedAt: now,
       phase: "deleting",

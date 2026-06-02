@@ -343,6 +343,23 @@ async function upsertInBatches<T extends Record<string, unknown>>(supabase: Retu
   return inserted;
 }
 
+async function downloadJsonFromStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const dl = await supabase.storage.from(bucket).download(path);
+  if (dl.error || !dl.data) return null;
+  try {
+    const buf = await dl.data.arrayBuffer();
+    const text = new TextDecoder().decode(buf);
+    return JSON.parse(text) as any;
+  } catch {
+    return null;
+  }
+}
+
+async function uploadJsonToStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, payload: unknown) {
+  const { error } = await supabase.storage.from(bucket).upload(path, JSON.stringify(payload), { contentType: "application/json", upsert: true });
+  if (error) throw new Error(error.message);
+}
+
 export async function POST(req: NextRequest) {
   let stage = "init";
   try {
@@ -352,6 +369,7 @@ export async function POST(req: NextRequest) {
     const kinds = Array.isArray((body as any)?.kinds) ? ((body as any).kinds as unknown[]).map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean) : null;
     const requestedPrefix = typeof (body as any)?.prefix === "string" ? String((body as any).prefix).trim().replace(/^\/+|\/+$/g, "") : "";
     const targetUserIdRaw = typeof (body as any)?.targetUserId === "string" ? String((body as any).targetUserId).trim() : "";
+    const mappingPath = typeof (body as any)?.mappingPath === "string" ? String((body as any).mappingPath).trim() : "";
 
     const enabled = (k: string) => !only || only.includes(k);
     let enableInsumos = enabled("insumos");
@@ -376,6 +394,17 @@ export async function POST(req: NextRequest) {
 
     const bubbleUserIdToEmail = new Map<string, string>();
     const bubbleCompanyIdToUserId = new Map<string, string>();
+    const mappingFromStorage = mappingPath ? await downloadJsonFromStorage(supabase, "bubble-imports", mappingPath) : null;
+    if (mappingFromStorage && typeof mappingFromStorage === "object") {
+      const companyToUser = (mappingFromStorage as any)?.companyToUser;
+      if (companyToUser && typeof companyToUser === "object") {
+        for (const [k, v] of Object.entries(companyToUser as Record<string, unknown>)) {
+          const companyId = String(k ?? "").trim();
+          const uid = String(v ?? "").trim();
+          if (companyId && uid) bubbleCompanyIdToUserId.set(companyId, uid);
+        }
+      }
+    }
 
     stage = "load_auth_users";
     const emailToId = !overrideTargetUserId ? await loadAuthEmailToIdMap(supabase) : new Map<string, string>();
@@ -1079,6 +1108,14 @@ export async function POST(req: NextRequest) {
 
     stage = "process_empresas";
     await processCsvGroups("empresas", (row) => handleEmpresaRow(row));
+
+    if (mappingPath) {
+      stage = "save_mapping";
+      await ensureBucket(supabase, "bubble-imports");
+      const companyToUser: Record<string, string> = {};
+      for (const [k, v] of bubbleCompanyIdToUserId.entries()) companyToUser[k] = v;
+      await uploadJsonToStorage(supabase, "bubble-imports", mappingPath, { companyToUser, updatedAt: new Date().toISOString() });
+    }
 
     stage = "process_unknown";
     if (includeUnknown && enabledKinds.has("unknown")) {

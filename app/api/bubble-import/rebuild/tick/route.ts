@@ -142,7 +142,14 @@ export async function POST(req: NextRequest) {
       const importRes = await fetch(importUrl, {
         method: "POST",
         headers: { "content-type": "application/json", cookie },
-        body: JSON.stringify({ prefix: state.prefix, includeUnknown: Boolean(state.includeUnknown), kinds, only: null }),
+        body: JSON.stringify({
+          prefix: state.prefix,
+          includeUnknown: Boolean(state.includeUnknown),
+          kinds,
+          only: null,
+          targetUserId: ownerId,
+          mappingPath: typeof state?.mappingPath === "string" ? String(state.mappingPath) : "",
+        }),
         cache: "no-store",
       });
       const text = await importRes.text().catch(() => "");
@@ -186,4 +193,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
