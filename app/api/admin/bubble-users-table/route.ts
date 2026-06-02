@@ -292,7 +292,7 @@ export async function GET(req: NextRequest) {
 
     const usersPick = pickBest(paths, "users");
     const empresasPick = pickBest(paths, "empresas");
-    const usersFile = usersPick.best;
+    let usersFile = usersPick.best;
     const empresasFile = empresasPick.best;
 
     const emailToAuthId = await loadAuthEmailToIdMap(supabase);
@@ -301,16 +301,43 @@ export async function GET(req: NextRequest) {
     const bubbleUserIdToEmail = new Map<string, string>();
     const bubbleEmails = new Set<string>();
 
-    if (usersFile) {
-      const rawRows = await loadRowsForPath(supabase, bucket, usersFile.path, usersFile.name);
+    const parseUsersFile = async (file: StoredPath) => {
+      const rawRows = await loadRowsForPath(supabase, bucket, file.path, file.name);
       for (const rr of rawRows) {
         const row = normalizeRowKeys(rr);
-        const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
-        const emailRaw = pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) || pickKeyLike(row, ["email", "mail", "login", "user"]);
+        const emailRaw =
+          pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) ||
+          pickKeyLike(row, ["email", "mail", "login", "user"], []);
         const email = emailRaw ? extractEmail(emailRaw) : null;
-        if (!bubbleId || !email) continue;
-        bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
-        bubbleEmails.add(email);
+        if (email) bubbleEmails.add(email);
+        const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
+        if (bubbleId && email) bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
+      }
+    };
+
+    if (usersFile) {
+      await parseUsersFile(usersFile);
+    }
+
+    if (!bubbleEmails.size) {
+      const candidates = paths
+        .filter((p) => {
+          const n = p.name.toLowerCase();
+          return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+        })
+        .slice()
+        .sort((a, b) => scoreFile(b, "users") - scoreFile(a, "users") || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))
+        .slice(0, 20);
+
+      for (const cand of candidates) {
+        if (usersFile?.path && cand.path === usersFile.path) continue;
+        bubbleEmails.clear();
+        bubbleUserIdToEmail.clear();
+        await parseUsersFile(cand);
+        if (bubbleEmails.size) {
+          usersFile = cand;
+          break;
+        }
       }
     }
 

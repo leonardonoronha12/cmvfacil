@@ -70,7 +70,7 @@ export default function EmailsUsuariosClient() {
       const usersPath = String(json?.files?.users?.path ?? "");
       const empresasPath = String(json?.files?.empresas?.path ?? "");
       setBubbleSourcePath(usersPath || empresasPath);
-      setBubbleDebug(json?.debug ?? null);
+      setBubbleDebug({ ...(json?.debug ?? {}), files: json?.files ?? null });
     } catch (err) {
       setBubbleRows([]);
       setBubbleSourcePath("");
@@ -226,10 +226,17 @@ export default function EmailsUsuariosClient() {
                     <div className={styles.helpText} style={{ marginBottom: 8 }}>
                       {bubbleSourcePath ? `Arquivos detectados dentro do seu upload.` : "Nenhum arquivo do Bubble encontrado ainda."}
                     </div>
-                    {!bubbleSourcePath && bubbleDebug ? (
+                    {bubbleDebug ? (
                       <div className={styles.helpText} style={{ marginBottom: 8 }}>
-                        Prefixo: {String(bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Candidates Users:{" "}
-                        {String(bubbleDebug?.usersCandidates ?? "—")} • Candidates Empresas: {String(bubbleDebug?.empresasCandidates ?? "—")}
+                        Prefixo: {String(bubbleDebug?.selectedPrefix ?? bubbleDebug?.searchedPrefix ?? "—")} • Arquivos: {String(bubbleDebug?.filesCount ?? "—")} • Users file:{" "}
+                        {String(bubbleDebug?.files?.users?.name ?? "—")} • Empresas file: {String(bubbleDebug?.files?.empresas?.name ?? "—")}
+                      </div>
+                    ) : null}
+                    {bubbleDebug && Array.isArray(bubbleDebug?.sampleFiles) && bubbleDebug.sampleFiles.length ? (
+                      <div className={styles.helpText} style={{ marginBottom: 8, whiteSpace: "pre-wrap" }}>
+                        Exemplo de arquivos:
+                        {"\n"}
+                        {bubbleDebug.sampleFiles.slice(0, 10).join("\n")}
                       </div>
                     ) : null}
                     <div style={{ overflowX: "auto", marginTop: 14 }}>
