@@ -51,6 +51,8 @@ export default function ImportarBubbleApiClient() {
   const [dangerAction, setDangerAction] = useState<null | "delete" | "rebuild">(null);
   const [dangerInFlight, setDangerInFlight] = useState<null | "delete" | "rebuild">(null);
   const [dangerConfirm, setDangerConfirm] = useState("");
+  const [globalTotals, setGlobalTotals] = useState<any>(null);
+  const [globalTotalsError, setGlobalTotalsError] = useState("");
   const [syncWarning, setSyncWarning] = useState<string>("");
   const stopRef = useRef(false);
   const [syncStatePath, setSyncStatePath] = useState<string>("");
@@ -81,17 +83,41 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
+  async function refreshGlobalTotals() {
+    setGlobalTotalsError("");
+    try {
+      const res = await fetch(`/api/bubble-import/stats?scope=all&ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      setGlobalTotals(json.totals ?? null);
+    } catch (err) {
+      setGlobalTotals(null);
+      setGlobalTotalsError(safeJsonMessage(err));
+    }
+  }
+
   useEffect(() => {
     void refreshCounts();
+    void refreshGlobalTotals();
   }, []);
 
   useEffect(() => {
     if (!isRunning) return;
     const t = window.setInterval(() => {
       void refreshCounts();
+      void refreshGlobalTotals();
     }, 2000);
     return () => window.clearInterval(t);
   }, [isRunning]);
+
+  useEffect(() => {
+    if (!dangerInFlight) return;
+    const t = window.setInterval(() => {
+      void refreshCounts();
+      void refreshGlobalTotals();
+    }, 2000);
+    return () => window.clearInterval(t);
+  }, [dangerInFlight]);
 
   useEffect(() => {
     try {
@@ -206,6 +232,8 @@ export default function ImportarBubbleApiClient() {
     setIsResetting(true);
     setDangerInFlight(dangerAction);
     try {
+      await refreshCounts();
+      await refreshGlobalTotals();
       if (dangerAction === "delete") {
         const res = await fetch("/api/bubble-import/reset", {
           method: "POST",
@@ -225,13 +253,15 @@ export default function ImportarBubbleApiClient() {
         const json = (await res.json().catch(() => null)) as any;
         if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
         await refreshCounts();
+        await refreshGlobalTotals();
         resetServerSync();
         setResult(JSON.stringify(json, null, 2));
       }
       setDangerAction(null);
       setDangerConfirm("");
     } catch (err) {
-      setResetError(safeJsonMessage(err));
+      const msg = safeJsonMessage(err);
+      setResetError(msg === "failed_504" ? "O servidor demorou e a requisição expirou (504). Tente novamente agora." : msg);
     } finally {
       setIsResetting(false);
       setDangerInFlight(null);
@@ -563,6 +593,15 @@ export default function ImportarBubbleApiClient() {
                         {dangerInFlight === "rebuild" ? "Reimportando..." : "Reset + Reimportar (Arquivos)"}
                       </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                      <div className={styles.fileMeta}>
+                        Global: Auth {globalTotals?.authUsers ?? "—"} • Usuários com insumos {globalTotals?.usersWith?.insumos_state ?? "—"} • fornecedores{" "}
+                        {globalTotals?.usersWith?.fornecedores_state ?? "—"} • pré-preparo {globalTotals?.usersWith?.pre_preparo_state ?? "—"} • fichas{" "}
+                        {globalTotals?.usersWith?.fichas_tecnicas_state ?? "—"} • entradas {globalTotals?.rows?.entradas ?? "—"} • inventário{" "}
+                        {globalTotals?.rows?.inventario ?? "—"} • desperdícios {globalTotals?.rows?.desperdicios ?? "—"}
+                      </div>
+                      {globalTotalsError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{globalTotalsError}</div> : null}
                     </div>
                     {dangerAction ? (
                       <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
