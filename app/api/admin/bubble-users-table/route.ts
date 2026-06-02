@@ -307,8 +307,14 @@ export async function GET(req: NextRequest) {
         const row = normalizeRowKeys(rr);
         const emailRaw =
           pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) ||
-          pickKeyLike(row, ["email", "mail", "login", "user"], []);
-        const email = emailRaw ? extractEmail(emailRaw) : null;
+          pickKeyLike(row, ["email", "mail", "login", "username"], ["id", "uuid"]);
+        let email = emailRaw ? extractEmail(emailRaw) : null;
+        if (!email) {
+          for (const v of Object.values(row)) {
+            email = extractEmail(String(v ?? ""));
+            if (email) break;
+          }
+        }
         if (email) bubbleEmails.add(email);
         const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
         if (bubbleId && email) bubbleUserIdToEmail.set(String(bubbleId).trim(), email);
