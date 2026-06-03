@@ -711,6 +711,113 @@ a {
   font-weight: 500;
 }
 
+.cmv-signup-success {
+  border-radius: 14px;
+  border: 1px solid rgba(10, 184, 109, 0.35);
+  background: linear-gradient(180deg, rgba(10, 184, 109, 0.10), rgba(10, 184, 109, 0.06));
+  padding: 14px 14px 12px;
+  box-shadow: 0 12px 26px rgba(10, 184, 109, 0.08);
+}
+
+.cmv-signup-success-top {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.cmv-signup-success-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 184, 109, 0.16);
+  color: rgb(0, 104, 54);
+  border: 1px solid rgba(10, 184, 109, 0.25);
+  flex-shrink: 0;
+}
+
+.cmv-signup-success-text {
+  min-width: 0;
+}
+
+.cmv-signup-success-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: #0b3b28;
+  line-height: 18px;
+}
+
+.cmv-signup-success-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: rgb(0, 80, 40);
+  line-height: 18px;
+}
+
+.cmv-signup-success-hint {
+  margin-top: 6px;
+  font-size: 12px;
+  color: rgba(0, 80, 40, 0.85);
+  line-height: 16px;
+}
+
+.cmv-signup-success-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.cmv-signup-success-primary,
+.cmv-signup-success-secondary {
+  height: 42px;
+  border-radius: 10px;
+  font-family: var(--cmv-font-inter);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease, filter 120ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 14px;
+}
+
+.cmv-signup-success-primary {
+  border: 1px solid #059e5d;
+  background: linear-gradient(180deg, #0ab86d, #098c55);
+  color: #ffffff;
+}
+
+.cmv-signup-success-secondary {
+  border: 1px solid rgba(10, 184, 109, 0.30);
+  background: rgba(255, 255, 255, 0.85);
+  color: #0b3b28;
+}
+
+.cmv-signup-success-primary:disabled,
+.cmv-signup-success-secondary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
+
+.cmv-signup-success-primary:not(:disabled):hover,
+.cmv-signup-success-secondary:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.cmv-signup-success-primary:not(:disabled):active,
+.cmv-signup-success-secondary:not(:disabled):active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
 .cmv-signup-form {
   display: flex;
   flex-direction: column;
@@ -857,6 +964,9 @@ a {
     display: none;
   }
   .cmv-signup-row2 {
+    grid-template-columns: 1fr;
+  }
+  .cmv-signup-success-actions {
     grid-template-columns: 1fr;
   }
 }
