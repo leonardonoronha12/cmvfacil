@@ -29,6 +29,51 @@ function safeEmail(input: unknown) {
   return v;
 }
 
+async function createInvite(args: { req: NextRequest; email: string; redirectTo: string }) {
+  const { req, email, redirectTo } = args;
+
+  let supabase: ReturnType<typeof getSupabaseAdmin>;
+  try {
+    supabase = getSupabaseAdmin();
+  } catch {
+    return { ok: false as const, status: 500, error: "supabase_not_configured" };
+  }
+
+  await supabase.auth.admin
+    .createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "admin-create" } } as any)
+    .catch(() => null);
+
+  const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
+  if (invite.error) return { ok: false as const, status: 500, error: invite.error.message };
+
+  const actionLink = String((invite.data as any)?.properties?.action_link ?? "").trim();
+  const createdUserId = String((invite.data as any)?.user?.id ?? "").trim();
+  if (!actionLink) return { ok: false as const, status: 500, error: "missing_action_link" };
+
+  return { ok: true as const, status: 200, email, userId: createdUserId || null, redirectTo, actionLink };
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (isUuid(String(userId))) return json({ ok: false, error: "forbidden" }, { status: 403 });
+
+    const url = new URL(req.url);
+    const email = safeEmail(url.searchParams.get("email") ?? "");
+    const redirectToRaw = String(url.searchParams.get("redirectTo") ?? "").trim();
+    const redirectTo = redirectToRaw || `${url.origin}/restaurar-senha`;
+    if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
+
+    const result = await createInvite({ req, email, redirectTo });
+    return json(result.ok ? { ok: true, email: result.email, userId: result.userId, redirectTo: result.redirectTo, actionLink: result.actionLink } : { ok: false, error: result.error }, {
+      status: result.status,
+    });
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -41,28 +86,10 @@ export async function POST(req: NextRequest) {
     const url = new URL(req.url);
     const redirectTo = redirectToRaw || `${url.origin}/restaurar-senha`;
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
-
-    let supabase: ReturnType<typeof getSupabaseAdmin>;
-    try {
-      supabase = getSupabaseAdmin();
-    } catch {
-      return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
-    }
-
-    await supabase.auth.admin
-      .createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "admin-create" } } as any)
-      .catch(() => null);
-
-    const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
-    if (invite.error) return json({ ok: false, error: invite.error.message }, { status: 500 });
-
-    const actionLink = String((invite.data as any)?.properties?.action_link ?? "").trim();
-    const createdUserId = String((invite.data as any)?.user?.id ?? "").trim();
-    if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
-
-    return json({ ok: true, email, userId: createdUserId || null, redirectTo, actionLink }, { status: 200 });
+    const result = await createInvite({ req, email, redirectTo });
+    if (!result.ok) return json({ ok: false, error: result.error }, { status: result.status });
+    return json({ ok: true, email: result.email, userId: result.userId, redirectTo: result.redirectTo, actionLink: result.actionLink }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
