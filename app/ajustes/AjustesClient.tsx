@@ -78,6 +78,8 @@ export default function AjustesClient() {
   const [planType, setPlanType] = useState<"PRO Mensal" | "PRO Anual">("PRO Mensal");
   const [cardLast4, setCardLast4] = useState("8895");
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
   const canSaveAccount = Boolean(nome.trim() && sobrenome.trim() && email.trim() && whatsapp.trim() && permissao);
   const canSavePassword = Boolean(senhaAtual.trim() && novaSenha.trim() && repitaSenha.trim() && novaSenha === repitaSenha);
   const canSaveCompany = Boolean(empresaNome.trim() && cnpj.trim() && empresaWhats.trim() && ramo.trim());
@@ -168,8 +170,21 @@ export default function AjustesClient() {
                     <button type="button" className={styles.btnPrimary} disabled={!canSaveAccount}>
                       Salvar
                     </button>
-                    <button type="button" className={styles.btnDanger}>
-                      Logout
+                    <button
+                      type="button"
+                      className={styles.btnDanger}
+                      disabled={loggingOut}
+                      onClick={async () => {
+                        if (loggingOut) return;
+                        setLoggingOut(true);
+                        try {
+                          await fetch("/api/auth/logout", { method: "POST" });
+                        } finally {
+                          window.location.href = "/login";
+                        }
+                      }}
+                    >
+                      {loggingOut ? "Saindo…" : "Logout"}
                     </button>
                   </div>
                 </div>
