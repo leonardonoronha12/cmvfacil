@@ -123,13 +123,24 @@ async function findLatestDumpPrefix(supabase: ReturnType<typeof getSupabaseAdmin
 async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabaseAdmin>; bucket: string; fromPrefix: string; toPrefix: string }) {
   const { supabase, bucket, fromPrefix, toPrefix } = args;
   const files = await listAllPaths(supabase, bucket, fromPrefix);
-  const dataFiles = files.filter((f) => looksDataLikeFile(f.name));
+  const dataFiles = files.filter((f) => looksDataLikeFile(f.name)).slice(0, 500);
+  let copied = 0;
+  const errors: string[] = [];
   for (const f of dataFiles) {
     const rel = f.path.startsWith(fromPrefix) ? f.path.slice(fromPrefix.length).replace(/^\/+/, "") : f.name;
     const dest = `${toPrefix}/${rel}`.replace(/\/{2,}/g, "/");
-    await supabase.storage.from(bucket).copy(f.path, dest).catch(() => null);
+    try {
+      const { error } = await supabase.storage.from(bucket).copy(f.path, dest);
+      if (error) {
+        if (errors.length < 3) errors.push(error.message);
+        continue;
+      }
+      copied += 1;
+    } catch (err) {
+      if (errors.length < 3) errors.push(err instanceof Error ? err.message : String(err));
+    }
   }
-  return dataFiles.length;
+  return { attempted: dataFiles.length, copied, errors };
 }
 
 async function findBestImportPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, userPrefix: string) {
@@ -321,7 +332,7 @@ export async function POST(req: NextRequest) {
           const cloneRunId = crypto.randomUUID();
           const toPrefix = `${userPrefix}/bootstrap-seed/${cloneRunId}`;
           const copied = await clonePrefixToUser({ supabase, bucket, fromPrefix: sourcePrefix, toPrefix });
-          if (copied > 0) {
+          if (copied.copied > 0) {
             const runId = crypto.randomUUID();
             const runPrefix = `${userPrefix}/bootstrap`;
             const statePath = `${runPrefix}/ensure-state.json`;
@@ -372,6 +383,20 @@ export async function POST(req: NextRequest) {
             await uploadJsonToStorage(supabase, bucket, statePath, state);
             return json({ ok: true, status: "started", mode: "rebuild", state }, { status: 200 });
           }
+          return json(
+            {
+              ok: true,
+              status: "needs_setup",
+              prefix: bestPrefix,
+              reason: "seed_copy_failed",
+              sourcePrefix,
+              toPrefix,
+              attempted: copied.attempted,
+              copied: copied.copied,
+              errors: copied.errors,
+            },
+            { status: 200 },
+          );
         }
         return json({ ok: true, status: "needs_setup", prefix: bestPrefix, reason: "no_files_and_bubble_not_configured" }, { status: 200 });
       }

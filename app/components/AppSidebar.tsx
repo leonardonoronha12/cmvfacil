@@ -291,8 +291,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
     { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
   );
-  const bootstrapDoneKey = "cmvfacil:bootstrapDone:v2";
-  const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v2";
+  const bootstrapDoneKey = "cmvfacil:bootstrapDone:v3";
+  const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v3";
 
   const formatEtaLabel = (ms: number | null) => {
     if (!ms || !Number.isFinite(ms) || ms <= 0) return "";
@@ -311,6 +311,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (msg.includes("no_files_and_bubble_not_configured") || msg.includes("needs_setup") || msg === "no_files") {
       return "Não há dados do Bubble disponíveis para importar ainda. Vá em Ajustes → Importar Bubble (ou Importar Bubble via API) e rode a migração.";
     }
+    if (msg.includes("seed_copy_failed")) return "Falha ao copiar o dump base para sua conta. Tente novamente em instantes.";
+    if (msg.includes("no_import_files")) return "Não encontrei arquivos válidos do Bubble para importar. Vá em Ajustes → Importar Bubble e envie os arquivos, ou configure a importação via API.";
     if (msg.includes("timeout")) return "A atualização está demorando mais que o esperado. Tente novamente em instantes.";
     return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
   };

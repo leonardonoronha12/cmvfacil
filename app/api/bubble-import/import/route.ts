@@ -433,6 +433,13 @@ export async function POST(req: NextRequest) {
 
     const prefixToUse = requestedPrefix && requestedPrefix.startsWith(`${userPrefix}/`) ? requestedPrefix : userPrefix;
     const files = await listAllPaths(supabase, bucket, prefixToUse);
+    const hasImportFile = files.some((f) => {
+      const n = String(f?.name ?? "").toLowerCase();
+      if (n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls")) return true;
+      if (n.endsWith(".json") && !n.endsWith("state.json") && !n.endsWith("mapping.json")) return true;
+      return false;
+    });
+    if (!hasImportFile) return json({ ok: false, error: "no_import_files" }, { status: 400 });
     const groups = groupParts(files);
     const byKind = new Map<string, { base: string; parts: { path: string; name: string; part: number }[] }[]>();
     for (const g of groups) {
