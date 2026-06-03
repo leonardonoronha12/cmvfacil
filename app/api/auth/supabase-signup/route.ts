@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -36,6 +37,27 @@ export async function POST(req: NextRequest) {
   const email = (body.email ?? "").trim();
   const password = (body.password ?? "").trim();
   if (!email || !password) return json({ error: "missing_fields" }, { status: 400 });
+
+  try {
+    const admin = getSupabaseAdmin();
+    const created = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        first_name: (body.first_name ?? "").trim() || null,
+        last_name: (body.last_name ?? "").trim() || null,
+        cpf: (body.cpf ?? "").trim() || null,
+        whatsapp: (body.whatsapp ?? "").trim() || null,
+      },
+    } as any);
+    if (created.error) {
+      return json({ error: "signup_failed", details: created.error.message }, { status: 400 });
+    }
+    return json({ ok: true, emailConfirmationRequired: false }, { status: 200 });
+  } catch {
+    // fall back to anon signup
+  }
 
   let cfg;
   try {
