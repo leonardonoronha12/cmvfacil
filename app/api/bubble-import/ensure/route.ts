@@ -135,6 +135,11 @@ async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabase
         if (errors.length < 3) errors.push(error.message);
         continue;
       }
+      const { error: verifyError } = await supabase.storage.from(bucket).createSignedUrl(dest, 60);
+      if (verifyError) {
+        if (errors.length < 3) errors.push(verifyError.message);
+        continue;
+      }
       copied += 1;
     } catch (err) {
       if (errors.length < 3) errors.push(err instanceof Error ? err.message : String(err));
