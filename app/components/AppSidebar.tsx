@@ -306,6 +306,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (!msg) return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
     if (msg.includes("unauthorized") || msg.includes("401") || msg.includes("jwt")) return "Sessão expirada. Faça login novamente.";
     if (msg.includes("forbidden") || msg.includes("403")) return "Não foi possível atualizar sua conta. Entre em contato com o suporte.";
+    if (msg.includes("no_files_and_bubble_not_configured") || msg.includes("needs_setup") || msg === "no_files") {
+      return "Não há dados do Bubble disponíveis para importar ainda. Vá em Ajustes → Importar Bubble (ou Importar Bubble via API) e rode a migração.";
+    }
     if (msg.includes("timeout")) return "A atualização está demorando mais que o esperado. Tente novamente em instantes.";
     return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
   };
@@ -519,12 +522,17 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         }
 
         const status = String(json?.status ?? "");
-        if (status === "ready" || status === "no_files") {
+        if (status === "ready") {
           try {
             window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
             window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
           } catch {}
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
+          return;
+        }
+        if (status === "needs_setup" || status === "no_files") {
+          const msg = String(json?.reason ?? "no_files");
+          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
           return;
         }
 

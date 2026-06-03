@@ -61,6 +61,77 @@ async function listPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket:
   return (data ?? []) as any[];
 }
 
+async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
+  const paths: { path: string; name: string; updated_at?: string }[] = [];
+
+  async function walk(currentPrefix: string, depth: number) {
+    if (depth > 6) return;
+    const folders: any[] = [];
+    const files: any[] = [];
+    for (let offset = 0; offset < 200000; offset += 1000) {
+      const { data, error } = await supabase.storage
+        .from(bucket)
+        .list(currentPrefix, { limit: 1000, offset, sortBy: { column: "name", order: "asc" } } as any);
+      if (error) throw new Error(error.message);
+      const batch = data ?? [];
+      for (const it of batch) {
+        if ((it as any).id == null) folders.push(it);
+        else files.push(it);
+      }
+      if (batch.length < 1000) break;
+    }
+    for (const f of files) paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at });
+    for (const folder of folders) await walk(`${currentPrefix}/${folder.name}`, depth + 1);
+  }
+
+  await walk(prefix, 0);
+  return paths.sort((a, b) => String(b.updated_at ?? "").localeCompare(String(a.updated_at ?? "")) || a.path.localeCompare(b.path));
+}
+
+async function findLatestDumpPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
+  let roots: any[] = [];
+  try {
+    roots = await listPrefix(supabase, bucket, "");
+  } catch {
+    roots = [];
+  }
+  const userFolders = roots
+    .filter((it) => (it as any)?.id == null)
+    .map((it) => String(it?.name ?? "").trim())
+    .filter((n) => /^user:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(n));
+
+  let best: { prefix: string; updatedAt: string } | null = null;
+  for (const userPrefix of userFolders.slice(0, 60)) {
+    const bestPrefix = await findBestImportPrefix(supabase, bucket, userPrefix);
+    let root: any[] = [];
+    try {
+      root = await listPrefix(supabase, bucket, bestPrefix);
+    } catch {
+      root = [];
+    }
+    const candidates = root.filter((it) => (it as any)?.id != null && looksDataLikeFile(String(it?.name ?? ""))) as any[];
+    const latest = candidates
+      .map((it) => String((it as any)?.updated_at ?? "").trim())
+      .filter(Boolean)
+      .sort((a, b) => b.localeCompare(a))[0];
+    if (!latest) continue;
+    if (!best || latest > best.updatedAt) best = { prefix: bestPrefix, updatedAt: latest };
+  }
+  return best?.prefix ?? null;
+}
+
+async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabaseAdmin>; bucket: string; fromPrefix: string; toPrefix: string }) {
+  const { supabase, bucket, fromPrefix, toPrefix } = args;
+  const files = await listAllPaths(supabase, bucket, fromPrefix);
+  const dataFiles = files.filter((f) => looksDataLikeFile(f.name));
+  for (const f of dataFiles) {
+    const rel = f.path.startsWith(fromPrefix) ? f.path.slice(fromPrefix.length).replace(/^\/+/, "") : f.name;
+    const dest = `${toPrefix}/${rel}`.replace(/\/{2,}/g, "/");
+    await supabase.storage.from(bucket).copy(f.path, dest).catch(() => null);
+  }
+  return dataFiles.length;
+}
+
 async function findBestImportPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, userPrefix: string) {
   const hasFilesAt = async (p: string) => {
     const items = await listPrefix(supabase, bucket, p);
@@ -244,7 +315,66 @@ export async function POST(req: NextRequest) {
     if (!hasAnyFile) {
       const baseUrl = getEnv("BUBBLE_BASE_URL");
       const token = getEnv("BUBBLE_API_TOKEN");
-      if (!baseUrl || !token) return json({ ok: true, status: "no_files", prefix: bestPrefix }, { status: 200 });
+      if (!baseUrl || !token) {
+        const sourcePrefix = await findLatestDumpPrefix(supabase, bucket);
+        if (sourcePrefix) {
+          const cloneRunId = crypto.randomUUID();
+          const toPrefix = `${userPrefix}/bootstrap-seed/${cloneRunId}`;
+          const copied = await clonePrefixToUser({ supabase, bucket, fromPrefix: sourcePrefix, toPrefix });
+          if (copied > 0) {
+            const runId = crypto.randomUUID();
+            const runPrefix = `${userPrefix}/bootstrap`;
+            const statePath = `${runPrefix}/ensure-state.json`;
+            const mappingPath = `${runPrefix}/ensure-mapping.json`;
+
+            const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
+            if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+              return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
+            }
+
+            const now = new Date().toISOString();
+            const stepsBase: Array<{ key: string; label: string; kinds: string[] }> = [
+              { key: "users", label: "Users", kinds: ["users"] },
+              { key: "empresas", label: "Empresas", kinds: ["empresas"] },
+              { key: "categorias", label: "Categorias", kinds: ["categorias"] },
+              { key: "insumos_custo_medio", label: "Insumos (Custo Médio)", kinds: ["custo_medio"] },
+              { key: "insumos_ingredientes", label: "Insumos (Ingredientes)", kinds: ["ingredientes"] },
+              { key: "insumos_itens", label: "Insumos (Itens)", kinds: ["itens"] },
+              { key: "fornecedores_info", label: "Fornecedores (Info)", kinds: ["fornecedores"] },
+              { key: "fornecedores_itens", label: "Fornecedores (Itens)", kinds: ["itens_fornecedores"] },
+              { key: "fornecedores_equivalencias", label: "Fornecedores (Equivalências)", kinds: ["equivalencias"] },
+              { key: "entradas_notas", label: "Entradas (Notas)", kinds: ["notas_fiscais"] },
+              { key: "entradas_itens", label: "Entradas (Itens)", kinds: ["itens_notas"] },
+              { key: "inventario", label: "Inventário", kinds: ["inventario"] },
+              { key: "desperdicios_motivos", label: "Desperdícios (Motivos)", kinds: ["motivos_desperdicios"] },
+              { key: "desperdicios", label: "Desperdícios", kinds: ["desperdicios"] },
+              { key: "pre_preparo", label: "Pré-preparo", kinds: ["pre_preparo", "pre_preparo_etiquetas"] },
+              { key: "fichas_tecnicas", label: "Fichas Técnicas", kinds: ["fichas_tecnicas"] },
+              { key: "unknown", label: "Desconhecidos", kinds: ["unknown"] },
+            ];
+
+            const state = {
+              v: 1,
+              runId,
+              runPrefix,
+              statePath,
+              mappingPath,
+              startedAt: now,
+              updatedAt: now,
+              phase: "importing",
+              storageOwnerUserId: userId,
+              prefix: toPrefix,
+              includeUnknown: true,
+              only: null as string[] | null,
+              steps: stepsBase.map((s) => ({ ...s, status: "pending", lastError: "", startedAt: null, finishedAt: null, lastResult: null })),
+            };
+
+            await uploadJsonToStorage(supabase, bucket, statePath, state);
+            return json({ ok: true, status: "started", mode: "rebuild", state }, { status: 200 });
+          }
+        }
+        return json({ ok: true, status: "needs_setup", prefix: bestPrefix, reason: "no_files_and_bubble_not_configured" }, { status: 200 });
+      }
 
       const runId = crypto.randomUUID();
       const runPrefix = `${userPrefix}/bootstrap/${runId}`;
