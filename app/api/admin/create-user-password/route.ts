@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
@@ -14,6 +15,14 @@ function json(data: unknown, init: ResponseInit = {}) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function safeEqual(a: string, b: string) {
+  const aBuf = Buffer.from(String(a ?? ""), "utf8");
+  const bBuf = Buffer.from(String(b ?? ""), "utf8");
+  if (aBuf.length !== bBuf.length) return false;
+  if (!aBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
 function safeEmail(input: unknown) {
@@ -47,8 +56,12 @@ async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmi
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
-    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    if (isUuid(String(userId))) return json({ ok: false, error: "forbidden" }, { status: 403 });
+    const oidcExpected = (process.env.VERCEL_OIDC_TOKEN ?? "").trim();
+    const oidcGot = (req.headers.get("x-vercel-oidc-token") ?? "").trim();
+    const oidcOk = oidcExpected && oidcGot ? safeEqual(oidcExpected, oidcGot) : false;
+    const adminOk = Boolean(userId && !isUuid(String(userId)));
+    if (!adminOk && !oidcOk) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (userId && isUuid(String(userId))) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
     const body = (await req.json().catch(() => null)) as any;
     const email = safeEmail(body?.email);
@@ -78,4 +91,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
