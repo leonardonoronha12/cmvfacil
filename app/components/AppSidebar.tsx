@@ -291,6 +291,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
     { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
   );
+  const bootstrapDoneKey = "cmvfacil:bootstrapDone:v2";
+  const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v2";
 
   const formatEtaLabel = (ms: number | null) => {
     if (!ms || !Number.isFinite(ms) || ms <= 0) return "";
@@ -451,7 +453,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
   useEffect(() => {
     try {
-      if (window.sessionStorage.getItem("cmvfacil:bootstrapRunning") === "1") return;
+      if (window.sessionStorage.getItem(bootstrapRunningKey) === "1") return;
     } catch {}
     if (bootstrap.status === "running") return;
     void bootstrapUserDataOnce();
@@ -500,7 +502,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (active === "ajustes") return;
     if (bootstrap.status === "running") return;
     try {
-      if (window.sessionStorage.getItem("cmvfacil:bootstrapDone") === "1") return;
+      if (window.sessionStorage.getItem(bootstrapDoneKey) === "1") return;
     } catch {
       // ignore
     }
@@ -524,8 +526,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const status = String(json?.status ?? "");
         if (status === "ready") {
           try {
-            window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
-            window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+            window.sessionStorage.setItem(bootstrapDoneKey, "1");
+            window.sessionStorage.removeItem(bootstrapRunningKey);
           } catch {}
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
           return;
@@ -544,7 +546,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         }
 
         try {
-          window.sessionStorage.setItem("cmvfacil:bootstrapRunning", "1");
+          window.sessionStorage.setItem(bootstrapRunningKey, "1");
         } catch {}
 
         const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
@@ -562,7 +564,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
             setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
             try {
-              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+              window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
             return;
           }
@@ -578,8 +580,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const phase = String(tickJson?.state?.phase ?? "");
           if (phase === "done") {
             try {
-              window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
-              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+              window.sessionStorage.setItem(bootstrapDoneKey, "1");
+              window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
             window.location.reload();
@@ -593,7 +595,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 "failed";
             setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
             try {
-              window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
+              window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
             return;
           }
