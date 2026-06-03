@@ -20,8 +20,7 @@ export default function CadastroUsuarioClient() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emailConfirmationRequired, setEmailConfirmationRequired] = useState<boolean | null>(null);
-  const [resending, setResending] = useState(false);
-  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error"; showActions?: boolean } | null>(null);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,41 +65,11 @@ export default function CadastroUsuarioClient() {
         title: "Conta criada",
         message: required === false ? "Você já pode fazer login." : "Verifique seu email para confirmar o cadastro.",
         tone: "success",
-        showActions: true,
       });
     } catch {
       setError("Erro ao criar conta.");
     } finally {
       setLoading(false);
-    }
-  }
-
-  async function resendConfirmation() {
-    if (!email.trim() || resending) return;
-    setResending(true);
-    setError(null);
-    setToast(null);
-    try {
-      const res = await fetch("/api/auth/supabase-resend-signup", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ email }),
-      });
-      const data = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; details?: string } | null;
-      if (!res.ok || !data?.ok) {
-        setError(data?.details ?? data?.error ?? "Erro ao reenviar email.");
-        return;
-      }
-      setToast({
-        title: "Email reenviado",
-        message: "Enviamos um novo email. Verifique a caixa de entrada e também o SPAM/Lixo eletrônico.",
-        tone: "success",
-        showActions: true,
-      });
-    } catch {
-      setError("Erro ao reenviar email.");
-    } finally {
-      setResending(false);
     }
   }
 
@@ -127,27 +96,6 @@ export default function CadastroUsuarioClient() {
                 message={toast.message}
                 tone={toast.tone}
                 onClose={() => setToast(null)}
-                actions={
-                  toast.showActions ? (
-                    <>
-                      <button type="button" className="cmv-button cmv-button-primary" onClick={() => router.replace("/login")}>
-                        Ir para Login
-                      </button>
-                      <button type="button" className="cmv-button" onClick={resendConfirmation} disabled={resending || emailConfirmationRequired === false}>
-                        {emailConfirmationRequired === false ? (
-                          "Email confirmado"
-                        ) : resending ? (
-                          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                            <LoadingSpinner size={16} />
-                            Reenviando…
-                          </span>
-                        ) : (
-                          "Reenviar email"
-                        )}
-                      </button>
-                    </>
-                  ) : null
-                }
               />
             ) : null}
             {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
