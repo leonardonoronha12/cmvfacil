@@ -17,12 +17,10 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
-function safeEqual(a: string, b: string) {
-  const aBuf = Buffer.from(String(a ?? ""), "utf8");
-  const bBuf = Buffer.from(String(b ?? ""), "utf8");
-  if (aBuf.length !== bBuf.length) return false;
-  if (!aBuf.length) return false;
-  return crypto.timingSafeEqual(aBuf, bBuf);
+function b64urlToBuf(input: string) {
+  const s = String(input ?? "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
+  return Buffer.from(s + pad, "base64");
 }
 
 function safeEmail(input: unknown) {
@@ -53,12 +51,76 @@ async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmi
   return null;
 }
 
+const jwksCache = new Map<string, { fetchedAt: number; keys: any[] }>();
+
+async function verifyVercelOidcToken(token: string) {
+  const raw = String(token ?? "").trim();
+  const parts = raw.split(".");
+  if (parts.length !== 3) return null;
+  const [h, p, s] = parts;
+
+  let header: any = null;
+  let payload: any = null;
+  try {
+    header = JSON.parse(b64urlToBuf(h).toString("utf8"));
+    payload = JSON.parse(b64urlToBuf(p).toString("utf8"));
+  } catch {
+    return null;
+  }
+
+  if (String(header?.alg ?? "") !== "RS256") return null;
+  const kid = String(header?.kid ?? "").trim();
+  const iss = String(payload?.iss ?? "").trim();
+  if (!kid || !iss) return null;
+
+  const now = Math.floor(Date.now() / 1000);
+  const exp = typeof payload?.exp === "number" ? payload.exp : 0;
+  const nbf = typeof payload?.nbf === "number" ? payload.nbf : 0;
+  if (!exp || exp <= now) return null;
+  if (nbf && nbf > now) return null;
+
+  const project = String(payload?.project ?? "").trim();
+  if (project !== "cmvfacil_repo") return null;
+
+  const cacheKey = iss;
+  const cached = jwksCache.get(cacheKey);
+  const fresh = cached && Date.now() - cached.fetchedAt < 10 * 60_000;
+  let keys: any[] = fresh ? cached!.keys : [];
+  if (!fresh) {
+    const jwksUrl = new URL("/.well-known/jwks", iss).toString();
+    const res = await fetch(jwksUrl, { cache: "no-store" });
+    if (!res.ok) return null;
+    const json = (await res.json().catch(() => null)) as any;
+    keys = Array.isArray(json?.keys) ? json.keys : [];
+    jwksCache.set(cacheKey, { fetchedAt: Date.now(), keys });
+  }
+
+  const jwk = keys.find((k) => String(k?.kid ?? "") === kid) ?? null;
+  if (!jwk) return null;
+
+  const subtle = crypto.webcrypto?.subtle;
+  if (!subtle) return null;
+
+  let key: CryptoKey;
+  try {
+    key = await subtle.importKey("jwk", jwk, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+  } catch {
+    return null;
+  }
+
+  const data = Buffer.from(`${h}.${p}`, "utf8");
+  const sig = b64urlToBuf(s);
+  const ok = await subtle.verify("RSASSA-PKCS1-v1_5", key, sig, data);
+  if (!ok) return null;
+
+  return payload;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
-    const oidcExpected = (process.env.VERCEL_OIDC_TOKEN ?? "").trim();
     const oidcGot = (req.headers.get("x-vercel-oidc-token") ?? "").trim();
-    const oidcOk = oidcExpected && oidcGot ? safeEqual(oidcExpected, oidcGot) : false;
+    const oidcOk = oidcGot ? Boolean(await verifyVercelOidcToken(oidcGot)) : false;
     const adminOk = Boolean(userId && !isUuid(String(userId)));
     if (!adminOk && !oidcOk) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (userId && isUuid(String(userId))) return json({ ok: false, error: "forbidden" }, { status: 403 });
