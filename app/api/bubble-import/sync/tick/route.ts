@@ -9,6 +9,11 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+function getEnv(name: string) {
+  const v = (process.env[name] ?? "").trim();
+  return v || null;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -370,8 +375,8 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => null)) as any;
     const statePath = String(body?.statePath ?? "").trim();
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? "");
-    const token = safeToken(body?.token ?? "");
+    const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
+    const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const resume = Boolean(body?.resume);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
     const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) ? importAsUserIdRaw : "";

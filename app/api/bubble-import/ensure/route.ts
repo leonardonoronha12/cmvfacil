@@ -18,6 +18,11 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function getEnv(name: string) {
+  const v = (process.env[name] ?? "").trim();
+  return v || null;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -132,6 +137,81 @@ async function userHasAnyData(supabase: ReturnType<typeof getSupabaseAdmin>, use
   return false;
 }
 
+function prioritizeTypes(types: string[]) {
+  const priority = ["User", "empresas"];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (t: string) => {
+    const v = String(t ?? "").trim();
+    if (!v) return;
+    const k = v.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(v);
+  };
+  for (const p of priority) {
+    const exact = types.find((t) => t === p) ?? types.find((t) => String(t).toLowerCase() === p.toLowerCase()) ?? "";
+    if (exact) push(exact);
+  }
+  for (const t of types) push(t);
+  return out;
+}
+
+function buildAutoSyncTypes() {
+  return prioritizeTypes([
+    "User",
+    "empresas",
+    "categorias",
+    "custo_medio_item",
+    "desperdicio",
+    "etiquetas",
+    "faturamentos",
+    "fornecedores",
+    "Ingredientes",
+    "inventarios",
+    "itens_fornecedores",
+    "itens_inventarios",
+    "Itens_lista_compras",
+    "itens_notas",
+    "item",
+    "motivos_desperdicios",
+    "notas_fiscais",
+    "qtd_compra_real",
+  ]);
+}
+
+function newSyncState(runId: string, runPrefix: string, statePath: string, types: string[]) {
+  const now = new Date().toISOString();
+  const perType: Record<string, any> = {};
+  for (const t of types) {
+    perType[t] = {
+      status: "pending",
+      fetched: 0,
+      parts: 0,
+      cursor: 0,
+      remaining: null,
+      segmentAfter: null,
+      lastCreated: null,
+      lastPath: "",
+      errorCount: 0,
+      lastError: "",
+    };
+  }
+  return {
+    v: 1,
+    runId,
+    runPrefix,
+    statePath,
+    startedAt: now,
+    updatedAt: now,
+    phase: "pulling",
+    types,
+    currentTypeIndex: 0,
+    perType,
+    import: { domains: ["insumos", "fornecedores", "entradas", "desperdicios", "inventario", "pre_preparo", "fichas_tecnicas"], index: 0, status: "pending", lastError: "" },
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -161,7 +241,25 @@ export async function POST(req: NextRequest) {
     } catch {
       hasAnyFile = false;
     }
-    if (!hasAnyFile) return json({ ok: true, status: "no_files", prefix: bestPrefix }, { status: 200 });
+    if (!hasAnyFile) {
+      const baseUrl = getEnv("BUBBLE_BASE_URL");
+      const token = getEnv("BUBBLE_API_TOKEN");
+      if (!baseUrl || !token) return json({ ok: true, status: "no_files", prefix: bestPrefix }, { status: 200 });
+
+      const runId = crypto.randomUUID();
+      const runPrefix = `${userPrefix}/bootstrap/${runId}`;
+      const statePath = `${userPrefix}/bootstrap/sync-state.json`;
+
+      const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
+      if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+        return json({ ok: true, status: "running", mode: "sync", state: existing }, { status: 200 });
+      }
+
+      const types = buildAutoSyncTypes();
+      const state = newSyncState(runId, runPrefix, statePath, types);
+      await uploadJsonToStorage(supabase, bucket, statePath, state);
+      return json({ ok: true, status: "started", mode: "sync", state }, { status: 200 });
+    }
 
     const runId = crypto.randomUUID();
     const runPrefix = `${userPrefix}/bootstrap`;
@@ -170,7 +268,7 @@ export async function POST(req: NextRequest) {
 
     const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
     if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
-      return json({ ok: true, status: "running", state: existing }, { status: 200 });
+      return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
     }
 
     const now = new Date().toISOString();
@@ -211,9 +309,8 @@ export async function POST(req: NextRequest) {
     };
 
     await uploadJsonToStorage(supabase, bucket, statePath, state);
-    return json({ ok: true, status: "started", state }, { status: 200 });
+    return json({ ok: true, status: "started", mode: "rebuild", state }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

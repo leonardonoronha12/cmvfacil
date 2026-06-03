@@ -313,6 +313,48 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const computeBootstrapProgress = (state: any) => {
     const now = Date.now();
     const phase = String(state?.phase ?? "").trim();
+
+    const isSyncState = state?.perType && typeof state.perType === "object" && !Array.isArray(state.perType);
+    if (isSyncState) {
+      const pullingWeight = 0.65;
+      const importingWeight = 0.35;
+
+      const perType = state.perType as Record<string, any>;
+      const types = Array.isArray(state.types) ? (state.types as any[]).map((t) => String(t ?? "").trim()).filter(Boolean) : Object.keys(perType);
+      const totalTypes = types.length || 0;
+      const doneTypes = types.filter((t) => String(perType?.[t]?.status ?? "") === "done").length;
+      const runningType = types.find((t) => String(perType?.[t]?.status ?? "") === "pulling" || String(perType?.[t]?.status ?? "").includes("segment")) ?? null;
+      const pullingProgress = totalTypes ? Math.min(1, (doneTypes + (runningType ? 0.35 : 0)) / totalTypes) : 0;
+
+      const domains = Array.isArray(state.import?.domains) ? (state.import.domains as any[]).map((d) => String(d ?? "").trim()).filter(Boolean) : [];
+      const importIdx = typeof state.import?.index === "number" && Number.isFinite(state.import.index) ? Math.max(0, state.import.index) : 0;
+      const importingProgress = domains.length ? Math.min(1, (importIdx + (String(state.import?.status ?? "") === "running" ? 0.35 : 0)) / domains.length) : 0;
+
+      const stage =
+        phase === "pulling" ? "Buscando seus dados" : phase === "importing" ? "Organizando informações" : phase === "done" ? "Concluído" : "Atualizando";
+
+      const progress =
+        phase === "pulling"
+          ? Math.min(0.99, pullingWeight * pullingProgress)
+          : phase === "importing"
+            ? Math.min(0.99, pullingWeight + importingWeight * importingProgress)
+            : phase === "done"
+              ? 1
+              : Math.min(0.98, pullingWeight * pullingProgress);
+
+      const startedAt = typeof state.startedAt === "string" ? new Date(state.startedAt).getTime() : 0;
+      const elapsed = startedAt ? Math.max(0, now - startedAt) : 0;
+      const etaMs = (() => {
+        if (phase === "done") return 0;
+        const p = Math.max(0.02, Math.min(0.95, progress));
+        if (!elapsed) return null;
+        const totalEst = elapsed / p;
+        const remaining = totalEst - elapsed;
+        return Number.isFinite(remaining) && remaining > 0 ? Math.min(4 * 60 * 60_000, remaining) : null;
+      })();
+
+      return { progress, etaMs, stage, doneSteps: doneTypes, totalSteps: totalTypes, pendingSteps: Math.max(0, totalTypes - doneTypes), phase };
+    }
     const deletingWeight = 0.2;
     const importingWeight = 0.8;
 
@@ -487,6 +529,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         }
 
         const statePath = String(json?.state?.statePath ?? "");
+        const mode = String(json?.mode ?? "");
         if (!statePath) {
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
           return;
@@ -496,12 +539,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           window.sessionStorage.setItem("cmvfacil:bootstrapRunning", "1");
         } catch {}
 
+        const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
+
         for (let i = 0; i < 2000; i++) {
           await sleep(1200);
-          const tickRes = await fetch("/api/bubble-import/rebuild/tick", {
+          const tickRes = await fetch(tickUrl, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: JSON.stringify({ statePath }),
+            body: mode === "sync" ? JSON.stringify({ statePath, resume: true, maxOps: 12 }) : JSON.stringify({ statePath }),
             cache: "no-store",
           });
           const tickJson = (await tickRes.json().catch(() => null)) as any;
@@ -533,10 +578,11 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             return;
           }
           if (phase === "error") {
-            const msg =
-              String(tickJson?.state?.delete?.lastError ?? "") ||
-              String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
-              "failed";
+            const msg = mode === "sync"
+              ? String(tickJson?.state?.lastError ?? "") || String(tickJson?.state?.import?.lastError ?? "") || "failed"
+              : String(tickJson?.state?.delete?.lastError ?? "") ||
+                String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
+                "failed";
             setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
             try {
               window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
