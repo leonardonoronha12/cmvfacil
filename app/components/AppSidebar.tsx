@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
+import { bootstrapUserDataOnce } from "../lib/bootstrapUserData";
 import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import suporteStyles from "../suporte/suporte.module.css";
@@ -304,6 +305,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    try {
+      if (window.sessionStorage.getItem("cmvfacil:bootstrapRunning") === "1") return;
+    } catch {}
+    if (bootstrap.status === "running") return;
+    void bootstrapUserDataOnce();
+  }, [bootstrap.status]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 720px)");
