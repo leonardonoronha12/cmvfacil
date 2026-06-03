@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import LoadingSpinner from "../components/LoadingSpinner";
+import SystemToast from "../components/SystemToast";
 
 export default function CadastroUsuarioClient() {
   const router = useRouter();
@@ -18,15 +19,15 @@ export default function CadastroUsuarioClient() {
   const [password2, setPassword2] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
   const [emailConfirmationRequired, setEmailConfirmationRequired] = useState<boolean | null>(null);
   const [resending, setResending] = useState(false);
+  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error"; showActions?: boolean } | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
     setError(null);
-    setSuccess(false);
+    setToast(null);
     setEmailConfirmationRequired(null);
 
     if (!email.trim() || !password.trim()) {
@@ -59,8 +60,14 @@ export default function CadastroUsuarioClient() {
         setError(data?.details ?? data?.error ?? "Erro ao criar conta.");
         return;
       }
-      setSuccess(true);
-      setEmailConfirmationRequired(typeof data.emailConfirmationRequired === "boolean" ? data.emailConfirmationRequired : null);
+      const required = typeof data.emailConfirmationRequired === "boolean" ? data.emailConfirmationRequired : null;
+      setEmailConfirmationRequired(required);
+      setToast({
+        title: "Conta criada",
+        message: required === false ? "Você já pode fazer login." : "Verifique seu email para confirmar o cadastro.",
+        tone: "success",
+        showActions: true,
+      });
     } catch {
       setError("Erro ao criar conta.");
     } finally {
@@ -72,6 +79,7 @@ export default function CadastroUsuarioClient() {
     if (!email.trim() || resending) return;
     setResending(true);
     setError(null);
+    setToast(null);
     try {
       const res = await fetch("/api/auth/supabase-resend-signup", {
         method: "POST",
@@ -83,7 +91,12 @@ export default function CadastroUsuarioClient() {
         setError(data?.details ?? data?.error ?? "Erro ao reenviar email.");
         return;
       }
-      setSuccess(true);
+      setToast({
+        title: "Email reenviado",
+        message: "Enviamos um novo email. Verifique a caixa de entrada e também o SPAM/Lixo eletrônico.",
+        tone: "success",
+        showActions: true,
+      });
     } catch {
       setError("Erro ao reenviar email.");
     } finally {
@@ -108,41 +121,36 @@ export default function CadastroUsuarioClient() {
               <p className="cmv-signup-subtitle">Informe os dados do responsável nos campos abaixo.</p>
             </div>
 
-            {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
-            {success ? (
-              <div className="cmv-signup-success" role="status" aria-live="polite">
-                <div className="cmv-signup-success-top">
-                  <div className="cmv-signup-success-icon" aria-hidden>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                      <path d="M20 6 9 17l-5-5" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </div>
-                  <div className="cmv-signup-success-text">
-                    <div className="cmv-signup-success-title">Conta criada</div>
-                    <div className="cmv-signup-success-sub">
-                      {emailConfirmationRequired === false ? "Você já pode fazer login." : "Verifique seu email para confirmar o cadastro."}
-                    </div>
-                    {emailConfirmationRequired === false ? null : <div className="cmv-signup-success-hint">Dica: verifique também SPAM/Lixo eletrônico.</div>}
-                  </div>
-                </div>
-
-                <div className="cmv-signup-success-actions">
-                  <button type="button" className="cmv-signup-success-primary" onClick={() => router.replace("/login")}>
-                    Ir para Login
-                  </button>
-                  <button type="button" className="cmv-signup-success-secondary" onClick={resendConfirmation} disabled={resending}>
-                    {resending ? (
-                      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                        <LoadingSpinner size={16} />
-                        Reenviando…
-                      </span>
-                    ) : (
-                      "Reenviar email"
-                    )}
-                  </button>
-                </div>
-              </div>
+            {toast ? (
+              <SystemToast
+                title={toast.title}
+                message={toast.message}
+                tone={toast.tone}
+                onClose={() => setToast(null)}
+                actions={
+                  toast.showActions ? (
+                    <>
+                      <button type="button" className="cmv-button cmv-button-primary" onClick={() => router.replace("/login")}>
+                        Ir para Login
+                      </button>
+                      <button type="button" className="cmv-button" onClick={resendConfirmation} disabled={resending || emailConfirmationRequired === false}>
+                        {emailConfirmationRequired === false ? (
+                          "Email confirmado"
+                        ) : resending ? (
+                          <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                            <LoadingSpinner size={16} />
+                            Reenviando…
+                          </span>
+                        ) : (
+                          "Reenviar email"
+                        )}
+                      </button>
+                    </>
+                  ) : null
+                }
+              />
             ) : null}
+            {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
 
             <form className="cmv-signup-form" onSubmit={onSubmit}>
               <div className="cmv-signup-row2">

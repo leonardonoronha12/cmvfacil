@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import dash from "../dashboard/dashboard.module.css";
 
 type SystemToastTone = "success" | "error";
@@ -34,7 +35,7 @@ function IconClipboard() {
   );
 }
 
-export default function SystemToast(props: { title: string; message: string; tone: SystemToastTone; onClose: () => void }) {
+export default function SystemToast(props: { title: string; message: string; tone: SystemToastTone; onClose: () => void; actions?: ReactNode }) {
   const isSuccess = props.tone === "success";
   return (
     <div className={`${dash.hideAlert} ${isSuccess ? dash.hideAlertShow : ""}`} role="alert" aria-live="assertive">
@@ -47,6 +48,7 @@ export default function SystemToast(props: { title: string; message: string; ton
           <span className={dash.hideAlertTitle}>{props.title}</span>
         </div>
         {props.message ? <div className={dash.hideAlertText}>{props.message}</div> : null}
+        {props.actions ? <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>{props.actions}</div> : null}
       </div>
       <button type="button" className={dash.hideAlertClose} aria-label="Fechar alerta" onClick={props.onClose}>
         ×
@@ -54,4 +56,3 @@ export default function SystemToast(props: { title: string; message: string; ton
     </div>
   );
 }
-
