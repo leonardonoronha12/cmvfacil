@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
+import LoadingSpinner from "./LoadingSpinner";
 import { bootstrapUserDataOnce } from "../lib/bootstrapUserData";
 import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
@@ -287,7 +288,104 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string }>({ status: "idle", message: "" });
+  const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
+    { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
+  );
+
+  const formatEtaLabel = (ms: number | null) => {
+    if (!ms || !Number.isFinite(ms) || ms <= 0) return "";
+    const totalMin = Math.max(1, Math.round(ms / 60_000));
+    const hours = Math.floor(totalMin / 60);
+    const mins = totalMin % 60;
+    if (hours >= 1) return `~${hours}h ${mins}min`;
+    return `~${totalMin}min`;
+  };
+
+  const formatBootstrapErrorLabel = (raw: string) => {
+    const msg = String(raw ?? "").trim().toLowerCase();
+    if (!msg) return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
+    if (msg.includes("unauthorized") || msg.includes("401") || msg.includes("jwt")) return "Sessão expirada. Faça login novamente.";
+    if (msg.includes("forbidden") || msg.includes("403")) return "Não foi possível atualizar sua conta. Entre em contato com o suporte.";
+    if (msg.includes("timeout")) return "A atualização está demorando mais que o esperado. Tente novamente em instantes.";
+    return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
+  };
+
+  const computeBootstrapProgress = (state: any) => {
+    const now = Date.now();
+    const phase = String(state?.phase ?? "").trim();
+    const deletingWeight = 0.2;
+    const importingWeight = 0.8;
+
+    const tables = Array.isArray(state?.delete?.tables) ? (state.delete.tables as any[]) : [];
+    const deleteIndex = typeof state?.delete?.index === "number" && Number.isFinite(state.delete.index) ? Math.max(0, state.delete.index) : 0;
+    const deleteTotal = tables.length || 0;
+    const deleteDone = deleteTotal ? Math.min(deleteTotal, deleteIndex) : 0;
+    const deleteProgress = deleteTotal ? deleteDone / deleteTotal : 0;
+
+    const steps = Array.isArray(state?.steps) ? (state.steps as any[]) : [];
+    const totalSteps = steps.length || 0;
+    const doneSteps = steps.filter((s) => String(s?.status ?? "") === "done").length;
+    const runningStep = steps.find((s) => String(s?.status ?? "") === "running") ?? null;
+    const pendingSteps = steps.filter((s) => String(s?.status ?? "") === "pending").length;
+
+    const durations: number[] = [];
+    for (const s of steps) {
+      if (String(s?.status ?? "") !== "done") continue;
+      const started = typeof s?.startedAt === "string" ? new Date(s.startedAt).getTime() : 0;
+      const finished = typeof s?.finishedAt === "string" ? new Date(s.finishedAt).getTime() : 0;
+      if (!started || !finished) continue;
+      const d = finished - started;
+      if (Number.isFinite(d) && d > 0) durations.push(d);
+    }
+    const avgStepMs = (() => {
+      if (!durations.length) return 60_000;
+      const sum = durations.reduce((a, b) => a + b, 0);
+      const avg = sum / durations.length;
+      return Math.min(5 * 60_000, Math.max(8_000, avg));
+    })();
+    const runningElapsedMs = (() => {
+      if (!runningStep) return 0;
+      const started = typeof runningStep?.startedAt === "string" ? new Date(runningStep.startedAt).getTime() : 0;
+      if (!started) return 0;
+      return Math.max(0, now - started);
+    })();
+    const runningFrac = runningStep ? Math.min(0.9, Math.max(0, runningElapsedMs / avgStepMs)) : 0;
+    const importingProgress = totalSteps ? Math.min(1, (doneSteps + runningFrac) / totalSteps) : 0;
+
+    const stage =
+      phase === "deleting"
+        ? "Otimizando dados"
+        : phase === "importing"
+          ? "Carregando informações"
+          : phase === "done"
+            ? "Concluído"
+            : "Atualizando";
+
+    const progress =
+      phase === "deleting"
+        ? Math.min(0.99, deletingWeight * deleteProgress)
+        : phase === "importing"
+          ? Math.min(0.99, deletingWeight + importingWeight * importingProgress)
+          : phase === "done"
+            ? 1
+            : Math.min(0.98, deletingWeight + importingWeight * importingProgress);
+
+    const remainingDeleteMs = (() => {
+      if (!deleteTotal) return 0;
+      const remaining = Math.max(0, deleteTotal - deleteDone);
+      return remaining * 1500;
+    })();
+    const remainingImportMs = (() => {
+      if (!totalSteps) return 0;
+      const remainingPending = Math.max(0, totalSteps - doneSteps - (runningStep ? 1 : 0));
+      const currentRemaining = runningStep ? Math.max(0, avgStepMs - runningElapsedMs) : 0;
+      return remainingPending * avgStepMs + currentRemaining;
+    })();
+    const etaMs =
+      phase === "deleting" ? remainingDeleteMs + remainingImportMs : phase === "importing" ? remainingImportMs : phase === "done" ? 0 : remainingImportMs || null;
+
+    return { progress, etaMs, stage, doneSteps, totalSteps, pendingSteps, phase };
+  };
 
   useEffect(() => {
     setEtiquetas(readPrePreparoEtiquetasFromStore());
@@ -362,7 +460,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       // ignore
     }
 
-    setBootstrap({ status: "running", message: "Preparando seus dados..." });
+    setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando" });
     void (async () => {
       try {
         const res = await fetch("/api/bubble-import/ensure", {
@@ -374,7 +472,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const json = (await res.json().catch(() => null)) as any;
         if (!res.ok || !json?.ok) {
           const msg = String(json?.error ?? `failed_${res.status}`);
-          setBootstrap({ status: "error", message: msg });
+          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
           return;
         }
 
@@ -384,13 +482,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
             window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
           } catch {}
-          setBootstrap({ status: "done", message: "" });
+          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
           return;
         }
 
         const statePath = String(json?.state?.statePath ?? "");
         if (!statePath) {
-          setBootstrap({ status: "done", message: "" });
+          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
           return;
         }
 
@@ -409,12 +507,20 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const tickJson = (await tickRes.json().catch(() => null)) as any;
           if (!tickRes.ok || !tickJson?.ok) {
             const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
-            setBootstrap({ status: "error", message: msg });
+            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
             try {
               window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
             } catch {}
             return;
           }
+
+          const meta = computeBootstrapProgress(tickJson?.state ?? {});
+          setBootstrap((prev) => {
+            if (prev.status !== "running") return prev;
+            const nextProgress = Math.max(prev.progress, meta.progress || 0);
+            const etaMs = meta.etaMs && Number.isFinite(meta.etaMs) ? Math.max(0, meta.etaMs) : null;
+            return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage };
+          });
 
           const phase = String(tickJson?.state?.phase ?? "");
           if (phase === "done") {
@@ -422,7 +528,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               window.sessionStorage.setItem("cmvfacil:bootstrapDone", "1");
               window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
             } catch {}
-            setBootstrap({ status: "done", message: "" });
+            setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
             window.location.reload();
             return;
           }
@@ -431,7 +537,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               String(tickJson?.state?.delete?.lastError ?? "") ||
               String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
               "failed";
-            setBootstrap({ status: "error", message: msg });
+            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
             try {
               window.sessionStorage.removeItem("cmvfacil:bootstrapRunning");
             } catch {}
@@ -439,9 +545,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           }
         }
 
-        setBootstrap({ status: "error", message: "timeout" });
+        setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "" });
       } catch (err) {
-        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err) });
+        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "" });
       }
     })();
   }, [active, bootstrap.status]);
@@ -621,9 +727,35 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                   boxShadow: "0 18px 50px rgba(0,0,0,0.16)",
                 }}
               >
-                <div style={{ fontSize: 14, fontWeight: 700, color: "#01040e", marginBottom: 6 }}>Preparando seus dados</div>
-                <div style={{ fontSize: 13, color: "#292d2d", lineHeight: "18px" }}>
-                  Estamos importando seus arquivos para o Supabase. Isso pode levar alguns minutos.
+                <div style={{ display: "flex", alignItems: "center", columnGap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 18, height: 18 }}>
+                    <LoadingSpinner />
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#01040e" }}>Atualizando o sistema</div>
+                </div>
+
+                <div style={{ fontSize: 13, color: "#292d2d", lineHeight: "18px", marginBottom: 12 }}>
+                  Estamos sincronizando as informações da sua conta. Isso pode levar alguns minutos.
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "#111111", fontWeight: 700 }}>{bootstrap.stage ? bootstrap.stage : "Atualizando"}</div>
+                  <div style={{ fontSize: 12, color: "#292d2d" }}>
+                    {Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100)}% • Tempo estimado:{" "}
+                    {formatEtaLabel(bootstrap.etaMs) ? formatEtaLabel(bootstrap.etaMs) : "calculando..."}
+                  </div>
+                </div>
+
+                <div style={{ width: "100%", height: 10, borderRadius: 999, background: "#e9eeed", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100)}%`,
+                      height: "100%",
+                      borderRadius: 999,
+                      background: "linear-gradient(90deg, #0ab86d, #22c55e)",
+                      transition: "width 350ms ease",
+                    }}
+                  />
                 </div>
               </div>
             </div>,
@@ -643,7 +775,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
             }}
           >
-            Falha ao preparar seus dados: {bootstrap.message}
+            {formatBootstrapErrorLabel(bootstrap.message)}
           </div>
         </div>
       ) : null}
