@@ -137,8 +137,7 @@ async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabase
   let copied = 0;
   const errors: string[] = [];
   for (const f of dataFiles) {
-    const rel = f.path.startsWith(fromPrefix) ? f.path.slice(fromPrefix.length).replace(/^\/+/, "") : f.name;
-    const dest = `${toPrefix}/${rel}`.replace(/\/{2,}/g, "/");
+    const dest = `${toPrefix}/${f.name}`.replace(/\/{2,}/g, "/");
     if (typeof f.size === "number" && f.size > 25_000_000) {
       if (errors.length < 3) errors.push(`file_too_large:${f.name}`);
       continue;
