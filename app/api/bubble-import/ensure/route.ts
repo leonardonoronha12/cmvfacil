@@ -48,7 +48,9 @@ async function uploadJsonToStorage(supabase: ReturnType<typeof getSupabaseAdmin>
 
 function looksDataLikeFile(name: string) {
   const n = name.toLowerCase();
-  return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
+  if (n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls")) return true;
+  if (n.endsWith(".json") && !n.endsWith("state.json") && !n.endsWith("mapping.json")) return true;
+  return false;
 }
 
 async function listPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
