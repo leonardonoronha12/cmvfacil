@@ -457,7 +457,8 @@ export async function POST(req: NextRequest) {
       const statePath = `${userPrefix}/bootstrap/sync-state.json`;
 
       const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-      if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+      const existingSyncPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
+      if (existingSyncPhase && existingSyncPhase !== "done" && existingSyncPhase !== "error") {
         return json({ ok: true, status: "running", mode: "sync", state: existing }, { status: 200 });
       }
 
@@ -473,7 +474,8 @@ export async function POST(req: NextRequest) {
     const mappingPath = `${runPrefix}/ensure-mapping.json`;
 
     const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-    if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+    const existingRebuildPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
+    if (existingRebuildPhase && existingRebuildPhase !== "done" && existingRebuildPhase !== "error") {
       return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
     }
 
