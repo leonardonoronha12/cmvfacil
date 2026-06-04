@@ -62,7 +62,7 @@ async function listPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, bucket:
 }
 
 async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, prefix: string) {
-  const paths: { path: string; name: string; updated_at?: string }[] = [];
+  const paths: { path: string; name: string; updated_at?: string; size?: number }[] = [];
 
   async function walk(currentPrefix: string, depth: number) {
     if (depth > 6) return;
@@ -80,7 +80,8 @@ async function listAllPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
       }
       if (batch.length < 1000) break;
     }
-    for (const f of files) paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at });
+    for (const f of files)
+      paths.push({ path: `${currentPrefix}/${f.name}`, name: f.name, updated_at: (f as any).updated_at, size: (f as any)?.metadata?.size });
     for (const folder of folders) await walk(`${currentPrefix}/${folder.name}`, depth + 1);
   }
 
@@ -120,6 +121,15 @@ async function findLatestDumpPrefix(supabase: ReturnType<typeof getSupabaseAdmin
   return best?.prefix ?? null;
 }
 
+function contentTypeFromName(name: string) {
+  const n = String(name ?? "").toLowerCase();
+  if (n.endsWith(".csv")) return "text/csv";
+  if (n.endsWith(".xlsx")) return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+  if (n.endsWith(".xls")) return "application/vnd.ms-excel";
+  if (n.endsWith(".json")) return "application/json";
+  return "application/octet-stream";
+}
+
 async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabaseAdmin>; bucket: string; fromPrefix: string; toPrefix: string }) {
   const { supabase, bucket, fromPrefix, toPrefix } = args;
   const files = await listAllPaths(supabase, bucket, fromPrefix);
@@ -129,15 +139,50 @@ async function clonePrefixToUser(args: { supabase: ReturnType<typeof getSupabase
   for (const f of dataFiles) {
     const rel = f.path.startsWith(fromPrefix) ? f.path.slice(fromPrefix.length).replace(/^\/+/, "") : f.name;
     const dest = `${toPrefix}/${rel}`.replace(/\/{2,}/g, "/");
+    if (typeof f.size === "number" && f.size > 25_000_000) {
+      if (errors.length < 3) errors.push(`file_too_large:${f.name}`);
+      continue;
+    }
     try {
       const { error } = await supabase.storage.from(bucket).copy(f.path, dest);
-      if (error) {
-        if (errors.length < 3) errors.push(error.message);
+      if (!error) {
+        const { error: verifyError } = await supabase.storage.from(bucket).createSignedUrl(dest, 60);
+        if (!verifyError) {
+          copied += 1;
+          continue;
+        }
+      }
+    } catch (err) {
+      if (errors.length < 3) errors.push(err instanceof Error ? err.message : String(err));
+    }
+
+    try {
+      const dl = await supabase.storage.from(bucket).download(f.path);
+      if (dl.error || !dl.data) {
+        if (errors.length < 3) errors.push(dl.error?.message || "failed_to_download");
         continue;
       }
-      const { error: verifyError } = await supabase.storage.from(bucket).createSignedUrl(dest, 60);
-      if (verifyError) {
-        if (errors.length < 3) errors.push(verifyError.message);
+      const blob = dl.data as any;
+      const blobSize = typeof blob?.size === "number" ? blob.size : null;
+      if (blobSize != null && blobSize > 25_000_000) {
+        if (errors.length < 3) errors.push(`file_too_large:${f.name}`);
+        continue;
+      }
+      const buf = await dl.data.arrayBuffer();
+      if (buf.byteLength > 25_000_000) {
+        if (errors.length < 3) errors.push(`file_too_large:${f.name}`);
+        continue;
+      }
+      const { error: upErr } = await supabase.storage
+        .from(bucket)
+        .upload(dest, buf, { upsert: true, contentType: contentTypeFromName(f.name) } as any);
+      if (upErr) {
+        if (errors.length < 3) errors.push(upErr.message);
+        continue;
+      }
+      const { error: verifyErr2 } = await supabase.storage.from(bucket).createSignedUrl(dest, 60);
+      if (verifyErr2) {
+        if (errors.length < 3) errors.push(verifyErr2.message);
         continue;
       }
       copied += 1;
@@ -344,7 +389,8 @@ export async function POST(req: NextRequest) {
             const mappingPath = `${runPrefix}/ensure-mapping.json`;
 
             const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-            if (existing && typeof existing === "object" && (existing as any)?.phase && (existing as any)?.phase !== "done") {
+            const existingPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
+            if (existingPhase && existingPhase !== "done" && existingPhase !== "error") {
               return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
             }
 
