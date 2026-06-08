@@ -181,6 +181,21 @@ function typeSlug(typeName: string) {
     .slice(0, 90);
 }
 
+function isMissingTableError(err: any) {
+  const msg = String(err?.message ?? "").toLowerCase();
+  const code = String(err?.code ?? "").toLowerCase();
+  if (code === "42p01") return true;
+  if (msg.includes("does not exist")) return true;
+  if (msg.includes("relation") && msg.includes("does not exist")) return true;
+  return false;
+}
+
+function safeIdSegment(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+  return s.replace(/[^\w.-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 90);
+}
+
 function isTransient(status: number | null) {
   return status === 429 || status === 500 || status === 502 || status === 503 || status === 504 || status === 520 || status === 521 || status === 522 || status === 523 || status === 524;
 }
@@ -829,7 +844,35 @@ export async function POST(req: NextRequest) {
                   );
                   const stateId = `user:${uid}`;
                   const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
-                  if (error) throw new Error(`insumos_state:${error.message}`);
+                  if (error) {
+                    if (!isMissingTableError(error)) throw new Error(`insumos_state:${error.message}`);
+                    const prefix = `user:${uid}:`;
+                    const desired = insumosRows.map((r: any) => {
+                      const raw = String(r?.id ?? "").trim();
+                      const seg = safeIdSegment(raw) || crypto.randomUUID();
+                      return {
+                        id: `${prefix}insumo:${seg}`,
+                        item: String(r?.item ?? "").trim(),
+                        medida: String(r?.medida ?? "").trim() || "Und",
+                        custo_medio: String(r?.custoMedio ?? "").trim(),
+                        categoria: String(r?.categoria ?? "").trim(),
+                        especificacao: String(r?.especificacao ?? "").trim(),
+                        ocultar: Boolean(r?.ocultar),
+                      };
+                    });
+                    const { data: existing, error: listErr } = await supabase.from("insumos").select("id").like("id", `${prefix}%`).limit(8000);
+                    if (listErr) throw new Error(`insumos_list:${listErr.message}`);
+                    const keep = new Set(desired.map((d) => d.id));
+                    const toDelete = (existing ?? []).map((x: any) => String(x?.id ?? "").trim()).filter((x: string) => x && !keep.has(x));
+                    if (toDelete.length) {
+                      const { error: delErr } = await supabase.from("insumos").delete().in("id", toDelete);
+                      if (delErr) throw new Error(`insumos_delete:${delErr.message}`);
+                    }
+                    if (desired.length) {
+                      const { error: upErr } = await supabase.from("insumos").upsert(desired as any, { onConflict: "id" });
+                      if (upErr) throw new Error(`insumos_upsert:${upErr.message}`);
+                    }
+                  }
                 }
                 state.import.index = idx + 1;
                 state.import.lastError = "";

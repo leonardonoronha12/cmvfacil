@@ -67,6 +67,10 @@ export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreIte
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-  if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_save_${res.status}`);
+  const text = await res.text().catch(() => "");
+  const json = (text ? (JSON.parse(text) as any) : null) as { ok?: boolean; error?: string } | null;
+  if (!res.ok || !json?.ok) {
+    const msg = String(json?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_save_${res.status}`;
+    throw new Error(msg);
+  }
 }

@@ -133,6 +133,27 @@ export default function ImportarBubbleApiClient() {
   }, []);
 
   useEffect(() => {
+    try {
+      const savedBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+      const savedToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      if (savedBaseUrl && !baseUrl) setBaseUrl(savedBaseUrl);
+      if (savedToken && !token) setToken(savedToken);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (baseUrl) window.localStorage.setItem("cmvfacil:bubbleBaseUrl", baseUrl);
+    } catch {}
+  }, [baseUrl]);
+
+  useEffect(() => {
+    try {
+      if (token) window.localStorage.setItem("cmvfacil:bubbleToken", token);
+    } catch {}
+  }, [token]);
+
+  useEffect(() => {
     if (!isRunning) return;
     const t = window.setInterval(() => {
       void refreshCounts();

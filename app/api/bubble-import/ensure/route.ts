@@ -23,6 +23,20 @@ function getEnv(name: string) {
   return v || null;
 }
 
+function safeBaseUrl(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const noTrail = raw.replace(/\/+$/, "");
+  const stripped = noTrail.replace(/\/api\/1\.1\/obj$/i, "").replace(/\/api\/1\.1$/i, "");
+  if (!/^https?:\/\//i.test(stripped)) return `https://${stripped}`;
+  return stripped;
+}
+
+function safeToken(input: string) {
+  const t = String(input ?? "").trim();
+  return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -248,7 +262,35 @@ async function userHasAnyData(supabase: ReturnType<typeof getSupabaseAdmin>, use
   const stateId = `user:${userId}`;
   const prefix = `user:${userId}:`;
 
-  const hasState = async (table: string) => {
+  const hasNonEmptyState = async (table: string) => {
+    if (table === "insumos_state") {
+      const { data } = await supabase.from(table).select("payload").eq("id", stateId).maybeSingle();
+      const payload = (data as any)?.payload;
+      const rows = Array.isArray(payload?.rows) ? payload.rows : [];
+      for (const r of rows) {
+        if (!r || typeof r !== "object") continue;
+        const obj = r as any;
+        const id = String(obj.id ?? "").trim();
+        const item = String(obj.item ?? "").trim();
+        if (id && item) return true;
+      }
+      return false;
+    }
+    if (table === "fornecedores_state") {
+      const { data } = await supabase.from(table).select("info,produtos,equivalencias").eq("id", stateId).maybeSingle();
+      const info = (data as any)?.info;
+      const produtos = (data as any)?.produtos;
+      const equivalencias = (data as any)?.equivalencias;
+      const hasInfo = info && typeof info === "object" && Object.keys(info).length > 0;
+      const hasProdutos = produtos && typeof produtos === "object" && Object.keys(produtos).length > 0;
+      const hasEq = equivalencias && typeof equivalencias === "object" && Object.keys(equivalencias).length > 0;
+      return Boolean(hasInfo || hasProdutos || hasEq);
+    }
+    if (table === "pre_preparo_state" || table === "pre_preparo_etiquetas_state" || table === "fichas_tecnicas_state" || table === "fichas_tecnicas_etiquetas_state") {
+      const { data } = await supabase.from(table).select("payload").eq("id", stateId).maybeSingle();
+      const payload = (data as any)?.payload;
+      return Array.isArray(payload) ? payload.length > 0 : payload && typeof payload === "object" ? Object.keys(payload).length > 0 : false;
+    }
     const { data } = await supabase.from(table).select("id").eq("id", stateId).maybeSingle();
     return Boolean((data as any)?.id);
   };
@@ -258,16 +300,183 @@ async function userHasAnyData(supabase: ReturnType<typeof getSupabaseAdmin>, use
     return Array.isArray(data) && data.length > 0;
   };
 
-  if (await hasState("insumos_state")) return true;
-  if (await hasState("fornecedores_state")) return true;
-  if (await hasState("pre_preparo_state")) return true;
-  if (await hasState("fichas_tecnicas_state")) return true;
+  if (await hasNonEmptyState("insumos_state")) return true;
+  if (await hasNonEmptyState("fornecedores_state")) return true;
+  if (await hasNonEmptyState("pre_preparo_state")) return true;
+  if (await hasNonEmptyState("fichas_tecnicas_state")) return true;
+
+  try {
+    const { data } = await supabase.from("insumos").select("id").like("id", `${prefix}%`).limit(1);
+    if (Array.isArray(data) && data.length > 0) return true;
+  } catch {
+    // ignore
+  }
 
   if (await hasRowsLike("entradas", `${prefix}entrada:`)) return true;
   if (await hasRowsLike("inventario", `${prefix}inventario:`)) return true;
   if (await hasRowsLike("desperdicios", `${prefix}desperdicio:`)) return true;
 
   return false;
+}
+
+function extractUuidFromScopedId(input: string) {
+  const s = String(input ?? "").trim();
+  const m = s.match(/^user:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})(?=[:/]|$)/i);
+  return m ? String(m[1]).toLowerCase() : null;
+}
+
+function replaceUserScopeInString(value: string, fromUserId: string, toUserId: string) {
+  if (!value) return value;
+  const from = `user:${fromUserId}`;
+  if (!value.includes(from)) return value;
+  return value.split(from).join(`user:${toUserId}`);
+}
+
+function replaceUserScopeDeep(value: unknown, fromUserId: string, toUserId: string): unknown {
+  if (value == null) return value;
+  if (typeof value === "string") return replaceUserScopeInString(value, fromUserId, toUserId);
+  if (typeof value === "number" || typeof value === "boolean") return value;
+  if (Array.isArray(value)) return value.map((v) => replaceUserScopeDeep(v, fromUserId, toUserId));
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(obj)) out[k] = replaceUserScopeDeep(v, fromUserId, toUserId);
+    return out;
+  }
+  return value;
+}
+
+async function findSourceUserIdFromDb(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  try {
+    const { data } = await supabase.from("insumos_state").select("id,payload,updated_at").order("updated_at", { ascending: false }).limit(50);
+    for (const row of (data ?? []) as any[]) {
+      const uid = extractUuidFromScopedId(String(row?.id ?? ""));
+      const payload = row?.payload;
+      const rows = payload && typeof payload === "object" ? (payload as any).rows : null;
+      if (uid && Array.isArray(rows) && rows.length > 0) return uid;
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const { data } = await supabase.from("inventario").select("id,created_at").order("created_at", { ascending: false }).limit(50);
+    for (const row of (data ?? []) as any[]) {
+      const id = String(row?.id ?? "");
+      const m = id.match(/^user:([0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}):/i);
+      if (m) return String(m[1]).toLowerCase();
+    }
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+async function upsertInBatches<T extends Record<string, unknown>>(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, rows: T[], batchSize = 500) {
+  let inserted = 0;
+  for (let i = 0; i < rows.length; i += batchSize) {
+    const chunk = rows.slice(i, i + batchSize);
+    const { error } = await supabase.from(table).upsert(chunk as any, { onConflict: "id" });
+    if (error) throw new Error(error.message);
+    inserted += chunk.length;
+  }
+  return inserted;
+}
+
+function pickColumns(row: Record<string, unknown>, keys: string[]) {
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    if (k in row) out[k] = row[k];
+  }
+  return out;
+}
+
+async function cloneUserDataFromDb(args: { supabase: ReturnType<typeof getSupabaseAdmin>; fromUserId: string; toUserId: string }) {
+  const { supabase, fromUserId, toUserId } = args;
+  const fromStateId = `user:${fromUserId}`;
+  const toStateId = `user:${toUserId}`;
+  const fromPrefix = `user:${fromUserId}:`;
+  const toPrefix = `user:${toUserId}:`;
+
+  const result = {
+    sourceUserId: fromUserId,
+    targetUserId: toUserId,
+    states: { insumos_state: false, fornecedores_state: false, pre_preparo_state: false, pre_preparo_etiquetas_state: false, fichas_tecnicas_state: false },
+    lists: { inventario: 0, entradas: 0, desperdicios: 0 },
+  };
+
+  const copyState = async (table: string, cols: string[]) => {
+    const { data, error } = await supabase.from(table).select(cols.join(",")).eq("id", fromStateId).maybeSingle();
+    if (error || !data) return false;
+    const raw = data as any as Record<string, unknown>;
+    const picked = pickColumns(raw, cols);
+    picked.id = toStateId;
+    const replaced = replaceUserScopeDeep(picked, fromUserId, toUserId) as Record<string, unknown>;
+    const { error: upErr } = await supabase.from(table).upsert(replaced as any, { onConflict: "id" });
+    if (upErr) throw new Error(`${table}:${upErr.message}`);
+    return true;
+  };
+
+  try {
+    result.states.insumos_state = await copyState("insumos_state", ["id", "payload"]);
+  } catch {
+    result.states.insumos_state = false;
+  }
+  try {
+    result.states.fornecedores_state = await copyState("fornecedores_state", ["id", "info", "produtos", "equivalencias"]);
+  } catch {
+    result.states.fornecedores_state = false;
+  }
+  try {
+    result.states.pre_preparo_state = await copyState("pre_preparo_state", ["id", "payload"]);
+  } catch {
+    result.states.pre_preparo_state = false;
+  }
+  try {
+    result.states.pre_preparo_etiquetas_state = await copyState("pre_preparo_etiquetas_state", ["id", "payload"]);
+  } catch {
+    result.states.pre_preparo_etiquetas_state = false;
+  }
+  try {
+    result.states.fichas_tecnicas_state = await copyState("fichas_tecnicas_state", ["id", "payload"]);
+  } catch {
+    result.states.fichas_tecnicas_state = false;
+  }
+
+  const copyList = async (table: string, likeIdPrefix: string, cols: string[], batchSize: number) => {
+    const { data, error } = await supabase.from(table).select(cols.join(",")).like("id", `${likeIdPrefix}%`).limit(2000);
+    if (error || !Array.isArray(data) || !data.length) return 0;
+    const rows = (data as any[]).map((r) => {
+      const raw = r as Record<string, unknown>;
+      const picked = pickColumns(raw, cols);
+      const id = String(picked.id ?? "");
+      if (id && id.startsWith(fromPrefix)) picked.id = `${toPrefix}${id.slice(fromPrefix.length)}`;
+      return replaceUserScopeDeep(picked, fromUserId, toUserId) as Record<string, unknown>;
+    });
+    return await upsertInBatches(supabase, table, rows, batchSize);
+  };
+
+  try {
+    result.lists.inventario = await copyList("inventario", `${fromPrefix}inventario:`, ["id", "data", "categorias"], 100);
+  } catch {
+    result.lists.inventario = 0;
+  }
+  try {
+    result.lists.entradas = await copyList(
+      "entradas",
+      `${fromPrefix}entrada:`,
+      ["id", "numero", "dataLancamento", "fornecedor", "valorNota", "itens", "responsavel", "dataCriacao", "itensNota"],
+      300,
+    );
+  } catch {
+    result.lists.entradas = 0;
+  }
+  try {
+    result.lists.desperdicios = await copyList("desperdicios", `${fromPrefix}desperdicio:`, ["id", "data", "item", "quantidade", "custo", "motivo"], 500);
+  } catch {
+    result.lists.desperdicios = 0;
+  }
+
+  return result;
 }
 
 function prioritizeTypes(types: string[]) {
@@ -351,6 +560,10 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
+    const body = (await req.json().catch(() => null)) as any;
+    const baseUrl = safeBaseUrl(String(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? ""));
+    const token = safeToken(String(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? ""));
+
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
       supabase = getSupabaseAdmin();
@@ -362,163 +575,26 @@ export async function POST(req: NextRequest) {
     await ensureBucket(supabase, bucket);
 
     const already = await userHasAnyData(supabase, userId);
-    if (already) return json({ ok: true, status: "ready" }, { status: 200 });
+    if (already) return json({ ok: true, status: "ready", userId }, { status: 200 });
 
-    const userPrefix = `user:${userId}`;
-    const bestPrefix = await findBestImportPrefix(supabase, bucket, userPrefix);
-
-    let hasAnyFile = false;
-    try {
-      const root = await listPrefix(supabase, bucket, bestPrefix);
-      hasAnyFile = root.some((it) => (it as any)?.id != null && looksDataLikeFile(String(it?.name ?? "")));
-    } catch {
-      hasAnyFile = false;
-    }
-    if (!hasAnyFile) {
-      const baseUrl = getEnv("BUBBLE_BASE_URL");
-      const token = getEnv("BUBBLE_API_TOKEN");
-      if (!baseUrl || !token) {
-        const sourcePrefix = await findLatestDumpPrefix(supabase, bucket);
-        if (sourcePrefix) {
-          const cloneRunId = crypto.randomUUID();
-          const toPrefix = `${userPrefix}/bootstrap-seed/${cloneRunId}`;
-          const copied = await clonePrefixToUser({ supabase, bucket, fromPrefix: sourcePrefix, toPrefix });
-          if (copied.copied > 0) {
-            const runId = crypto.randomUUID();
-            const runPrefix = `${userPrefix}/bootstrap`;
-            const statePath = `${runPrefix}/ensure-state.json`;
-            const mappingPath = `${runPrefix}/ensure-mapping.json`;
-
-            const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-            const existingPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
-            if (existingPhase && existingPhase !== "done" && existingPhase !== "error") {
-              return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
-            }
-
-            const now = new Date().toISOString();
-            const stepsBase: Array<{ key: string; label: string; kinds: string[] }> = [
-              { key: "users", label: "Users", kinds: ["users"] },
-              { key: "empresas", label: "Empresas", kinds: ["empresas"] },
-              { key: "categorias", label: "Categorias", kinds: ["categorias"] },
-              { key: "insumos_custo_medio", label: "Insumos (Custo Médio)", kinds: ["custo_medio"] },
-              { key: "insumos_ingredientes", label: "Insumos (Ingredientes)", kinds: ["ingredientes"] },
-              { key: "insumos_itens", label: "Insumos (Itens)", kinds: ["itens"] },
-              { key: "fornecedores_info", label: "Fornecedores (Info)", kinds: ["fornecedores"] },
-              { key: "fornecedores_itens", label: "Fornecedores (Itens)", kinds: ["itens_fornecedores"] },
-              { key: "fornecedores_equivalencias", label: "Fornecedores (Equivalências)", kinds: ["equivalencias"] },
-              { key: "entradas_notas", label: "Entradas (Notas)", kinds: ["notas_fiscais"] },
-              { key: "entradas_itens", label: "Entradas (Itens)", kinds: ["itens_notas"] },
-              { key: "inventario", label: "Inventário", kinds: ["inventario"] },
-              { key: "desperdicios_motivos", label: "Desperdícios (Motivos)", kinds: ["motivos_desperdicios"] },
-              { key: "desperdicios", label: "Desperdícios", kinds: ["desperdicios"] },
-              { key: "pre_preparo", label: "Pré-preparo", kinds: ["pre_preparo", "pre_preparo_etiquetas"] },
-              { key: "fichas_tecnicas", label: "Fichas Técnicas", kinds: ["fichas_tecnicas"] },
-              { key: "unknown", label: "Desconhecidos", kinds: ["unknown"] },
-            ];
-
-            const state = {
-              v: 1,
-              runId,
-              runPrefix,
-              statePath,
-              mappingPath,
-              startedAt: now,
-              updatedAt: now,
-              phase: "importing",
-              storageOwnerUserId: userId,
-              prefix: toPrefix,
-              includeUnknown: true,
-              only: null as string[] | null,
-              steps: stepsBase.map((s) => ({ ...s, status: "pending", lastError: "", startedAt: null, finishedAt: null, lastResult: null })),
-            };
-
-            await uploadJsonToStorage(supabase, bucket, statePath, state);
-            return json({ ok: true, status: "started", mode: "rebuild", state }, { status: 200 });
-          }
-          return json(
-            {
-              ok: true,
-              status: "needs_setup",
-              prefix: bestPrefix,
-              reason: "seed_copy_failed",
-              sourcePrefix,
-              toPrefix,
-              attempted: copied.attempted,
-              copied: copied.copied,
-              errors: copied.errors,
-            },
-            { status: 200 },
-          );
-        }
-        return json({ ok: true, status: "needs_setup", prefix: bestPrefix, reason: "no_files_and_bubble_not_configured" }, { status: 200 });
-      }
-
-      const runId = crypto.randomUUID();
-      const runPrefix = `${userPrefix}/bootstrap/${runId}`;
-      const statePath = `${userPrefix}/bootstrap/sync-state.json`;
-
-      const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-      const existingSyncPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
-      if (existingSyncPhase && existingSyncPhase !== "done" && existingSyncPhase !== "error") {
-        return json({ ok: true, status: "running", mode: "sync", state: existing }, { status: 200 });
-      }
-
-      const types = buildAutoSyncTypes();
-      const state = newSyncState(runId, runPrefix, statePath, types);
-      await uploadJsonToStorage(supabase, bucket, statePath, state);
-      return json({ ok: true, status: "started", mode: "sync", state }, { status: 200 });
+    if (!baseUrl || !token) {
+      return json({ ok: true, status: "needs_setup", reason: "missing_bubble_credentials", userId }, { status: 200 });
     }
 
     const runId = crypto.randomUUID();
-    const runPrefix = `${userPrefix}/bootstrap`;
-    const statePath = `${runPrefix}/ensure-state.json`;
-    const mappingPath = `${runPrefix}/ensure-mapping.json`;
+    const runPrefix = `user:${userId}/bootstrap/${runId}`;
+    const statePath = `user:${userId}/bootstrap/sync-state.json`;
 
     const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
-    const existingRebuildPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
-    if (existingRebuildPhase && existingRebuildPhase !== "done" && existingRebuildPhase !== "error") {
-      return json({ ok: true, status: "running", mode: "rebuild", state: existing }, { status: 200 });
+    const existingSyncPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
+    if (existingSyncPhase && existingSyncPhase !== "done" && existingSyncPhase !== "error") {
+      return json({ ok: true, status: "running", mode: "sync", state: existing, userId }, { status: 200 });
     }
 
-    const now = new Date().toISOString();
-    const stepsBase: Array<{ key: string; label: string; kinds: string[] }> = [
-      { key: "users", label: "Users", kinds: ["users"] },
-      { key: "empresas", label: "Empresas", kinds: ["empresas"] },
-      { key: "categorias", label: "Categorias", kinds: ["categorias"] },
-      { key: "insumos_custo_medio", label: "Insumos (Custo Médio)", kinds: ["custo_medio"] },
-      { key: "insumos_ingredientes", label: "Insumos (Ingredientes)", kinds: ["ingredientes"] },
-      { key: "insumos_itens", label: "Insumos (Itens)", kinds: ["itens"] },
-      { key: "fornecedores_info", label: "Fornecedores (Info)", kinds: ["fornecedores"] },
-      { key: "fornecedores_itens", label: "Fornecedores (Itens)", kinds: ["itens_fornecedores"] },
-      { key: "fornecedores_equivalencias", label: "Fornecedores (Equivalências)", kinds: ["equivalencias"] },
-      { key: "entradas_notas", label: "Entradas (Notas)", kinds: ["notas_fiscais"] },
-      { key: "entradas_itens", label: "Entradas (Itens)", kinds: ["itens_notas"] },
-      { key: "inventario", label: "Inventário", kinds: ["inventario"] },
-      { key: "desperdicios_motivos", label: "Desperdícios (Motivos)", kinds: ["motivos_desperdicios"] },
-      { key: "desperdicios", label: "Desperdícios", kinds: ["desperdicios"] },
-      { key: "pre_preparo", label: "Pré-preparo", kinds: ["pre_preparo", "pre_preparo_etiquetas"] },
-      { key: "fichas_tecnicas", label: "Fichas Técnicas", kinds: ["fichas_tecnicas"] },
-      { key: "unknown", label: "Desconhecidos", kinds: ["unknown"] },
-    ];
-
-    const state = {
-      v: 1,
-      runId,
-      runPrefix,
-      statePath,
-      mappingPath,
-      startedAt: now,
-      updatedAt: now,
-      phase: "importing",
-      storageOwnerUserId: userId,
-      prefix: bestPrefix,
-      includeUnknown: true,
-      only: null as string[] | null,
-      steps: stepsBase.map((s) => ({ ...s, status: "pending", lastError: "", startedAt: null, finishedAt: null, lastResult: null })),
-    };
-
+    const types = buildAutoSyncTypes();
+    const state = newSyncState(runId, runPrefix, statePath, types);
     await uploadJsonToStorage(supabase, bucket, statePath, state);
-    return json({ ok: true, status: "started", mode: "rebuild", state }, { status: 200 });
+    return json({ ok: true, status: "started", mode: "sync", state, userId }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

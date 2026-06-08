@@ -291,8 +291,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
     { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
   );
-  const bootstrapDoneKey = "cmvfacil:bootstrapDone:v3";
-  const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v3";
+  const bootstrapDoneKey = "cmvfacil:bootstrapDone:v5";
+  const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v5";
 
   const formatEtaLabel = (ms: number | null) => {
     if (!ms || !Number.isFinite(ms) || ms <= 0) return "";
@@ -307,7 +307,12 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     const msg = String(raw ?? "").trim().toLowerCase();
     if (!msg) return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
     if (msg.includes("unauthorized") || msg.includes("401") || msg.includes("jwt")) return "Sessão expirada. Faça login novamente.";
+    if (msg.includes("supabase_not_configured")) return "Supabase não está configurado no servidor. Configure as envs (SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY).";
+    if (msg.includes("user_not_supabase_uuid")) return "Seu login atual não é compatível com a importação automática. Faça login usando a conta do Supabase.";
     if (msg.includes("forbidden") || msg.includes("403")) return "Não foi possível atualizar sua conta. Entre em contato com o suporte.";
+    if (msg.includes("missing_bubble_credentials") || msg.includes("missing_base_url") || msg.includes("missing_token")) {
+      return "Falta configurar o Bubble para importar via API. Vá em Ajustes → Importar Bubble via API e informe a URL e o token.";
+    }
     if (msg.includes("no_files_and_bubble_not_configured") || msg.includes("needs_setup") || msg === "no_files") {
       return "Não há dados do Bubble disponíveis para importar ainda. Vá em Ajustes → Importar Bubble (ou Importar Bubble via API) e rode a migração.";
     }
@@ -503,19 +508,20 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   useEffect(() => {
     if (active === "ajustes") return;
     if (bootstrap.status === "running") return;
-    try {
-      if (window.sessionStorage.getItem(bootstrapDoneKey) === "1") return;
-    } catch {
-      // ignore
-    }
 
     setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando" });
     void (async () => {
       try {
+        let bubbleBaseUrl = "";
+        let bubbleToken = "";
+        try {
+          bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+          bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+        } catch {}
         const res = await fetch("/api/bubble-import/ensure", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: "{}",
+          body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined }),
           cache: "no-store",
         });
         const json = (await res.json().catch(() => null)) as any;
@@ -528,9 +534,10 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const status = String(json?.status ?? "");
         if (status === "ready") {
           try {
-            window.sessionStorage.setItem(bootstrapDoneKey, "1");
             window.sessionStorage.removeItem(bootstrapRunningKey);
-          } catch {}
+          } catch {
+            // ignore
+          }
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
           return;
         }
@@ -552,13 +559,24 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         } catch {}
 
         const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
+        const importAsUserId = mode === "sync" ? String(json?.userId ?? "").trim() : "";
 
         for (let i = 0; i < 2000; i++) {
           await sleep(1200);
           const tickRes = await fetch(tickUrl, {
             method: "POST",
             headers: { "content-type": "application/json" },
-            body: mode === "sync" ? JSON.stringify({ statePath, resume: true, maxOps: 12 }) : JSON.stringify({ statePath }),
+            body:
+              mode === "sync"
+                ? JSON.stringify({
+                    statePath,
+                    resume: true,
+                    maxOps: 12,
+                    baseUrl: bubbleBaseUrl || undefined,
+                    token: bubbleToken || undefined,
+                    importAsUserId: importAsUserId || undefined,
+                  })
+                : JSON.stringify({ statePath }),
             cache: "no-store",
           });
           const tickJson = (await tickRes.json().catch(() => null)) as any;
@@ -582,7 +600,6 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const phase = String(tickJson?.state?.phase ?? "");
           if (phase === "done") {
             try {
-              window.sessionStorage.setItem(bootstrapDoneKey, "1");
               window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });

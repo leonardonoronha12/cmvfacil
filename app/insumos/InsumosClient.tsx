@@ -364,6 +364,106 @@ export default function InsumosClient() {
     return `Não foi possível salvar no Supabase (${msg}).`;
   }
 
+  function isBootstrapRunning() {
+    try {
+      return window.sessionStorage.getItem("cmvfacil:bootstrapRunning:v5") === "1";
+    } catch {
+      return false;
+    }
+  }
+
+  function maskToken(raw: string) {
+    const t = String(raw ?? "").trim();
+    if (!t) return "";
+    if (t.length <= 10) return `${t.slice(0, 3)}…`;
+    return `${t.slice(0, 6)}…${t.slice(-4)}`;
+  }
+
+  async function runAutoImportDiagnosis() {
+    setAutoImportDiag((prev) => ({ ...prev, loading: true, error: "" }));
+    try {
+      let bubbleBaseUrl = "";
+      let bubbleToken = "";
+      try {
+        bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
+
+      const meRes = await fetch("/api/auth/me", { method: "GET", cache: "no-store" });
+      const meJson = (await meRes.json().catch(() => null)) as any;
+      const meUserId = String(meJson?.userId ?? "").trim();
+
+      const statusRes = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
+      const statusText = await statusRes.text().catch(() => "");
+      let statusJson: any = null;
+      try {
+        statusJson = statusText ? JSON.parse(statusText) : null;
+      } catch {
+        statusJson = null;
+      }
+
+      if (!statusRes.ok) {
+        const msg = statusRes.status === 401 ? "Sem sessão no servidor (cookie de login não encontrado)." : `Falha ao consultar status (${statusRes.status}).`;
+        setAutoImportDiag({
+          loading: false,
+          meUserId,
+          bubbleBaseUrl,
+          bubbleTokenMasked: maskToken(bubbleToken),
+          statusJson,
+          error: msg,
+        });
+        return;
+      }
+
+      setAutoImportDiag({
+        loading: false,
+        meUserId,
+        bubbleBaseUrl,
+        bubbleTokenMasked: maskToken(bubbleToken),
+        statusJson,
+        error: "",
+      });
+    } catch (err) {
+      setAutoImportDiag((prev) => ({
+        ...prev,
+        loading: false,
+        error: err instanceof Error ? err.message : String(err),
+      }));
+    }
+  }
+
+  async function checkAutoImportStatusIfEmpty(nextRows: InsumoRow[]) {
+    if (nextRows.length) return;
+    try {
+      const res = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) {
+        const msg = res.status === 401 ? "Sem sessão no servidor para checar a importação automática." : `Falha ao checar importação (${res.status}).`;
+        showToast(msg, "error", 9000);
+        return;
+      }
+      if (json.userIdIsUuid === false) {
+        showToast("Login inválido para importação automática (userId não é UUID). Faça login pelo Supabase.", "error", 8000);
+        return;
+      }
+      if (json.supabaseAdminConfigured === false) {
+        showToast("Supabase (service role) não configurado no servidor. A importação automática não consegue rodar.", "error", 8000);
+        return;
+      }
+      const s = json.summary;
+      const phase = String(s?.phase ?? "");
+      const fetchedTotal = typeof s?.fetchedTotal === "number" ? s.fetchedTotal : null;
+      const importLastError = String(s?.importLastError ?? "").trim();
+      if (phase === "error" || importLastError) {
+        showToast(`Falha na importação automática (${importLastError || "error"}).`, "error", 9000);
+        return;
+      }
+      if (phase === "done" && fetchedTotal === 0) {
+        showToast("Importação automática concluiu, mas o Bubble retornou 0 registros. Verifique URL/token e os nomes dos tipos no Bubble.", "error", 10000);
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -389,6 +489,10 @@ export default function InsumosClient() {
         }));
         rowsReadyRef.current = true;
         setDataRows(mapped);
+        void checkAutoImportStatusIfEmpty(mapped);
+        if (!mapped.length) {
+          void runAutoImportDiagnosis();
+        }
 
         const fromRows = getUniqueCategoriesFromRows(mapped);
         const merged: string[] = [];
@@ -411,7 +515,10 @@ export default function InsumosClient() {
         setDataRows([]);
         setCategories([]);
         categoriesReadyRef.current = true;
-        window.alert("Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.");
+        const msg = err instanceof Error ? err.message : String(err);
+        window.alert(
+          `Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.\n\nDetalhes: ${msg}`,
+        );
       } finally {
         setIsLoadingTable(false);
       }
@@ -467,6 +574,7 @@ export default function InsumosClient() {
 
   useEffect(() => {
     if (!rowsReadyRef.current || !categoriesReadyRef.current) return;
+    if (isBootstrapRunning()) return;
     if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = window.setTimeout(() => {
       const storeRows = dataRows.map((r) => ({
@@ -520,6 +628,14 @@ export default function InsumosClient() {
     "especificacao",
   ]);
   const [draggingColumn, setDraggingColumn] = useState<null | "item" | "medida" | "custoMedio" | "categoria" | "especificacao">(null);
+  const [autoImportDiag, setAutoImportDiag] = useState<{
+    loading: boolean;
+    meUserId: string;
+    bubbleBaseUrl: string;
+    bubbleTokenMasked: string;
+    statusJson: any | null;
+    error: string;
+  }>({ loading: false, meUserId: "", bubbleBaseUrl: "", bubbleTokenMasked: "", statusJson: null, error: "" });
 
   function toggleOcultar(id: string) {
     setDataRows((prev) => {
@@ -537,6 +653,7 @@ export default function InsumosClient() {
           ocultar: r.ocultar,
         })),
       );
+      if (isBootstrapRunning()) return nextRows;
       void saveInsumosStateToSupabase({
         rows: nextRows.map((r) => ({
           id: r.id,
@@ -1383,6 +1500,54 @@ export default function InsumosClient() {
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
+                <div style={{ marginTop: 12, display: "grid", gap: 10, width: "100%", maxWidth: 720 }}>
+                  <div
+                    style={{
+                      background: "#f7faf9",
+                      border: "1px solid #dbe7e4",
+                      borderRadius: 12,
+                      padding: 12,
+                      textAlign: "left",
+                      color: "#0f172a",
+                      fontSize: 13,
+                      lineHeight: "18px",
+                    }}
+                  >
+                    <div style={{ fontWeight: 900, marginBottom: 6 }}>Diagnóstico (importação automática)</div>
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <div>
+                        <span style={{ fontWeight: 800 }}>UserId:</span> {autoImportDiag.meUserId ? autoImportDiag.meUserId : "—"}
+                      </div>
+                      <div>
+                        <span style={{ fontWeight: 800 }}>Bubble URL:</span> {autoImportDiag.bubbleBaseUrl ? autoImportDiag.bubbleBaseUrl : "—"}
+                      </div>
+                      <div>
+                        <span style={{ fontWeight: 800 }}>Bubble token:</span> {autoImportDiag.bubbleTokenMasked ? autoImportDiag.bubbleTokenMasked : "—"}
+                      </div>
+                      <div>
+                        <span style={{ fontWeight: 800 }}>Status:</span>{" "}
+                        {autoImportDiag.loading
+                          ? "checando..."
+                          : autoImportDiag.error
+                            ? autoImportDiag.error
+                            : autoImportDiag.statusJson?.summary
+                              ? `phase=${String(autoImportDiag.statusJson.summary.phase ?? "")} fetched=${String(autoImportDiag.statusJson.summary.fetchedTotal ?? "")} importError=${String(autoImportDiag.statusJson.summary.importLastError ?? "") || "—"}`
+                              : "sem estado"}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                      <button type="button" className="cmv-button" onClick={() => void runAutoImportDiagnosis()} disabled={autoImportDiag.loading}>
+                        {autoImportDiag.loading ? "Checando..." : "Rechecar"}
+                      </button>
+                      <a className="cmv-button" href="/ajustes/importar-bubble-api">
+                        Configurar Bubble
+                      </a>
+                      <a className="cmv-button" href="/api/bubble-import/status" target="_blank" rel="noreferrer">
+                        Abrir status (JSON)
+                      </a>
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : (
               visibleRows.map((r) => (
