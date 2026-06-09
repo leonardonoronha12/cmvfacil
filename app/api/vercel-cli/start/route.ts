@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
   const mode = body?.mode === "linkAndDeploy" ? "linkAndDeploy" : "deployLinked";
   const project = safeSlug(body?.project);
   const scope = safeSlug(body?.scope);
+  if (!scope) return json({ ok: false, error: "missing_scope" }, { status: 400 });
 
   const id = crypto.randomUUID();
   const job = createJob(id);
@@ -51,15 +52,15 @@ export async function POST(req: NextRequest) {
   const ps: string[] = [];
   ps.push("npx vercel --version");
   if (mode === "deployLinked") {
-    ps.push("npx vercel pull --yes --environment=production --token $env:VERCEL_TOKEN");
-    ps.push("npx vercel --prod --yes --token $env:VERCEL_TOKEN");
+    ps.push(`npx vercel pull --yes --environment=production --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else {
     const linkParts = ["npx vercel link --yes"];
     if (project) linkParts.push(`--project ${project}`);
-    if (scope) linkParts.push(`--scope ${scope}`);
+    linkParts.push(`--scope ${scope}`);
     linkParts.push("--token $env:VERCEL_TOKEN");
     ps.push(linkParts.join(" "));
-    ps.push("npx vercel --prod --yes --token $env:VERCEL_TOKEN");
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   }
 
   runPowershellJob(job, ps.join("; "), { VERCEL_TOKEN: token });

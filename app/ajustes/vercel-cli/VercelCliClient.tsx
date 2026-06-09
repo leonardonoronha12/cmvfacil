@@ -16,7 +16,7 @@ async function copy(text: string) {
 export default function VercelCliClient() {
   const [token, setToken] = useState("");
   const [projectHint, setProjectHint] = useState("cmvfacilrepo");
-  const [scopeHint, setScopeHint] = useState("");
+  const [scopeHint, setScopeHint] = useState("leonardonoronha12-2214s-projects");
   const [copiedKey, setCopiedKey] = useState("");
   const [autoRun, setAutoRun] = useState(true);
   const [mode, setMode] = useState<"deployLinked" | "linkAndDeploy">("linkAndDeploy");
@@ -32,21 +32,24 @@ export default function VercelCliClient() {
   const cmdSetToken = useMemo(() => `$env:VERCEL_TOKEN="${token.trim()}"`, [token]);
 
   const cmdDeployLinked = useMemo(() => {
+    const s = scopeHint.trim();
+    const scopeFlag = s ? ` --scope ${s}` : "";
     return [
       cmdSetToken,
       "npx vercel --version",
-      "npx vercel pull --yes --environment=production --token $env:VERCEL_TOKEN",
-      "npx vercel --prod --yes --token $env:VERCEL_TOKEN",
+      `npx vercel pull --yes --environment=production${scopeFlag} --token $env:VERCEL_TOKEN`,
+      `npx vercel --prod --yes${scopeFlag} --token $env:VERCEL_TOKEN`,
     ].join("\r\n");
-  }, [cmdSetToken]);
+  }, [cmdSetToken, scopeHint]);
 
   const cmdLinkAndDeploy = useMemo(() => {
     const p = projectHint.trim();
     const s = scopeHint.trim();
+    const scopeFlag = s ? ` --scope ${s}` : "";
     const link = ["npx vercel link --yes", p ? `--project ${p}` : "", s ? `--scope ${s}` : "", "--token $env:VERCEL_TOKEN"]
       .filter(Boolean)
       .join(" ");
-    return [cmdSetToken, "npx vercel --version", link, "npx vercel --prod --yes --token $env:VERCEL_TOKEN"].join("\r\n");
+    return [cmdSetToken, "npx vercel --version", link, `npx vercel --prod --yes${scopeFlag} --token $env:VERCEL_TOKEN`].join("\r\n");
   }, [cmdSetToken, projectHint, scopeHint]);
 
   async function copyWithToast(key: string, text: string) {
@@ -173,8 +176,16 @@ export default function VercelCliClient() {
           <input className="cmv-input" value={projectHint} onChange={(e) => setProjectHint(e.target.value)} placeholder="ex: cmvfacilrepo" />
 
           <label className="cmv-label">Scope (opcional)</label>
-          <div className="cmv-help">Use quando o projeto estiver em um time. Pode ser o slug do time/conta na Vercel.</div>
-          <input className="cmv-input" value={scopeHint} onChange={(e) => setScopeHint(e.target.value)} placeholder="ex: leonardonoronha12" />
+          <div className="cmv-help">
+            Em modo não-interativo (com <span className="cmv-code">--yes</span>), a Vercel exige <span className="cmv-code">--scope</span> quando não há
+            default. Para este projeto, use <span className="cmv-code">leonardonoronha12-2214s-projects</span>.
+          </div>
+          <input
+            className="cmv-input"
+            value={scopeHint}
+            onChange={(e) => setScopeHint(e.target.value)}
+            placeholder="ex: leonardonoronha12-2214s-projects"
+          />
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
             <button
