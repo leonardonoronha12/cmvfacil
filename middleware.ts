@@ -158,6 +158,10 @@ export async function middleware(req: NextRequest) {
     }
   }
 
+  if (pathname.startsWith("/api/")) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
   const url = req.nextUrl.clone();
   url.pathname = "/login";
   url.searchParams.set("next", pathname);

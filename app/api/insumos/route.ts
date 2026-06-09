@@ -32,7 +32,7 @@ function safeSegment(input: string) {
 export async function GET(req: NextRequest) {
   try {
     const { accessToken, id } = getUserScopedId(req);
-    if (!id) return json({ rows: [], categories: [] }, { status: 200 });
+    if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
     const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
     if (!error) {
