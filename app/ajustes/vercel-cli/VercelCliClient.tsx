@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function maskToken(raw: string) {
   const t = String(raw ?? "").trim();
@@ -18,6 +18,14 @@ export default function VercelCliClient() {
   const [projectHint, setProjectHint] = useState("cmvfacilrepo");
   const [scopeHint, setScopeHint] = useState("");
   const [copiedKey, setCopiedKey] = useState("");
+  const [autoRun, setAutoRun] = useState(true);
+  const [mode, setMode] = useState<"deployLinked" | "linkAndDeploy">("linkAndDeploy");
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [jobStatus, setJobStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
+  const [jobExitCode, setJobExitCode] = useState<number | null>(null);
+  const [jobOutput, setJobOutput] = useState("");
+  const [jobError, setJobError] = useState<string | null>(null);
+  const startedRef = useRef(false);
 
   const tokenMasked = useMemo(() => maskToken(token), [token]);
 
@@ -46,6 +54,72 @@ export default function VercelCliClient() {
     setCopiedKey(key);
     window.setTimeout(() => setCopiedKey((v) => (v === key ? "" : v)), 1200);
   }
+
+  async function startJob(explicitToken?: string) {
+    const t = String(explicitToken ?? token ?? "").trim();
+    if (!t) return;
+    setJobError(null);
+    setJobOutput("");
+    setJobExitCode(null);
+    setJobStatus("queued");
+    startedRef.current = true;
+    try {
+      const res = await fetch("/api/vercel-cli/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: t, mode, project: projectHint, scope: scopeHint }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
+      setJobId(String(data.jobId));
+      setJobStatus("running");
+      setToken("");
+    } catch (e) {
+      setJobError(e instanceof Error ? e.message : String(e));
+      setJobStatus("error");
+    }
+  }
+
+  async function stop() {
+    if (!jobId) return;
+    try {
+      await fetch("/api/vercel-cli/stop", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jobId }) });
+    } catch {}
+  }
+
+  useEffect(() => {
+    if (!jobId) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      const res = await fetch(`/api/vercel-cli/status?jobId=${encodeURIComponent(jobId)}`, { method: "GET", cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) return;
+      const j = data.job as any;
+      const st = String(j?.status ?? "").trim();
+      if (st === "queued" || st === "running" || st === "done" || st === "error") {
+        setJobStatus(st);
+      } else {
+        setJobStatus("running");
+      }
+      setJobExitCode(typeof j?.exitCode === "number" ? j.exitCode : null);
+      setJobOutput(String(j?.output ?? ""));
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 900);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [jobId]);
+
+  useEffect(() => {
+    const t = token.trim();
+    if (!autoRun) return;
+    if (!t) return;
+    if (startedRef.current) return;
+    void startJob(t);
+  }, [autoRun, token]);
 
   return (
     <main className="cmv-container">
@@ -77,6 +151,20 @@ export default function VercelCliClient() {
             autoComplete="off"
           />
 
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 800 }}>
+              <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
+              Executar automaticamente ao colar
+            </label>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 800 }}>Modo</span>
+              <select className="cmv-input" style={{ width: 240, paddingTop: 8, paddingBottom: 8 }} value={mode} onChange={(e) => setMode(e.target.value as any)}>
+                <option value="linkAndDeploy">Link + Deploy (recomendado)</option>
+                <option value="deployLinked">Deploy (repo já linkado)</option>
+              </select>
+            </div>
+          </div>
+
           <label className="cmv-label">Projeto (opcional)</label>
           <div className="cmv-help">
             Se o domínio <span className="cmv-code">cmvfacil.vercel.app</span> estiver apontando para outro projeto, preencha o nome do projeto para
@@ -105,13 +193,41 @@ export default function VercelCliClient() {
             >
               {copiedKey === "linkAndDeploy" ? "Copiado" : "Copiar link + deploy"}
             </button>
+            <button type="button" className="cmv-button cmv-button-primary" disabled={!token.trim() || jobStatus === "running" || jobStatus === "queued"} onClick={() => void startJob()}>
+              Executar agora
+            </button>
+            <button type="button" className="cmv-button" disabled={!jobId || jobStatus !== "running"} onClick={() => void stop()}>
+              Parar
+            </button>
           </div>
+
+          {jobError ? <div className="cmv-alert cmv-alert-error">Erro: {jobError}</div> : null}
         </section>
 
         <section className="cmv-card">
-          <div style={{ fontWeight: 900, fontSize: 13 }}>Terminal (PowerShell)</div>
+          <div style={{ fontWeight: 900, fontSize: 13 }}>Terminal (na tela)</div>
           <div className="cmv-help" style={{ marginTop: 6 }}>
-            Cole um dos blocos abaixo no terminal do Trae. O segundo bloco tenta “linkar” o repo no projeto correto antes de publicar.
+            Essa execução funciona só no preview local (localhost). Em produção, fica desativado por segurança.
+          </div>
+
+          <div className="cmv-preview" style={{ marginTop: 12 }}>
+            <div className="cmv-preview-title">
+              Status: <span className="cmv-code">{jobStatus}</span> {jobExitCode != null ? <span className="cmv-code">exit={jobExitCode}</span> : null}
+            </div>
+            <pre
+              style={{
+                margin: "10px 0 0",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: "var(--cmv-font-mono)",
+                fontSize: 12,
+                minHeight: 220,
+                maxHeight: 360,
+                overflow: "auto",
+              }}
+            >
+              {jobOutput || "Aguardando..."}
+            </pre>
           </div>
 
           <div className="cmv-preview" style={{ marginTop: 12 }}>
@@ -132,4 +248,3 @@ export default function VercelCliClient() {
     </main>
   );
 }
-
