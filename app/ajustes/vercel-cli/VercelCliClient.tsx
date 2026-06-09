@@ -41,6 +41,7 @@ export default function VercelCliClient() {
   const [cfgOutput, setCfgOutput] = useState("");
   const startedRef = useRef(false);
   const autoAliasedRef = useRef(false);
+  const cfgAliasedRef = useRef(false);
 
   const tokenMasked = useMemo(() => maskToken(token), [token]);
 
@@ -278,6 +279,17 @@ export default function VercelCliClient() {
     void startAliasJob(deploymentUrl);
     autoAliasedRef.current = true;
   }, [autoAlias, jobStatus, jobExitCode, jobOutput, token, scopeHint, aliasDomain, forceAlias]);
+
+  useEffect(() => {
+    if (!autoAlias) return;
+    if (cfgAliasedRef.current) return;
+    if (cfgStatus !== "done") return;
+    if (cfgExitCode !== 0) return;
+    const deploymentUrl = extractDeploymentUrl(cfgOutput);
+    if (!deploymentUrl) return;
+    void startAliasJob(deploymentUrl);
+    cfgAliasedRef.current = true;
+  }, [autoAlias, cfgStatus, cfgExitCode, cfgOutput, token, scopeHint, aliasDomain, forceAlias]);
 
   return (
     <main className="cmv-container">
