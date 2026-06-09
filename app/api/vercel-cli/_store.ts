@@ -14,11 +14,42 @@ export type VercelCliJob = {
 };
 
 const KEY = "__cmvfacil_vercel_cli_jobs__";
+const SECRETS_KEY = "__cmvfacil_vercel_cli_secrets__";
+const SECRETS_TTL_MS = 20 * 60 * 1000;
 
 function getStore(): Map<string, VercelCliJob> {
   const g = globalThis as any;
   if (!g[KEY]) g[KEY] = new Map<string, VercelCliJob>();
   return g[KEY] as Map<string, VercelCliJob>;
+}
+
+export type VercelCliSecrets = {
+  updatedAt: number;
+  token?: string;
+  scope?: string;
+  project?: string;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
+  supabaseServiceRoleKey?: string;
+};
+
+function getSecretsStore(): VercelCliSecrets {
+  const g = globalThis as any;
+  if (!g[SECRETS_KEY]) g[SECRETS_KEY] = { updatedAt: 0 } satisfies VercelCliSecrets;
+  return g[SECRETS_KEY] as VercelCliSecrets;
+}
+
+export function setLastSecrets(patch: Omit<VercelCliSecrets, "updatedAt">) {
+  const s = getSecretsStore();
+  Object.assign(s, patch);
+  s.updatedAt = Date.now();
+}
+
+export function getLastSecrets(): VercelCliSecrets | null {
+  const s = getSecretsStore();
+  if (!s.updatedAt) return null;
+  if (Date.now() - s.updatedAt > SECRETS_TTL_MS) return null;
+  return s;
 }
 
 export function createJob(id: string): VercelCliJob {
@@ -81,4 +112,3 @@ export function stopJob(job: VercelCliJob) {
     job.proc?.kill();
   } catch {}
 }
-

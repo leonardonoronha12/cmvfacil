@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createJob, runPowershellJob } from "../_store";
+import { createJob, getLastSecrets, runPowershellJob, setLastSecrets } from "../_store";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -52,7 +52,8 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
-  const token = String(body?.token ?? "").trim();
+  const last = getLastSecrets();
+  const token = String(body?.token ?? last?.token ?? "").trim();
   if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
   const mode =
@@ -85,8 +86,31 @@ export async function POST(req: NextRequest) {
 
   if (mode === "setEnvAndDeploy") {
     if (!project) return json({ ok: false, error: "missing_project" }, { status: 400 });
-    if (!supabaseUrl) return json({ ok: false, error: "missing_supabase_url" }, { status: 400 });
-    if (!supabaseAnonKey) return json({ ok: false, error: "missing_supabase_anon_key" }, { status: 400 });
+    const resolvedSupabaseUrl = supabaseUrl || String(last?.supabaseUrl ?? "").trim();
+    const resolvedAnonKey = supabaseAnonKey || String(last?.supabaseAnonKey ?? "").trim();
+    const resolvedServiceRoleKey = supabaseServiceRoleKey || String(last?.supabaseServiceRoleKey ?? "").trim();
+    if (!resolvedSupabaseUrl) return json({ ok: false, error: "missing_supabase_url" }, { status: 400 });
+    if (!resolvedAnonKey) return json({ ok: false, error: "missing_supabase_anon_key" }, { status: 400 });
+
+    setLastSecrets({
+      token,
+      scope,
+      project,
+      supabaseUrl: resolvedSupabaseUrl,
+      supabaseAnonKey: resolvedAnonKey,
+      supabaseServiceRoleKey: resolvedServiceRoleKey || undefined,
+    });
+  }
+
+  if (body?.token || body?.supabaseUrl || body?.supabaseAnonKey || body?.supabaseServiceRoleKey || body?.scope || body?.project) {
+    setLastSecrets({
+      token: body?.token ? token : undefined,
+      scope: body?.scope ? scope : undefined,
+      project: body?.project ? project : undefined,
+      supabaseUrl: body?.supabaseUrl ? supabaseUrl : undefined,
+      supabaseAnonKey: body?.supabaseAnonKey ? supabaseAnonKey : undefined,
+      supabaseServiceRoleKey: body?.supabaseServiceRoleKey ? supabaseServiceRoleKey : undefined,
+    });
   }
 
   const id = crypto.randomUUID();
@@ -95,6 +119,9 @@ export async function POST(req: NextRequest) {
   const ps: string[] = [];
   ps.push("npx vercel --version");
   if (mode === "setEnvAndDeploy") {
+    const resolvedSupabaseUrl = String((body?.supabaseUrl ?? last?.supabaseUrl) ?? "").trim();
+    const resolvedAnonKey = String((body?.supabaseAnonKey ?? last?.supabaseAnonKey) ?? "").trim();
+    const resolvedServiceRoleKey = String((body?.supabaseServiceRoleKey ?? last?.supabaseServiceRoleKey) ?? "").trim();
     ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`Write-Output 'Setting SUPABASE_URL...'`);
     ps.push(
@@ -109,7 +136,7 @@ export async function POST(req: NextRequest) {
     ps.push(
       `npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --value "$env:CMV_SUPABASE_ANON_KEY" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
-    if (supabaseServiceRoleKey) {
+    if (resolvedServiceRoleKey) {
       ps.push(
         `Write-Output 'Setting SUPABASE_SERVICE_ROLE_KEY...'`,
       );
@@ -134,11 +161,15 @@ export async function POST(req: NextRequest) {
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   }
 
+  const resolvedSupabaseUrl = String((body?.supabaseUrl ?? last?.supabaseUrl) ?? "").trim();
+  const resolvedAnonKey = String((body?.supabaseAnonKey ?? last?.supabaseAnonKey) ?? "").trim();
+  const resolvedServiceRoleKey = String((body?.supabaseServiceRoleKey ?? last?.supabaseServiceRoleKey) ?? "").trim();
+
   runPowershellJob(job, ps.join("; "), {
     VERCEL_TOKEN: token,
-    CMV_SUPABASE_URL: stripLineBreaks(supabaseUrl),
-    CMV_SUPABASE_ANON_KEY: stripLineBreaks(supabaseAnonKey),
-    CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(supabaseServiceRoleKey),
+    CMV_SUPABASE_URL: stripLineBreaks(resolvedSupabaseUrl),
+    CMV_SUPABASE_ANON_KEY: stripLineBreaks(resolvedAnonKey),
+    CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(resolvedServiceRoleKey),
   });
 
   return json({ ok: true, jobId: id }, { status: 200 });
