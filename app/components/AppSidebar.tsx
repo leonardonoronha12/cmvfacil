@@ -325,6 +325,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (msg.includes("missing_bubble_credentials") || msg.includes("missing_base_url") || msg.includes("missing_token")) {
       return "Falta configurar o Bubble para importar via API. Vá em Ajustes → Importar Bubble via API e informe a URL e o token.";
     }
+    if (msg.includes("import_done_but_empty")) {
+      return "A importação automática concluiu, mas não encontrou dados. Verifique a URL/token do Bubble e se os tipos estão corretos (ex.: Ingredientes/item). Depois rode novamente em Ajustes → Importar Bubble via API.";
+    }
     if (msg.includes("no_files_and_bubble_not_configured") || msg.includes("needs_setup") || msg === "no_files") {
       return "Não há dados do Bubble disponíveis para importar ainda. Vá em Ajustes → Importar Bubble (ou Importar Bubble via API) e rode a migração.";
     }
