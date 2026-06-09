@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
   ps.push("npx vercel --version");
   if (mode === "alias") {
     if (forceAlias) ps.push(`npx vercel alias rm ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
-    ps.push(`npx vercel alias set ${deploymentUrl} ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`npx vercel alias set https://${deploymentUrl} ${aliasDomain} --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "deployLinked") {
     ps.push(`npx vercel pull --yes --environment=production --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);

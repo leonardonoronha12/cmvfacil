@@ -64,7 +64,7 @@ export default function VercelCliClient() {
     const s = scopeHint.trim();
     const scopeFlag = s ? ` --scope ${s}` : "";
     const rm = forceAlias ? `npx vercel alias rm ${aliasDomain.trim()} --yes${scopeFlag} --token $env:VERCEL_TOKEN` : "";
-    const set = `npx vercel alias set <deployment-url> ${aliasDomain.trim()} --yes${scopeFlag} --token $env:VERCEL_TOKEN`;
+    const set = `npx vercel alias set <deployment-url> ${aliasDomain.trim()}${scopeFlag} --token $env:VERCEL_TOKEN`;
     return [cmdSetToken, "npx vercel --version", rm, set].filter(Boolean).join("\r\n");
   }, [cmdSetToken, scopeHint, aliasDomain, forceAlias]);
 
