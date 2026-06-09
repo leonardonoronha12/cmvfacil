@@ -23,9 +23,12 @@ function safeSlug(input: unknown) {
 
 type Body = {
   token?: string;
-  mode?: "deployLinked" | "linkAndDeploy";
+  mode?: "deployLinked" | "linkAndDeploy" | "alias";
   project?: string;
   scope?: string;
+  deploymentUrl?: string;
+  aliasDomain?: string;
+  forceAlias?: boolean;
 };
 
 export async function POST(req: NextRequest) {
@@ -41,17 +44,32 @@ export async function POST(req: NextRequest) {
   const token = String(body?.token ?? "").trim();
   if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
-  const mode = body?.mode === "linkAndDeploy" ? "linkAndDeploy" : "deployLinked";
+  const mode = body?.mode === "alias" ? "alias" : body?.mode === "linkAndDeploy" ? "linkAndDeploy" : "deployLinked";
   const project = safeSlug(body?.project);
   const scope = safeSlug(body?.scope);
   if (!scope) return json({ ok: false, error: "missing_scope" }, { status: 400 });
+
+  const rawDeploymentUrl = String(body?.deploymentUrl ?? "").trim();
+  const deploymentUrl = rawDeploymentUrl.replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+  const aliasDomain = String(body?.aliasDomain ?? "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "").trim();
+  const forceAlias = Boolean(body?.forceAlias);
+
+  const isHost = (value: string) => /^[a-z0-9][a-z0-9.-]{0,250}[a-z0-9]$/i.test(value) && !value.includes("..");
+
+  if (mode === "alias") {
+    if (!deploymentUrl || !isHost(deploymentUrl)) return json({ ok: false, error: "invalid_deployment_url" }, { status: 400 });
+    if (!aliasDomain || !isHost(aliasDomain)) return json({ ok: false, error: "invalid_alias_domain" }, { status: 400 });
+  }
 
   const id = crypto.randomUUID();
   const job = createJob(id);
 
   const ps: string[] = [];
   ps.push("npx vercel --version");
-  if (mode === "deployLinked") {
+  if (mode === "alias") {
+    if (forceAlias) ps.push(`npx vercel alias rm ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`npx vercel alias set ${deploymentUrl} ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+  } else if (mode === "deployLinked") {
     ps.push(`npx vercel pull --yes --environment=production --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else {

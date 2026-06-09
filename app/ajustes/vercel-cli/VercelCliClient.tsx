@@ -19,13 +19,21 @@ export default function VercelCliClient() {
   const [scopeHint, setScopeHint] = useState("leonardonoronha12-2214s-projects");
   const [copiedKey, setCopiedKey] = useState("");
   const [autoRun, setAutoRun] = useState(true);
+  const [autoAlias, setAutoAlias] = useState(true);
+  const [aliasDomain, setAliasDomain] = useState("cmvfacil.vercel.app");
+  const [forceAlias, setForceAlias] = useState(true);
   const [mode, setMode] = useState<"deployLinked" | "linkAndDeploy">("linkAndDeploy");
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
   const [jobExitCode, setJobExitCode] = useState<number | null>(null);
   const [jobOutput, setJobOutput] = useState("");
   const [jobError, setJobError] = useState<string | null>(null);
+  const [aliasJobId, setAliasJobId] = useState<string | null>(null);
+  const [aliasStatus, setAliasStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
+  const [aliasExitCode, setAliasExitCode] = useState<number | null>(null);
+  const [aliasOutput, setAliasOutput] = useState("");
   const startedRef = useRef(false);
+  const autoAliasedRef = useRef(false);
 
   const tokenMasked = useMemo(() => maskToken(token), [token]);
 
@@ -52,6 +60,14 @@ export default function VercelCliClient() {
     return [cmdSetToken, "npx vercel --version", link, `npx vercel --prod --yes${scopeFlag} --token $env:VERCEL_TOKEN`].join("\r\n");
   }, [cmdSetToken, projectHint, scopeHint]);
 
+  const cmdAlias = useMemo(() => {
+    const s = scopeHint.trim();
+    const scopeFlag = s ? ` --scope ${s}` : "";
+    const rm = forceAlias ? `npx vercel alias rm ${aliasDomain.trim()} --yes${scopeFlag} --token $env:VERCEL_TOKEN` : "";
+    const set = `npx vercel alias set <deployment-url> ${aliasDomain.trim()} --yes${scopeFlag} --token $env:VERCEL_TOKEN`;
+    return [cmdSetToken, "npx vercel --version", rm, set].filter(Boolean).join("\r\n");
+  }, [cmdSetToken, scopeHint, aliasDomain, forceAlias]);
+
   async function copyWithToast(key: string, text: string) {
     await copy(text);
     setCopiedKey(key);
@@ -76,12 +92,72 @@ export default function VercelCliClient() {
       if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
       setJobId(String(data.jobId));
       setJobStatus("running");
-      setToken("");
     } catch (e) {
       setJobError(e instanceof Error ? e.message : String(e));
       setJobStatus("error");
     }
   }
+
+  const extractDeploymentUrl = (output: string) => {
+    const text = String(output ?? "");
+    const m = text.match(/▲\s*Production\s+`https:\/\/([^`]+)`/i);
+    if (m?.[1]) return m[1].trim();
+    const m2 = text.match(/"url"\s*:\s*"\s*`https:\/\/([^`]+)`\s*"/i);
+    if (m2?.[1]) return m2[1].trim();
+    const m3 = text.match(/https:\/\/([a-z0-9-]+\.vercel\.app)/i);
+    if (m3?.[1]) return m3[1].trim();
+    return "";
+  };
+
+  async function startAliasJob(deploymentUrl: string) {
+    const t = token.trim();
+    const s = scopeHint.trim();
+    const a = aliasDomain.trim();
+    if (!t || !s || !a || !deploymentUrl) return;
+    setAliasOutput("");
+    setAliasExitCode(null);
+    setAliasStatus("queued");
+    try {
+      const res = await fetch("/api/vercel-cli/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: t, mode: "alias", scope: s, deploymentUrl, aliasDomain: a, forceAlias }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
+      setAliasJobId(String(data.jobId));
+      setAliasStatus("running");
+    } catch (e) {
+      setAliasOutput(String(e instanceof Error ? e.message : e));
+      setAliasStatus("error");
+    }
+  }
+
+  useEffect(() => {
+    if (!aliasJobId) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      const res = await fetch(`/api/vercel-cli/status?jobId=${encodeURIComponent(aliasJobId)}`, { method: "GET", cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) return;
+      const j = data.job as any;
+      const st = String(j?.status ?? "").trim();
+      if (st === "queued" || st === "running" || st === "done" || st === "error") {
+        setAliasStatus(st);
+      } else {
+        setAliasStatus("running");
+      }
+      setAliasExitCode(typeof j?.exitCode === "number" ? j.exitCode : null);
+      setAliasOutput(String(j?.output ?? ""));
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 900);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [aliasJobId]);
 
   async function stop() {
     if (!jobId) return;
@@ -124,6 +200,17 @@ export default function VercelCliClient() {
     void startJob(t);
   }, [autoRun, token]);
 
+  useEffect(() => {
+    if (!autoAlias) return;
+    if (autoAliasedRef.current) return;
+    if (jobStatus !== "done") return;
+    if (jobExitCode !== 0) return;
+    const deploymentUrl = extractDeploymentUrl(jobOutput);
+    if (!deploymentUrl) return;
+    void startAliasJob(deploymentUrl);
+    autoAliasedRef.current = true;
+  }, [autoAlias, jobStatus, jobExitCode, jobOutput, token, scopeHint, aliasDomain, forceAlias]);
+
   return (
     <main className="cmv-container">
       <header className="cmv-header">
@@ -159,6 +246,10 @@ export default function VercelCliClient() {
               <input type="checkbox" checked={autoRun} onChange={(e) => setAutoRun(e.target.checked)} />
               Executar automaticamente ao colar
             </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 800 }}>
+              <input type="checkbox" checked={autoAlias} onChange={(e) => setAutoAlias(e.target.checked)} />
+              Após deploy, apontar cmvfacil.vercel.app
+            </label>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 800 }}>Modo</span>
               <select className="cmv-input" style={{ width: 240, paddingTop: 8, paddingBottom: 8 }} value={mode} onChange={(e) => setMode(e.target.value as any)}>
@@ -186,6 +277,14 @@ export default function VercelCliClient() {
             onChange={(e) => setScopeHint(e.target.value)}
             placeholder="ex: leonardonoronha12-2214s-projects"
           />
+
+          <label className="cmv-label">Domínio para apontar (alias)</label>
+          <div className="cmv-help">Se esse domínio já estiver preso em outro projeto, marque “Forçar”.</div>
+          <input className="cmv-input" value={aliasDomain} onChange={(e) => setAliasDomain(e.target.value)} placeholder="ex: cmvfacil.vercel.app" />
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 800, marginTop: 10 }}>
+            <input type="checkbox" checked={forceAlias} onChange={(e) => setForceAlias(e.target.checked)} />
+            Forçar (remove alias atual antes)
+          </label>
 
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
             <button
@@ -242,6 +341,37 @@ export default function VercelCliClient() {
           </div>
 
           <div className="cmv-preview" style={{ marginTop: 12 }}>
+            <div className="cmv-preview-title">
+              Alias: <span className="cmv-code">{aliasStatus}</span>{" "}
+              {aliasExitCode != null ? <span className="cmv-code">exit={aliasExitCode}</span> : null}
+            </div>
+            <pre
+              style={{
+                margin: "10px 0 0",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontFamily: "var(--cmv-font-mono)",
+                fontSize: 12,
+                minHeight: 120,
+                maxHeight: 260,
+                overflow: "auto",
+              }}
+            >
+              {aliasOutput || "Aguardando..."}
+            </pre>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+              <button
+                type="button"
+                className="cmv-button cmv-button-primary"
+                disabled={!token.trim() || aliasStatus === "running" || jobStatus !== "done" || jobExitCode !== 0}
+                onClick={() => void startAliasJob(extractDeploymentUrl(jobOutput))}
+              >
+                Executar alias agora
+              </button>
+            </div>
+          </div>
+
+          <div className="cmv-preview" style={{ marginTop: 12 }}>
             <div className="cmv-preview-title">Deploy no projeto já linkado neste repo</div>
             <pre style={{ margin: "10px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--cmv-font-mono)", fontSize: 12 }}>
               {cmdDeployLinked}
@@ -252,6 +382,13 @@ export default function VercelCliClient() {
             <div className="cmv-preview-title">Forçar link + deploy (quando o domínio está em outro projeto)</div>
             <pre style={{ margin: "10px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--cmv-font-mono)", fontSize: 12 }}>
               {cmdLinkAndDeploy}
+            </pre>
+          </div>
+
+          <div className="cmv-preview" style={{ marginTop: 12 }}>
+            <div className="cmv-preview-title">Alias (apontar domínio para um deployment)</div>
+            <pre style={{ margin: "10px 0 0", whiteSpace: "pre-wrap", wordBreak: "break-word", fontFamily: "var(--cmv-font-mono)", fontSize: 12 }}>
+              {cmdAlias}
             </pre>
           </div>
         </section>
