@@ -32,6 +32,13 @@ export default function VercelCliClient() {
   const [aliasStatus, setAliasStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
   const [aliasExitCode, setAliasExitCode] = useState<number | null>(null);
   const [aliasOutput, setAliasOutput] = useState("");
+  const [supabaseUrl, setSupabaseUrl] = useState("");
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState("");
+  const [supabaseServiceRoleKey, setSupabaseServiceRoleKey] = useState("");
+  const [cfgJobId, setCfgJobId] = useState<string | null>(null);
+  const [cfgStatus, setCfgStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
+  const [cfgExitCode, setCfgExitCode] = useState<number | null>(null);
+  const [cfgOutput, setCfgOutput] = useState("");
   const startedRef = useRef(false);
   const autoAliasedRef = useRef(false);
 
@@ -133,6 +140,41 @@ export default function VercelCliClient() {
     }
   }
 
+  async function startSupabaseConfigJob() {
+    const t = token.trim();
+    const s = scopeHint.trim();
+    const p = projectHint.trim();
+    const u = supabaseUrl.trim();
+    const a = supabaseAnonKey.trim();
+    const sr = supabaseServiceRoleKey.trim();
+    if (!t || !s || !p || !u || !a) return;
+    setCfgOutput("");
+    setCfgExitCode(null);
+    setCfgStatus("queued");
+    try {
+      const res = await fetch("/api/vercel-cli/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          token: t,
+          mode: "setEnvAndDeploy",
+          project: p,
+          scope: s,
+          supabaseUrl: u,
+          supabaseAnonKey: a,
+          supabaseServiceRoleKey: sr || undefined,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
+      setCfgJobId(String(data.jobId));
+      setCfgStatus("running");
+    } catch (e) {
+      setCfgOutput(String(e instanceof Error ? e.message : e));
+      setCfgStatus("error");
+    }
+  }
+
   useEffect(() => {
     if (!aliasJobId) return;
     let alive = true;
@@ -158,6 +200,32 @@ export default function VercelCliClient() {
       window.clearInterval(t);
     };
   }, [aliasJobId]);
+
+  useEffect(() => {
+    if (!cfgJobId) return;
+    let alive = true;
+    const tick = async () => {
+      if (!alive) return;
+      const res = await fetch(`/api/vercel-cli/status?jobId=${encodeURIComponent(cfgJobId)}`, { method: "GET", cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) return;
+      const j = data.job as any;
+      const st = String(j?.status ?? "").trim();
+      if (st === "queued" || st === "running" || st === "done" || st === "error") {
+        setCfgStatus(st);
+      } else {
+        setCfgStatus("running");
+      }
+      setCfgExitCode(typeof j?.exitCode === "number" ? j.exitCode : null);
+      setCfgOutput(String(j?.output ?? ""));
+    };
+    void tick();
+    const t = window.setInterval(() => void tick(), 900);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [cfgJobId]);
 
   async function stop() {
     if (!jobId) return;
@@ -312,6 +380,68 @@ export default function VercelCliClient() {
           </div>
 
           {jobError ? <div className="cmv-alert cmv-alert-error">Erro: {jobError}</div> : null}
+
+          <div className="cmv-preview" style={{ marginTop: 16 }}>
+            <div className="cmv-preview-title">Configurar Supabase na Vercel (production) + redeploy</div>
+            <div className="cmv-help" style={{ marginTop: 6 }}>
+              Resolve o erro <span className="cmv-code">server_not_configured</span> no login adicionando as env vars do Supabase no projeto da Vercel.
+            </div>
+            <label className="cmv-label" style={{ marginTop: 12 }}>
+              SUPABASE_URL
+            </label>
+            <input className="cmv-input" value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://xxxx.supabase.co" />
+
+            <label className="cmv-label">NEXT_PUBLIC_SUPABASE_ANON_KEY</label>
+            <input
+              className="cmv-input"
+              type="password"
+              value={supabaseAnonKey}
+              onChange={(e) => setSupabaseAnonKey(e.target.value)}
+              placeholder="eyJhbGciOi..."
+              autoComplete="off"
+            />
+
+            <label className="cmv-label">SUPABASE_SERVICE_ROLE_KEY (opcional)</label>
+            <input
+              className="cmv-input"
+              type="password"
+              value={supabaseServiceRoleKey}
+              onChange={(e) => setSupabaseServiceRoleKey(e.target.value)}
+              placeholder="eyJhbGciOi..."
+              autoComplete="off"
+            />
+
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+              <button
+                type="button"
+                className="cmv-button cmv-button-primary"
+                disabled={!token.trim() || !projectHint.trim() || !scopeHint.trim() || !supabaseUrl.trim() || !supabaseAnonKey.trim() || cfgStatus === "running"}
+                onClick={() => void startSupabaseConfigJob()}
+              >
+                {cfgStatus === "running" || cfgStatus === "queued" ? "Executando…" : "Configurar + redeploy"}
+              </button>
+            </div>
+
+            <div className="cmv-preview" style={{ marginTop: 12 }}>
+              <div className="cmv-preview-title">
+                Status: <span className="cmv-code">{cfgStatus}</span> {cfgExitCode != null ? <span className="cmv-code">exit={cfgExitCode}</span> : null}
+              </div>
+              <pre
+                style={{
+                  margin: "10px 0 0",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontFamily: "var(--cmv-font-mono)",
+                  fontSize: 12,
+                  minHeight: 120,
+                  maxHeight: 260,
+                  overflow: "auto",
+                }}
+              >
+                {cfgOutput || "Aguardando..."}
+              </pre>
+            </div>
+          </div>
         </section>
 
         <section className="cmv-card">

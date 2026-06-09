@@ -21,14 +21,21 @@ function safeSlug(input: unknown) {
   return s;
 }
 
+function psQuote(value: string) {
+  return `'${String(value ?? "").replace(/'/g, "''")}'`;
+}
+
 type Body = {
   token?: string;
-  mode?: "deployLinked" | "linkAndDeploy" | "alias";
+  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy";
   project?: string;
   scope?: string;
   deploymentUrl?: string;
   aliasDomain?: string;
   forceAlias?: boolean;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
+  supabaseServiceRoleKey?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -44,7 +51,14 @@ export async function POST(req: NextRequest) {
   const token = String(body?.token ?? "").trim();
   if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
-  const mode = body?.mode === "alias" ? "alias" : body?.mode === "linkAndDeploy" ? "linkAndDeploy" : "deployLinked";
+  const mode =
+    body?.mode === "setEnvAndDeploy"
+      ? "setEnvAndDeploy"
+      : body?.mode === "alias"
+        ? "alias"
+        : body?.mode === "linkAndDeploy"
+          ? "linkAndDeploy"
+          : "deployLinked";
   const project = safeSlug(body?.project);
   const scope = safeSlug(body?.scope);
   if (!scope) return json({ ok: false, error: "missing_scope" }, { status: 400 });
@@ -61,12 +75,37 @@ export async function POST(req: NextRequest) {
     if (!aliasDomain || !isHost(aliasDomain)) return json({ ok: false, error: "invalid_alias_domain" }, { status: 400 });
   }
 
+  const supabaseUrl = String(body?.supabaseUrl ?? "").trim();
+  const supabaseAnonKey = String(body?.supabaseAnonKey ?? "").trim();
+  const supabaseServiceRoleKey = String(body?.supabaseServiceRoleKey ?? "").trim();
+
+  if (mode === "setEnvAndDeploy") {
+    if (!project) return json({ ok: false, error: "missing_project" }, { status: 400 });
+    if (!supabaseUrl) return json({ ok: false, error: "missing_supabase_url" }, { status: 400 });
+    if (!supabaseAnonKey) return json({ ok: false, error: "missing_supabase_anon_key" }, { status: 400 });
+  }
+
   const id = crypto.randomUUID();
   const job = createJob(id);
 
   const ps: string[] = [];
   ps.push("npx vercel --version");
-  if (mode === "alias") {
+  if (mode === "setEnvAndDeploy") {
+    ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`npx vercel env add SUPABASE_URL production --value ${psQuote(supabaseUrl)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(
+      `npx vercel env add NEXT_PUBLIC_SUPABASE_URL production --value ${psQuote(supabaseUrl)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+    );
+    ps.push(
+      `npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --value ${psQuote(supabaseAnonKey)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+    );
+    if (supabaseServiceRoleKey) {
+      ps.push(
+        `npx vercel env add SUPABASE_SERVICE_ROLE_KEY production --value ${psQuote(supabaseServiceRoleKey)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      );
+    }
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+  } else if (mode === "alias") {
     if (forceAlias) ps.push(`npx vercel alias rm ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`npx vercel alias set https://${deploymentUrl} ${aliasDomain} --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "deployLinked") {
