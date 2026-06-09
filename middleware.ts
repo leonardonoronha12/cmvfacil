@@ -93,6 +93,15 @@ async function isAuthenticated(req: NextRequest) {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isPublicFile = /\.[^/]+$/.test(pathname);
+  const host = String(req.headers.get("host") ?? "").toLowerCase();
+  const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
+
+  if (
+    isLocalhost &&
+    (pathname === "/ajustes/vercel-cli" || pathname.startsWith("/ajustes/vercel-cli/") || pathname.startsWith("/api/vercel-cli/"))
+  ) {
+    return NextResponse.next();
+  }
 
   if (
     pathname.startsWith("/_next") ||
@@ -107,13 +116,10 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/resetar-senha/") ||
     pathname === "/restaurar-senha" ||
     pathname.startsWith("/restaurar-senha/") ||
-    pathname === "/ajustes/vercel-cli" ||
-    pathname.startsWith("/ajustes/vercel-cli/") ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
-    pathname.startsWith("/api/vercel-cli/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version"
   ) {
