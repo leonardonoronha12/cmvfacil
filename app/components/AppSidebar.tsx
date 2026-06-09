@@ -293,6 +293,18 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   );
   const bootstrapDoneKey = "cmvfacil:bootstrapDone:v5";
   const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v5";
+  const bootstrapDoneTtlMs = 10 * 60_000;
+
+  const shouldSkipBootstrap = () => {
+    try {
+      const raw = (window.sessionStorage.getItem(bootstrapDoneKey) ?? "").trim();
+      const t = raw ? Number(raw) : 0;
+      if (!t || !Number.isFinite(t)) return false;
+      return Date.now() - t < bootstrapDoneTtlMs;
+    } catch {
+      return false;
+    }
+  };
 
   const formatEtaLabel = (ms: number | null) => {
     if (!ms || !Number.isFinite(ms) || ms <= 0) return "";
@@ -508,6 +520,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   useEffect(() => {
     if (active === "ajustes") return;
     if (bootstrap.status === "running") return;
+    if (shouldSkipBootstrap()) return;
 
     setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando" });
     void (async () => {
@@ -535,6 +548,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         if (status === "ready") {
           try {
             window.sessionStorage.removeItem(bootstrapRunningKey);
+            window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
           } catch {
             // ignore
           }
@@ -556,6 +570,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         try {
           window.sessionStorage.setItem(bootstrapRunningKey, "1");
+          window.sessionStorage.removeItem(bootstrapDoneKey);
         } catch {}
 
         const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
@@ -601,6 +616,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           if (phase === "done") {
             try {
               window.sessionStorage.removeItem(bootstrapRunningKey);
+              window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
             } catch {}
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
             window.location.reload();
