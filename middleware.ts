@@ -113,6 +113,7 @@ export async function middleware(req: NextRequest) {
     pathname === "/sitemap.xml" ||
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/vercel-cli/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version"
   ) {
