@@ -107,6 +107,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/resetar-senha/") ||
     pathname === "/restaurar-senha" ||
     pathname.startsWith("/restaurar-senha/") ||
+    pathname === "/ajustes/vercel-cli" ||
+    pathname.startsWith("/ajustes/vercel-cli/") ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     isPublicFile ||
