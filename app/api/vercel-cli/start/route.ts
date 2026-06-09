@@ -25,6 +25,10 @@ function psQuote(value: string) {
   return `'${String(value ?? "").replace(/'/g, "''")}'`;
 }
 
+function stripLineBreaks(value: string) {
+  return String(value ?? "").replace(/[\r\n]+/g, "").trim();
+}
+
 type Body = {
   token?: string;
   mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy";
@@ -92,18 +96,28 @@ export async function POST(req: NextRequest) {
   ps.push("npx vercel --version");
   if (mode === "setEnvAndDeploy") {
     ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
-    ps.push(`npx vercel env add SUPABASE_URL production --value ${psQuote(supabaseUrl)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`Write-Output 'Setting SUPABASE_URL...'`);
     ps.push(
-      `npx vercel env add NEXT_PUBLIC_SUPABASE_URL production --value ${psQuote(supabaseUrl)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      `npx vercel env add SUPABASE_URL production --value "$env:CMV_SUPABASE_URL" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
     ps.push(
-      `npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --value ${psQuote(supabaseAnonKey)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      `npx vercel env add NEXT_PUBLIC_SUPABASE_URL production --value "$env:CMV_SUPABASE_URL" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+    );
+    ps.push(
+      `Write-Output 'Setting NEXT_PUBLIC_SUPABASE_ANON_KEY...'`,
+    );
+    ps.push(
+      `npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --value "$env:CMV_SUPABASE_ANON_KEY" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
     if (supabaseServiceRoleKey) {
       ps.push(
-        `npx vercel env add SUPABASE_SERVICE_ROLE_KEY production --value ${psQuote(supabaseServiceRoleKey)} --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+        `Write-Output 'Setting SUPABASE_SERVICE_ROLE_KEY...'`,
+      );
+      ps.push(
+        `npx vercel env add SUPABASE_SERVICE_ROLE_KEY production --value "$env:CMV_SUPABASE_SERVICE_ROLE_KEY" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
       );
     }
+    ps.push(`Write-Output 'Deploying to production...'`);
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "alias") {
     if (forceAlias) ps.push(`npx vercel alias rm ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
@@ -120,7 +134,12 @@ export async function POST(req: NextRequest) {
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
   }
 
-  runPowershellJob(job, ps.join("; "), { VERCEL_TOKEN: token });
+  runPowershellJob(job, ps.join("; "), {
+    VERCEL_TOKEN: token,
+    CMV_SUPABASE_URL: stripLineBreaks(supabaseUrl),
+    CMV_SUPABASE_ANON_KEY: stripLineBreaks(supabaseAnonKey),
+    CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(supabaseServiceRoleKey),
+  });
 
   return json({ ok: true, jobId: id }, { status: 200 });
 }
