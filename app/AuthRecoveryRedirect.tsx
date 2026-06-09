@@ -37,6 +37,17 @@ export default function AuthRecoveryRedirect() {
 
     const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
+    const shouldReloadAfterImport = () => {
+      try {
+        const k = "cmvfacil:autoImport:reloadedMs";
+        const raw = (window.sessionStorage.getItem(k) ?? "").trim();
+        const last = raw ? Number.parseInt(raw, 10) : 0;
+        if (last && Number.isFinite(last) && Date.now() - last < 60_000) return false;
+        window.sessionStorage.setItem(k, String(Date.now()));
+      } catch {}
+      return true;
+    };
+
     const getThrottleOk = () => {
       try {
         const raw = window.sessionStorage.getItem("cmvfacil:autoImport:lastMs") || "";
@@ -59,6 +70,7 @@ export default function AuthRecoveryRedirect() {
 
     const run = async () => {
       const path = window.location.pathname || "";
+      if (path.startsWith("/ajustes")) return;
       const creds = getBubbleCreds();
       if (!creds.baseUrl || !creds.token) {
         if (!path.startsWith("/ajustes")) {
@@ -121,7 +133,7 @@ export default function AuthRecoveryRedirect() {
         }
         const phase = String(tickJson?.state?.phase ?? "");
         if (phase === "done") {
-          window.location.reload();
+          if (shouldReloadAfterImport()) window.location.reload();
           return;
         }
         if (phase === "error") {
