@@ -70,19 +70,23 @@ export default function AuthRecoveryRedirect() {
 
     const run = async () => {
       const path = window.location.pathname || "";
+      if (path === "/login" || path.startsWith("/login/")) return;
+      if (path === "/cadastro-usuario" || path.startsWith("/cadastro-usuario/")) return;
+      if (path === "/cadastro-empresa" || path.startsWith("/cadastro-empresa/")) return;
+      if (path === "/resetar-senha" || path.startsWith("/resetar-senha/")) return;
+      if (path.startsWith("/restaurar-senha")) return;
       if (path.startsWith("/ajustes")) return;
-      const creds = getBubbleCreds();
-      if (!creds.baseUrl || !creds.token) {
-        if (!path.startsWith("/ajustes")) {
-          window.location.assign(`/ajustes/importar-bubble-api?next=${encodeURIComponent(path)}`);
-        }
-        return;
-      }
       if (!getThrottleOk()) return;
       const meRes = await fetch("/api/auth/me", { method: "GET", cache: "no-store" });
       const meJson = (await meRes.json().catch(() => null)) as any;
       const userId = String(meJson?.userId ?? "").trim();
       if (!meRes.ok || !userId) return;
+
+      const creds = getBubbleCreds();
+      if (!creds.baseUrl || !creds.token) {
+        window.location.assign(`/ajustes/importar-bubble-api?next=${encodeURIComponent(path)}`);
+        return;
+      }
 
       const ensureRes = await fetch("/api/bubble-import/ensure", {
         method: "POST",
