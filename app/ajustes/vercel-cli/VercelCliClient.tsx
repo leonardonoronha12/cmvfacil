@@ -23,6 +23,8 @@ export default function VercelCliClient() {
   const [aliasDomain, setAliasDomain] = useState("cmvfacil.vercel.app");
   const [forceAlias, setForceAlias] = useState(true);
   const [mode, setMode] = useState<"deployLinked" | "linkAndDeploy">("linkAndDeploy");
+  const [rememberToken, setRememberToken] = useState(true);
+  const [tokenSavedMsg, setTokenSavedMsg] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<"idle" | "queued" | "running" | "done" | "error">("idle");
   const [jobExitCode, setJobExitCode] = useState<number | null>(null);
@@ -42,6 +44,7 @@ export default function VercelCliClient() {
   const startedRef = useRef(false);
   const autoAliasedRef = useRef(false);
   const cfgAliasedRef = useRef(false);
+  const tokenSavedRef = useRef(false);
 
   const tokenMasked = useMemo(() => maskToken(token), [token]);
 
@@ -269,6 +272,38 @@ export default function VercelCliClient() {
     void startJob(t);
   }, [autoRun, token]);
 
+  async function saveTokenToServer(t: string) {
+    const tokenToSave = t.trim();
+    if (!tokenToSave) return;
+    try {
+      const res = await fetch("/api/vercel-cli/save-token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ token: tokenToSave, scope: scopeHint, project: projectHint }),
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
+      setTokenSavedMsg("Token salvo (temporário, só localhost).");
+      window.setTimeout(() => setTokenSavedMsg(null), 1400);
+    } catch {
+      setTokenSavedMsg("Falha ao salvar token.");
+      window.setTimeout(() => setTokenSavedMsg(null), 1800);
+    }
+  }
+
+  useEffect(() => {
+    const t = token.trim();
+    if (!rememberToken) return;
+    if (!t) return;
+    if (tokenSavedRef.current) return;
+    tokenSavedRef.current = true;
+    void saveTokenToServer(t);
+  }, [rememberToken, token, scopeHint, projectHint]);
+
+  useEffect(() => {
+    if (!token.trim()) tokenSavedRef.current = false;
+  }, [token]);
+
   useEffect(() => {
     if (!autoAlias) return;
     if (autoAliasedRef.current) return;
@@ -330,6 +365,10 @@ export default function VercelCliClient() {
               <input type="checkbox" checked={autoAlias} onChange={(e) => setAutoAlias(e.target.checked)} />
               Após deploy, apontar cmvfacil.vercel.app
             </label>
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 800 }}>
+              <input type="checkbox" checked={rememberToken} onChange={(e) => setRememberToken(e.target.checked)} />
+              Salvar token (temporário)
+            </label>
             <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 800 }}>Modo</span>
               <select className="cmv-input" style={{ width: 240, paddingTop: 8, paddingBottom: 8 }} value={mode} onChange={(e) => setMode(e.target.value as any)}>
@@ -338,6 +377,7 @@ export default function VercelCliClient() {
               </select>
             </div>
           </div>
+          {tokenSavedMsg ? <div className="cmv-alert">{tokenSavedMsg}</div> : null}
 
           <label className="cmv-label">Projeto (opcional)</label>
           <div className="cmv-help">
