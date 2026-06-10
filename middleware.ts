@@ -98,7 +98,12 @@ export async function middleware(req: NextRequest) {
 
   if (
     isLocalhost &&
-    (pathname === "/ajustes/vercel-cli" || pathname.startsWith("/ajustes/vercel-cli/") || pathname.startsWith("/api/vercel-cli/"))
+    (pathname === "/ajustes/vercel-cli" ||
+      pathname.startsWith("/ajustes/vercel-cli/") ||
+      pathname.startsWith("/api/vercel-cli/") ||
+      pathname === "/debug-supabase" ||
+      pathname.startsWith("/debug-supabase/") ||
+      pathname.startsWith("/api/debug/"))
   ) {
     return NextResponse.next();
   }
