@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readFileSync, writeFileSync } from "fs";
 import { createJob, getLastSecrets, runPowershellJob, setLastSecrets } from "../_store";
 
 function json(data: unknown, init: ResponseInit = {}) {
@@ -27,6 +28,43 @@ function psQuote(value: string) {
 
 function stripLineBreaks(value: string) {
   return String(value ?? "").replace(/[\r\n]+/g, "").trim();
+}
+
+function upsertEnvFile(filePath: string, vars: Record<string, string | undefined>) {
+  const keys = Object.keys(vars).filter((k) => typeof k === "string" && k.trim());
+  if (keys.length === 0) return;
+
+  let existing = "";
+  try {
+    existing = readFileSync(filePath, "utf8");
+  } catch {
+    existing = "";
+  }
+
+  const lines = existing ? existing.split(/\r?\n/) : [];
+  const indexByKey = new Map<string, number>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+    if (m?.[1]) indexByKey.set(m[1], i);
+  }
+
+  const setLine = (k: string, v: string) => `${k}="${String(v).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+
+  for (const k of keys) {
+    const v = vars[k];
+    if (typeof v !== "string" || !v.trim()) continue;
+    const line = setLine(k, v.trim());
+    const idx = indexByKey.get(k);
+    if (typeof idx === "number") {
+      lines[idx] = line;
+    } else {
+      lines.push(line);
+    }
+  }
+
+  const out = lines.join("\n").replace(/\n{3,}/g, "\n\n");
+  writeFileSync(filePath, out.endsWith("\n") ? out : `${out}\n`, "utf8");
 }
 
 type Body = {
@@ -99,6 +137,14 @@ export async function POST(req: NextRequest) {
       supabaseUrl: resolvedSupabaseUrl,
       supabaseAnonKey: resolvedAnonKey,
       supabaseServiceRoleKey: resolvedServiceRoleKey || undefined,
+    });
+
+    upsertEnvFile(".env.local", {
+      SUPABASE_URL: resolvedSupabaseUrl,
+      NEXT_PUBLIC_SUPABASE_URL: resolvedSupabaseUrl,
+      SUPABASE_ANON_KEY: resolvedAnonKey,
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: resolvedAnonKey,
+      SUPABASE_SERVICE_ROLE_KEY: resolvedServiceRoleKey || undefined,
     });
   }
 
