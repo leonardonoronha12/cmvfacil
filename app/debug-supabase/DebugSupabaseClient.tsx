@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type Payload = {
   ok: true;
@@ -18,6 +18,13 @@ export default function DebugSupabaseClient() {
   const [data, setData] = useState<Payload | null>(null);
   const [reset, setReset] = useState<ResetPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [supabaseUrl, setSupabaseUrl] = useState("");
+  const [supabaseAnonKey, setSupabaseAnonKey] = useState("");
+  const [supabaseServiceRoleKey, setSupabaseServiceRoleKey] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const storageKey = useMemo(() => "cmvfacil:localSupabaseEnv", []);
 
   useEffect(() => {
     let alive = true;
@@ -41,6 +48,17 @@ export default function DebugSupabaseClient() {
   }, []);
 
   useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (!raw) return;
+      const j = JSON.parse(raw) as { supabaseUrl?: string; supabaseAnonKey?: string; supabaseServiceRoleKey?: string };
+      if (typeof j?.supabaseUrl === "string") setSupabaseUrl(j.supabaseUrl);
+      if (typeof j?.supabaseAnonKey === "string") setSupabaseAnonKey(j.supabaseAnonKey);
+      if (typeof j?.supabaseServiceRoleKey === "string") setSupabaseServiceRoleKey(j.supabaseServiceRoleKey);
+    } catch {}
+  }, [storageKey]);
+
+  useEffect(() => {
     let alive = true;
     fetch("/api/debug/reset-redirect", { cache: "no-store" })
       .then(async (r) => {
@@ -54,6 +72,35 @@ export default function DebugSupabaseClient() {
       alive = false;
     };
   }, []);
+
+  async function save() {
+    const u = supabaseUrl.trim();
+    const a = supabaseAnonKey.trim();
+    const sr = supabaseServiceRoleKey.trim();
+    if (!u || !a) {
+      setSaveMsg("Preencha SUPABASE_URL e NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+      return;
+    }
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const res = await fetch("/api/debug/set-local-supabase-env", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ supabaseUrl: u, supabaseAnonKey: a, supabaseServiceRoleKey: sr || undefined }),
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({ supabaseUrl: u, supabaseAnonKey: a, supabaseServiceRoleKey: sr || "" }));
+      } catch {}
+      setSaveMsg("Salvo. Reinicie o dev server (npm run dev) para aplicar.");
+    } catch (e) {
+      setSaveMsg(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
     <main className="cmv-container">
@@ -109,6 +156,46 @@ export default function DebugSupabaseClient() {
           <div className="cmv-help" style={{ marginTop: 12 }}>
             O Supabase precisa permitir esse redirect em Authentication → URL Configuration → Additional Redirect URLs.
           </div>
+        </div>
+      </section>
+
+      <section className="cmv-card" style={{ marginTop: 16 }}>
+        <div style={{ fontWeight: 900 }}>Configurar Supabase local</div>
+        <div className="cmv-help" style={{ marginTop: 8 }}>
+          Salva no <span className="cmv-code">.env.local</span> do projeto (apenas localhost) e também no seu navegador para não precisar colar de novo.
+        </div>
+
+        {saveMsg ? <div className="cmv-alert">{saveMsg}</div> : null}
+
+        <label className="cmv-label" style={{ marginTop: 14 }}>
+          SUPABASE_URL
+        </label>
+        <input className="cmv-input" value={supabaseUrl} onChange={(e) => setSupabaseUrl(e.target.value)} placeholder="https://xxxx.supabase.co" />
+
+        <label className="cmv-label">NEXT_PUBLIC_SUPABASE_ANON_KEY</label>
+        <input
+          className="cmv-input"
+          type="password"
+          value={supabaseAnonKey}
+          onChange={(e) => setSupabaseAnonKey(e.target.value)}
+          placeholder="eyJhbGciOi..."
+          autoComplete="off"
+        />
+
+        <label className="cmv-label">SUPABASE_SERVICE_ROLE_KEY (opcional)</label>
+        <input
+          className="cmv-input"
+          type="password"
+          value={supabaseServiceRoleKey}
+          onChange={(e) => setSupabaseServiceRoleKey(e.target.value)}
+          placeholder="eyJhbGciOi..."
+          autoComplete="off"
+        />
+
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+          <button type="button" className="cmv-button cmv-button-primary" disabled={saving} onClick={() => void save()}>
+            {saving ? "Salvando…" : "Salvar chaves"}
+          </button>
         </div>
       </section>
     </main>
