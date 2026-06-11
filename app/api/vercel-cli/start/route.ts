@@ -207,10 +207,15 @@ export async function POST(req: NextRequest) {
       ps.push(`npx vercel link --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
     }
     ps.push(`Write-Output 'Deploying to production...'`);
-    ps.push(`$deployUrl = (npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN | Select-Object -Last 1)`);
+    ps.push(`$outLines = @()`);
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN 2>&1 | Tee-Object -Variable outLines | Out-Default`);
+    ps.push(`$outText = ($outLines | Out-String)`);
+    ps.push(
+      `$deployUrl = ($outText | Select-String -Pattern 'https://[a-z0-9-]+\\.vercel\\.app' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value } | Select-Object -Last 1)`,
+    );
+    ps.push(`if (-not $deployUrl) { throw 'deploy_url_not_found' }`);
     ps.push(`$deployUrl = ($deployUrl | Out-String).Trim()`);
     ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
-    ps.push(`if ($deployUrl -and ($deployUrl -notmatch '^https?://')) { $deployUrl = 'https://' + $deployUrl }`);
     if (doForce) {
       ps.push(`try { npx vercel alias rm ${a} --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
     }
