@@ -288,6 +288,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
   const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
     { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
   );
@@ -525,6 +526,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (bootstrap.status === "running") return;
     if (shouldSkipBootstrap()) return;
 
+    setBootstrapOverlayVisible(true);
     setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando" });
     void (async () => {
       try {
@@ -622,7 +624,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
             } catch {}
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
-            window.location.reload();
+            if (bootstrapOverlayVisible) window.location.reload();
             return;
           }
           if (phase === "error") {
@@ -644,7 +646,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "" });
       }
     })();
-  }, [active, bootstrap.status]);
+  }, [active, bootstrap.status, bootstrapOverlayVisible]);
 
   const etiquetasVencidasPendentes = useMemo(() => {
     const now = new Date();
@@ -796,7 +798,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
   return (
     <>
-      {bootstrap.status === "running"
+      {bootstrap.status === "running" && bootstrapOverlayVisible
         ? createPortal(
             <div
               style={{
@@ -851,11 +853,24 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                     }}
                   />
                 </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                  <button type="button" className="cmv-button" onClick={() => setBootstrapOverlayVisible(false)}>
+                    Continuar usando
+                  </button>
+                </div>
               </div>
             </div>,
             document.body,
           )
         : null}
+      {bootstrap.status === "running" && !bootstrapOverlayVisible ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 10, zIndex: 91, display: "flex", justifyContent: "flex-end" }}>
+          <button type="button" className="cmv-button" onClick={() => setBootstrapOverlayVisible(true)}>
+            Atualizando… {Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100)}%
+          </button>
+        </div>
+      ) : null}
       {bootstrap.status === "error" && bootstrap.message ? (
         <div style={{ position: "fixed", left: 210, right: 16, top: 10, zIndex: 91 }}>
           <div
