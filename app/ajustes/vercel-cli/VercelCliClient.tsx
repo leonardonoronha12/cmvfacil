@@ -13,6 +13,8 @@ export default function VercelCliClient() {
   const [token, setToken] = useState("");
   const [projectHint, setProjectHint] = useState("cmvfacilrepo");
   const [scopeHint, setScopeHint] = useState("leonardonoronha12-2214s-projects");
+  const [bubbleBaseUrl, setBubbleBaseUrl] = useState("");
+  const [bubbleApiToken, setBubbleApiToken] = useState("");
   const [rememberToken, setRememberToken] = useState(true);
   const [tokenSavedMsg, setTokenSavedMsg] = useState<string | null>(null);
   const [serverHasToken, setServerHasToken] = useState(false);
@@ -64,7 +66,8 @@ export default function VercelCliClient() {
       setJobId(String(data.jobId));
       setJobStatus("running");
     } catch (e) {
-      setJobError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setJobError(msg === "disabled" ? "Esta tela só funciona no localhost." : msg);
       setJobStatus("error");
     }
   }
@@ -88,7 +91,8 @@ export default function VercelCliClient() {
       setJobId(String(data.jobId));
       setJobStatus("running");
     } catch (e) {
-      setJobError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setJobError(msg === "disabled" ? "Esta tela só funciona no localhost." : msg);
       setJobStatus("error");
     }
   }
@@ -96,13 +100,9 @@ export default function VercelCliClient() {
   async function startBubbleFix() {
     const t = token.trim();
     if (!t && !serverHasToken) return;
-    let bubbleBaseUrl = "";
-    let bubbleToken = "";
-    try {
-      bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-      bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-    } catch {}
-    if (!bubbleBaseUrl || !bubbleToken) {
+    const baseUrl = bubbleBaseUrl.trim();
+    const apiToken = bubbleApiToken.trim();
+    if (!baseUrl || !apiToken) {
       setJobError("missing_bubble_credentials");
       setJobStatus("error");
       return;
@@ -121,8 +121,8 @@ export default function VercelCliClient() {
           mode: "setBubbleEnvAndDeploy",
           project: projectHint,
           scope: scopeHint,
-          bubbleBaseUrl,
-          bubbleApiToken: bubbleToken,
+          bubbleBaseUrl: baseUrl,
+          bubbleApiToken: apiToken,
         }),
       });
       const data = (await res.json().catch(() => null)) as any;
@@ -130,7 +130,8 @@ export default function VercelCliClient() {
       setJobId(String(data.jobId));
       setJobStatus("running");
     } catch (e) {
-      setJobError(e instanceof Error ? e.message : String(e));
+      const msg = e instanceof Error ? e.message : String(e);
+      setJobError(msg === "disabled" ? "Esta tela só funciona no localhost." : msg);
       setJobStatus("error");
     }
   }
@@ -203,6 +204,12 @@ export default function VercelCliClient() {
 
   useEffect(() => {
     void refreshTokenStatus();
+    try {
+      const b = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+      const t = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      if (b) setBubbleBaseUrl(b);
+      if (t) setBubbleApiToken(t);
+    } catch {}
   }, []);
 
   return (
@@ -265,6 +272,14 @@ export default function VercelCliClient() {
                 Para configurar Supabase do app, use <a href="/debug-supabase">/debug-supabase</a>.
               </div>
 
+              <label className="cmv-label" style={{ marginTop: 14 }}>
+                Bubble Base URL
+              </label>
+              <input className="cmv-input" value={bubbleBaseUrl} onChange={(e) => setBubbleBaseUrl(e.target.value)} placeholder="ex: https://app.bubble.io/..." />
+
+              <label className="cmv-label">Bubble API Token</label>
+              <input className="cmv-input" type="password" value={bubbleApiToken} onChange={(e) => setBubbleApiToken(e.target.value)} placeholder="ex: ..." autoComplete="off" />
+
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
                 <button
                   type="button"
@@ -277,7 +292,7 @@ export default function VercelCliClient() {
                 <button
                   type="button"
                   className="cmv-button"
-                  disabled={!canDeploy || jobStatus === "running" || jobStatus === "queued"}
+                  disabled={!canDeploy || !bubbleBaseUrl.trim() || !bubbleApiToken.trim() || jobStatus === "running" || jobStatus === "queued"}
                   onClick={() => void startBubbleFix()}
                 >
                   Configurar Bubble (produção)
