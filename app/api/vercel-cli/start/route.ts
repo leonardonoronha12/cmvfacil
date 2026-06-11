@@ -69,7 +69,7 @@ function upsertEnvFile(filePath: string, vars: Record<string, string | undefined
 
 type Body = {
   token?: string;
-  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy";
+  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "deployAndAlias";
   project?: string;
   scope?: string;
   deploymentUrl?: string;
@@ -97,6 +97,8 @@ export async function POST(req: NextRequest) {
   const mode =
     body?.mode === "setEnvAndDeploy"
       ? "setEnvAndDeploy"
+      : body?.mode === "deployAndAlias"
+        ? "deployAndAlias"
       : body?.mode === "alias"
         ? "alias"
         : body?.mode === "linkAndDeploy"
@@ -116,6 +118,10 @@ export async function POST(req: NextRequest) {
   if (mode === "alias") {
     if (!deploymentUrl || !isHost(deploymentUrl)) return json({ ok: false, error: "invalid_deployment_url" }, { status: 400 });
     if (!aliasDomain || !isHost(aliasDomain)) return json({ ok: false, error: "invalid_alias_domain" }, { status: 400 });
+  }
+  if (mode === "deployAndAlias") {
+    const a = aliasDomain || "cmvfacil.vercel.app";
+    if (!isHost(a)) return json({ ok: false, error: "invalid_alias_domain" }, { status: 400 });
   }
 
   const supabaseUrl = String(body?.supabaseUrl ?? "").trim();
@@ -192,6 +198,23 @@ export async function POST(req: NextRequest) {
     }
     ps.push(`Write-Output 'Deploying to production...'`);
     ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+  } else if (mode === "deployAndAlias") {
+    const a = aliasDomain || "cmvfacil.vercel.app";
+    const doForce = Boolean(forceAlias);
+    if (project) {
+      ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
+    } else {
+      ps.push(`npx vercel link --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+    }
+    ps.push(`Write-Output 'Deploying to production...'`);
+    ps.push(`$deployUrl = (npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN | Select-Object -Last 1)`);
+    ps.push(`$deployUrl = ($deployUrl | Out-String).Trim()`);
+    ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
+    ps.push(`if ($deployUrl -and ($deployUrl -notmatch '^https?://')) { $deployUrl = 'https://' + $deployUrl }`);
+    if (doForce) {
+      ps.push(`try { npx vercel alias rm ${a} --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
+    }
+    ps.push(`npx vercel alias set $deployUrl ${a} --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "alias") {
     if (forceAlias) ps.push(`npx vercel alias rm ${aliasDomain} --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`npx vercel alias set https://${deploymentUrl} ${aliasDomain} --scope ${scope} --token $env:VERCEL_TOKEN`);

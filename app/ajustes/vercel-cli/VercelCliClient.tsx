@@ -50,7 +50,14 @@ export default function VercelCliClient() {
       const res = await fetch("/api/vercel-cli/start", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...(t ? { token: t } : {}), mode: "linkAndDeploy", project: projectHint, scope: scopeHint }),
+        body: JSON.stringify({
+          ...(t ? { token: t } : {}),
+          mode: "deployAndAlias",
+          project: projectHint,
+          scope: scopeHint,
+          aliasDomain: "cmvfacil.vercel.app",
+          forceAlias: true,
+        }),
       });
       const data = (await res.json().catch(() => null)) as any;
       if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
