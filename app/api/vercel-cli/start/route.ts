@@ -101,7 +101,7 @@ function upsertEnvFile(filePath: string, vars: Record<string, string | undefined
 
 type Body = {
   token?: string;
-  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "deployAndAlias" | "envLs";
+  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "setBubbleEnvAndDeploy" | "deployAndAlias" | "envLs";
   project?: string;
   scope?: string;
   deploymentUrl?: string;
@@ -110,6 +110,8 @@ type Body = {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   supabaseServiceRoleKey?: string;
+  bubbleBaseUrl?: string;
+  bubbleApiToken?: string;
 };
 
 export async function POST(req: NextRequest) {
@@ -129,6 +131,8 @@ export async function POST(req: NextRequest) {
   const mode =
     body?.mode === "setEnvAndDeploy"
       ? "setEnvAndDeploy"
+      : body?.mode === "setBubbleEnvAndDeploy"
+        ? "setBubbleEnvAndDeploy"
       : body?.mode === "deployAndAlias"
         ? "deployAndAlias"
       : body?.mode === "envLs"
@@ -161,6 +165,8 @@ export async function POST(req: NextRequest) {
   const supabaseUrl = String(body?.supabaseUrl ?? "").trim();
   const supabaseAnonKey = String(body?.supabaseAnonKey ?? "").trim();
   const supabaseServiceRoleKey = String(body?.supabaseServiceRoleKey ?? "").trim();
+  const bubbleBaseUrl = String(body?.bubbleBaseUrl ?? "").trim();
+  const bubbleApiToken = String(body?.bubbleApiToken ?? "").trim();
 
   if (mode === "setEnvAndDeploy") {
     if (!project) return json({ ok: false, error: "missing_project" }, { status: 400 });
@@ -200,6 +206,13 @@ export async function POST(req: NextRequest) {
       NEXT_PUBLIC_SUPABASE_ANON_KEY: resolvedAnonKey,
       SUPABASE_SERVICE_ROLE_KEY: resolvedServiceRoleKey || undefined,
     });
+  }
+  if (mode === "setBubbleEnvAndDeploy") {
+    if (!project) return json({ ok: false, error: "missing_project" }, { status: 400 });
+    const resolvedBaseUrl = bubbleBaseUrl || getLocalEnv("BUBBLE_BASE_URL") || "";
+    const resolvedToken = bubbleApiToken || getLocalEnv("BUBBLE_API_TOKEN") || "";
+    if (!resolvedBaseUrl) return json({ ok: false, error: "missing_bubble_base_url" }, { status: 400 });
+    if (!resolvedToken) return json({ ok: false, error: "missing_bubble_api_token" }, { status: 400 });
   }
 
   if (body?.token || body?.supabaseUrl || body?.supabaseAnonKey || body?.supabaseServiceRoleKey || body?.scope || body?.project) {
@@ -270,6 +283,30 @@ export async function POST(req: NextRequest) {
     ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
     ps.push(`try { npx vercel alias rm cmvfacil.vercel.app --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
     ps.push(`npx vercel alias set $deployUrl cmvfacil.vercel.app --scope ${scope} --token $env:VERCEL_TOKEN`);
+  } else if (mode === "setBubbleEnvAndDeploy") {
+    const resolvedBaseUrl = bubbleBaseUrl || getLocalEnv("BUBBLE_BASE_URL") || "";
+    const resolvedToken = bubbleApiToken || getLocalEnv("BUBBLE_API_TOKEN") || "";
+    ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`Write-Output 'Setting BUBBLE_BASE_URL...'`);
+    ps.push(
+      `$env:CMV_BUBBLE_BASE_URL | npx vercel env add BUBBLE_BASE_URL production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+    );
+    ps.push(`Write-Output 'Setting BUBBLE_API_TOKEN...'`);
+    ps.push(
+      `$env:CMV_BUBBLE_API_TOKEN | npx vercel env add BUBBLE_API_TOKEN production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+    );
+    ps.push(`Write-Output 'Deploying to production...'`);
+    ps.push(`$outLines = @()`);
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN 2>&1 | Tee-Object -Variable outLines | Out-Default`);
+    ps.push(`$outText = ($outLines | Out-String)`);
+    ps.push(
+      `$deployUrl = ($outText | Select-String -Pattern 'https://[a-z0-9-]+\\.vercel\\.app' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value } | Select-Object -Last 1)`,
+    );
+    ps.push(`if (-not $deployUrl) { throw 'deploy_url_not_found' }`);
+    ps.push(`$deployUrl = ($deployUrl | Out-String).Trim()`);
+    ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
+    ps.push(`try { npx vercel alias rm cmvfacil.vercel.app --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
+    ps.push(`npx vercel alias set $deployUrl cmvfacil.vercel.app --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "envLs") {
     ps.push(`npx vercel link --yes --project ${project || "cmvfacilrepo"} --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`npx vercel env ls production --scope ${scope} --token $env:VERCEL_TOKEN`);
@@ -319,6 +356,8 @@ export async function POST(req: NextRequest) {
     CMV_SUPABASE_URL: stripLineBreaks(resolvedSupabaseUrl || getLocalEnv("SUPABASE_URL") || getLocalEnv("NEXT_PUBLIC_SUPABASE_URL") || ""),
     CMV_SUPABASE_ANON_KEY: stripLineBreaks(resolvedAnonKey || getLocalEnv("SUPABASE_ANON_KEY") || getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") || ""),
     CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(resolvedServiceRoleKey || getLocalEnv("SUPABASE_SERVICE_ROLE_KEY") || ""),
+    CMV_BUBBLE_BASE_URL: stripLineBreaks(bubbleBaseUrl || getLocalEnv("BUBBLE_BASE_URL") || ""),
+    CMV_BUBBLE_API_TOKEN: stripLineBreaks(bubbleApiToken || getLocalEnv("BUBBLE_API_TOKEN") || ""),
   });
 
   return json({ ok: true, jobId: id }, { status: 200 });

@@ -83,11 +83,6 @@ export default function AuthRecoveryRedirect() {
       if (!meRes.ok || !userId) return;
 
       const creds = getBubbleCreds();
-      if (!creds.baseUrl || !creds.token) {
-        window.location.assign(`/ajustes/importar-bubble-api?next=${encodeURIComponent(path)}`);
-        return;
-      }
-
       const ensureRes = await fetch("/api/bubble-import/ensure", {
         method: "POST",
         headers: { "content-type": "application/json" },

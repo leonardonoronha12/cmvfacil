@@ -93,6 +93,48 @@ export default function VercelCliClient() {
     }
   }
 
+  async function startBubbleFix() {
+    const t = token.trim();
+    if (!t && !serverHasToken) return;
+    let bubbleBaseUrl = "";
+    let bubbleToken = "";
+    try {
+      bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+      bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+    } catch {}
+    if (!bubbleBaseUrl || !bubbleToken) {
+      setJobError("missing_bubble_credentials");
+      setJobStatus("error");
+      return;
+    }
+    setJobError(null);
+    setJobOutput("");
+    setJobExitCode(null);
+    setJobStatus("queued");
+    startedRef.current = true;
+    try {
+      const res = await fetch("/api/vercel-cli/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          ...(t ? { token: t } : {}),
+          mode: "setBubbleEnvAndDeploy",
+          project: projectHint,
+          scope: scopeHint,
+          bubbleBaseUrl,
+          bubbleApiToken: bubbleToken,
+        }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
+      setJobId(String(data.jobId));
+      setJobStatus("running");
+    } catch (e) {
+      setJobError(e instanceof Error ? e.message : String(e));
+      setJobStatus("error");
+    }
+  }
+
   async function stop() {
     if (!jobId) return;
     try {
@@ -231,6 +273,14 @@ export default function VercelCliClient() {
                   onClick={() => void startSupabaseFix()}
                 >
                   Corrigir login (Supabase)
+                </button>
+                <button
+                  type="button"
+                  className="cmv-button"
+                  disabled={!canDeploy || jobStatus === "running" || jobStatus === "queued"}
+                  onClick={() => void startBubbleFix()}
+                >
+                  Configurar Bubble (produção)
                 </button>
               </div>
             </div>
