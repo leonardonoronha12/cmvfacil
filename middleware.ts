@@ -126,7 +126,8 @@ export async function middleware(req: NextRequest) {
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
     pathname === "/api/admin/create-user-password" ||
-    pathname === "/api/version"
+    pathname === "/api/version" ||
+    pathname === "/api/health/supabase-config"
   ) {
     return NextResponse.next();
   }
