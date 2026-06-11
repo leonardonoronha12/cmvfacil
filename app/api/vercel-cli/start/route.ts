@@ -237,23 +237,23 @@ export async function POST(req: NextRequest) {
     ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`Write-Output 'Setting SUPABASE_URL...'`);
     ps.push(
-      `npx vercel env add SUPABASE_URL production --value "$env:CMV_SUPABASE_URL" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      `$env:CMV_SUPABASE_URL | npx vercel env add SUPABASE_URL production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
     ps.push(
-      `npx vercel env add NEXT_PUBLIC_SUPABASE_URL production --value "$env:CMV_SUPABASE_URL" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      `$env:CMV_SUPABASE_URL | npx vercel env add NEXT_PUBLIC_SUPABASE_URL production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
     ps.push(
       `Write-Output 'Setting NEXT_PUBLIC_SUPABASE_ANON_KEY...'`,
     );
     ps.push(
-      `npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --value "$env:CMV_SUPABASE_ANON_KEY" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+      `$env:CMV_SUPABASE_ANON_KEY | npx vercel env add NEXT_PUBLIC_SUPABASE_ANON_KEY production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
     );
     if (resolvedServiceRoleKey) {
       ps.push(
         `Write-Output 'Setting SUPABASE_SERVICE_ROLE_KEY...'`,
       );
       ps.push(
-        `npx vercel env add SUPABASE_SERVICE_ROLE_KEY production --value "$env:CMV_SUPABASE_SERVICE_ROLE_KEY" --force --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
+        `$env:CMV_SUPABASE_SERVICE_ROLE_KEY | npx vercel env add SUPABASE_SERVICE_ROLE_KEY production --force --yes --sensitive --scope ${scope} --token $env:VERCEL_TOKEN`,
       );
     }
     ps.push(`Write-Output 'Deploying to production...'`);
