@@ -101,7 +101,7 @@ function upsertEnvFile(filePath: string, vars: Record<string, string | undefined
 
 type Body = {
   token?: string;
-  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "deployAndAlias";
+  mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "deployAndAlias" | "envLs";
   project?: string;
   scope?: string;
   deploymentUrl?: string;
@@ -131,6 +131,8 @@ export async function POST(req: NextRequest) {
       ? "setEnvAndDeploy"
       : body?.mode === "deployAndAlias"
         ? "deployAndAlias"
+      : body?.mode === "envLs"
+        ? "envLs"
       : body?.mode === "alias"
         ? "alias"
         : body?.mode === "linkAndDeploy"
@@ -268,6 +270,9 @@ export async function POST(req: NextRequest) {
     ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
     ps.push(`try { npx vercel alias rm cmvfacil.vercel.app --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
     ps.push(`npx vercel alias set $deployUrl cmvfacil.vercel.app --scope ${scope} --token $env:VERCEL_TOKEN`);
+  } else if (mode === "envLs") {
+    ps.push(`npx vercel link --yes --project ${project || "cmvfacilrepo"} --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`npx vercel env ls production --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "deployAndAlias") {
     const a = aliasDomain || "cmvfacil.vercel.app";
     const doForce = Boolean(forceAlias);
