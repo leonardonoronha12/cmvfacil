@@ -41,7 +41,9 @@ function getSecretsStore(): VercelCliSecrets {
 
 export function setLastSecrets(patch: Omit<VercelCliSecrets, "updatedAt">) {
   const s = getSecretsStore();
-  Object.assign(s, patch);
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) (s as any)[k] = v;
+  }
   s.updatedAt = Date.now();
 }
 
