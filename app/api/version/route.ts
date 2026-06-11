@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
+  const headers = new Headers();
+  headers.set("cache-control", "no-store, no-cache, must-revalidate, max-age=0");
   return NextResponse.json(
     {
       now: new Date().toISOString(),
@@ -11,7 +15,6 @@ export async function GET() {
         deploymentUrl: process.env.VERCEL_URL ?? null,
       },
     },
-    { status: 200 },
+    { status: 200, headers },
   );
 }
-
