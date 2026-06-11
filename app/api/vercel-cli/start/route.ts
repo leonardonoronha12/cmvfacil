@@ -30,6 +30,38 @@ function stripLineBreaks(value: string) {
   return String(value ?? "").replace(/[\r\n]+/g, "").trim();
 }
 
+function parseDotEnv(filePath: string) {
+  let raw = "";
+  try {
+    raw = readFileSync(filePath, "utf8");
+  } catch {
+    return {};
+  }
+  const out: Record<string, string> = {};
+  for (const line of raw.split(/\r?\n/)) {
+    const l = line.trim();
+    if (!l || l.startsWith("#")) continue;
+    const m = l.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+    if (!m) continue;
+    const key = m[1]!;
+    let val = (m[2] ?? "").trim();
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+      val = val.slice(1, -1);
+      val = val.replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+    }
+    out[key] = val;
+  }
+  return out;
+}
+
+function getLocalEnv(name: string) {
+  const v = (process.env[name] ?? "").trim();
+  if (v) return v;
+  const envLocal = parseDotEnv(".env.local");
+  const v2 = String(envLocal[name] ?? "").trim();
+  return v2 || null;
+}
+
 function upsertEnvFile(filePath: string, vars: Record<string, string | undefined>) {
   const keys = Object.keys(vars).filter((k) => typeof k === "string" && k.trim());
   if (keys.length === 0) return;
@@ -130,9 +162,23 @@ export async function POST(req: NextRequest) {
 
   if (mode === "setEnvAndDeploy") {
     if (!project) return json({ ok: false, error: "missing_project" }, { status: 400 });
-    const resolvedSupabaseUrl = supabaseUrl || String(last?.supabaseUrl ?? "").trim();
-    const resolvedAnonKey = supabaseAnonKey || String(last?.supabaseAnonKey ?? "").trim();
-    const resolvedServiceRoleKey = supabaseServiceRoleKey || String(last?.supabaseServiceRoleKey ?? "").trim();
+    const resolvedSupabaseUrl =
+      supabaseUrl ||
+      String(last?.supabaseUrl ?? "").trim() ||
+      getLocalEnv("SUPABASE_URL") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_URL") ||
+      (getLocalEnv("SUPABASE_FUNCTIONS_BASE_URL") ? getLocalEnv("SUPABASE_FUNCTIONS_BASE_URL")!.replace(/\/functions\/v1\/?$/, "") : null) ||
+      "";
+    const resolvedAnonKey =
+      supabaseAnonKey ||
+      String(last?.supabaseAnonKey ?? "").trim() ||
+      getLocalEnv("SUPABASE_ANON_KEY") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      getLocalEnv("SUPABASE_ANON_PUBLIC_KEY") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_PUBLIC_KEY") ||
+      "";
+    const resolvedServiceRoleKey =
+      supabaseServiceRoleKey || String(last?.supabaseServiceRoleKey ?? "").trim() || getLocalEnv("SUPABASE_SERVICE_ROLE_KEY") || "";
     if (!resolvedSupabaseUrl) return json({ ok: false, error: "missing_supabase_url" }, { status: 400 });
     if (!resolvedAnonKey) return json({ ok: false, error: "missing_supabase_anon_key" }, { status: 400 });
 
@@ -171,9 +217,23 @@ export async function POST(req: NextRequest) {
   const ps: string[] = [];
   ps.push("npx vercel --version");
   if (mode === "setEnvAndDeploy") {
-    const resolvedSupabaseUrl = String((body?.supabaseUrl ?? last?.supabaseUrl) ?? "").trim();
-    const resolvedAnonKey = String((body?.supabaseAnonKey ?? last?.supabaseAnonKey) ?? "").trim();
-    const resolvedServiceRoleKey = String((body?.supabaseServiceRoleKey ?? last?.supabaseServiceRoleKey) ?? "").trim();
+    const resolvedSupabaseUrl =
+      supabaseUrl ||
+      String(last?.supabaseUrl ?? "").trim() ||
+      getLocalEnv("SUPABASE_URL") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_URL") ||
+      (getLocalEnv("SUPABASE_FUNCTIONS_BASE_URL") ? getLocalEnv("SUPABASE_FUNCTIONS_BASE_URL")!.replace(/\/functions\/v1\/?$/, "") : null) ||
+      "";
+    const resolvedAnonKey =
+      supabaseAnonKey ||
+      String(last?.supabaseAnonKey ?? "").trim() ||
+      getLocalEnv("SUPABASE_ANON_KEY") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") ||
+      getLocalEnv("SUPABASE_ANON_PUBLIC_KEY") ||
+      getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_PUBLIC_KEY") ||
+      "";
+    const resolvedServiceRoleKey =
+      supabaseServiceRoleKey || String(last?.supabaseServiceRoleKey ?? "").trim() || getLocalEnv("SUPABASE_SERVICE_ROLE_KEY") || "";
     ps.push(`npx vercel link --yes --project ${project} --scope ${scope} --token $env:VERCEL_TOKEN`);
     ps.push(`Write-Output 'Setting SUPABASE_URL...'`);
     ps.push(
@@ -197,7 +257,17 @@ export async function POST(req: NextRequest) {
       );
     }
     ps.push(`Write-Output 'Deploying to production...'`);
-    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN`);
+    ps.push(`$outLines = @()`);
+    ps.push(`npx vercel --prod --yes --scope ${scope} --token $env:VERCEL_TOKEN 2>&1 | Tee-Object -Variable outLines | Out-Default`);
+    ps.push(`$outText = ($outLines | Out-String)`);
+    ps.push(
+      `$deployUrl = ($outText | Select-String -Pattern 'https://[a-z0-9-]+\\.vercel\\.app' -AllMatches | ForEach-Object { $_.Matches } | ForEach-Object { $_.Value } | Select-Object -Last 1)`,
+    );
+    ps.push(`if (-not $deployUrl) { throw 'deploy_url_not_found' }`);
+    ps.push(`$deployUrl = ($deployUrl | Out-String).Trim()`);
+    ps.push(`Write-Output ('DEPLOY_URL ' + $deployUrl)`);
+    ps.push(`try { npx vercel alias rm cmvfacil.vercel.app --yes --scope ${scope} --token $env:VERCEL_TOKEN } catch {}`);
+    ps.push(`npx vercel alias set $deployUrl cmvfacil.vercel.app --scope ${scope} --token $env:VERCEL_TOKEN`);
   } else if (mode === "deployAndAlias") {
     const a = aliasDomain || "cmvfacil.vercel.app";
     const doForce = Boolean(forceAlias);
@@ -241,9 +311,9 @@ export async function POST(req: NextRequest) {
 
   runPowershellJob(job, ps.join("; "), {
     VERCEL_TOKEN: token,
-    CMV_SUPABASE_URL: stripLineBreaks(resolvedSupabaseUrl),
-    CMV_SUPABASE_ANON_KEY: stripLineBreaks(resolvedAnonKey),
-    CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(resolvedServiceRoleKey),
+    CMV_SUPABASE_URL: stripLineBreaks(resolvedSupabaseUrl || getLocalEnv("SUPABASE_URL") || getLocalEnv("NEXT_PUBLIC_SUPABASE_URL") || ""),
+    CMV_SUPABASE_ANON_KEY: stripLineBreaks(resolvedAnonKey || getLocalEnv("SUPABASE_ANON_KEY") || getLocalEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY") || ""),
+    CMV_SUPABASE_SERVICE_ROLE_KEY: stripLineBreaks(resolvedServiceRoleKey || getLocalEnv("SUPABASE_SERVICE_ROLE_KEY") || ""),
   });
 
   return json({ ok: true, jobId: id }, { status: 200 });

@@ -69,6 +69,30 @@ export default function VercelCliClient() {
     }
   }
 
+  async function startSupabaseFix() {
+    const t = token.trim();
+    if (!t && !serverHasToken) return;
+    setJobError(null);
+    setJobOutput("");
+    setJobExitCode(null);
+    setJobStatus("queued");
+    startedRef.current = true;
+    try {
+      const res = await fetch("/api/vercel-cli/start", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...(t ? { token: t } : {}), mode: "setEnvAndDeploy", project: projectHint, scope: scopeHint }),
+      });
+      const data = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !data?.ok) throw new Error(String(data?.error ?? `failed_${res.status}`));
+      setJobId(String(data.jobId));
+      setJobStatus("running");
+    } catch (e) {
+      setJobError(e instanceof Error ? e.message : String(e));
+      setJobStatus("error");
+    }
+  }
+
   async function stop() {
     if (!jobId) return;
     try {
@@ -197,6 +221,17 @@ export default function VercelCliClient() {
 
               <div className="cmv-help" style={{ marginTop: 10 }}>
                 Para configurar Supabase do app, use <a href="/debug-supabase">/debug-supabase</a>.
+              </div>
+
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="cmv-button cmv-button-primary"
+                  disabled={!canDeploy || jobStatus === "running" || jobStatus === "queued"}
+                  onClick={() => void startSupabaseFix()}
+                >
+                  Corrigir login (Supabase)
+                </button>
               </div>
             </div>
           </details>
