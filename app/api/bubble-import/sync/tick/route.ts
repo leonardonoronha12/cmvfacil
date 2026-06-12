@@ -767,6 +767,32 @@ export async function POST(req: NextRequest) {
                 return created;
               };
 
+              const publishPartial = async () => {
+                const now = Date.now();
+                const lastAt = typeof work.publishedAt === "number" ? work.publishedAt : 0;
+                if (lastAt && now - lastAt < 3000) return;
+                const mainUid = overrideImportUserId || userId;
+                const mainAcc = users[mainUid] && typeof users[mainUid] === "object" ? users[mainUid] : users[userId];
+                const map = mainAcc && typeof (mainAcc as any).insumosByKey === "object" ? ((mainAcc as any).insumosByKey as Record<string, unknown>) : {};
+                const totalItems = Object.keys(map).length;
+                const lastItems = typeof work.publishedItems === "number" ? work.publishedItems : 0;
+                if (totalItems <= lastItems) return;
+
+                if (!isUuid(mainUid)) return;
+                const insumosRowsAll = Object.values(map).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
+                const insumosRows = insumosRowsAll.slice(0, 6000);
+                const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
+                  a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
+                );
+                const stateId = `user:${mainUid}`;
+                const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+                if (error && !isMissingTableError(error)) throw new Error(`insumos_state:${error.message}`);
+
+                work.publishedAt = now;
+                work.publishedItems = totalItems;
+                state.import.work[domain] = work;
+              };
+
               let sincePersist = 0;
               for (let i = cursor; i < end; i++) {
                 const partPath = files[i]!;
@@ -838,6 +864,7 @@ export async function POST(req: NextRequest) {
                   await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, users });
                   await persist();
                   ops += 1;
+                  await publishPartial();
                   sincePersist = 0;
                   if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
                 }
@@ -847,6 +874,7 @@ export async function POST(req: NextRequest) {
                 await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, users });
                 await persist();
                 ops += 1;
+                await publishPartial();
               }
 
               if (work.cursor >= files.length) {

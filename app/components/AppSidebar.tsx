@@ -5,6 +5,9 @@ import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import LoadingSpinner from "./LoadingSpinner";
 import { bootstrapUserDataOnce } from "../lib/bootstrapUserData";
+import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
+import { writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
+import { writeInsumosToStore } from "../lib/insumosStore";
 import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import suporteStyles from "../suporte/suporte.module.css";
@@ -60,6 +63,10 @@ function parseDateLabelLoose(value: string) {
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+function formatIntPT(n: number) {
+  return new Intl.NumberFormat("pt-BR").format(n);
 }
 
 type SidebarKey =
@@ -289,6 +296,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
+  const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const [bootstrap, setBootstrap] = useState<{
     status: "idle" | "running" | "done" | "error";
     message: string;
@@ -388,9 +396,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const name = t ? String(t) : "—";
           const a: string[] = [];
           a.push(`Tipo: ${name}`);
-          if (cursor != null) a.push(`cursor ${cursor}`);
-          if (fetched != null) a.push(`puxados ${fetched}`);
-          if (remaining != null) a.push(`restante ${remaining}`);
+          if (cursor != null) a.push(`cursor ${formatIntPT(cursor)}`);
+          if (fetched != null) a.push(`puxados ${formatIntPT(fetched)}`);
+          if (remaining != null) a.push(`restante ${formatIntPT(remaining)}`);
           a.push(`${doneTypes}/${totalTypes} tipos`);
           return a.join(" • ");
         }
@@ -403,7 +411,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const lastName = lastFile ? lastFile.split("/").slice(-1)[0] || "" : "";
           const a: string[] = [];
           a.push(`Importando: ${domain || "—"}`);
-          if (cursor != null && total != null && total > 0) a.push(`arquivos ${Math.min(total, cursor)}/${total}`);
+          if (cursor != null && total != null && total > 0) a.push(`arquivos ${formatIntPT(Math.min(total, cursor))}/${formatIntPT(total)}`);
           if (lastName) a.push(`último ${lastName}`);
           a.push(`${Math.min(domains.length, importIdx)}/${domains.length} etapas`);
           return a.join(" • ");
@@ -583,6 +591,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (shouldSkipBootstrap()) return;
 
     setBootstrapOverlayVisible(true);
+    setBootstrapDisplayPct(0);
     setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando", detail: "" });
     void (async () => {
       try {
@@ -636,6 +645,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
         const importAsUserId = mode === "sync" ? String(json?.userId ?? "").trim() : "";
+        let lastInsumosRefresh = 0;
 
         for (let i = 0; i < 2000; i++) {
           await sleep(1200);
@@ -673,6 +683,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage, detail: String(meta.detail ?? "") };
           });
 
+          if (mode === "sync") {
+            const now = Date.now();
+            if (now - lastInsumosRefresh > 1800) {
+              lastInsumosRefresh = now;
+              void loadInsumosStateFromSupabase()
+                .then((state) => {
+                  writeInsumosToStore(state.rows);
+                  writeInsumoCategoriasToStore(state.categories);
+                })
+                .catch(() => {});
+            }
+          }
+
           const phase = String(tickJson?.state?.phase ?? "");
           if (phase === "done") {
             try {
@@ -703,6 +726,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       }
     })();
   }, [active, bootstrap.status, bootstrapOverlayVisible]);
+
+  useEffect(() => {
+    if (bootstrap.status !== "running") return;
+    const target = Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100);
+    const t = window.setInterval(() => {
+      setBootstrapDisplayPct((cur) => {
+        if (cur === target) return cur;
+        if (cur < target) return Math.min(target, cur + 1);
+        return Math.max(target, cur - 1);
+      });
+    }, 30);
+    return () => window.clearInterval(t);
+  }, [bootstrap.progress, bootstrap.status]);
 
   const etiquetasVencidasPendentes = useMemo(() => {
     const now = new Date();
@@ -893,7 +929,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
                   <div style={{ fontSize: 12, color: "#111111", fontWeight: 700 }}>{bootstrap.stage ? bootstrap.stage : "Atualizando"}</div>
                   <div style={{ fontSize: 12, color: "#292d2d" }}>
-                    {Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100)}% • Tempo estimado:{" "}
+                    {bootstrapDisplayPct}% • Tempo estimado:{" "}
                     {formatEtaLabel(bootstrap.etaMs) ? formatEtaLabel(bootstrap.etaMs) : "calculando..."}
                   </div>
                 </div>
@@ -929,7 +965,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       {bootstrap.status === "running" && !bootstrapOverlayVisible ? (
         <div style={{ position: "fixed", left: 210, right: 16, top: 10, zIndex: 91, display: "flex", justifyContent: "flex-end" }}>
           <button type="button" className="cmv-button" onClick={() => setBootstrapOverlayVisible(true)}>
-            Atualizando… {Math.round(Math.max(0, Math.min(1, bootstrap.progress)) * 100)}%
+            Atualizando… {bootstrapDisplayPct}%
           </button>
         </div>
       ) : null}
