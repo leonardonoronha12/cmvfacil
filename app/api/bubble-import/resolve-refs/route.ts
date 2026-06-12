@@ -11,6 +11,11 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+function getEnv(name: string) {
+  const v = (process.env[name] ?? "").trim();
+  return v || null;
+}
+
 function safeToken(input: string) {
   const t = String(input ?? "").trim();
   return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
@@ -53,8 +58,8 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? "");
-    const token = safeToken(body?.token ?? "");
+    const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
+    const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const type = String(body?.type ?? "fornecedores").trim() || "fornecedores";
     const ids = Array.isArray(body?.ids) ? (body.ids as any[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
     const unique = Array.from(new Set(ids)).slice(0, 60);
@@ -85,4 +90,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

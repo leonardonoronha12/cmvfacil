@@ -2217,36 +2217,52 @@ export default function DashboardClient() {
 
   useEffect(() => {
     if (!historyItem) return;
+    const extractCandidateId = (raw: string) => {
+      const s = raw.trim();
+      if (!s) return "";
+      const parts = s.split("/").map((x) => x.trim()).filter(Boolean);
+      if (parts.length >= 2 && /^\d{10,}$/.test(parts[0].replace(/[^\d]/g, ""))) return parts[0];
+      const m = s.match(/\d{10,}/);
+      if (m) return m[0] ?? "";
+      return "";
+    };
+
+    const rawToId = new Map<string, string>();
+    for (const h of historicoEntradas) {
+      const raw = String(h.fornecedor ?? "").trim();
+      if (!raw) continue;
+      if (resolvedFornecedorIds[raw]) continue;
+      const candidate = extractCandidateId(raw);
+      if (!candidate) continue;
+      rawToId.set(raw, candidate);
+    }
+
     const ids = Array.from(
       new Set(
-        historicoEntradas
-          .map((h) => String(h.fornecedor ?? "").trim())
-          .filter(Boolean)
-          .filter((v) => !resolvedFornecedorIds[v])
-          .filter((v) => /^\d{10,}$/.test(v.replace(/[^\d]/g, ""))),
+        Array.from(rawToId.values()).filter(Boolean),
       ),
     ).slice(0, 40);
     if (!ids.length) return;
-    let baseUrl = "";
-    let token = "";
-    try {
-      baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-      token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-    } catch {}
-    if (!baseUrl || !token) return;
     void (async () => {
       try {
         const res = await fetch("/api/bubble-import/resolve-refs", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ baseUrl, token, type: "fornecedores", ids }),
+          body: JSON.stringify({ type: "fornecedores", ids }),
           cache: "no-store",
         });
         const j = (await res.json().catch(() => null)) as any;
         if (!res.ok || !j?.ok) return;
         const map = j?.map && typeof j.map === "object" ? (j.map as Record<string, string>) : {};
         if (!Object.keys(map).length) return;
-        setResolvedFornecedorIds((prev) => ({ ...prev, ...map }));
+        const expanded: Record<string, string> = {};
+        for (const [raw, id] of rawToId.entries()) {
+          const label = map[id] ? String(map[id]) : "";
+          if (label) expanded[raw] = label;
+        }
+        for (const [id, label] of Object.entries(map)) expanded[id] = label;
+        if (!Object.keys(expanded).length) return;
+        setResolvedFornecedorIds((prev) => ({ ...prev, ...expanded }));
       } catch {}
     })();
   }, [historicoEntradas, historyItem, resolvedFornecedorIds]);
