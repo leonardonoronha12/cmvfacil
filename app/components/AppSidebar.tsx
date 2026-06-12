@@ -298,6 +298,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const lastSyncRunIdRef = useRef("");
+  const bootstrapSkipUntilRef = useRef(0);
   const [bootstrap, setBootstrap] = useState<{
     status: "idle" | "running" | "done" | "error";
     message: string;
@@ -313,6 +314,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const bootstrapDoneTtlMs = 10 * 60_000;
 
   const shouldSkipBootstrap = () => {
+    const localUntil = bootstrapSkipUntilRef.current;
+    if (localUntil && Date.now() < localUntil) return true;
     try {
       const raw = (window.sessionStorage.getItem(bootstrapDoneKey) ?? "").trim();
       const t = raw ? Number(raw) : 0;
@@ -640,6 +643,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           } catch {
             // ignore
           }
+          bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
           return;
         }
@@ -726,6 +730,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               window.sessionStorage.removeItem(bootstrapRunningKey);
               window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
             } catch {}
+            bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
             void bootstrapUserDataOnce();
             setBootstrapOverlayVisible(false);
