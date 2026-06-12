@@ -892,6 +892,7 @@ export default function DashboardClient() {
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [resolvedFornecedorIds, setResolvedFornecedorIds] = useState<Record<string, string>>({});
   const [isFornecedorModalOpen, setIsFornecedorModalOpen] = useState(false);
   const [fornecedorModalKey, setFornecedorModalKey] = useState("");
   const [fornecedorModalLabel, setFornecedorModalLabel] = useState("");
@@ -2207,8 +2208,48 @@ export default function DashboardClient() {
     }
 
     out.sort((a, b) => b.t - a.t);
-    return out;
-  }, [entradas, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
+    return out.map((x) => {
+      const raw = String(x.fornecedor ?? "").trim();
+      const mapped = raw && resolvedFornecedorIds[raw] ? resolvedFornecedorIds[raw] : "";
+      return mapped ? { ...x, fornecedor: mapped } : x;
+    });
+  }, [entradas, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas, resolvedFornecedorIds]);
+
+  useEffect(() => {
+    if (!historyItem) return;
+    const ids = Array.from(
+      new Set(
+        historicoEntradas
+          .map((h) => String(h.fornecedor ?? "").trim())
+          .filter(Boolean)
+          .filter((v) => !resolvedFornecedorIds[v])
+          .filter((v) => /^\d{10,}$/.test(v.replace(/[^\d]/g, ""))),
+      ),
+    ).slice(0, 40);
+    if (!ids.length) return;
+    let baseUrl = "";
+    let token = "";
+    try {
+      baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+      token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+    } catch {}
+    if (!baseUrl || !token) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/bubble-import/resolve-refs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ baseUrl, token, type: "fornecedores", ids }),
+          cache: "no-store",
+        });
+        const j = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !j?.ok) return;
+        const map = j?.map && typeof j.map === "object" ? (j.map as Record<string, string>) : {};
+        if (!Object.keys(map).length) return;
+        setResolvedFornecedorIds((prev) => ({ ...prev, ...map }));
+      } catch {}
+    })();
+  }, [historicoEntradas, historyItem, resolvedFornecedorIds]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];
