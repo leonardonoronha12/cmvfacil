@@ -692,6 +692,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           if (!tickRes.ok || !tickJson?.ok) {
             const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
             setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
+          bootstrapSkipUntilRef.current = Date.now() + 60_000;
             try {
               window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
@@ -744,6 +745,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
                 "failed";
             setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
+            bootstrapSkipUntilRef.current = Date.now() + 60_000;
             try {
               window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
@@ -752,11 +754,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         }
 
         setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "", detail: "" });
+        bootstrapSkipUntilRef.current = Date.now() + 60_000;
       } catch (err) {
         setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "", detail: "" });
+        bootstrapSkipUntilRef.current = Date.now() + 60_000;
       }
     })();
-  }, [active, bootstrap.status, bootstrapOverlayVisible]);
+  }, [active, bootstrap.status]);
 
   useEffect(() => {
     if (bootstrap.status !== "running") return;
