@@ -15,7 +15,7 @@ export type VercelCliJob = {
 
 const KEY = "__cmvfacil_vercel_cli_jobs__";
 const SECRETS_KEY = "__cmvfacil_vercel_cli_secrets__";
-const SECRETS_TTL_MS = 20 * 60 * 1000;
+const SECRETS_TTL_MS = 6 * 60 * 60 * 1000;
 
 function getStore(): Map<string, VercelCliJob> {
   const g = globalThis as any;
