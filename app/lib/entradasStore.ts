@@ -2,6 +2,7 @@
 
 export type NotaItem = {
   id: string;
+  itemId?: string;
   nome: string;
   quantidadeLabel: string;
   subtotalLabel: string;
@@ -43,6 +44,7 @@ function normalizeRow(input: unknown): EntradaStoreRow | null {
           const it = x as Record<string, unknown>;
           const item: NotaItem = {
             id: String(it.id ?? "").trim() || String(Date.now()),
+            itemId: String(it.itemId ?? "").trim() || undefined,
             nome: String(it.nome ?? "").trim(),
             quantidadeLabel: String(it.quantidadeLabel ?? "").trim(),
             subtotalLabel: String(it.subtotalLabel ?? "").trim(),

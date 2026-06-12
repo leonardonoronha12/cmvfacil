@@ -2124,8 +2124,31 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
+        const itemId = String((it as any)?.itemId ?? "").trim();
+        if (itemId && itemId === historyItem.insumoId) {
+          const parsed = parseQtyLabel(it.quantidadeLabel ?? "");
+          const qtyBase = parsed.qty;
+          if (!Number.isFinite(qtyBase) || qtyBase <= 0) continue;
+          let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
+          if (!subtotalCents) {
+            const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+            if (unit && qtyBase > 0) subtotalCents = Math.round(unit * qtyBase);
+          }
+          const unitCostCents = subtotalCents > 0 && qtyBase > 0 ? Math.round(subtotalCents / qtyBase) : 0;
+          const qtyLabel = `${qtyBase.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}${baseUnit}`;
+          out.push({
+            t,
+            data: e.dataLancamento,
+            fornecedor: e.fornecedor,
+            qtd: qtyLabel,
+            preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)}/${baseUnit}` : `-/${baseUnit}`,
+            subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
+          });
+          continue;
+        }
+
         const rawNome = String(it.nome ?? "").trim();
-        const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+        const resolvedNome = (itemId && insumoNameById.get(itemId)) || (rawNome && insumoNameById.get(rawNome)) || rawNome;
         const rawKey = normalizeKey(resolvedNome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;

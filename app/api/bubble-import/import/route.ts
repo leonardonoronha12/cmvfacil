@@ -738,6 +738,7 @@ export async function POST(req: NextRequest) {
       const list = notaItemsByNotaKey.get(notaId) ?? [];
       list.push({
         id: `${prefix}nota_item:${bubbleId}`,
+        itemId: String(itemId ?? "").trim() || undefined,
         nome: nome.trim(),
         quantidadeLabel: qtd.trim(),
         subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",
