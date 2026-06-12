@@ -289,8 +289,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
-  const [bootstrap, setBootstrap] = useState<{ status: "idle" | "running" | "done" | "error"; message: string; progress: number; etaMs: number | null; stage: string }>(
-    { status: "idle", message: "", progress: 0, etaMs: null, stage: "" },
+  const [bootstrap, setBootstrap] = useState<{
+    status: "idle" | "running" | "done" | "error";
+    message: string;
+    progress: number;
+    etaMs: number | null;
+    stage: string;
+    detail: string;
+  }>(
+    { status: "idle", message: "", progress: 0, etaMs: null, stage: "", detail: "" },
   );
   const bootstrapDoneKey = "cmvfacil:bootstrapDone:v5";
   const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v5";
@@ -370,18 +377,55 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               ? 1
               : Math.min(0.98, pullingWeight * pullingProgress);
 
+      const detail = (() => {
+        if (phase === "pulling") {
+          const idx = typeof state.currentTypeIndex === "number" && Number.isFinite(state.currentTypeIndex) ? Math.max(0, state.currentTypeIndex) : 0;
+          const t = (runningType || types[idx] || types.find((x) => String(perType?.[x]?.status ?? "") !== "done")) ?? "";
+          const st = t ? (perType?.[t] ?? null) : null;
+          const fetched = st && typeof st?.fetched === "number" ? st.fetched : null;
+          const remaining = st && typeof st?.remaining === "number" ? st.remaining : null;
+          const cursor = st && typeof st?.cursor === "number" ? st.cursor : null;
+          const name = t ? String(t) : "—";
+          const a: string[] = [];
+          a.push(`Tipo: ${name}`);
+          if (cursor != null) a.push(`cursor ${cursor}`);
+          if (fetched != null) a.push(`puxados ${fetched}`);
+          if (remaining != null) a.push(`restante ${remaining}`);
+          a.push(`${doneTypes}/${totalTypes} tipos`);
+          return a.join(" • ");
+        }
+        if (phase === "importing") {
+          const domain = domains[importIdx] ? String(domains[importIdx]) : "";
+          const work = state?.import?.work && domain && typeof state.import.work === "object" ? (state.import.work as any)[domain] : null;
+          const cursor = work && typeof work?.cursor === "number" ? work.cursor : null;
+          const total = work && typeof work?.total === "number" ? work.total : null;
+          const lastFile = work && typeof work?.lastFile === "string" ? String(work.lastFile) : "";
+          const lastName = lastFile ? lastFile.split("/").slice(-1)[0] || "" : "";
+          const a: string[] = [];
+          a.push(`Importando: ${domain || "—"}`);
+          if (cursor != null && total != null && total > 0) a.push(`arquivos ${Math.min(total, cursor)}/${total}`);
+          if (lastName) a.push(`último ${lastName}`);
+          a.push(`${Math.min(domains.length, importIdx)}/${domains.length} etapas`);
+          return a.join(" • ");
+        }
+        return "";
+      })();
+
       const startedAt = typeof state.startedAt === "string" ? new Date(state.startedAt).getTime() : 0;
       const elapsed = startedAt ? Math.max(0, now - startedAt) : 0;
       const etaMs = (() => {
         if (phase === "done") return 0;
         const p = Math.max(0.02, Math.min(0.95, progress));
         if (!elapsed) return null;
+        if (elapsed < 30_000 || p < 0.1) return null;
         const totalEst = elapsed / p;
         const remaining = totalEst - elapsed;
-        return Number.isFinite(remaining) && remaining > 0 ? Math.min(4 * 60 * 60_000, remaining) : null;
+        if (!Number.isFinite(remaining) || remaining <= 0) return null;
+        if (remaining > 6 * 60 * 60_000) return null;
+        return remaining;
       })();
 
-      return { progress, etaMs, stage, doneSteps: doneTypes, totalSteps: totalTypes, pendingSteps: Math.max(0, totalTypes - doneTypes), phase };
+      return { progress, etaMs, stage, detail, doneSteps: doneTypes, totalSteps: totalTypes, pendingSteps: Math.max(0, totalTypes - doneTypes), phase };
     }
     const deletingWeight = 0.2;
     const importingWeight = 0.8;
@@ -454,7 +498,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     const etaMs =
       phase === "deleting" ? remainingDeleteMs + remainingImportMs : phase === "importing" ? remainingImportMs : phase === "done" ? 0 : remainingImportMs || null;
 
-    return { progress, etaMs, stage, doneSteps, totalSteps, pendingSteps, phase };
+    const detail = (() => {
+      if (phase === "deleting") {
+        const t = tables[deleteIndex] ? String(tables[deleteIndex]) : "";
+        return t ? `Otimizando: ${t}` : "";
+      }
+      if (phase === "importing") {
+        const label = runningStep ? String(runningStep?.name ?? runningStep?.label ?? "") : "";
+        return label ? `Importando: ${label}` : "";
+      }
+      return "";
+    })();
+
+    return { progress, etaMs, stage, detail, doneSteps, totalSteps, pendingSteps, phase };
   };
 
   useEffect(() => {
@@ -527,7 +583,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (shouldSkipBootstrap()) return;
 
     setBootstrapOverlayVisible(true);
-    setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando" });
+    setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando", detail: "" });
     void (async () => {
       try {
         let bubbleBaseUrl = "";
@@ -545,7 +601,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const json = (await res.json().catch(() => null)) as any;
         if (!res.ok || !json?.ok) {
           const msg = String(json?.error ?? `failed_${res.status}`);
-          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
+          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
           return;
         }
 
@@ -557,19 +613,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           } catch {
             // ignore
           }
-          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
+          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
           return;
         }
         if (status === "needs_setup" || status === "no_files") {
           const msg = String(json?.reason ?? "no_files");
-          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
+          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
           return;
         }
 
         const statePath = String(json?.state?.statePath ?? "");
         const mode = String(json?.mode ?? "");
         if (!statePath) {
-          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
+          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
           return;
         }
 
@@ -602,7 +658,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const tickJson = (await tickRes.json().catch(() => null)) as any;
           if (!tickRes.ok || !tickJson?.ok) {
             const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
-            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
+            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
             try {
               window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
@@ -614,7 +670,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             if (prev.status !== "running") return prev;
             const nextProgress = Math.max(prev.progress, meta.progress || 0);
             const etaMs = meta.etaMs && Number.isFinite(meta.etaMs) ? Math.max(0, meta.etaMs) : null;
-            return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage };
+            return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage, detail: String(meta.detail ?? "") };
           });
 
           const phase = String(tickJson?.state?.phase ?? "");
@@ -623,7 +679,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               window.sessionStorage.removeItem(bootstrapRunningKey);
               window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
             } catch {}
-            setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "" });
+            setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
             if (bootstrapOverlayVisible) window.location.reload();
             return;
           }
@@ -633,7 +689,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               : String(tickJson?.state?.delete?.lastError ?? "") ||
                 String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
                 "failed";
-            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "" });
+            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
             try {
               window.sessionStorage.removeItem(bootstrapRunningKey);
             } catch {}
@@ -641,9 +697,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           }
         }
 
-        setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "" });
+        setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "", detail: "" });
       } catch (err) {
-        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "" });
+        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "", detail: "" });
       }
     })();
   }, [active, bootstrap.status, bootstrapOverlayVisible]);
@@ -841,6 +897,12 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                     {formatEtaLabel(bootstrap.etaMs) ? formatEtaLabel(bootstrap.etaMs) : "calculando..."}
                   </div>
                 </div>
+
+                {bootstrap.detail ? (
+                  <div style={{ fontSize: 12, color: "#292d2d", marginBottom: 10, wordBreak: "break-word" }}>
+                    {bootstrap.detail}
+                  </div>
+                ) : null}
 
                 <div style={{ width: "100%", height: 10, borderRadius: 999, background: "#e9eeed", overflow: "hidden" }}>
                   <div
