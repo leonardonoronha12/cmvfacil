@@ -715,7 +715,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
             } catch {}
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
-            if (bootstrapOverlayVisible) window.location.reload();
+            void bootstrapUserDataOnce();
+            setBootstrapOverlayVisible(false);
             return;
           }
           if (phase === "error") {
