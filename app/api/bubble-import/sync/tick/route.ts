@@ -686,6 +686,17 @@ export async function POST(req: NextRequest) {
               break;
             } catch (err) {
               const bubbleStatus = err instanceof BubbleApiError ? err.bubbleStatus : null;
+              if (bubbleStatus === 404) {
+                p.status = "done";
+                p.remaining = 0;
+                p.lastError = "type_not_found";
+                idx += 1;
+                state.currentTypeIndex = idx;
+                await persist();
+                ops += 1;
+                pausedByTransientError = true;
+                break;
+              }
               if (!isTransient(bubbleStatus)) throw err;
               if (attempt >= 9) {
                 p.errorCount = (p.errorCount ?? 0) + 1;
@@ -782,7 +793,7 @@ export async function POST(req: NextRequest) {
           ops += 1;
           continue;
         }
-        if (domain === "insumos" || domain === "inventario" || domain === "fornecedores") {
+        if (domain === "insumos" || domain === "fornecedores") {
           let work: any = null;
           try {
             state.import.status = "running";

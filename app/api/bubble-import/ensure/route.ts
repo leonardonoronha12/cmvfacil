@@ -506,6 +506,7 @@ function buildAutoSyncTypes() {
     "categorias",
     "custo_medio_item",
     "desperdicio",
+    "fichas_tecnicas",
     "etiquetas",
     "faturamentos",
     "fornecedores",
