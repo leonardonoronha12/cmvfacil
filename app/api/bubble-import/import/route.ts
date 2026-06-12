@@ -726,8 +726,7 @@ export async function POST(req: NextRequest) {
       if (!notaId) return;
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
-      const itemIdCandidate = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
-      const itemId = itemIdCandidate && itemById.has(itemIdCandidate) ? itemIdCandidate : "";
+      const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
       const nome =
         pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]) ||
         (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||

@@ -63,9 +63,9 @@ export async function POST(req: NextRequest) {
     } catch {}
     if (!res.ok || !parsed?.ok) return json({ ok: false, error: parsed?.error || text || `failed_${res.status}` }, { status: 500 });
 
-    return json({ ok: true, runPrefix }, { status: 200 });
+    const entradasInserted = typeof parsed?.summary?.entradas === "number" ? parsed.summary.entradas : null;
+    return json({ ok: true, runPrefix, entradasInserted }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

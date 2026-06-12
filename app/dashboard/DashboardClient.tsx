@@ -951,7 +951,14 @@ export default function DashboardClient() {
       const dbEntradas = await loadEntradasFromSupabase();
       writeEntradasToStore(dbEntradas);
       setEntradas(dbEntradas);
-      showToast("Entradas sincronizadas. Reabra o item para ver o histórico.", "success", 5000);
+      const inserted = typeof rj?.entradasInserted === "number" ? rj.entradasInserted : null;
+      const msg =
+        inserted === 0
+          ? "Sincronização concluída, mas 0 entradas foram importadas. Verifique se os tipos do Bubble (itens_notas/notas_fiscais) existem e se estão acessíveis pela Data API."
+          : inserted != null
+            ? `Entradas sincronizadas (${inserted}). Reabra o item para ver o histórico.`
+            : "Entradas sincronizadas. Reabra o item para ver o histórico.";
+      showToast(msg, inserted === 0 ? "error" : "success", inserted === 0 ? 10000 : 5000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
