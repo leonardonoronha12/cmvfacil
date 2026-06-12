@@ -432,6 +432,24 @@ export default function InsumosClient() {
     }
   }
 
+  async function resumeAutoImport() {
+    try {
+      let bubbleBaseUrl = "";
+      let bubbleToken = "";
+      try {
+        bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
+      await fetch("/api/bubble-import/ensure", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined }),
+        cache: "no-store",
+      });
+    } catch {}
+    window.location.reload();
+  }
+
   async function checkAutoImportStatusIfEmpty(nextRows: InsumoRow[]) {
     if (nextRows.length) return;
     try {
@@ -1501,6 +1519,9 @@ export default function InsumosClient() {
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
                   <button type="button" className="cmv-button" onClick={() => void runAutoImportDiagnosis()} disabled={autoImportDiag.loading}>
                     {autoImportDiag.loading ? "Checando..." : "Rechecar"}
+                  </button>
+                  <button type="button" className="cmv-button" onClick={() => void resumeAutoImport()}>
+                    Retomar importação
                   </button>
                   <a className="cmv-button" href="/ajustes/importar-bubble-api">
                     Configurar Bubble

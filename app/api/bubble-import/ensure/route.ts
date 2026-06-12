@@ -575,17 +575,7 @@ export async function POST(req: NextRequest) {
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
 
-    const already = await userHasAnyData(supabase, userId);
-    if (already) return json({ ok: true, status: "ready", userId }, { status: 200 });
-
-    if (!baseUrl || !token) {
-      return json({ ok: true, status: "needs_setup", reason: "missing_bubble_credentials", userId }, { status: 200 });
-    }
-
-    const runId = crypto.randomUUID();
-    const runPrefix = `user:${userId}/bootstrap/${runId}`;
     const statePath = `user:${userId}/bootstrap/sync-state.json`;
-
     const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
     const existingSyncPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
     if (existingSyncPhase === "done") {
@@ -594,7 +584,11 @@ export async function POST(req: NextRequest) {
       }
       return json({ ok: true, status: "needs_setup", reason: "import_done_but_empty", userId, state: existing }, { status: 200 });
     }
-    if (existingSyncPhase && existingSyncPhase !== "done" && existingSyncPhase !== "error") {
+    if (existingSyncPhase) {
+      const needsCreds = existingSyncPhase === "pulling" && (!baseUrl || !token);
+      if (needsCreds) {
+        return json({ ok: true, status: "needs_setup", reason: "missing_bubble_credentials", userId, state: existing }, { status: 200 });
+      }
       try {
         const desiredTypes = buildAutoSyncTypes();
         const existingTypes = Array.isArray((existing as any)?.types) ? ((existing as any).types as unknown[]).map((t) => String(t ?? "").trim()).filter(Boolean) : [];
@@ -620,12 +614,18 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        if (changed || nextTypes.length !== existingTypes.length) {
+        const shouldReset = existingSyncPhase === "error";
+        if (changed || nextTypes.length !== existingTypes.length || shouldReset) {
           (existing as any).types = nextTypes;
           (existing as any).perType = perType;
-          if (String((existing as any)?.phase ?? "") !== "pulling") {
+          if (shouldReset) {
             (existing as any).phase = "pulling";
             (existing as any).currentTypeIndex = 0;
+            (existing as any).lastError = "";
+            if ((existing as any).import && typeof (existing as any).import === "object") {
+              (existing as any).import.lastError = "";
+              (existing as any).import.status = "pending";
+            }
           }
           (existing as any).updatedAt = new Date().toISOString();
           await uploadJsonToStorage(supabase, bucket, statePath, existing as any);
@@ -634,6 +634,15 @@ export async function POST(req: NextRequest) {
       return json({ ok: true, status: "running", mode: "sync", state: existing, userId }, { status: 200 });
     }
 
+    const already = await userHasAnyData(supabase, userId);
+    if (already) return json({ ok: true, status: "ready", userId }, { status: 200 });
+
+    if (!baseUrl || !token) {
+      return json({ ok: true, status: "needs_setup", reason: "missing_bubble_credentials", userId }, { status: 200 });
+    }
+
+    const runId = crypto.randomUUID();
+    const runPrefix = `user:${userId}/bootstrap/${runId}`;
     const types = buildAutoSyncTypes();
     const state = newSyncState(runId, runPrefix, statePath, types);
     await uploadJsonToStorage(supabase, bucket, statePath, state);
