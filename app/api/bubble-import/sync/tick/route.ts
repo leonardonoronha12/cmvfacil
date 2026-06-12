@@ -168,6 +168,17 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+async function getSupabaseEmailForUserId(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
+  try {
+    const { data, error } = await supabase.auth.admin.getUserById(userId);
+    if (error) return null;
+    const email = String((data as any)?.user?.email ?? "").trim().toLowerCase();
+    return email || null;
+  } catch {
+    return null;
+  }
+}
+
 function partLabel(part: number) {
   return String(part).padStart(4, "0");
 }
@@ -420,6 +431,75 @@ export async function POST(req: NextRequest) {
       await uploadJson(supabase, bucket, statePath, state);
     };
 
+    const ensureEmailFilter = async () => {
+      if (overrideImportUserId) return;
+      const enabled = Boolean((state as any)?.filter?.mode === "email_only");
+      const bubbleUserIdExisting = String((state as any)?.filter?.bubbleUserId ?? "").trim();
+      const emailExisting = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
+      if (enabled && bubbleUserIdExisting && emailExisting) return;
+
+      if (state.phase !== "pulling") return;
+      if (!baseUrl) throw new Error("missing_base_url");
+      if (!token) throw new Error("missing_token");
+
+      const email = (await getSupabaseEmailForUserId(supabase, userId)) ?? "";
+      if (!email) throw new Error("missing_supabase_email");
+
+      const userType =
+        (Array.isArray(state.types) ? (state.types as any[]) : [])
+          .map((t) => String(t ?? "").trim())
+          .find((t) => t.toLowerCase() === "user" || t.toLowerCase() === "usuario" || t.toLowerCase() === "usuarios") ?? "User";
+
+      const page = await fetchBubblePage({
+        baseUrl,
+        token,
+        typeName: userType,
+        cursor: 0,
+        limit: 10,
+        constraints: [{ key: "email", constraint_type: "equals", value: email }],
+      });
+      const first = (page.results ?? [])[0] as any;
+      const bubbleUserId = String(first?.["unique_id"] ?? first?._id ?? first?.id ?? first?.["Created By"] ?? "").trim();
+      if (!bubbleUserId) throw new Error("bubble_user_not_found_for_email");
+
+      const needsReset = !enabled || !bubbleUserIdExisting || emailExisting !== email;
+      (state as any).filter = { v: 1, mode: "email_only", email, bubbleUserId, userType };
+      if (needsReset) {
+        const runId = crypto.randomUUID();
+        const runPrefix = `user:${userId}/bootstrap/${runId}`;
+        state.runId = runId;
+        state.runPrefix = runPrefix;
+        state.startedAt = nowIso();
+        state.phase = "pulling";
+        state.currentTypeIndex = 0;
+        if (state.import) {
+          state.import.status = "pending";
+          state.import.index = 0;
+          state.import.lastError = "";
+          state.import.work = {};
+        }
+        if (state.perType && typeof state.perType === "object") {
+          for (const t of Object.keys(state.perType)) {
+            const p = state.perType[t];
+            if (!p || typeof p !== "object") continue;
+            p.status = "pending";
+            p.fetched = 0;
+            p.parts = 0;
+            p.cursor = 0;
+            p.remaining = null;
+            p.segmentAfter = null;
+            p.lastCreated = null;
+            p.lastPath = "";
+            p.errorCount = 0;
+            p.lastError = "";
+            p.nextRetryAt = 0;
+          }
+        }
+      }
+      await persist();
+      ops += 1;
+    };
+
     const ensureUserMap = async () => {
       if (overrideImportUserId) return;
       const existing = state.userMap && typeof state.userMap === "object" ? state.userMap : null;
@@ -430,7 +510,14 @@ export async function POST(req: NextRequest) {
       if (hasEmailToId && hasBubbleIdToEmail) return;
       try {
         const next: any = existing && typeof existing === "object" ? { ...existing } : {};
-        if (!hasEmailToId) next.emailToId = await loadAuthEmailToIdMap(supabase);
+        if (!hasEmailToId) {
+          const filteredEmail = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
+          if (filteredEmail) {
+            next.emailToId = { [filteredEmail]: userId };
+          } else {
+            next.emailToId = await loadAuthEmailToIdMap(supabase);
+          }
+        }
         if (!hasBubbleIdToEmail && typeof state.runPrefix === "string" && state.runPrefix) {
           const all = await listAllPaths(supabase, bucket, state.runPrefix);
           const userFiles = all
@@ -538,6 +625,7 @@ export async function POST(req: NextRequest) {
 
     while (ops < maxOps && Date.now() - startMs < hardMs) {
       if (state.phase === "pulling") {
+        await ensureEmailFilter();
         const types: string[] = Array.isArray(state.types) ? state.types : [];
         if (!types.length) {
           state.phase = "error";
@@ -568,15 +656,23 @@ export async function POST(req: NextRequest) {
 
           const cursor = typeof p.cursor === "number" && p.cursor >= 0 ? p.cursor : 0;
           const segAfter = typeof p.segmentAfter === "string" && p.segmentAfter.trim() ? p.segmentAfter.trim() : null;
-          const constraints = segAfter
-            ? [
-                {
-                  key: "Created Date",
-                  constraint_type: "greater than",
-                  value: segAfter,
-                },
-              ]
-            : null;
+          const baseConstraints: BubbleConstraint[] = [];
+          if (segAfter) {
+            baseConstraints.push({ key: "Created Date", constraint_type: "greater than", value: segAfter });
+          }
+          const filter = (state as any)?.filter;
+          const filterMode = String(filter?.mode ?? "");
+          const filterBubbleUserId = String(filter?.bubbleUserId ?? "").trim();
+          const filterEmail = String(filter?.email ?? "").trim().toLowerCase();
+          const filterUserType = String(filter?.userType ?? "User").trim() || "User";
+          if (filterMode === "email_only" && filterBubbleUserId) {
+            if (t.toLowerCase() === String(filterUserType).toLowerCase() && filterEmail) {
+              baseConstraints.push({ key: "email", constraint_type: "equals", value: filterEmail });
+            } else {
+              baseConstraints.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
+            }
+          }
+          const constraints = baseConstraints.length ? baseConstraints : null;
 
           let results: unknown[] = [];
           let remaining: number | null = null;
