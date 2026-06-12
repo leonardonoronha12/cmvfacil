@@ -1059,12 +1059,17 @@ export async function POST(req: NextRequest) {
                 if (!key) return;
                 const fornId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "fornecedor_id"]);
                 if (fornId) uacc.fornecedorNameById[fornId.trim()] = fornecedor.trim();
-                uacc.infoMap[key] = {
+                const info = {
                   fornecedor: fornecedor.trim() || fornecedor,
                   vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
                   whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
                   endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
                 };
+                uacc.infoMap[key] = info;
+                if (fornId) {
+                  const idKey = fornId.trim().toUpperCase();
+                  if (!uacc.infoMap[idKey]) uacc.infoMap[idKey] = info;
+                }
               };
 
               const handleFornecedorProduto = (row: Record<string, string>) => {

@@ -733,13 +733,19 @@ export async function POST(req: NextRequest) {
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
       const fornId = pickBubbleId(row) || pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
-      if (fornId) st.fornecedorNameById.set(fornId, fornecedor.trim());
-      st.infoMap[key] = {
+      const fornIdResolved = fornId ? extractBubbleRefId(String(fornId)) : "";
+      if (fornIdResolved) st.fornecedorNameById.set(fornIdResolved, fornecedor.trim());
+      const info = {
         fornecedor: fornecedor.trim() || fornecedor,
         vendedor: pickFirst(row, ["vendedor", "contato", "nome_vendedor", "responsavel"]) || pickKeyLike(row, ["vendedor", "contato", "responsavel"]),
         whatsapp: pickFirst(row, ["whatsapp", "telefone", "celular", "fone"]) || pickKeyLike(row, ["whatsapp", "telefone", "celular"]),
         endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
       };
+      st.infoMap[key] = info;
+      if (fornIdResolved) {
+        const idKey = fornIdResolved.trim().toUpperCase();
+        if (!st.infoMap[idKey]) st.infoMap[idKey] = info;
+      }
     }
 
     function handleFornecedorProduto(row: CsvObjectRow) {

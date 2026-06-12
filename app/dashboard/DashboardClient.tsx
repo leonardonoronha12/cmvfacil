@@ -902,6 +902,7 @@ export default function DashboardClient() {
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const resolveFornecedorFailedRef = useRef(false);
+  const reimportFornecedoresTriedRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
@@ -2211,10 +2212,55 @@ export default function DashboardClient() {
     out.sort((a, b) => b.t - a.t);
     return out.map((x) => {
       const raw = String(x.fornecedor ?? "").trim();
-      const mapped = raw && resolvedFornecedorIds[raw] ? resolvedFornecedorIds[raw] : "";
+      const rawUpper = raw.toUpperCase();
+      const clean = raw.split("/")[0]?.trim() || raw;
+      const cleanUpper = clean.toUpperCase();
+      const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[cleanUpper] || null;
+      const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
+      if (labelFromState) return { ...x, fornecedor: labelFromState };
+      const mapped = (raw && resolvedFornecedorIds[raw]) || (clean && resolvedFornecedorIds[clean]) || "";
       return mapped ? { ...x, fornecedor: mapped } : x;
     });
-  }, [entradas, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas, resolvedFornecedorIds]);
+  }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas, resolvedFornecedorIds]);
+
+  useEffect(() => {
+    if (!historyItem) return;
+    if (reimportFornecedoresTriedRef.current) return;
+    const needs = historicoEntradas
+      .map((h) => String(h.fornecedor ?? "").trim())
+      .filter(Boolean)
+      .some((raw) => {
+        const clean = raw.split("/")[0]?.trim() || raw;
+        const id = clean.replace(/[^\d]/g, "");
+        if (!/^\d{10,}$/.test(id)) return false;
+        const info = fornecedorInfoMap[clean.toUpperCase()] || fornecedorInfoMap[raw.toUpperCase()] || null;
+        const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
+        if (labelFromState) return false;
+        if (resolvedFornecedorIds[raw] || resolvedFornecedorIds[clean]) return false;
+        return true;
+      });
+    if (!needs) return;
+    reimportFornecedoresTriedRef.current = true;
+    void (async () => {
+      setIsLoadingTables(true);
+      try {
+        const res = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
+        const j = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
+        const db = await loadFornecedoresStateFromSupabase();
+        writeFornecedorInfoMap(db.info);
+        writeFornecedorProdutosMap(db.produtos);
+        writeFornecedorEquivalenciasMap(db.equivalencias);
+        setFornecedorInfoMap(db.info);
+        setFornecedorProdutosMap(db.produtos);
+        setFornecedorEquivalenciasMap(db.equivalencias);
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+      } finally {
+        setIsLoadingTables(false);
+      }
+    })();
+  }, [fornecedorInfoMap, historicoEntradas, historyItem, resolvedFornecedorIds]);
 
   useEffect(() => {
     if (!historyItem) return;
