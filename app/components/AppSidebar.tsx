@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import LoadingSpinner from "./LoadingSpinner";
@@ -297,6 +297,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isMobile, setIsMobile] = useState(false);
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
+  const lastSyncRunIdRef = useRef("");
   const [bootstrap, setBootstrap] = useState<{
     status: "idle" | "running" | "done" | "error";
     message: string;
@@ -388,6 +389,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
               : Math.min(0.98, pullingWeight * pullingProgress);
 
       const detail = (() => {
+        const filterEmail = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
         if (phase === "pulling") {
           const idx = typeof state.currentTypeIndex === "number" && Number.isFinite(state.currentTypeIndex) ? Math.max(0, state.currentTypeIndex) : 0;
           const t = (runningType || types[idx] || types.find((x) => String(perType?.[x]?.status ?? "") !== "done")) ?? "";
@@ -402,6 +404,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           if (fetched != null) a.push(`puxados ${formatIntPT(fetched)}`);
           if (remaining != null) a.push(`restante ${formatIntPT(remaining)}`);
           a.push(`${doneTypes}/${totalTypes} tipos`);
+          if (filterEmail) a.push(filterEmail);
           return a.join(" • ");
         }
         if (phase === "importing") {
@@ -416,6 +419,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           if (cursor != null && total != null && total > 0) a.push(`arquivos ${formatIntPT(Math.min(total, cursor))}/${formatIntPT(total)}`);
           if (lastName) a.push(`último ${lastName}`);
           a.push(`${Math.min(domains.length, importIdx)}/${domains.length} etapas`);
+          if (filterEmail) a.push(filterEmail);
           return a.join(" • ");
         }
         return "";
@@ -678,9 +682,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           }
 
           const meta = computeBootstrapProgress(tickJson?.state ?? {});
+          const currentRunId = String(tickJson?.state?.runId ?? "").trim();
+          const runIdChanged = Boolean(currentRunId && currentRunId !== lastSyncRunIdRef.current);
+          if (runIdChanged) {
+            lastSyncRunIdRef.current = currentRunId;
+            setBootstrapDisplayPct(0);
+          }
           setBootstrap((prev) => {
             if (prev.status !== "running") return prev;
-            const nextProgress = Math.max(prev.progress, meta.progress || 0);
+            const nextProgress = runIdChanged ? (meta.progress || 0) : Math.max(prev.progress, meta.progress || 0);
             const etaMs = meta.etaMs && Number.isFinite(meta.etaMs) ? Math.max(0, meta.etaMs) : null;
             return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage, detail: String(meta.detail ?? "") };
           });
