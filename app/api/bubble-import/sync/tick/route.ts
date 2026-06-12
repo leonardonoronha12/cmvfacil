@@ -405,7 +405,7 @@ export async function POST(req: NextRequest) {
     const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const resume = Boolean(body?.resume);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
-    const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) ? importAsUserIdRaw : "";
+    const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) && importAsUserIdRaw !== userId ? importAsUserIdRaw : "";
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
