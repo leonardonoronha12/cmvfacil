@@ -579,9 +579,15 @@ export async function POST(req: NextRequest) {
     const existing = await downloadJsonFromStorage(supabase, bucket, statePath);
     const existingSyncPhase = existing && typeof existing === "object" ? String((existing as any)?.phase ?? "").trim().toLowerCase() : "";
     if (existingSyncPhase === "done") {
-      if (!baseUrl || !token) {
-        return json({ ok: true, status: "needs_setup", reason: "missing_bubble_credentials", userId, state: existing }, { status: 200 });
+      const importStatus = existing && typeof existing === "object" ? String((existing as any)?.import?.status ?? "").trim().toLowerCase() : "";
+      const importDone = importStatus === "done";
+      if (!importDone) {
+        return json({ ok: true, status: "running", mode: "sync", state: existing, userId }, { status: 200 });
       }
+
+      const already = await userHasAnyData(supabase, userId);
+      if (already) return json({ ok: true, status: "ready", userId }, { status: 200 });
+
       return json({ ok: true, status: "needs_setup", reason: "import_done_but_empty", userId, state: existing }, { status: 200 });
     }
     if (existingSyncPhase) {
