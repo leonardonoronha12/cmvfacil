@@ -370,7 +370,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       const totalTypes = types.length || 0;
       const doneTypes = types.filter((t) => String(perType?.[t]?.status ?? "") === "done").length;
       const runningType = types.find((t) => String(perType?.[t]?.status ?? "") === "pulling" || String(perType?.[t]?.status ?? "").includes("segment")) ?? null;
-      const pullingProgress = totalTypes ? Math.min(1, (doneTypes + (runningType ? 0.35 : 0)) / totalTypes) : 0;
+      const pullingProgress = (() => {
+        if (!totalTypes) return 0;
+        if (!runningType) return Math.min(1, doneTypes / totalTypes);
+        const st = perType?.[runningType] ?? null;
+        const fetched = st && typeof st?.fetched === "number" ? st.fetched : null;
+        const remaining = st && typeof st?.remaining === "number" ? st.remaining : null;
+        const denom = fetched != null && remaining != null ? fetched + remaining : null;
+        const frac =
+          denom && Number.isFinite(denom) && denom > 0 && fetched != null && Number.isFinite(fetched)
+            ? Math.max(0, Math.min(1, fetched / denom))
+            : 0.35;
+        return Math.min(1, (doneTypes + frac) / totalTypes);
+      })();
 
       const domains = Array.isArray(state.import?.domains) ? (state.import.domains as any[]).map((d) => String(d ?? "").trim()).filter(Boolean) : [];
       const importIdx = typeof state.import?.index === "number" && Number.isFinite(state.import.index) ? Math.max(0, state.import.index) : 0;
