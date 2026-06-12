@@ -628,6 +628,7 @@ export default function InsumosClient() {
     "especificacao",
   ]);
   const [draggingColumn, setDraggingColumn] = useState<null | "item" | "medida" | "custoMedio" | "categoria" | "especificacao">(null);
+  const [isAutoImportDiagOpen, setIsAutoImportDiagOpen] = useState(false);
   const [autoImportDiag, setAutoImportDiag] = useState<{
     loading: boolean;
     meUserId: string;
@@ -1418,6 +1419,19 @@ export default function InsumosClient() {
               <IconUpload />
               Importar
             </button>
+            <button
+              type="button"
+              className={styles.importBtn}
+              onClick={() => {
+                setIsAutoImportDiagOpen((v) => {
+                  const next = !v;
+                  if (next) void runAutoImportDiagnosis();
+                  return next;
+                });
+              }}
+            >
+              Diagnóstico
+            </button>
             <button type="button" className={styles.newBtn} onClick={openNewItem}>
               <IconPlus />
               Novo Item
@@ -1443,6 +1457,61 @@ export default function InsumosClient() {
         </section>
 
         <div className={styles.tableWrap}>
+          {isAutoImportDiagOpen ? (
+            <div style={{ marginBottom: 12 }}>
+              <div
+                style={{
+                  background: "#f7faf9",
+                  border: "1px solid #dbe7e4",
+                  borderRadius: 12,
+                  padding: 12,
+                  textAlign: "left",
+                  color: "#0f172a",
+                  fontSize: 13,
+                  lineHeight: "18px",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", marginBottom: 6 }}>
+                  <div style={{ fontWeight: 900 }}>Diagnóstico (importação automática)</div>
+                  <button type="button" className="cmv-button" onClick={() => setIsAutoImportDiagOpen(false)}>
+                    Fechar
+                  </button>
+                </div>
+                <div style={{ display: "grid", gap: 6 }}>
+                  <div>
+                    <span style={{ fontWeight: 800 }}>UserId:</span> {autoImportDiag.meUserId ? autoImportDiag.meUserId : "—"}
+                  </div>
+                  <div>
+                    <span style={{ fontWeight: 800 }}>Bubble URL:</span> {autoImportDiag.bubbleBaseUrl ? autoImportDiag.bubbleBaseUrl : "—"}
+                  </div>
+                  <div>
+                    <span style={{ fontWeight: 800 }}>Bubble token:</span> {autoImportDiag.bubbleTokenMasked ? autoImportDiag.bubbleTokenMasked : "—"}
+                  </div>
+                  <div>
+                    <span style={{ fontWeight: 800 }}>Status:</span>{" "}
+                    {autoImportDiag.loading
+                      ? "checando..."
+                      : autoImportDiag.error
+                        ? autoImportDiag.error
+                        : autoImportDiag.statusJson?.summary
+                          ? `phase=${String(autoImportDiag.statusJson.summary.phase ?? "")} fetched=${String(autoImportDiag.statusJson.summary.fetchedTotal ?? "")} importError=${String(autoImportDiag.statusJson.summary.importLastError ?? "") || "—"}`
+                          : "sem estado"}
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
+                  <button type="button" className="cmv-button" onClick={() => void runAutoImportDiagnosis()} disabled={autoImportDiag.loading}>
+                    {autoImportDiag.loading ? "Checando..." : "Rechecar"}
+                  </button>
+                  <a className="cmv-button" href="/ajustes/importar-bubble-api">
+                    Configurar Bubble
+                  </a>
+                  <a className="cmv-button" href="/api/bubble-import/status" target="_blank" rel="noreferrer">
+                    Abrir status (JSON)
+                  </a>
+                </div>
+              </div>
+            </div>
+          ) : null}
           <section className={styles.table} style={{ position: "relative" }}>
             {isLoadingTable ? (
               <div className={dash.loadingOverlay}>
