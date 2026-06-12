@@ -595,6 +595,42 @@ export async function POST(req: NextRequest) {
       return json({ ok: true, status: "needs_setup", reason: "import_done_but_empty", userId, state: existing }, { status: 200 });
     }
     if (existingSyncPhase && existingSyncPhase !== "done" && existingSyncPhase !== "error") {
+      try {
+        const desiredTypes = buildAutoSyncTypes();
+        const existingTypes = Array.isArray((existing as any)?.types) ? ((existing as any).types as unknown[]).map((t) => String(t ?? "").trim()).filter(Boolean) : [];
+        const nextTypes = prioritizeTypes([...existingTypes, ...desiredTypes]);
+        const perType = (existing as any)?.perType && typeof (existing as any).perType === "object" && !Array.isArray((existing as any).perType) ? (existing as any).perType : {};
+        let changed = false;
+
+        for (const t of nextTypes) {
+          if (!perType[t]) {
+            perType[t] = {
+              status: "pending",
+              fetched: 0,
+              parts: 0,
+              cursor: 0,
+              remaining: null,
+              segmentAfter: null,
+              lastCreated: null,
+              lastPath: "",
+              errorCount: 0,
+              lastError: "",
+            };
+            changed = true;
+          }
+        }
+
+        if (changed || nextTypes.length !== existingTypes.length) {
+          (existing as any).types = nextTypes;
+          (existing as any).perType = perType;
+          if (String((existing as any)?.phase ?? "") !== "pulling") {
+            (existing as any).phase = "pulling";
+            (existing as any).currentTypeIndex = 0;
+          }
+          (existing as any).updatedAt = new Date().toISOString();
+          await uploadJsonToStorage(supabase, bucket, statePath, existing as any);
+        }
+      } catch {}
       return json({ ok: true, status: "running", mode: "sync", state: existing, userId }, { status: 200 });
     }
 
