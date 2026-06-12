@@ -203,6 +203,30 @@ function extractBubbleIdFromText(input: string) {
   return m ? String(m[1] ?? "").trim() : null;
 }
 
+function extractBubbleRefId(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+  const fromJson = extractBubbleIdFromText(s);
+  if (fromJson) return fromJson;
+  const parts = s.split("$");
+  if (parts.length >= 2) {
+    const tail = String(parts[parts.length - 1] ?? "").trim();
+    if (tail) return tail;
+  }
+  return s;
+}
+
+function looksLikeId(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return false;
+  if (/[A-Za-zÀ-ÿ]/.test(s)) return false;
+  const cleaned = s.replace(/[^\w]/g, "");
+  if (!cleaned) return false;
+  if (/^\d{10,}$/.test(cleaned)) return true;
+  if (/^[a-z0-9]{20,}$/i.test(cleaned)) return true;
+  return false;
+}
+
 function pickUserRefFromRow(row: CsvObjectRow) {
   const direct =
     pickFirst(row, [
@@ -455,6 +479,27 @@ export async function POST(req: NextRequest) {
       list.push(g);
       byKind.set(kind, list);
     }
+
+    const fornecedorNameById = new Map<string, string>();
+    let fornecedorNameByIdReady = false;
+    const ensureFornecedorNameById = async () => {
+      if (fornecedorNameByIdReady) return;
+      fornecedorNameByIdReady = true;
+      const fornecedorGroups = byKind.get("fornecedores") ?? [];
+      for (const g of fornecedorGroups) {
+        for (const part of g.parts) {
+          const rows = await loadRowsForPart(supabase, bucket, part);
+          for (const row of rows) {
+            const idRaw = pickBubbleId(row) || pickFirst(row, ["fornecedor_id", "id_fornecedor", "id"]);
+            const id = idRaw ? extractBubbleRefId(String(idRaw)) : "";
+            const nome =
+              pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
+              pickKeyLike(row, ["fornecedor", "empresa", "nome"]);
+            if (id && nome && !fornecedorNameById.has(id)) fornecedorNameById.set(id, nome.trim());
+          }
+        }
+      }
+    };
 
     const fileCountsByKind: Record<string, { groups: number; parts: number; examples: string[] }> = {};
     for (const [kind, list] of byKind.entries()) {
@@ -755,12 +800,22 @@ export async function POST(req: NextRequest) {
     const uid = resolveTargetUserId(row);
     const prefix = `user:${uid}:`;
     const fornState = getFornecedoresState(uid);
-    const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
-    const fornecedor =
+    const fornecedorIdRaw =
+      pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor", "fornecedor_ref", "empresa_id", "empresa"]) ||
+      pickKeyLike(row, ["fornecedor_id", "id_fornecedor", "fornecedor"]);
+    const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
+    let fornecedor =
       pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) ||
-      (fornecedorId ? fornState.fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
       pickKeyLike(row, ["fornecedor", "empresa"]);
-    if (!fornecedor) return;
+    if (fornecedor && looksLikeId(fornecedor)) {
+      const mapped = fornState.fornecedorNameById.get(extractBubbleRefId(fornecedor.trim())) ?? "";
+      fornecedor = mapped || fornecedor;
+    }
+    if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
+      const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
+      if (mapped) fornecedor = mapped;
+    }
+    if (!fornecedor) fornecedor = fornecedorId || "-";
     const numero =
       pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
     const dataLanc = buildDateLabel(pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]));
@@ -1172,6 +1227,9 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "process_files";
+    if (enableEntradas) {
+      await ensureFornecedorNameById();
+    }
     await processCsvGroups("empresas", (row) => handleEmpresaRow(row));
     await processCsvGroups("categorias", (row) => handleCategoria(row));
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
