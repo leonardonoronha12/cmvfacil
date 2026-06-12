@@ -901,6 +901,7 @@ export default function DashboardClient() {
   const [fornecedorProdutoQuery, setFornecedorProdutoQuery] = useState("");
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
+  const resolveFornecedorFailedRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
@@ -2245,22 +2246,35 @@ export default function DashboardClient() {
     if (!ids.length) return;
     void (async () => {
       try {
-        const res = await fetch("/api/bubble-import/resolve-refs", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ type: "fornecedores", ids }),
-          cache: "no-store",
-        });
-        const j = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !j?.ok) return;
-        const map = j?.map && typeof j.map === "object" ? (j.map as Record<string, string>) : {};
-        if (!Object.keys(map).length) return;
+        const resolve = async (type: string) => {
+          const res = await fetch("/api/bubble-import/resolve-refs", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ type, ids }),
+            cache: "no-store",
+          });
+          const j = (await res.json().catch(() => null)) as any;
+          if (!res.ok || !j?.ok) return {} as Record<string, string>;
+          const map = j?.map && typeof j.map === "object" ? (j.map as Record<string, string>) : {};
+          return map && typeof map === "object" ? map : {};
+        };
+
+        const map = await resolve("fornecedores");
+        const map2 = Object.keys(map).length ? {} : await resolve("empresas");
+        const merged = { ...map, ...map2 };
+        if (!Object.keys(merged).length) {
+          if (!resolveFornecedorFailedRef.current) {
+            resolveFornecedorFailedRef.current = true;
+            showToast("Não consegui resolver os IDs dos fornecedores no Bubble (verifique o tipo e permissões da Data API).", "error", 9000);
+          }
+          return;
+        }
         const expanded: Record<string, string> = {};
         for (const [raw, id] of rawToId.entries()) {
-          const label = map[id] ? String(map[id]) : "";
+          const label = merged[id] ? String(merged[id]) : "";
           if (label) expanded[raw] = label;
         }
-        for (const [id, label] of Object.entries(map)) expanded[id] = label;
+        for (const [id, label] of Object.entries(merged)) expanded[id] = label;
         if (!Object.keys(expanded).length) return;
         setResolvedFornecedorIds((prev) => ({ ...prev, ...expanded }));
       } catch {}
