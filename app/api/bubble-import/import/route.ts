@@ -213,6 +213,11 @@ function extractBubbleRefId(input: string) {
     const tail = String(parts[parts.length - 1] ?? "").trim();
     if (tail) return tail;
   }
+  const slashParts = s.split("/");
+  if (slashParts.length >= 2) {
+    const tail = String(slashParts[slashParts.length - 1] ?? "").trim();
+    if (tail) return tail;
+  }
   return s;
 }
 
@@ -485,7 +490,12 @@ export async function POST(req: NextRequest) {
     const ensureFornecedorNameById = async () => {
       if (fornecedorNameByIdReady) return;
       fornecedorNameByIdReady = true;
-      const fornecedorGroups = byKind.get("fornecedores") ?? [];
+      const fornecedorGroups: { base: string; parts: { path: string; name: string; part: number }[] }[] = [];
+      fornecedorGroups.push(...(byKind.get("fornecedores") ?? []));
+      for (const g of byKind.get("unknown") ?? []) {
+        const b = String(g.base ?? "").toLowerCase();
+        if (b.includes("fornecedor") || b.includes("supplier")) fornecedorGroups.push(g);
+      }
       for (const g of fornecedorGroups) {
         for (const part of g.parts) {
           const rows = await loadRowsForPart(supabase, bucket, part);
@@ -496,6 +506,27 @@ export async function POST(req: NextRequest) {
               pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
               pickKeyLike(row, ["fornecedor", "empresa", "nome"]);
             if (id && nome && !fornecedorNameById.has(id)) fornecedorNameById.set(id, nome.trim());
+          }
+        }
+      }
+    };
+
+    const empresaNameById = new Map<string, string>();
+    let empresaNameByIdReady = false;
+    const ensureEmpresaNameById = async () => {
+      if (empresaNameByIdReady) return;
+      empresaNameByIdReady = true;
+      const empresaGroups = byKind.get("empresas") ?? [];
+      for (const g of empresaGroups) {
+        for (const part of g.parts) {
+          const rows = await loadRowsForPart(supabase, bucket, part);
+          for (const row of rows) {
+            const idRaw = pickBubbleId(row) || pickFirst(row, ["empresa_id", "id_empresa", "company_id", "restaurante_id", "id"]);
+            const id = idRaw ? extractBubbleRefId(String(idRaw)) : "";
+            const nome =
+              pickFirst(row, ["nome_fantasia", "nome", "empresa_nome", "restaurante_nome", "razao_social", "fantasia"]) ||
+              pickKeyLike(row, ["nome", "fantas", "razao", "empresa", "restaurante"]);
+            if (id && nome && !empresaNameById.has(id)) empresaNameById.set(id, nome.trim());
           }
         }
       }
@@ -813,6 +844,10 @@ export async function POST(req: NextRequest) {
     }
     if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
       const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
+      if (mapped) fornecedor = mapped;
+    }
+    if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
+      const mapped = empresaNameById.get(fornecedorId.trim()) ?? "";
       if (mapped) fornecedor = mapped;
     }
     if (!fornecedor) fornecedor = fornecedorId || "-";
@@ -1229,6 +1264,7 @@ export async function POST(req: NextRequest) {
     stage = "process_files";
     if (enableEntradas) {
       await ensureFornecedorNameById();
+      await ensureEmpresaNameById();
     }
     await processCsvGroups("empresas", (row) => handleEmpresaRow(row));
     await processCsvGroups("categorias", (row) => handleCategoria(row));
