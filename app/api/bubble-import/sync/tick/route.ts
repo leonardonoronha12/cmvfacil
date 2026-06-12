@@ -742,7 +742,8 @@ export async function POST(req: NextRequest) {
             const filesDoc = await downloadJson(supabase, bucket, filesPath);
             const files: string[] = Array.isArray(filesDoc?.files) ? (filesDoc.files as any).map((x: any) => String(x ?? "")).filter(Boolean) : [];
             const cursor = typeof work.cursor === "number" && Number.isFinite(work.cursor) && work.cursor >= 0 ? Math.floor(work.cursor) : 0;
-            const maxFilesPerTick = 6;
+            const maxFilesPerTick = 24;
+            const persistEvery = 6;
             const end = Math.min(files.length, cursor + maxFilesPerTick);
             const acc = await downloadJson(supabase, bucket, accPath);
 
@@ -766,6 +767,7 @@ export async function POST(req: NextRequest) {
                 return created;
               };
 
+              let sincePersist = 0;
               for (let i = cursor; i < end; i++) {
                 const partPath = files[i]!;
                 const payload = await downloadJson(supabase, bucket, partPath);
@@ -825,14 +827,26 @@ export async function POST(req: NextRequest) {
                     };
                   }
                 }
+
                 work.cursor = i + 1;
                 work.lastFile = partPath;
                 work.total = files.length;
                 state.import.work[domain] = work;
+                sincePersist += 1;
+
+                if (sincePersist >= persistEvery || Date.now() - startMs >= hardMs) {
+                  await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, users });
+                  await persist();
+                  ops += 1;
+                  sincePersist = 0;
+                  if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+                }
+              }
+
+              if (sincePersist > 0) {
                 await uploadJson(supabase, bucket, accPath, { v: 1, categoriasById, users });
                 await persist();
                 ops += 1;
-                if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
               }
 
               if (work.cursor >= files.length) {
@@ -964,6 +978,7 @@ export async function POST(req: NextRequest) {
                 uacc.equivalenciasMap[key] = list;
               };
 
+              let sincePersist = 0;
               for (let i = cursor; i < end; i++) {
                 const partPath = files[i]!;
                 const payload = await downloadJson(supabase, bucket, partPath);
@@ -980,10 +995,20 @@ export async function POST(req: NextRequest) {
                 work.lastFile = partPath;
                 work.total = files.length;
                 state.import.work[domain] = work;
+                sincePersist += 1;
+                if (sincePersist >= persistEvery || Date.now() - startMs >= hardMs) {
+                  await uploadJson(supabase, bucket, accPath, { v: 1, users });
+                  await persist();
+                  ops += 1;
+                  sincePersist = 0;
+                  if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+                }
+              }
+
+              if (sincePersist > 0) {
                 await uploadJson(supabase, bucket, accPath, { v: 1, users });
                 await persist();
                 ops += 1;
-                if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
               }
 
               if (work.cursor >= files.length) {
@@ -1007,6 +1032,7 @@ export async function POST(req: NextRequest) {
               }
             } else {
               const contagens: Record<string, any> = acc?.contagens && typeof acc.contagens === "object" ? acc.contagens : {};
+              let sincePersist = 0;
               for (let i = cursor; i < end; i++) {
                 const partPath = files[i]!;
                 const payload = await downloadJson(supabase, bucket, partPath);
@@ -1026,10 +1052,20 @@ export async function POST(req: NextRequest) {
                 work.lastFile = partPath;
                 work.total = files.length;
                 state.import.work[domain] = work;
+                sincePersist += 1;
+                if (sincePersist >= persistEvery || Date.now() - startMs >= hardMs) {
+                  await uploadJson(supabase, bucket, accPath, { v: 1, contagens });
+                  await persist();
+                  ops += 1;
+                  sincePersist = 0;
+                  if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
+                }
+              }
+
+              if (sincePersist > 0) {
                 await uploadJson(supabase, bucket, accPath, { v: 1, contagens });
                 await persist();
                 ops += 1;
-                if (ops >= maxOps || Date.now() - startMs >= hardMs) return json({ ok: true, state, ops }, { status: 200 });
               }
 
               const allRows = Object.values(contagens);

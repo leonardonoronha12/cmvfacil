@@ -591,7 +591,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 ? JSON.stringify({
                     statePath,
                     resume: true,
-                    maxOps: 12,
+                    maxOps: 40,
                     baseUrl: bubbleBaseUrl || undefined,
                     token: bubbleToken || undefined,
                     importAsUserId: importAsUserId || undefined,

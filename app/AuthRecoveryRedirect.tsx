@@ -118,7 +118,7 @@ export default function AuthRecoveryRedirect() {
           body: JSON.stringify({
             statePath,
             resume: true,
-            maxOps: 12,
+            maxOps: 40,
             baseUrl: creds.baseUrl || undefined,
             token: creds.token || undefined,
             importAsUserId: userId,
