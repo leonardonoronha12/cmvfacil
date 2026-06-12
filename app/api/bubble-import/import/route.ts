@@ -724,7 +724,10 @@ export async function POST(req: NextRequest) {
     const notaId =
         pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
-      const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
+      const itemIdRaw =
+        pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
+      const itemIdCandidate = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
+      const itemId = itemIdCandidate && itemById.has(itemIdCandidate) ? itemIdCandidate : "";
       const nome =
         pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]) ||
         (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||
@@ -738,7 +741,7 @@ export async function POST(req: NextRequest) {
       const list = notaItemsByNotaKey.get(notaId) ?? [];
       list.push({
         id: `${prefix}nota_item:${bubbleId}`,
-        itemId: String(itemId ?? "").trim() || undefined,
+        itemId: itemId || undefined,
         nome: nome.trim(),
         quantidadeLabel: qtd.trim(),
         subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",

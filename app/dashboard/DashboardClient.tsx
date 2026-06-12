@@ -942,6 +942,23 @@ export default function DashboardClient() {
     }, durationMs);
   }
 
+  async function reimportEntradasAndReload() {
+    setIsLoadingTables(true);
+    try {
+      const re = await fetch("/api/bubble-import/reimport-entradas", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
+      const rj = (await re.json().catch(() => null)) as any;
+      if (!re.ok || !rj?.ok) throw new Error(String(rj?.error ?? `failed_${re.status}`));
+      const dbEntradas = await loadEntradasFromSupabase();
+      writeEntradasToStore(dbEntradas);
+      setEntradas(dbEntradas);
+      showToast("Entradas sincronizadas. Reabra o item para ver o histórico.", "success", 5000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", 8000);
+    } finally {
+      setIsLoadingTables(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -2850,7 +2867,26 @@ export default function DashboardClient() {
                               </div>
                             ))
                           ) : (
-                            <div className={styles.historyEmpty}>Nenhuma entrada encontrada para este item.</div>
+                            <div className={styles.historyEmpty}>
+                              Nenhuma entrada encontrada para este item.
+                              <div style={{ marginTop: 10 }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void reimportEntradasAndReload()}
+                                  disabled={isLoadingTables}
+                                  style={{
+                                    border: "1px solid #e4e8e7",
+                                    background: "#ffffff",
+                                    borderRadius: 10,
+                                    padding: "10px 12px",
+                                    fontWeight: 800,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  Sincronizar entradas
+                                </button>
+                              </div>
+                            </div>
                           )}
                         </div>
                       </>
