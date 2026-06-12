@@ -336,9 +336,16 @@ async function upsertInBatches<T extends Record<string, unknown>>(supabase: Retu
   let inserted = 0;
   for (let i = 0; i < rows.length; i += batchSize) {
     const chunk = rows.slice(i, i + batchSize);
-    const { error } = await supabase.from(table).upsert(chunk as any, { onConflict: "id" });
+    const dedup = new Map<string, T>();
+    for (const r of chunk) {
+      const rawId = String((r as any)?.id ?? "").trim();
+      const k = rawId ? rawId : `__noid__:${dedup.size}`;
+      dedup.set(k, r);
+    }
+    const uniqueChunk = Array.from(dedup.values());
+    const { error } = await supabase.from(table).upsert(uniqueChunk as any, { onConflict: "id" });
     if (error) throw new Error(error.message);
-    inserted += chunk.length;
+    inserted += uniqueChunk.length;
   }
   return inserted;
 }
