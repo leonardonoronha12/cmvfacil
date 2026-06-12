@@ -1124,10 +1124,13 @@ export default function DashboardClient() {
 
   const avgUnitCostCentsByInsumoId = useMemo(() => {
     const insumoIdByKey = new Map<string, string>();
+    const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
+      const id = String(i.id ?? "").trim();
+      if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
     }
     const sumQtyById = new Map<string, number>();
     const sumCentsById = new Map<string, number>();
@@ -1135,7 +1138,9 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const rawKey = normalizeKey(it.nome);
+        const rawNome = String(it.nome ?? "").trim();
+        const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+        const rawKey = normalizeKey(resolvedNome);
         let mappedKey = rawKey;
         let fator = 1;
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
@@ -1254,11 +1259,14 @@ export default function DashboardClient() {
 
     const insumoIdByKey = new Map<string, string>();
     const ocultarByInsumoId = new Map<string, boolean>();
+    const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
+      const id = String(i.id ?? "").trim();
+      if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
     }
 
     const entradasQtyById = new Map<string, number>();
@@ -1271,7 +1279,9 @@ export default function DashboardClient() {
       if (e.itensNota?.length) {
         const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
         for (const it of e.itensNota) {
-          const rawKey = normalizeKey(it.nome);
+          const rawNome = String(it.nome ?? "").trim();
+          const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+          const rawKey = normalizeKey(resolvedNome);
           let mappedKey = rawKey;
           let fator = 1;
           const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
@@ -1480,11 +1490,14 @@ export default function DashboardClient() {
 
     const insumoIdByKey = new Map<string, string>();
     const ocultarByInsumoId = new Map<string, boolean>();
+    const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
+      const id = String(i.id ?? "").trim();
+      if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
     }
 
     const entradasQtyById = new Map<string, number>();
@@ -1499,7 +1512,9 @@ export default function DashboardClient() {
       if (e.itensNota?.length) {
         const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
         for (const it of e.itensNota) {
-          const rawKey = normalizeKey(it.nome);
+          const rawNome = String(it.nome ?? "").trim();
+          const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+          const rawKey = normalizeKey(resolvedNome);
           let mappedKey = rawKey;
           let fator = 1;
           const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
@@ -1962,10 +1977,13 @@ export default function DashboardClient() {
     const maxT = Math.max(startT, endT);
 
     const insumoByKey = new Map<string, { id: string; baseUnit: string; custoMedioCents: number }>();
+    const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (insumoByKey.has(key)) continue;
+      const id = String(i.id ?? "").trim();
+      if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
       insumoByKey.set(key, {
         id: i.id,
         baseUnit: String(i.medida ?? "Und").trim() || "Und",
@@ -1984,7 +2002,9 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const rawKey = normalizeKey(it.nome);
+        const rawNome = String(it.nome ?? "").trim();
+        const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+        const rawKey = normalizeKey(resolvedNome);
         if (!rawKey) continue;
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
@@ -2083,6 +2103,12 @@ export default function DashboardClient() {
       insumos.find((i) => i.id === historyItem.insumoId) ??
       (key ? insumos.find((i) => normalizeKey(i.item) === key) ?? null : null);
     const baseUnit = (String(insumo?.medida ?? "") || "Und").trim() || "Und";
+    const insumoNameById = new Map<string, string>();
+    for (const i of insumos) {
+      const id = String(i.id ?? "").trim();
+      if (!id) continue;
+      if (!insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+    }
     const out: Array<{
       t: number;
       data: string;
@@ -2098,7 +2124,9 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const rawKey = normalizeKey(it.nome);
+        const rawNome = String(it.nome ?? "").trim();
+        const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+        const rawKey = normalizeKey(resolvedNome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
         if (mappedKey !== key) continue;
