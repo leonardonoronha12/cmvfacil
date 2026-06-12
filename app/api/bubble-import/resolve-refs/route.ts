@@ -71,17 +71,36 @@ export async function POST(req: NextRequest) {
     const map: Record<string, string> = {};
     for (const id of unique) {
       try {
-        const url = `${baseUrl}/api/1.1/obj/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
-        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
-        const text = await res.text();
-        let j: any = null;
-        try {
-          j = JSON.parse(text);
-        } catch {}
-        if (!res.ok) continue;
-        const response = j?.response ?? j ?? {};
-        const label = pickLabelFromBubbleObject(response);
-        if (label) map[id] = label;
+        if (map[id]) continue;
+        const typeLower = type.toLowerCase();
+        const typesToTry =
+          typeLower === "fornecedores" || typeLower === "fornecedor"
+            ? ["fornecedores", "fornecedor", "Fornecedores", "Fornecedor", type]
+            : typeLower === "empresas" || typeLower === "empresa"
+              ? ["empresas", "empresa", "Empresas", "Empresa", type]
+              : [type];
+        const tried = new Set<string>();
+        for (const t of typesToTry) {
+          const tn = String(t ?? "").trim();
+          if (!tn) continue;
+          const key = tn.toLowerCase();
+          if (tried.has(key)) continue;
+          tried.add(key);
+          const url = `${baseUrl}/api/1.1/obj/${encodeURIComponent(tn)}/${encodeURIComponent(id)}`;
+          const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+          const text = await res.text();
+          let j: any = null;
+          try {
+            j = JSON.parse(text);
+          } catch {}
+          if (!res.ok) continue;
+          const response = j?.response ?? j ?? {};
+          const label = pickLabelFromBubbleObject(response);
+          if (label) {
+            map[id] = label;
+            break;
+          }
+        }
       } catch {}
     }
 
