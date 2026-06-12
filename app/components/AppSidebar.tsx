@@ -341,6 +341,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (msg.includes("missing_bubble_credentials") || msg.includes("missing_base_url") || msg.includes("missing_token")) {
       return "Falta configurar o Bubble para importar via API. Vá em Ajustes → Importar Bubble via API e informe a URL e o token.";
     }
+    if (msg.includes("missing_supabase_email")) return "Não consegui identificar o email da sua conta no Supabase. Faça login novamente.";
+    if (msg.includes("bubble_user_not_found_for_email")) return "Não encontrei esse email no Bubble. Verifique se o email da conta no Bubble é o mesmo do login.";
     if (msg.includes("import_done_but_empty")) {
       return "A importação automática concluiu, mas não encontrou dados. Verifique a URL/token do Bubble e se os tipos estão corretos (ex.: Ingredientes/item). Depois rode novamente em Ajustes → Importar Bubble via API.";
     }
