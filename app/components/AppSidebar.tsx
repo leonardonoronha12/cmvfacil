@@ -369,7 +369,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       const importingWeight = 0.35;
 
       const perType = state.perType as Record<string, any>;
-      const types = Array.isArray(state.types) ? (state.types as any[]).map((t) => String(t ?? "").trim()).filter(Boolean) : Object.keys(perType);
+      const typesFromState = Array.isArray(state.types) ? (state.types as any[]).map((t) => String(t ?? "").trim()).filter(Boolean) : [];
+      const types = typesFromState.length ? typesFromState : Object.keys(perType);
       const totalTypes = types.length || 0;
       const doneTypes = types.filter((t) => String(perType?.[t]?.status ?? "") === "done").length;
       const runningType = types.find((t) => String(perType?.[t]?.status ?? "") === "pulling" || String(perType?.[t]?.status ?? "").includes("segment")) ?? null;
