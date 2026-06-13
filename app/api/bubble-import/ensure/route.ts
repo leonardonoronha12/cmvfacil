@@ -588,6 +588,15 @@ export async function POST(req: NextRequest) {
       const already = await userHasAnyData(supabase, userId);
       if (already) return json({ ok: true, status: "ready", userId }, { status: 200 });
 
+      if (baseUrl && token) {
+        const runId = crypto.randomUUID();
+        const runPrefix = `user:${userId}/bootstrap/${runId}`;
+        const types = buildAutoSyncTypes();
+        const state = newSyncState(runId, runPrefix, statePath, types);
+        await uploadJsonToStorage(supabase, bucket, statePath, state);
+        return json({ ok: true, status: "started", mode: "sync", state, userId }, { status: 200 });
+      }
+
       return json({ ok: true, status: "needs_setup", reason: "import_done_but_empty", userId, state: existing }, { status: 200 });
     }
     if (existingSyncPhase) {
