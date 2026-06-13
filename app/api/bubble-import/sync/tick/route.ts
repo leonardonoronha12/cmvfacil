@@ -339,6 +339,19 @@ function extractBubbleIdFromText(input: string) {
   return m ? String(m[1] ?? "").trim() : null;
 }
 
+function looksLikeBubbleId(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return false;
+  return /^\d{8,}x\d{6,}$/.test(s);
+}
+
+function extractBubbleIdLoose(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return null;
+  const m = s.match(/\d{8,}x\d{6,}/);
+  return m ? String(m[0]).trim() : null;
+}
+
 function pickUserRefFromRow(row: Record<string, string>) {
   const direct =
     pickFirst(row, [
@@ -436,6 +449,7 @@ export async function POST(req: NextRequest) {
       const enabled = Boolean((state as any)?.filter?.mode === "email_only");
       const bubbleUserIdExisting = String((state as any)?.filter?.bubbleUserId ?? "").trim();
       const emailExisting = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
+      const companyIdExisting = String((state as any)?.filter?.companyId ?? "").trim();
       if (enabled && bubbleUserIdExisting && emailExisting) return;
 
       if (state.phase !== "pulling") return;
@@ -462,8 +476,43 @@ export async function POST(req: NextRequest) {
       const bubbleUserId = String(first?.["unique_id"] ?? first?._id ?? first?.id ?? first?.["Created By"] ?? "").trim();
       if (!bubbleUserId) throw new Error("bubble_user_not_found_for_email");
 
-      const needsReset = !enabled || !bubbleUserIdExisting || emailExisting !== email;
-      (state as any).filter = { v: 1, mode: "email_only", email, bubbleUserId, userType };
+      const firstRow = normalizeRowObject(first) ?? {};
+      const companyCandidate =
+        pickFirst(firstRow, ["empresa_id", "empresa", "company_id", "company", "restaurante_id", "restaurante"]) ||
+        pickKeyLike(firstRow, ["empresa", "company", "restaurante"], { excludeParts: ["nome", "name", "email", "telefone", "whatsapp", "cnpj", "endereco", "address"] });
+      let companyId = companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "";
+
+      if (!companyId) {
+        const companyType =
+          (Array.isArray(state.types) ? (state.types as any[]) : [])
+            .map((t) => String(t ?? "").trim())
+            .find((t) => t.toLowerCase() === "empresa" || t.toLowerCase() === "empresas" || t.toLowerCase().includes("empresa")) ?? "Empresas";
+
+        const keys = ["lista_usuarios", "lista_de_usuarios", "usuarios", "users", "usuario", "usuarios_ids", "lista_usuarios_ids"];
+        for (const k of keys) {
+          try {
+            const p = await fetchBubblePage({
+              baseUrl,
+              token,
+              typeName: companyType,
+              cursor: 0,
+              limit: 10,
+              constraints: [{ key: k, constraint_type: "contains", value: bubbleUserId }],
+            });
+            const emp = (p.results ?? [])[0] as any;
+            const empId = String(emp?.["unique_id"] ?? emp?._id ?? emp?.id ?? "").trim();
+            if (empId) {
+              companyId = empId;
+              break;
+            }
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      const needsReset = !enabled || !bubbleUserIdExisting || emailExisting !== email || companyIdExisting !== companyId;
+      (state as any).filter = { v: 1, mode: "email_only", email, bubbleUserId, userType, companyId: companyId || undefined };
       if (needsReset) {
         const runId = crypto.randomUUID();
         const runPrefix = `user:${userId}/bootstrap/${runId}`;
@@ -665,14 +714,32 @@ export async function POST(req: NextRequest) {
           const filterBubbleUserId = String(filter?.bubbleUserId ?? "").trim();
           const filterEmail = String(filter?.email ?? "").trim().toLowerCase();
           const filterUserType = String(filter?.userType ?? "User").trim() || "User";
+          const filterCompanyId = String(filter?.companyId ?? "").trim();
           if (filterMode === "email_only" && filterBubbleUserId) {
             if (t.toLowerCase() === String(filterUserType).toLowerCase() && filterEmail) {
               baseConstraints.push({ key: "email", constraint_type: "equals", value: filterEmail });
             } else {
-              baseConstraints.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
+              const forced = String((p as any)?.constraintStrategy ?? "").trim().toLowerCase();
+              const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
+              const companyKeyIndexRaw = typeof (p as any)?.companyKeyIndex === "number" ? (p as any).companyKeyIndex : 0;
+              const companyKeyIndex = Number.isFinite(companyKeyIndexRaw) ? Math.max(0, Math.min(companyKeys.length - 1, Math.floor(companyKeyIndexRaw))) : 0;
+              const preferCompany = forced === "empresa" || forced === "empresa_id" || forced === "company" || forced === "company_id";
+              const preferCreatedBy = forced === "created_by";
+              const preferNone = forced === "none";
+
+              if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
+                baseConstraints.push({ key: companyKeys[companyKeyIndex]!, constraint_type: "equals", value: filterCompanyId });
+                (p as any).constraintStrategy = "company";
+                (p as any).companyKeyIndex = companyKeyIndex;
+              } else if (!preferNone) {
+                baseConstraints.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
+                (p as any).constraintStrategy = "created_by";
+              }
             }
           }
-          const constraints = baseConstraints.length ? baseConstraints : null;
+          let constraints = baseConstraints.length ? baseConstraints : null;
+          const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
+          let usedCompanyKey = filterCompanyId ? companyKeys.find((k) => baseConstraints.some((c) => c.key === k)) ?? "" : "";
 
           let results: unknown[] = [];
           let remaining: number | null = null;
@@ -697,6 +764,30 @@ export async function POST(req: NextRequest) {
                 pausedByTransientError = true;
                 break;
               }
+
+              if (bubbleStatus === 400 && filterMode === "email_only" && filterCompanyId && usedCompanyKey) {
+                const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
+                const currentIdx = companyKeys.findIndex((k) => k === usedCompanyKey);
+                const nextIdx = currentIdx >= 0 ? currentIdx + 1 : 0;
+                if (nextIdx >= 0 && nextIdx < companyKeys.length) {
+                  (p as any).constraintStrategy = "company";
+                  (p as any).companyKeyIndex = nextIdx;
+                  const next = baseConstraints.filter((c) => !companyKeys.includes(c.key));
+                  next.push({ key: companyKeys[nextIdx]!, constraint_type: "equals", value: filterCompanyId });
+                  constraints = next;
+                  usedCompanyKey = companyKeys[nextIdx]!;
+                  continue;
+                }
+
+                (p as any).constraintStrategy = "created_by";
+                (p as any).companyKeyIndex = 0;
+                const next = baseConstraints.filter((c) => !companyKeys.includes(c.key));
+                next.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
+                constraints = next;
+                usedCompanyKey = "";
+                continue;
+              }
+
               if (!isTransient(bubbleStatus)) throw err;
               if (attempt >= 9) {
                 p.errorCount = (p.errorCount ?? 0) + 1;
@@ -1053,8 +1144,8 @@ export async function POST(req: NextRequest) {
                 const uid = resolveImportUserId(row);
                 const uacc = getUserAcc(uid);
                 const fornecedor =
-                  pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
-                  pickKeyLike(row, ["fornecedor", "empresa"]);
+                  pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
+                  pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
                 const key = normalizeFornecedorKey(fornecedor);
                 if (!key) return;
                 const fornId = pickFirst(row, ["unique_id", "_id", "id", "bubble_id", "fornecedor_id"]);
@@ -1077,9 +1168,9 @@ export async function POST(req: NextRequest) {
                 const uacc = getUserAcc(uid);
                 const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
                 const fornecedor =
-                  pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
+                  pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
                   (fornecedorId ? uacc.fornecedorNameById[fornecedorId.trim()] ?? "" : "") ||
-                  pickKeyLike(row, ["fornecedor", "empresa"]);
+                  pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
                 const itemName =
                   pickFirst(row, ["produto", "item", "nome_item", "nome_do_item", "nome", "descricao", "ingrediente", "insumo"]) ||
                   pickKeyLike(row, ["produto", "item", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
@@ -1094,7 +1185,9 @@ export async function POST(req: NextRequest) {
               const handleEquivalencia = (row: Record<string, string>) => {
                 const uid = resolveImportUserId(row);
                 const uacc = getUserAcc(uid);
-                const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+                const fornecedor =
+                  pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
+                  pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
                 const key = normalizeFornecedorKey(fornecedor);
                 if (!key) return;
                 const nomeNaNota =
