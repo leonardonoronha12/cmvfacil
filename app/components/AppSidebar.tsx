@@ -615,14 +615,16 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const skipOverlay = shouldSkipBootstrap();
         let bubbleBaseUrl = "";
         let bubbleToken = "";
+        let bubbleCompanyId = "";
         try {
           bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
           bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+          bubbleCompanyId = (window.localStorage.getItem("cmvfacil:bubbleCompanyId") ?? "").trim();
         } catch {}
         const res = await fetch("/api/bubble-import/ensure", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined }),
+          body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined, companyId: bubbleCompanyId || undefined }),
           cache: "no-store",
         });
         const json = (await res.json().catch(() => null)) as any;
@@ -697,6 +699,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                     maxOps: 40,
                     baseUrl: bubbleBaseUrl || undefined,
                     token: bubbleToken || undefined,
+                    companyId: bubbleCompanyId || undefined,
                     importAsUserId: importAsUserId || undefined,
                   })
                 : JSON.stringify({ statePath }),
