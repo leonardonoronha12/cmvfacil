@@ -624,6 +624,10 @@ export async function POST(req: NextRequest) {
       return created;
     };
 
+    if (enableFornecedores) {
+      getFornecedoresState(overrideTargetUserId || userId);
+    }
+
     function handleUserRow(row: CsvObjectRow) {
       const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
       if (!bubbleId) return;
@@ -1282,7 +1286,7 @@ export async function POST(req: NextRequest) {
     }
 
     stage = "process_files";
-    if (enableEntradas) {
+    if (enableEntradas || enableFornecedores) {
       await ensureFornecedorNameById();
       await ensureEmpresaNameById();
     }
@@ -1307,6 +1311,19 @@ export async function POST(req: NextRequest) {
         st.produtosMap[k] = Array.from(new Set((st.produtosMap[k] ?? []).filter(Boolean))).sort((a, b) =>
           a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
         );
+      }
+    }
+
+    if (enableFornecedores) {
+      for (const st of fornecedoresByUser.values()) {
+        for (const [id, name] of empresaNameById.entries()) {
+          const idKey = String(id ?? "").trim().toUpperCase();
+          if (!idKey) continue;
+          if (!st.fornecedorNameById.has(idKey)) st.fornecedorNameById.set(idKey, name);
+          if (!st.infoMap[idKey]) {
+            st.infoMap[idKey] = { fornecedor: name, vendedor: "-", whatsapp: "-", endereco: "-" };
+          }
+        }
       }
     }
 
