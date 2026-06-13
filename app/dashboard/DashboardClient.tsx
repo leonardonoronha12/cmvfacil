@@ -892,7 +892,6 @@ export default function DashboardClient() {
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
-  const [resolvedFornecedorIds, setResolvedFornecedorIds] = useState<Record<string, string>>({});
   const [isFornecedorModalOpen, setIsFornecedorModalOpen] = useState(false);
   const [fornecedorModalKey, setFornecedorModalKey] = useState("");
   const [fornecedorModalLabel, setFornecedorModalLabel] = useState("");
@@ -901,7 +900,6 @@ export default function DashboardClient() {
   const [fornecedorProdutoQuery, setFornecedorProdutoQuery] = useState("");
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
-  const resolveFornecedorFailedRef = useRef(false);
   const reimportFornecedoresTriedRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2218,10 +2216,9 @@ export default function DashboardClient() {
       const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[cleanUpper] || null;
       const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
       if (labelFromState) return { ...x, fornecedor: labelFromState };
-      const mapped = (raw && resolvedFornecedorIds[raw]) || (clean && resolvedFornecedorIds[clean]) || "";
-      return mapped ? { ...x, fornecedor: mapped } : x;
+      return x;
     });
-  }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas, resolvedFornecedorIds]);
+  }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
 
   useEffect(() => {
     if (!historyItem) return;
@@ -2236,7 +2233,6 @@ export default function DashboardClient() {
         const info = fornecedorInfoMap[clean.toUpperCase()] || fornecedorInfoMap[raw.toUpperCase()] || null;
         const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
         if (labelFromState) return false;
-        if (resolvedFornecedorIds[raw] || resolvedFornecedorIds[clean]) return false;
         return true;
       });
     if (!needs) return;
@@ -2260,72 +2256,7 @@ export default function DashboardClient() {
         setIsLoadingTables(false);
       }
     })();
-  }, [fornecedorInfoMap, historicoEntradas, historyItem, resolvedFornecedorIds]);
-
-  useEffect(() => {
-    if (!historyItem) return;
-    const extractCandidateId = (raw: string) => {
-      const s = raw.trim();
-      if (!s) return "";
-      const parts = s.split("/").map((x) => x.trim()).filter(Boolean);
-      if (parts.length >= 2 && /^\d{10,}$/.test(parts[0].replace(/[^\d]/g, ""))) return parts[0];
-      const m = s.match(/\d{10,}/);
-      if (m) return m[0] ?? "";
-      return "";
-    };
-
-    const rawToId = new Map<string, string>();
-    for (const h of historicoEntradas) {
-      const raw = String(h.fornecedor ?? "").trim();
-      if (!raw) continue;
-      if (resolvedFornecedorIds[raw]) continue;
-      const candidate = extractCandidateId(raw);
-      if (!candidate) continue;
-      rawToId.set(raw, candidate);
-    }
-
-    const ids = Array.from(
-      new Set(
-        Array.from(rawToId.values()).filter(Boolean),
-      ),
-    ).slice(0, 40);
-    if (!ids.length) return;
-    void (async () => {
-      try {
-        const resolve = async (type: string) => {
-          const res = await fetch("/api/bubble-import/resolve-refs", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ type, ids }),
-            cache: "no-store",
-          });
-          const j = (await res.json().catch(() => null)) as any;
-          if (!res.ok || !j?.ok) return {} as Record<string, string>;
-          const map = j?.map && typeof j.map === "object" ? (j.map as Record<string, string>) : {};
-          return map && typeof map === "object" ? map : {};
-        };
-
-        const map = await resolve("fornecedores");
-        const map2 = Object.keys(map).length ? {} : await resolve("empresas");
-        const merged = { ...map, ...map2 };
-        if (!Object.keys(merged).length) {
-          if (!resolveFornecedorFailedRef.current) {
-            resolveFornecedorFailedRef.current = true;
-            showToast("Não consegui resolver os IDs dos fornecedores no Bubble (verifique o tipo e permissões da Data API).", "error", 9000);
-          }
-          return;
-        }
-        const expanded: Record<string, string> = {};
-        for (const [raw, id] of rawToId.entries()) {
-          const label = merged[id] ? String(merged[id]) : "";
-          if (label) expanded[raw] = label;
-        }
-        for (const [id, label] of Object.entries(merged)) expanded[id] = label;
-        if (!Object.keys(expanded).length) return;
-        setResolvedFornecedorIds((prev) => ({ ...prev, ...expanded }));
-      } catch {}
-    })();
-  }, [historicoEntradas, historyItem, resolvedFornecedorIds]);
+  }, [fornecedorInfoMap, historicoEntradas, historyItem]);
 
   const historicoFornecedores = useMemo(() => {
     if (!historyItem) return [];

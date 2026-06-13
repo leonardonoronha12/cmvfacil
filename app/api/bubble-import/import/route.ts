@@ -208,14 +208,28 @@ function extractBubbleRefId(input: string) {
   if (!s) return "";
   const fromJson = extractBubbleIdFromText(s);
   if (fromJson) return fromJson;
-  const parts = s.split("$");
+
+  const segmentLooksLikeId = (seg: string) => {
+    const v = String(seg ?? "").trim();
+    if (!v) return false;
+    if (/[A-Za-zÀ-ÿ]/.test(v)) return false;
+    const digits = v.replace(/[^\d]/g, "");
+    return /^\d{10,}$/.test(digits);
+  };
+
+  const parts = s.split("$").map((x) => x.trim()).filter(Boolean);
   if (parts.length >= 2) {
+    const head = String(parts[0] ?? "").trim();
     const tail = String(parts[parts.length - 1] ?? "").trim();
+    if (segmentLooksLikeId(head)) return head;
     if (tail) return tail;
   }
-  const slashParts = s.split("/");
+
+  const slashParts = s.split("/").map((x) => x.trim()).filter(Boolean);
   if (slashParts.length >= 2) {
+    const head = String(slashParts[0] ?? "").trim();
     const tail = String(slashParts[slashParts.length - 1] ?? "").trim();
+    if (segmentLooksLikeId(head)) return head;
     if (tail) return tail;
   }
   return s;
