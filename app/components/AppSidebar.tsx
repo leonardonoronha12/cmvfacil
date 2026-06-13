@@ -610,13 +610,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   useEffect(() => {
     if (active === "ajustes") return;
     if (bootstrap.status === "running") return;
-    if (shouldSkipBootstrap()) return;
-
-    setBootstrapOverlayVisible(true);
-    setBootstrapDisplayPct(0);
-    setBootstrap({ status: "running", message: "", progress: 0.02, etaMs: null, stage: "Atualizando", detail: "" });
     void (async () => {
       try {
+        const skipOverlay = shouldSkipBootstrap();
         let bubbleBaseUrl = "";
         let bubbleToken = "";
         try {
@@ -632,6 +628,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const json = (await res.json().catch(() => null)) as any;
         if (!res.ok || !json?.ok) {
           const msg = String(json?.error ?? `failed_${res.status}`);
+          setBootstrapOverlayVisible(true);
+          setBootstrapDisplayPct(0);
           setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
           return;
         }
@@ -646,10 +644,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           }
           bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
+          if (!skipOverlay) setBootstrapOverlayVisible(false);
           return;
         }
         if (status === "needs_setup" || status === "no_files") {
           const msg = String(json?.reason ?? "no_files");
+          setBootstrapOverlayVisible(true);
+          setBootstrapDisplayPct(0);
           setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
           return;
         }
@@ -658,8 +659,21 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         const mode = String(json?.mode ?? "");
         if (!statePath) {
           setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
+          if (!skipOverlay) setBootstrapOverlayVisible(false);
           return;
         }
+
+        const initialMeta = computeBootstrapProgress(json?.state ?? {});
+        setBootstrapOverlayVisible(true);
+        setBootstrapDisplayPct(0);
+        setBootstrap({
+          status: "running",
+          message: "",
+          progress: Math.max(0.02, Math.min(0.98, initialMeta.progress || 0.02)),
+          etaMs: initialMeta.etaMs ?? null,
+          stage: initialMeta.stage || "Atualizando",
+          detail: String(initialMeta.detail ?? ""),
+        });
 
         try {
           window.sessionStorage.setItem(bootstrapRunningKey, "1");
@@ -756,6 +770,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "", detail: "" });
         bootstrapSkipUntilRef.current = Date.now() + 60_000;
       } catch (err) {
+        setBootstrapOverlayVisible(true);
+        setBootstrapDisplayPct(0);
         setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "", detail: "" });
         bootstrapSkipUntilRef.current = Date.now() + 60_000;
       }
