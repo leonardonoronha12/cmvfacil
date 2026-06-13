@@ -748,7 +748,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             } catch {}
             bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
-            void bootstrapUserDataOnce();
+            void bootstrapUserDataOnce(true);
             setBootstrapOverlayVisible(false);
             return;
           }
