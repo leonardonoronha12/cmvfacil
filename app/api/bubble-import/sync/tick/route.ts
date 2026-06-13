@@ -352,6 +352,19 @@ function extractBubbleIdLoose(input: string) {
   return m ? String(m[0]).trim() : null;
 }
 
+function extractAllBubbleIdsLoose(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return [];
+  const out: string[] = [];
+  const re = /\d{8,}x\d{6,}/g;
+  let m: RegExpExecArray | null = null;
+  while ((m = re.exec(s))) {
+    const v = String(m[0] ?? "").trim();
+    if (v) out.push(v);
+  }
+  return out;
+}
+
 function pickUserRefFromRow(row: Record<string, string>) {
   const direct =
     pickFirst(row, [
@@ -482,6 +495,62 @@ export async function POST(req: NextRequest) {
         pickKeyLike(firstRow, ["empresa", "company", "restaurante"], { excludeParts: ["nome", "name", "email", "telefone", "whatsapp", "cnpj", "endereco", "address"] });
       let companyId = companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "";
 
+      const companyCandidateIds = new Set<string>();
+      for (const [k, v] of Object.entries(firstRow)) {
+        const kk = String(k ?? "").toLowerCase();
+        if (!kk.includes("empresa") && !kk.includes("restaurante") && !kk.includes("company") && !kk.includes("unidade")) continue;
+        for (const id of extractAllBubbleIdsLoose(String(v ?? ""))) companyCandidateIds.add(id);
+      }
+      if (companyId) companyCandidateIds.add(companyId);
+      if (companyIdExisting) companyCandidateIds.add(companyIdExisting);
+
+      const probeEmpresaId = async (candidateId: string) => {
+        const types: string[] = Array.isArray(state.types) ? state.types : [];
+        const notasType =
+          types
+            .map((t) => String(t ?? "").trim())
+            .find((t) => t.toLowerCase().includes("nota") || t.toLowerCase().includes("fiscal")) ?? "notas_fiscais";
+        const keys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
+        for (const key of keys) {
+          try {
+            const page = await fetchBubblePage({
+              baseUrl,
+              token,
+              typeName: notasType,
+              cursor: 0,
+              limit: 1,
+              sortField: "Modified Date",
+              descending: true,
+              constraints: [{ key, constraint_type: "equals", value: candidateId }],
+            });
+            const first = (page.results ?? [])[0] as any;
+            if (!first) continue;
+            const date = String(first?.["Modified Date"] ?? first?.["Created Date"] ?? "").trim();
+            return { ok: true, key, date };
+          } catch (err) {
+            const bubbleStatus = err instanceof BubbleApiError ? err.bubbleStatus : null;
+            if (bubbleStatus === 400 || bubbleStatus === 404) continue;
+            throw err;
+          }
+        }
+        return { ok: false, key: "", date: "" };
+      };
+
+      if (!companyId && companyCandidateIds.size) {
+        const candidates = Array.from(companyCandidateIds);
+        let best: { id: string; date: string } | null = null;
+        for (const cand of candidates) {
+          const res = await probeEmpresaId(cand);
+          if (!res.ok) continue;
+          if (!best) {
+            best = { id: cand, date: res.date };
+            continue;
+          }
+          if (res.date && (!best.date || res.date > best.date)) best = { id: cand, date: res.date };
+        }
+        if (best?.id) companyId = best.id;
+      }
+
       if (!companyId) {
         const companyType =
           (Array.isArray(state.types) ? (state.types as any[]) : [])
@@ -512,7 +581,15 @@ export async function POST(req: NextRequest) {
       }
 
       const needsReset = !enabled || !bubbleUserIdExisting || emailExisting !== email || companyIdExisting !== companyId;
-      (state as any).filter = { v: 1, mode: "email_only", email, bubbleUserId, userType, companyId: companyId || undefined };
+      (state as any).filter = {
+        v: 1,
+        mode: "email_only",
+        email,
+        bubbleUserId,
+        userType,
+        companyId: companyId || undefined,
+        companyCandidates: Array.from(companyCandidateIds),
+      };
       if (needsReset) {
         const runId = crypto.randomUUID();
         const runPrefix = `user:${userId}/bootstrap/${runId}`;
