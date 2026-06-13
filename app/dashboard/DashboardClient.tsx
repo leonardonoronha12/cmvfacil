@@ -967,6 +967,27 @@ export default function DashboardClient() {
     }
   }
 
+  async function reimportFornecedoresAndReload() {
+    setIsLoadingTables(true);
+    try {
+      const res = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
+      const db = await loadFornecedoresStateFromSupabase();
+      writeFornecedorInfoMap(db.info);
+      writeFornecedorProdutosMap(db.produtos);
+      writeFornecedorEquivalenciasMap(db.equivalencias);
+      setFornecedorInfoMap(db.info);
+      setFornecedorProdutosMap(db.produtos);
+      setFornecedorEquivalenciasMap(db.equivalencias);
+      showToast("Fornecedores sincronizados.", "success", 5000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+    } finally {
+      setIsLoadingTables(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -2220,6 +2241,15 @@ export default function DashboardClient() {
     });
   }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
 
+  const historicoHasFornecedorIds = useMemo(() => {
+    return historicoEntradas.some((h) => {
+      const raw = String(h.fornecedor ?? "").trim();
+      const clean = raw.split("/")[0]?.trim() || raw;
+      const id = clean.replace(/[^\d]/g, "");
+      return /^\d{10,}$/.test(id);
+    });
+  }, [historicoEntradas]);
+
   useEffect(() => {
     if (!historyItem) return;
     if (reimportFornecedoresTriedRef.current) return;
@@ -2897,6 +2927,25 @@ export default function DashboardClient() {
                     {detailsTab === "entradas" ? (
                       <>
                         <div className={styles.historyTitle}>Histórico de Entradas</div>
+                        {isLoadingTables ? null : historicoEntradas.length && historicoHasFornecedorIds ? (
+                          <div style={{ margin: "8px 0 0" }}>
+                            <button
+                              type="button"
+                              onClick={() => void reimportFornecedoresAndReload()}
+                              disabled={isLoadingTables}
+                              style={{
+                                border: "1px solid #e4e8e7",
+                                background: "#ffffff",
+                                borderRadius: 10,
+                                padding: "10px 12px",
+                                fontWeight: 800,
+                                cursor: "pointer",
+                              }}
+                            >
+                              Sincronizar fornecedores
+                            </button>
+                          </div>
+                        ) : null}
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>
