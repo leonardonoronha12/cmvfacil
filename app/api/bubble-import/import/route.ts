@@ -829,11 +829,11 @@ export async function POST(req: NextRequest) {
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
-      const nomeRaw =
-        pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]) ||
-        (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||
-        guessItemLabel(row);
-      const nome = typeof nomeRaw === "string" ? nomeRaw.trim() : String(nomeRaw ?? "").trim();
+      const nomePicked = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]);
+      const nomeFromPicked = typeof nomePicked === "string" ? nomePicked.trim() : "";
+      const nomeFromItem = itemId ? String(itemById.get(itemId.trim())?.nome ?? "").trim() : "";
+      const nomeFromGuess = String(guessItemLabel(row) ?? "").trim();
+      const nome = nomeFromPicked || nomeFromItem || nomeFromGuess;
       if (!nome) return;
       const bubbleId = pickBubbleId(row) || String(Date.now());
       const bubbleKey = String(bubbleId).trim();
