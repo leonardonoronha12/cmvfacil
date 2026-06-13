@@ -38,14 +38,19 @@ function normalizeInfoMap(input: unknown): FornecedorInfoMap {
     const v = obj[k];
     if (!v || typeof v !== "object") continue;
     const row = v as Record<string, unknown>;
-    const fornecedor = normName(String(row.fornecedor ?? k));
-    if (!fornecedor) continue;
-    out[fornecedor.toUpperCase()] = {
-      fornecedor,
+    const fornecedor = normName(String(row.fornecedor ?? ""));
+    const fornecedorLabel = fornecedor || normName(String(k ?? ""));
+    if (!fornecedorLabel) continue;
+    const normalizedRow = {
+      fornecedor: fornecedorLabel,
       vendedor: String(row.vendedor ?? "").trim(),
       whatsapp: String(row.whatsapp ?? "").trim(),
       endereco: String(row.endereco ?? "").trim(),
     };
+    const fornecedorKey = fornecedorLabel.toUpperCase();
+    out[fornecedorKey] = normalizedRow;
+    const idKey = normName(String(k ?? "")).toUpperCase();
+    if (idKey && idKey !== fornecedorKey) out[idKey] = normalizedRow;
   }
   return out;
 }
