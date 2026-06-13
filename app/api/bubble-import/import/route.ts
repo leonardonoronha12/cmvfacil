@@ -746,8 +746,9 @@ export async function POST(req: NextRequest) {
       if (!enableFornecedores) return;
       const uid = resolveTargetUserId(row);
       const st = getFornecedoresState(uid);
-      const fornecedor =
-        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+    const fornecedor =
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
+        pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
       const fornId = pickBubbleId(row) || pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
@@ -772,9 +773,9 @@ export async function POST(req: NextRequest) {
       const st = getFornecedoresState(uid);
       const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
       const fornecedor =
-        pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome", "nome_fornecedor"]) ||
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
         (fornecedorId ? st.fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
-        pickKeyLike(row, ["fornecedor", "empresa"]);
+        pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
 
       const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
       const itemName =
@@ -794,7 +795,9 @@ export async function POST(req: NextRequest) {
       if (!enableFornecedores) return;
       const uid = resolveTargetUserId(row);
       const st = getFornecedoresState(uid);
-      const fornecedor = pickFirst(row, ["fornecedor", "fornecedor_nome", "empresa", "empresa_nome"]) || pickKeyLike(row, ["fornecedor", "empresa"]);
+      const fornecedor =
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
+        pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
       const nomeNaNota =
@@ -870,8 +873,8 @@ export async function POST(req: NextRequest) {
       pickKeyLike(row, ["fornecedor_id", "id_fornecedor"]);
     const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
     let fornecedor =
-      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) ||
-      pickKeyLike(row, ["fornecedor", "empresa"]);
+      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social"]) ||
+      pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
     if (fornecedor && looksLikeId(fornecedor)) {
       const mapped = fornState.fornecedorNameById.get(extractBubbleRefId(fornecedor.trim())) ?? "";
       fornecedor = mapped || fornecedor;
@@ -1318,19 +1321,6 @@ export async function POST(req: NextRequest) {
         st.produtosMap[k] = Array.from(new Set((st.produtosMap[k] ?? []).filter(Boolean))).sort((a, b) =>
           a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
         );
-      }
-    }
-
-    if (enableFornecedores) {
-      for (const st of fornecedoresByUser.values()) {
-        for (const [id, name] of empresaNameById.entries()) {
-          const idKey = String(id ?? "").trim().toUpperCase();
-          if (!idKey) continue;
-          if (!st.fornecedorNameById.has(idKey)) st.fornecedorNameById.set(idKey, name);
-          if (!st.infoMap[idKey]) {
-            st.infoMap[idKey] = { fornecedor: name, vendedor: "-", whatsapp: "-", endereco: "-" };
-          }
-        }
       }
     }
 
