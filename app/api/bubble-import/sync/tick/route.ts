@@ -463,7 +463,9 @@ export async function POST(req: NextRequest) {
       const bubbleUserIdExisting = String((state as any)?.filter?.bubbleUserId ?? "").trim();
       const emailExisting = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
       const companyIdExisting = String((state as any)?.filter?.companyId ?? "").trim();
-      if (enabled && bubbleUserIdExisting && emailExisting) return;
+      const companyCandidatesExisting = (state as any)?.filter?.companyCandidates;
+      const hasCompanyCandidates = Array.isArray(companyCandidatesExisting) && companyCandidatesExisting.length > 0;
+      if (enabled && bubbleUserIdExisting && emailExisting && hasCompanyCandidates) return;
 
       if (state.phase !== "pulling") return;
       if (!baseUrl) throw new Error("missing_base_url");
