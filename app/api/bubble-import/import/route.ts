@@ -818,35 +818,45 @@ export async function POST(req: NextRequest) {
     }
 
     const notaItemsByNotaKey = new Map<string, any[]>();
+    const notaItemSeenByNotaKey = new Map<string, Set<string>>();
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
       const prefix = prefixForRow(row);
     const notaId =
         pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
+      const notaKey = extractBubbleRefId(String(notaId)).trim() || String(notaId).trim();
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
-      const nome =
+      const nomeRaw =
         pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]) ||
         (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "") ||
         guessItemLabel(row);
+      const nome = typeof nomeRaw === "string" ? nomeRaw.trim() : String(nomeRaw ?? "").trim();
       if (!nome) return;
       const bubbleId = pickBubbleId(row) || String(Date.now());
+      const bubbleKey = String(bubbleId).trim();
+      const seen = notaItemSeenByNotaKey.get(notaKey) ?? new Set<string>();
+      if (bubbleKey && seen.has(bubbleKey)) return;
+      if (bubbleKey) {
+        seen.add(bubbleKey);
+        notaItemSeenByNotaKey.set(notaKey, seen);
+      }
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
       const subtotal = pickFirst(row, ["subtotal_label", "subtotal", "total", "valor"]) || pickKeyLike(row, ["subtotal", "total", "valor"]);
       const unit =
         pickFirst(row, ["custo_unitario_label", "custo_unitario", "preco_unitario", "valor_unitario"]) || pickKeyLike(row, ["custo", "preco", "valor"]);
-      const list = notaItemsByNotaKey.get(notaId) ?? [];
+      const list = notaItemsByNotaKey.get(notaKey) ?? [];
       list.push({
         id: `${prefix}nota_item:${bubbleId}`,
         itemId: itemId || undefined,
-        nome: nome.trim(),
+        nome,
         quantidadeLabel: qtd.trim(),
         subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",
         custoUnitarioLabel: unit ? (parsePtNumber(unit) ? formatMoneyBRL(parsePtNumber(unit)) : unit.trim()) : "",
       });
-      notaItemsByNotaKey.set(notaId, list);
+      notaItemsByNotaKey.set(notaKey, list);
     }
 
     const entradasRows: any[] = [];
@@ -856,8 +866,8 @@ export async function POST(req: NextRequest) {
     const prefix = `user:${uid}:`;
     const fornState = getFornecedoresState(uid);
     const fornecedorIdRaw =
-      pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor", "fornecedor_ref", "empresa_id", "empresa"]) ||
-      pickKeyLike(row, ["fornecedor_id", "id_fornecedor", "fornecedor"]);
+      pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor_ref"]) ||
+      pickKeyLike(row, ["fornecedor_id", "id_fornecedor"]);
     const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
     let fornecedor =
       pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social"]) ||
@@ -870,11 +880,7 @@ export async function POST(req: NextRequest) {
       const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
       if (mapped) fornecedor = mapped;
     }
-    if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
-      const mapped = empresaNameById.get(fornecedorId.trim()) ?? "";
-      if (mapped) fornecedor = mapped;
-    }
-    if (!fornecedor) fornecedor = fornecedorId || "-";
+    if (!fornecedor) fornecedor = fornecedorId ? fornecedorId : "-";
     const numero =
       pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
     const dataLanc = buildDateLabel(pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]));
@@ -884,7 +890,8 @@ export async function POST(req: NextRequest) {
     const valorNum = parsePtNumber(valor);
     const responsavel = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
     const dataCriacao = buildDateLabel(pickFirst(row, ["data_criacao", "created_date", "created_at", "created"]) || "");
-    const itensList = notaItemsByNotaKey.get(bubbleId) ?? notaItemsByNotaKey.get(numero) ?? notaItemsByNotaKey.get(numeroFinal) ?? [];
+    const notaKey = extractBubbleRefId(String(bubbleId)).trim() || String(bubbleId).trim();
+    const itensList = notaItemsByNotaKey.get(notaKey) ?? notaItemsByNotaKey.get(numero) ?? notaItemsByNotaKey.get(numeroFinal) ?? [];
     const itensCount = itensList.length;
     entradasRows.push({
       id: `${prefix}entrada:${bubbleId}`,
