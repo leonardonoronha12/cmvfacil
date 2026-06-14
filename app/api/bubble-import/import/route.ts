@@ -831,7 +831,7 @@ export async function POST(req: NextRequest) {
       const notaKey = extractBubbleRefId(String(notaId)).trim() || String(notaId).trim();
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
-      const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
+      const itemId = itemIdRaw ? extractBubbleRefId(String(itemIdRaw)) : "";
       const nomePicked = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]);
       const nomeFromPicked = typeof nomePicked === "string" ? nomePicked.trim() : "";
       const nomeFromItem = itemId ? String(itemById.get(itemId.trim())?.nome ?? "").trim() : "";

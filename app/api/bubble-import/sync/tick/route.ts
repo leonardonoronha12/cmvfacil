@@ -805,6 +805,8 @@ export async function POST(req: NextRequest) {
             if (t.toLowerCase() === String(filterUserType).toLowerCase() && filterEmail) {
               baseConstraints.push({ key: "email", constraint_type: "equals", value: filterEmail });
             } else {
+              const typeKey = t.toLowerCase();
+              const isItensNotas = typeKey.includes("itens") && typeKey.includes("nota");
               const forced = String((p as any)?.constraintStrategy ?? "").trim().toLowerCase();
               const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
               const companyKeyIndexRaw = typeof (p as any)?.companyKeyIndex === "number" ? (p as any).companyKeyIndex : 0;
@@ -813,7 +815,10 @@ export async function POST(req: NextRequest) {
               const preferCreatedBy = forced === "created_by";
               const preferNone = forced === "none";
 
-              if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
+              if (!preferNone && isItensNotas) {
+                (p as any).constraintStrategy = "none";
+                (p as any).companyKeyIndex = 0;
+              } else if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
                 baseConstraints.push({ key: companyKeys[companyKeyIndex]!, constraint_type: "equals", value: filterCompanyId });
                 (p as any).constraintStrategy = "company";
                 (p as any).companyKeyIndex = companyKeyIndex;
@@ -870,6 +875,14 @@ export async function POST(req: NextRequest) {
                 const next = baseConstraints.filter((c) => !companyKeys.includes(c.key));
                 next.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
                 constraints = next;
+                usedCompanyKey = "";
+                continue;
+              }
+
+              if (bubbleStatus === 400 && filterMode === "email_only" && constraints?.some((c) => c.key === "Created By")) {
+                (p as any).constraintStrategy = "none";
+                (p as any).companyKeyIndex = 0;
+                constraints = baseConstraints.filter((c) => c.key !== "Created By");
                 usedCompanyKey = "";
                 continue;
               }
