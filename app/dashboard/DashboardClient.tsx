@@ -734,6 +734,13 @@ function parseDateDDMMYYYY(value: string) {
   return d;
 }
 
+function formatDateLabelShortPT(d: Date) {
+  const day = String(d.getDate()).padStart(2, "0");
+  const year = d.getFullYear();
+  const month = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][d.getMonth()] ?? "";
+  return `${day} ${month}, ${year}`;
+}
+
 function parseDateLabelLoose(value: string) {
   const raw = value.trim();
   if (!raw) return null;
@@ -783,6 +790,13 @@ function parseDateLabelLoose(value: string) {
   return d;
 }
 
+function normalizeDateLabelForUI(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const d = parseDateLabelLoose(raw) ?? parseDateDDMMYYYY(raw);
+  return d ? formatDateLabelShortPT(d) : raw;
+}
+
 function toIsoDate(d: Date) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -802,6 +816,13 @@ function parseQtyLabel(input: string) {
   const qty = parsePtNumber(m[1] ?? "");
   const unit = String(m[2] ?? "").trim();
   return { qty, unit };
+}
+
+function formatQtyLabelBubble(qty: number, unit: string) {
+  const u = String(unit ?? "").trim() || "Und";
+  const q = Number.isFinite(qty) ? qty : 0;
+  const label = q === 0 ? "0" : q.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+  return `${label} ${u}`.trim();
 }
 
 function formatQty(qty: number, unit: string) {
@@ -1150,24 +1171,13 @@ export default function DashboardClient() {
     return mapped ? fornecedorEquivalenciasMap[mapped] ?? [] : fornecedorEquivalenciasMap[fornecedor.trim().toUpperCase()] ?? [];
   }
 
-  function extractBubbleItemIdFromInsumoId(insumoId: string) {
-    const s = String(insumoId ?? "").trim();
-    if (!s) return "";
-    const m = s.match(/(?:^|:)item:(\d{8,}x\d{6,})(?:$|:)/);
-    return m ? String(m[1] ?? "").trim() : "";
-  }
-
   useEffect(() => {
-    const itemId = (searchParams.get("itemId")?.trim() ?? "") || (searchParams.get("produto")?.trim() ?? "");
+    const itemId = searchParams.get("itemId")?.trim() ?? "";
     const itemName = searchParams.get("item")?.trim() ?? "";
     if (!itemId && !itemName) return;
 
     const matched =
       insumos.find((i) => i.id === itemId) ??
-      (itemId
-        ? insumos.find((i) => extractBubbleItemIdFromInsumoId(i.id) === itemId) ??
-          insumos.find((i) => String(i.id ?? "").includes(String(itemId)))
-        : null) ??
       insumos.find((i) => normalizeKey(i.item) === normalizeKey(itemName));
 
     if (!matched) return;
@@ -1182,15 +1192,12 @@ export default function DashboardClient() {
   const avgUnitCostCentsByInsumoId = useMemo(() => {
     const insumoIdByKey = new Map<string, string>();
     const insumoNameById = new Map<string, string>();
-    const insumoIdByBubbleId = new Map<string, string>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
       const id = String(i.id ?? "").trim();
       if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
-      const bubbleId = extractBubbleItemIdFromInsumoId(id);
-      if (bubbleId && !insumoIdByBubbleId.has(bubbleId)) insumoIdByBubbleId.set(bubbleId, id);
     }
     const sumQtyById = new Map<string, number>();
     const sumCentsById = new Map<string, number>();
@@ -1198,7 +1205,6 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const directItemId = String(it.itemId ?? "").trim();
         const rawNome = String(it.nome ?? "").trim();
         const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
         const rawKey = normalizeKey(resolvedNome);
@@ -1210,8 +1216,7 @@ export default function DashboardClient() {
           const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
           if (Number.isFinite(f) && f > 0) fator = f;
         }
-        const idFromItemId = directItemId ? insumoIdByBubbleId.get(directItemId) ?? "" : "";
-        const id = idFromItemId || insumoIdByKey.get(mappedKey);
+        const id = insumoIdByKey.get(mappedKey);
         if (!id) continue;
         const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
         const qtyEq = qty * fator;
@@ -2166,13 +2171,10 @@ export default function DashboardClient() {
       (key ? insumos.find((i) => normalizeKey(i.item) === key) ?? null : null);
     const baseUnit = (String(insumo?.medida ?? "") || "Und").trim() || "Und";
     const insumoNameById = new Map<string, string>();
-    const insumoIdByBubbleId = new Map<string, string>();
     for (const i of insumos) {
       const id = String(i.id ?? "").trim();
       if (!id) continue;
       if (!insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
-      const bubbleId = extractBubbleItemIdFromInsumoId(id);
-      if (bubbleId && !insumoIdByBubbleId.has(bubbleId)) insumoIdByBubbleId.set(bubbleId, id);
     }
     const out: Array<{
       t: number;
@@ -2183,70 +2185,52 @@ export default function DashboardClient() {
       subtotal: string;
     }> = [];
 
-    const targetInsumoId = String(historyItem.insumoId ?? "").trim();
-
     for (const e of entradas) {
       const d = parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const itemId = String(it.itemId ?? "").trim();
-        const mappedInsumoIdFromItemId = itemId ? insumoIdByBubbleId.get(itemId) ?? "" : "";
-
-        if (mappedInsumoIdFromItemId && mappedInsumoIdFromItemId === targetInsumoId) {
-          const parsed = parseQtyLabel(it.quantidadeLabel ?? "");
-          const qtyBase = parsed.qty;
-          if (!Number.isFinite(qtyBase) || qtyBase <= 0) continue;
+        const itemId = String((it as any)?.itemId ?? "").trim();
+        if (itemId && itemId === historyItem.insumoId) {
+          const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          const unitLabel = String(unit || baseUnit).trim() || baseUnit;
           let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
-          if (!subtotalCents) {
-            const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
-            if (unit && qtyBase > 0) subtotalCents = Math.round(unit * qtyBase);
-          }
-          const unitCostCents = subtotalCents > 0 && qtyBase > 0 ? Math.round(subtotalCents / qtyBase) : 0;
-          const qtyLabel = `${qtyBase.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}${baseUnit}`;
+          const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
+          const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
           out.push({
             t,
             data: e.dataLancamento,
             fornecedor: e.fornecedor,
-            qtd: qtyLabel,
-            preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)}/${baseUnit}` : `-/${baseUnit}`,
+            qtd: formatQtyLabelBubble(qty, unitLabel),
+            preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
           });
           continue;
         }
 
         const rawNome = String(it.nome ?? "").trim();
-        const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+        const resolvedNome = (itemId && insumoNameById.get(itemId)) || (rawNome && insumoNameById.get(rawNome)) || rawNome;
         const rawKey = normalizeKey(resolvedNome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
         if (mappedKey !== key) continue;
-        if (mappedInsumoIdFromItemId && mappedInsumoIdFromItemId !== targetInsumoId && !eq) continue;
 
-        const parsed = parseQtyLabel(it.quantidadeLabel ?? "");
-        const qty = parsed.qty;
-        let fator = 1;
-        if (eq) {
-          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
-          if (Number.isFinite(f) && f > 0) fator = f;
-        }
-        const qtyBase = qty * fator;
-        if (!Number.isFinite(qtyBase) || qtyBase <= 0) continue;
-
+        const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+        if (!Number.isFinite(qty) || qty <= 0) continue;
+        const unitLabel = String(unit || baseUnit).trim() || baseUnit;
         let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
-        if (!subtotalCents) {
-          const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
-          if (unit && qtyBase > 0) subtotalCents = Math.round(unit * qtyBase);
-        }
-        const unitCostCents = subtotalCents > 0 && qtyBase > 0 ? Math.round(subtotalCents / qtyBase) : 0;
-        const qtyLabel = `${qtyBase.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}${baseUnit}`;
+        const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
+        if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
+        const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
         out.push({
           t,
           data: e.dataLancamento,
           fornecedor: e.fornecedor,
-          qtd: qtyLabel,
-          preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)}/${baseUnit}` : `-/${baseUnit}`,
+          qtd: formatQtyLabelBubble(qty, unitLabel),
+          preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
         });
       }
@@ -2392,6 +2376,12 @@ export default function DashboardClient() {
     if (!key) return null;
     return insumos.find((i) => normalizeKey(i.item) === key) ?? null;
   }, [historyItem, insumos]);
+
+  const selectedInsumoCustoMedioLabel = useMemo(() => {
+    if (!selectedInsumo) return "-";
+    const cents = avgUnitCostCentsByInsumoId.get(selectedInsumo.id) ?? parseBrlToCents(String(selectedInsumo.custoMedio ?? ""));
+    return cents ? formatBrlFromCents(cents) : "-";
+  }, [avgUnitCostCentsByInsumoId, selectedInsumo]);
 
   function toggleOcultarSelecionado() {
     if (!selectedInsumo) return;
@@ -3074,7 +3064,7 @@ export default function DashboardClient() {
                         </div>
                         <div className={styles.itemAsideKpiText}>
                           <div className={styles.itemAsideKpiLabel}>Custo Médio</div>
-                          <div className={styles.itemAsideKpiValue}>{selectedInsumo?.custoMedio ?? "-"}</div>
+                          <div className={styles.itemAsideKpiValue}>{selectedInsumoCustoMedioLabel}</div>
                         </div>
                       </div>
                       <div className={styles.itemAsideKpi}>
@@ -3083,7 +3073,7 @@ export default function DashboardClient() {
                         </div>
                         <div className={styles.itemAsideKpiText}>
                           <div className={styles.itemAsideKpiLabel}>Última Entrada</div>
-                          <div className={styles.itemAsideKpiValue}>{historicoEntradas[0]?.data ?? "-"}</div>
+                          <div className={styles.itemAsideKpiValue}>{normalizeDateLabelForUI(historicoEntradas[0]?.data ?? "")}</div>
                         </div>
                       </div>
                     </div>
