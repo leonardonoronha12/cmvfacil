@@ -679,6 +679,8 @@ export async function POST(req: NextRequest) {
 
     const resolveImportUserId = (row: Record<string, string>) => {
       if (overrideImportUserId) return overrideImportUserId;
+      const filterMode = String((state as any)?.filter?.mode ?? "");
+      if (filterMode === "email_only") return userId;
       const ref = pickUserRefFromRow(row);
       const uuid = ref ? extractUuidFromText(ref) : null;
       if (uuid) return uuid;
@@ -752,7 +754,7 @@ export async function POST(req: NextRequest) {
           kinds: kindsByDomain[domain] ?? undefined,
           includeUnknown: domain !== "entradas",
           prefix: state.runPrefix,
-          targetUserId: overrideImportUserId || undefined,
+          targetUserId: overrideImportUserId || userId,
         }),
         cache: "no-store",
       });
