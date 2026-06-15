@@ -44,7 +44,6 @@ type EntradaRow = {
 
 type NotaItem = {
   id: string;
-  itemId?: string;
   nome: string;
   quantidadeLabel: string;
   subtotalLabel: string;

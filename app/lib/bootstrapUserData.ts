@@ -44,11 +44,11 @@ function setLastRunMs(ms: number) {
   } catch {}
 }
 
-export async function bootstrapUserDataOnce(force?: boolean) {
+export async function bootstrapUserDataOnce() {
   if (typeof window === "undefined") return;
   const last = getLastRunMs();
   const now = getNow();
-  if (!force && last && now - last < 60_000) return;
+  if (last && now - last < 60_000) return;
   if (running) return running;
 
   setLastRunMs(now);
@@ -89,3 +89,4 @@ export async function bootstrapUserDataOnce(force?: boolean) {
 
   return running;
 }
+

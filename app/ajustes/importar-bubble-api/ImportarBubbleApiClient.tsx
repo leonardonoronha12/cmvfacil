@@ -34,9 +34,6 @@ type SyncState = {
 export default function ImportarBubbleApiClient() {
   const [baseUrl, setBaseUrl] = useState("");
   const [token, setToken] = useState("");
-  const [companyId, setCompanyId] = useState("");
-  const [companyOptions, setCompanyOptions] = useState<Array<{ id: string; name: string; type?: string }> | null>(null);
-  const [companyOptionsError, setCompanyOptionsError] = useState("");
   const [importAsUserId, setImportAsUserId] = useState("");
   const [typesText, setTypesText] = useState(
     "User\nempresas\ncategorias\ncusto_medio_item\ndesperdicio\netiquetas\nfaturamentos\nfornecedores\nIngredientes\ninventarios\nitens_fornecedores\nitens_inventarios\nItens_lista_compras\nitens_notas\nitem\nmotivos_desperdicios\nnotas_fiscais\nqtd_compra_real",
@@ -128,26 +125,6 @@ export default function ImportarBubbleApiClient() {
     }
   }
 
-  async function loadCompanies() {
-    setCompanyOptionsError("");
-    try {
-      const res = await fetch("/api/bubble-import/companies", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ baseUrl, token }),
-        cache: "no-store",
-      });
-      const json = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
-      const list = Array.isArray(json?.companies) ? json.companies : [];
-      setCompanyOptions(list);
-      if (list.length && !companyId) setCompanyId(String(list[0]?.id ?? "").trim());
-    } catch (err) {
-      setCompanyOptions(null);
-      setCompanyOptionsError(safeJsonMessage(err));
-    }
-  }
-
   useEffect(() => {
     void refreshCounts();
     void refreshGlobalTotals();
@@ -159,10 +136,8 @@ export default function ImportarBubbleApiClient() {
     try {
       const savedBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
       const savedToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      const savedCompanyId = (window.localStorage.getItem("cmvfacil:bubbleCompanyId") ?? "").trim();
       if (savedBaseUrl && !baseUrl) setBaseUrl(savedBaseUrl);
       if (savedToken && !token) setToken(savedToken);
-      if (savedCompanyId && !companyId) setCompanyId(savedCompanyId);
     } catch {}
   }, []);
 
@@ -177,12 +152,6 @@ export default function ImportarBubbleApiClient() {
       if (token) window.localStorage.setItem("cmvfacil:bubbleToken", token);
     } catch {}
   }, [token]);
-
-  useEffect(() => {
-    try {
-      if (companyId) window.localStorage.setItem("cmvfacil:bubbleCompanyId", companyId);
-    } catch {}
-  }, [companyId]);
 
   useEffect(() => {
     if (!isRunning) return;
@@ -276,7 +245,7 @@ export default function ImportarBubbleApiClient() {
     const res = await fetch("/api/bubble-import/sync/tick", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ statePath, baseUrl, token, companyId, maxOps: 12, resume: true, importAsUserId }),
+      body: JSON.stringify({ statePath, baseUrl, token, maxOps: 12, resume: true, importAsUserId }),
     });
     const json = (await res.json().catch(() => null)) as any;
     if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
@@ -324,7 +293,7 @@ export default function ImportarBubbleApiClient() {
       await refreshUserProgress();
       if (dangerAction === "delete") {
         setRebuildState(null);
-        const res = await fetch("/api/bubble-import/reset-all", {
+        const res = await fetch("/api/bubble-import/reset", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ confirm: "DELETE_ALL" }),
@@ -806,33 +775,6 @@ export default function ImportarBubbleApiClient() {
                       <div className={styles.fileMeta}>Token da Data API</div>
                       <input className={styles.input} type="password" value={token} onChange={(e) => setToken(e.target.value)} placeholder="Bearer token" />
                     </label>
-                    <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div className={styles.fileMeta}>Empresa/Unidade ID (Bubble)</div>
-                      <input
-                        className={styles.input}
-                        value={companyId}
-                        onChange={(e) => setCompanyId(e.target.value)}
-                        placeholder="ex: 1746219577632x984305616160817200"
-                      />
-                    </label>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                      <button type="button" className={styles.btn} onClick={loadCompanies} disabled={!baseUrl || !token || isRunning || isResetting}>
-                        Carregar empresas do Bubble
-                      </button>
-                      {companyOptionsError ? <div className={styles.warnText}>{companyOptionsError}</div> : null}
-                    </div>
-                    {companyOptions?.length ? (
-                      <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div className={styles.fileMeta}>Selecionar empresa</div>
-                        <select className={styles.input} value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-                          {companyOptions.map((c) => (
-                            <option key={c.id} value={c.id}>
-                              {c.name}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
                     <label style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       <div className={styles.fileMeta}>Data Types (1 por linha)</div>
                       <textarea

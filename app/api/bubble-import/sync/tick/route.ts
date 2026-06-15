@@ -429,8 +429,6 @@ export async function POST(req: NextRequest) {
     const statePath = String(body?.statePath ?? "").trim();
     const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
     const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
-    const companyIdRaw = typeof body?.companyId === "string" ? String(body.companyId).trim() : "";
-    const overrideCompanyId = companyIdRaw ? extractBubbleIdLoose(companyIdRaw) || (looksLikeBubbleId(companyIdRaw) ? companyIdRaw : "") : "";
     const resume = Boolean(body?.resume);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
     const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) && importAsUserIdRaw !== userId ? importAsUserIdRaw : "";
@@ -465,11 +463,9 @@ export async function POST(req: NextRequest) {
       const bubbleUserIdExisting = String((state as any)?.filter?.bubbleUserId ?? "").trim();
       const emailExisting = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
       const companyIdExisting = String((state as any)?.filter?.companyId ?? "").trim();
-      const overrideCompanyIdExisting = String((state as any)?.filter?.overrideCompanyId ?? "").trim();
       const companyCandidatesExisting = (state as any)?.filter?.companyCandidates;
       const hasCompanyCandidates = Array.isArray(companyCandidatesExisting) && companyCandidatesExisting.length > 0;
-      const overrideChanged = Boolean(overrideCompanyId && overrideCompanyIdExisting !== overrideCompanyId);
-      if (enabled && bubbleUserIdExisting && emailExisting && hasCompanyCandidates && !overrideChanged) return;
+      if (enabled && bubbleUserIdExisting && emailExisting && hasCompanyCandidates) return;
 
       if (state.phase !== "pulling") return;
       if (!baseUrl) throw new Error("missing_base_url");
@@ -496,11 +492,10 @@ export async function POST(req: NextRequest) {
       if (!bubbleUserId) throw new Error("bubble_user_not_found_for_email");
 
       const firstRow = normalizeRowObject(first) ?? {};
-      const forcedCompanyId = overrideCompanyId;
       const companyCandidate =
         pickFirst(firstRow, ["empresa_id", "empresa", "company_id", "company", "restaurante_id", "restaurante"]) ||
         pickKeyLike(firstRow, ["empresa", "company", "restaurante"], { excludeParts: ["nome", "name", "email", "telefone", "whatsapp", "cnpj", "endereco", "address"] });
-      let companyId = forcedCompanyId || (companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "");
+      let companyId = companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "";
 
       const companyCandidateIds = new Set<string>();
       for (const [k, v] of Object.entries(firstRow)) {
@@ -510,7 +505,6 @@ export async function POST(req: NextRequest) {
       }
       if (companyId) companyCandidateIds.add(companyId);
       if (companyIdExisting) companyCandidateIds.add(companyIdExisting);
-      if (forcedCompanyId) companyCandidateIds.add(forcedCompanyId);
 
       const probeEmpresaId = async (candidateId: string) => {
         const types: string[] = Array.isArray(state.types) ? state.types : [];
@@ -597,7 +591,6 @@ export async function POST(req: NextRequest) {
         userType,
         companyId: companyId || undefined,
         companyCandidates: Array.from(companyCandidateIds),
-        overrideCompanyId: forcedCompanyId || undefined,
       };
       if (needsReset) {
         const runId = crypto.randomUUID();
@@ -870,14 +863,6 @@ export async function POST(req: NextRequest) {
                 const next = baseConstraints.filter((c) => !companyKeys.includes(c.key));
                 next.push({ key: "Created By", constraint_type: "equals", value: filterBubbleUserId });
                 constraints = next;
-                usedCompanyKey = "";
-                continue;
-              }
-
-              if (bubbleStatus === 400 && filterMode === "email_only" && constraints?.some((c) => c.key === "Created By")) {
-                (p as any).constraintStrategy = "none";
-                (p as any).companyKeyIndex = 0;
-                constraints = baseConstraints.filter((c) => c.key !== "Created By");
                 usedCompanyKey = "";
                 continue;
               }
