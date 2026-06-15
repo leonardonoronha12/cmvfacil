@@ -380,6 +380,18 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     setBootstrap({ status: "error", message: "paused_by_user", progress: 0, etaMs: null, stage: "", detail: "" });
   };
 
+  const requestRestartBootstrap = async () => {
+    bootstrapStopRef.current = true;
+    try {
+      await fetch("/api/bubble-import/sync/restart", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
+    } catch {}
+    try {
+      window.sessionStorage.removeItem(bootstrapRunningKey);
+      window.sessionStorage.removeItem(bootstrapDoneKey);
+    } catch {}
+    window.location.reload();
+  };
+
   const computeBootstrapProgress = (state: any) => {
     const now = Date.now();
     const phase = String(state?.phase ?? "").trim();
@@ -1052,6 +1064,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                 <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 10 }}>
                   <button type="button" className="cmv-button" onClick={() => setBootstrapOverlayVisible(false)}>
                     Continuar usando
+                  </button>
+                  <button
+                    type="button"
+                    className="cmv-button"
+                    style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db" }}
+                    onClick={() => void requestRestartBootstrap()}
+                  >
+                    Reiniciar
                   </button>
                   <button
                     type="button"
