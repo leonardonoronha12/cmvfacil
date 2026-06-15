@@ -805,8 +805,6 @@ export async function POST(req: NextRequest) {
             if (t.toLowerCase() === String(filterUserType).toLowerCase() && filterEmail) {
               baseConstraints.push({ key: "email", constraint_type: "equals", value: filterEmail });
             } else {
-              const typeKey = t.toLowerCase();
-              const isItensNotas = typeKey.includes("itens") && typeKey.includes("nota");
               const forced = String((p as any)?.constraintStrategy ?? "").trim().toLowerCase();
               const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
               const companyKeyIndexRaw = typeof (p as any)?.companyKeyIndex === "number" ? (p as any).companyKeyIndex : 0;
@@ -815,10 +813,7 @@ export async function POST(req: NextRequest) {
               const preferCreatedBy = forced === "created_by";
               const preferNone = forced === "none";
 
-              if (!preferNone && isItensNotas) {
-                (p as any).constraintStrategy = "none";
-                (p as any).companyKeyIndex = 0;
-              } else if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
+              if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
                 baseConstraints.push({ key: companyKeys[companyKeyIndex]!, constraint_type: "equals", value: filterCompanyId });
                 (p as any).constraintStrategy = "company";
                 (p as any).companyKeyIndex = companyKeyIndex;

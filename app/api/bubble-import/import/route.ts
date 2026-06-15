@@ -820,15 +820,17 @@ export async function POST(req: NextRequest) {
       st.equivalenciasMap[key] = list;
     }
 
+    const allowedNotaKeys = new Set<string>();
     const notaItemsByNotaKey = new Map<string, any[]>();
     const notaItemSeenByNotaKey = new Map<string, Set<string>>();
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
       const prefix = prefixForRow(row);
-    const notaId =
+      const notaId =
         pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
       const notaKey = extractBubbleRefId(String(notaId)).trim() || String(notaId).trim();
+      if (allowedNotaKeys.size && !allowedNotaKeys.has(notaKey)) return;
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
       const itemId = itemIdRaw ? extractBubbleRefId(String(itemIdRaw)) : "";
@@ -862,53 +864,63 @@ export async function POST(req: NextRequest) {
       notaItemsByNotaKey.set(notaKey, list);
     }
 
+    const entradaDrafts: Array<{ notaKey: string; numero: string; numeroFinal: string; row: any }> = [];
     const entradasRows: any[] = [];
     function handleNotaFiscal(row: CsvObjectRow) {
       if (!enableEntradas) return;
-    const uid = resolveTargetUserId(row);
-    const prefix = `user:${uid}:`;
-    const fornState = getFornecedoresState(uid);
-    const fornecedorIdRaw =
-      pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor_ref"]) ||
-      pickKeyLike(row, ["fornecedor_id", "id_fornecedor"]);
-    const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
-    let fornecedor =
-      pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social"]) ||
-      pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
-    if (fornecedor && looksLikeId(fornecedor)) {
-      const mapped = fornState.fornecedorNameById.get(extractBubbleRefId(fornecedor.trim())) ?? "";
-      fornecedor = mapped || fornecedor;
+      const uid = resolveTargetUserId(row);
+      const prefix = `user:${uid}:`;
+      const fornState = getFornecedoresState(uid);
+      const fornecedorIdRaw =
+        pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor_ref"]) || pickKeyLike(row, ["fornecedor_id", "id_fornecedor"]);
+      const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
+      let fornecedor =
+        pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social"]) ||
+        pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
+      if (fornecedor && looksLikeId(fornecedor)) {
+        const mapped = fornState.fornecedorNameById.get(extractBubbleRefId(fornecedor.trim())) ?? "";
+        fornecedor = mapped || fornecedor;
+      }
+      if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
+        const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
+        if (mapped) fornecedor = mapped;
+      }
+      if (!fornecedor) fornecedor = fornecedorId ? fornecedorId : "-";
+      const numero = pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
+      const dataLanc = buildDateLabel(
+        pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]),
+      );
+      const bubbleId = pickBubbleId(row) || `${numero || "nf"}_${entradaDrafts.length + 1}`;
+      const numeroFinal = numero.trim() || `NF-${String(bubbleId).slice(0, 8)}`;
+      const valor = pickFirst(row, ["valor_nota", "valor_total", "valor", "total", "subtotal"]) || pickKeyLike(row, ["valor", "total", "subtotal"]);
+      const valorNum = parsePtNumber(valor);
+      const responsavel =
+        pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
+      const dataCriacao = buildDateLabel(pickFirst(row, ["data_criacao", "created_date", "created_at", "created"]) || "");
+      const notaKey = extractBubbleRefId(String(bubbleId)).trim() || String(bubbleId).trim();
+
+      allowedNotaKeys.add(notaKey);
+      if (numero.trim()) allowedNotaKeys.add(numero.trim());
+      if (numeroFinal.trim()) allowedNotaKeys.add(numeroFinal.trim());
+
+      entradaDrafts.push({
+        notaKey,
+        numero: numero.trim(),
+        numeroFinal: numeroFinal.trim(),
+        row: {
+          id: `${prefix}entrada:${bubbleId}`,
+          user_id: uid,
+          numero: numeroFinal,
+          data_lancamento: dataLanc || "-",
+          fornecedor: fornecedor.trim(),
+          valor_nota: valorNum ? formatMoneyBRL(valorNum) : String(valor ?? "").trim() || "R$0,00",
+          itens: "0 Itens",
+          responsavel: responsavel.trim(),
+          data_criacao: dataCriacao || dataLanc || "-",
+          itens_nota: null,
+        },
+      });
     }
-    if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
-      const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
-      if (mapped) fornecedor = mapped;
-    }
-    if (!fornecedor) fornecedor = fornecedorId ? fornecedorId : "-";
-    const numero =
-      pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
-    const dataLanc = buildDateLabel(pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]));
-    const bubbleId = pickBubbleId(row) || `${numero || "nf"}_${entradasRows.length + 1}`;
-    const numeroFinal = numero.trim() || `NF-${String(bubbleId).slice(0, 8)}`;
-    const valor = pickFirst(row, ["valor_nota", "valor_total", "valor", "total", "subtotal"]) || pickKeyLike(row, ["valor", "total", "subtotal"]);
-    const valorNum = parsePtNumber(valor);
-    const responsavel = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
-    const dataCriacao = buildDateLabel(pickFirst(row, ["data_criacao", "created_date", "created_at", "created"]) || "");
-    const notaKey = extractBubbleRefId(String(bubbleId)).trim() || String(bubbleId).trim();
-    const itensList = notaItemsByNotaKey.get(notaKey) ?? notaItemsByNotaKey.get(numero) ?? notaItemsByNotaKey.get(numeroFinal) ?? [];
-    const itensCount = itensList.length;
-    entradasRows.push({
-      id: `${prefix}entrada:${bubbleId}`,
-      user_id: uid,
-      numero: numeroFinal,
-      data_lancamento: dataLanc || "-",
-      fornecedor: fornecedor.trim(),
-      valor_nota: valorNum ? formatMoneyBRL(valorNum) : String(valor ?? "").trim() || "R$0,00",
-      itens: `${itensCount || parsePtNumber(pickFirst(row, ["itens", "qtd_itens", "quantidade_itens"]) || pickKeyLike(row, ["itens", "qtd"])) || 0} Itens`,
-      responsavel: responsavel.trim(),
-      data_criacao: dataCriacao || dataLanc || "-",
-      itens_nota: itensList.length ? itensList : null,
-    });
-  }
 
     const desperdiciosRows: any[] = [];
     function handleMotivoDesperdicio(row: CsvObjectRow) {
@@ -1433,8 +1445,17 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
     const desperdiciosInserted = enableDesperdicios && desperdiciosRows.length ? await upsertInBatches(supabase, "desperdicios", desperdiciosRows, 500) : 0;
 
-    await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
     await processCsvGroups("notas_fiscais", (row) => handleNotaFiscal(row));
+    await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
+    if (enableEntradas && entradaDrafts.length) {
+      for (const d of entradaDrafts) {
+        const itensList = notaItemsByNotaKey.get(d.notaKey) ?? notaItemsByNotaKey.get(d.numero) ?? notaItemsByNotaKey.get(d.numeroFinal) ?? [];
+        const itensCount = itensList.length;
+        d.row.itens = `${itensCount} Itens`;
+        d.row.itens_nota = itensCount ? itensList : null;
+        entradasRows.push(d.row);
+      }
+    }
     const entradasInserted = enableEntradas && entradasRows.length ? await upsertInBatches(supabase, "entradas", entradasRows, 300) : 0;
 
     return json(
