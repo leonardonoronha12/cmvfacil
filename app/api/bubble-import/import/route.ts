@@ -825,8 +825,18 @@ export async function POST(req: NextRequest) {
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
       const prefix = prefixForRow(row);
-    const notaId =
-        pickFirst(row, ["nota_id", "nota_fiscal_id", "nota", "notas_fiscais_id", "notas_fiscais", "entrada_id", "entrada"]) || pickKeyLike(row, ["nota", "entrada"]);
+      const notaId =
+        pickFirst(row, [
+          "nota_id",
+          "nota_fiscal_id",
+          "nota_fiscal",
+          "nota",
+          "notas_fiscais_id",
+          "notas_fiscais",
+          "notas_fiscais_ref",
+          "entrada_id",
+          "entrada",
+        ]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
       const notaKey = extractBubbleRefId(String(notaId)).trim() || String(notaId).trim();
       const itemIdRaw =
@@ -838,21 +848,21 @@ export async function POST(req: NextRequest) {
       const nomeFromGuess = String(guessItemLabel(row) ?? "").trim();
       const nome = nomeFromPicked || nomeFromItem || nomeFromGuess;
       if (!nome) return;
-      const bubbleId = pickBubbleId(row) || String(Date.now());
-      const bubbleKey = String(bubbleId).trim();
       const seen = notaItemSeenByNotaKey.get(notaKey) ?? new Set<string>();
-      if (bubbleKey && seen.has(bubbleKey)) return;
-      if (bubbleKey) {
-        seen.add(bubbleKey);
-        notaItemSeenByNotaKey.set(notaKey, seen);
-      }
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
       const subtotal = pickFirst(row, ["subtotal_label", "subtotal", "total", "valor"]) || pickKeyLike(row, ["subtotal", "total", "valor"]);
       const unit =
         pickFirst(row, ["custo_unitario_label", "custo_unitario", "preco_unitario", "valor_unitario"]) || pickKeyLike(row, ["custo", "preco", "valor"]);
+
       const list = notaItemsByNotaKey.get(notaKey) ?? [];
+      const bubbleId = String(pickBubbleId(row) ?? "").trim();
+      const fallbackKey = `${notaKey}:${bubbleId || itemId || nome}:${String(qtd ?? "").trim()}:${String(subtotal ?? "").trim()}:${String(unit ?? "").trim()}:${list.length}`;
+      const bubbleKey = bubbleId || fallbackKey;
+      if (seen.has(bubbleKey)) return;
+      seen.add(bubbleKey);
+      notaItemSeenByNotaKey.set(notaKey, seen);
       list.push({
-        id: `${prefix}nota_item:${bubbleId}`,
+        id: `${prefix}nota_item:${bubbleKey}`,
         itemId: itemId || undefined,
         nome,
         quantidadeLabel: qtd.trim(),
