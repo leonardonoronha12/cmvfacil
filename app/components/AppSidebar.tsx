@@ -299,6 +299,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const lastSyncRunIdRef = useRef("");
   const bootstrapSkipUntilRef = useRef(0);
+  const bootstrapControlRef = useRef<{ tickUrl: string; statePath: string } | null>(null);
+  const bootstrapStopRef = useRef(false);
   const [bootstrap, setBootstrap] = useState<{
     status: "idle" | "running" | "done" | "error";
     message: string;
@@ -347,6 +349,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     }
     if (msg.includes("missing_supabase_email")) return "Não consegui identificar o email da sua conta no Supabase. Faça login novamente.";
     if (msg.includes("bubble_user_not_found_for_email")) return "Não encontrei esse email no Bubble. Verifique se o email da conta no Bubble é o mesmo do login.";
+    if (msg.includes("paused_by_user")) return "Sincronização pausada.";
     if (msg.includes("import_done_but_empty")) {
       return "A importação automática concluiu, mas não encontrou dados. Verifique a URL/token do Bubble e se os tipos estão corretos (ex.: Ingredientes/item). Depois rode novamente em Ajustes → Importar Bubble via API.";
     }
@@ -357,6 +360,24 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (msg.includes("no_import_files")) return "Não encontrei arquivos válidos do Bubble para importar. Vá em Ajustes → Importar Bubble e envie os arquivos, ou configure a importação via API.";
     if (msg.includes("timeout")) return "A atualização está demorando mais que o esperado. Tente novamente em instantes.";
     return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
+  };
+
+  const requestStopBootstrap = async () => {
+    bootstrapStopRef.current = true;
+    const ctl = bootstrapControlRef.current;
+    if (!ctl?.statePath || !ctl?.tickUrl) return;
+    try {
+      await fetch(ctl.tickUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ statePath: ctl.statePath, stop: true }),
+        cache: "no-store",
+      });
+    } catch {}
+    try {
+      window.sessionStorage.removeItem(bootstrapRunningKey);
+    } catch {}
+    setBootstrap({ status: "error", message: "paused_by_user", progress: 0, etaMs: null, stage: "", detail: "" });
   };
 
   const computeBootstrapProgress = (state: any) => {
@@ -393,13 +414,23 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       const importingProgress = domains.length ? Math.min(1, (importIdx + (String(state.import?.status ?? "") === "running" ? 0.35 : 0)) / domains.length) : 0;
 
       const stage =
-        phase === "pulling" ? "Buscando seus dados" : phase === "importing" ? "Organizando informações" : phase === "done" ? "Concluído" : "Atualizando";
+        phase === "pulling"
+          ? "Buscando seus dados"
+          : phase === "importing"
+            ? "Organizando informações"
+            : phase === "paused"
+              ? "Pausado"
+              : phase === "done"
+                ? "Concluído"
+                : "Atualizando";
 
       const progress =
         phase === "pulling"
           ? Math.min(0.99, pullingWeight * pullingProgress)
           : phase === "importing"
             ? Math.min(0.99, pullingWeight + importingWeight * importingProgress)
+            : phase === "paused"
+              ? Math.min(0.99, pullingWeight + importingWeight * importingProgress)
             : phase === "done"
               ? 1
               : Math.min(0.98, pullingWeight * pullingProgress);
@@ -686,10 +717,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
         const importAsUserId = mode === "sync" ? String(json?.userId ?? "").trim() : "";
+        bootstrapControlRef.current = { tickUrl, statePath };
+        bootstrapStopRef.current = false;
         let lastInsumosRefresh = 0;
 
         for (let i = 0; i < 2000; i++) {
           await sleep(1200);
+          if (bootstrapStopRef.current) return;
           const tickRes = await fetch(tickUrl, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -754,6 +788,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
             void bootstrapUserDataOnce();
             setBootstrapOverlayVisible(false);
+            return;
+          }
+          if (phase === "paused") {
+            setBootstrap({ status: "error", message: "paused_by_user", progress: 0, etaMs: null, stage: "", detail: "" });
+            bootstrapSkipUntilRef.current = Date.now() + 10_000;
+            try {
+              window.sessionStorage.removeItem(bootstrapRunningKey);
+            } catch {}
             return;
           }
           if (phase === "error") {
@@ -1007,9 +1049,17 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
                   />
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 10 }}>
                   <button type="button" className="cmv-button" onClick={() => setBootstrapOverlayVisible(false)}>
                     Continuar usando
+                  </button>
+                  <button
+                    type="button"
+                    className="cmv-button"
+                    style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db" }}
+                    onClick={() => void requestStopBootstrap()}
+                  >
+                    Pausar
                   </button>
                 </div>
               </div>

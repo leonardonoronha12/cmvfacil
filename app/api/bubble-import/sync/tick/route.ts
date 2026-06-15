@@ -430,6 +430,7 @@ export async function POST(req: NextRequest) {
     const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
     const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const resume = Boolean(body?.resume);
+    const stop = Boolean(body?.stop);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
     const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) && importAsUserIdRaw !== userId ? importAsUserIdRaw : "";
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
@@ -456,6 +457,18 @@ export async function POST(req: NextRequest) {
       state.updatedAt = nowIso();
       await uploadJson(supabase, bucket, statePath, state);
     };
+
+    if (stop) {
+      (state as any).paused = { phase: String(state.phase ?? ""), at: nowIso() };
+      state.phase = "paused";
+      if (state.import && typeof state.import === "object") {
+        (state.import as any).status = "paused";
+        (state.import as any).lastError = "paused_by_user";
+      }
+      state.lastError = "paused_by_user";
+      await persist();
+      return json({ ok: true, state, ops }, { status: 200 });
+    }
 
     const ensureEmailFilter = async () => {
       if (overrideImportUserId) return;
@@ -729,6 +742,19 @@ export async function POST(req: NextRequest) {
         state.import.lastError = "";
       }
       state.phase = "importing";
+      await persist();
+    }
+
+    if (state.phase === "paused") {
+      if (!resume) return json({ ok: true, state }, { status: 200 });
+      const prev = (state as any)?.paused?.phase ? String((state as any).paused.phase) : "";
+      (state as any).paused = null;
+      state.lastError = "";
+      if (state.import && typeof state.import === "object") {
+        (state.import as any).lastError = "";
+        if (String((state.import as any).status) === "paused") (state.import as any).status = "pending";
+      }
+      state.phase = prev === "pulling" || prev === "importing" ? (prev as any) : "importing";
       await persist();
     }
 
