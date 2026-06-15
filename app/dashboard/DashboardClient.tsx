@@ -2940,7 +2940,24 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div className={styles.historyTitle}>Histórico de Entradas</div>
+                        <div className={styles.historyTitle} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                          <span>Histórico de Entradas</span>
+                          <button
+                            type="button"
+                            onClick={() => void reimportEntradasAndReload()}
+                            disabled={isLoadingTables}
+                            style={{
+                              border: "1px solid #e4e8e7",
+                              background: "#ffffff",
+                              borderRadius: 10,
+                              padding: "10px 12px",
+                              fontWeight: 800,
+                              cursor: isLoadingTables ? "default" : "pointer",
+                            }}
+                          >
+                            Sincronizar entradas
+                          </button>
+                        </div>
                         {isLoadingTables ? null : historicoEntradas.length && historicoHasFornecedorIds ? (
                           <div style={{ margin: "8px 0 0" }}>
                             <button
