@@ -2203,7 +2203,7 @@ export default function DashboardClient() {
           out.push({
             t,
             data: e.dataLancamento,
-            fornecedor: e.fornecedor,
+            fornecedor: String(e.fornecedor ?? "").trim() || "-",
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2228,7 +2228,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: e.dataLancamento,
-          fornecedor: e.fornecedor,
+          fornecedor: String(e.fornecedor ?? "").trim() || "-",
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2245,7 +2245,7 @@ export default function DashboardClient() {
       const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[cleanUpper] || null;
       const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
       if (labelFromState) return { ...x, fornecedor: labelFromState };
-      return x;
+      return raw ? x : { ...x, fornecedor: "-" };
     });
   }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
 
