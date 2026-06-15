@@ -517,8 +517,8 @@ export async function POST(req: NextRequest) {
             const idRaw = pickBubbleId(row) || pickFirst(row, ["fornecedor_id", "id_fornecedor", "id"]);
             const id = idRaw ? extractBubbleRefId(String(idRaw)) : "";
             const nome =
-              pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "empresa", "empresa_nome", "razao_social", "nome"]) ||
-              pickKeyLike(row, ["fornecedor", "empresa", "nome"]);
+              pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
+              pickKeyLike(row, ["fornecedor", "nome"], { excludeParts: ["empresa", "restaurante", "company"] });
             if (id && nome && !fornecedorNameById.has(id)) fornecedorNameById.set(id, nome.trim());
           }
         }

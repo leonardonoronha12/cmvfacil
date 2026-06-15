@@ -430,11 +430,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           const total = work && typeof work?.total === "number" ? work.total : null;
           const lastFile = work && typeof work?.lastFile === "string" ? String(work.lastFile) : "";
           const lastName = lastFile ? lastFile.split("/").slice(-1)[0] || "" : "";
+          const status = String(state?.import?.status ?? "").trim();
+          const lastError = String(state?.import?.lastError ?? "").trim();
           const a: string[] = [];
           a.push(`Importando: ${domain || "—"}`);
           if (cursor != null && total != null && total > 0) a.push(`arquivos ${formatIntPT(Math.min(total, cursor))}/${formatIntPT(total)}`);
           if (lastName) a.push(`último ${lastName}`);
           a.push(`${Math.min(domains.length, importIdx)}/${domains.length} etapas`);
+          if (status && status !== "running" && status !== "pending") a.push(status);
+          if (lastError) a.push(`erro: ${lastError.slice(0, 140)}`);
           if (filterEmail) a.push(filterEmail);
           return a.join(" • ");
         }

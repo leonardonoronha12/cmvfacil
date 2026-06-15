@@ -737,10 +737,23 @@ export async function POST(req: NextRequest) {
 
     const doImportDomain = async (domain: string) => {
       const url = new URL("/api/bubble-import/import", req.url);
+      const kindsByDomain: Record<string, string[]> = {
+        entradas: ["itens_notas", "notas_fiscais"],
+        desperdicios: ["desperdicios", "motivos_desperdicios"],
+        inventario: ["inventario"],
+        pre_preparo: ["pre_preparo", "pre_preparo_etiquetas", "categorias", "itens"],
+        fichas_tecnicas: ["fichas_tecnicas"],
+      };
       const res = await fetch(url, {
         method: "POST",
         headers: { "content-type": "application/json", cookie: req.headers.get("cookie") ?? "" },
-        body: JSON.stringify({ only: [domain], includeUnknown: true, prefix: state.runPrefix, targetUserId: overrideImportUserId || undefined }),
+        body: JSON.stringify({
+          only: [domain],
+          kinds: kindsByDomain[domain] ?? undefined,
+          includeUnknown: domain !== "entradas",
+          prefix: state.runPrefix,
+          targetUserId: overrideImportUserId || undefined,
+        }),
         cache: "no-store",
       });
       const text = await res.text();
