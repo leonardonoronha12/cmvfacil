@@ -886,6 +886,7 @@ export default function DashboardClient() {
   const [debugHost, setDebugHost] = useState<string>("");
   const [debugBubbleBaseUrl, setDebugBubbleBaseUrl] = useState<string>("");
   const [debugHasBubbleToken, setDebugHasBubbleToken] = useState(false);
+  const [debugStats, setDebugStats] = useState<any>(null);
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
@@ -1064,6 +1065,11 @@ export default function DashboardClient() {
         if (sha) setDebugVersion(sha.slice(0, 7));
         const dep = String(ver?.vercel?.deploymentUrl ?? "").trim();
         if (dep) setDebugDeployUrl(dep);
+      } catch {}
+      try {
+        const statsRes = await fetch("/api/bubble-import/stats", { cache: "no-store" });
+        const stats = (await statsRes.json().catch(() => null)) as any;
+        if (statsRes.ok && stats?.ok) setDebugStats(stats);
       } catch {}
     })();
   }, [debugMode]);
@@ -2718,6 +2724,16 @@ export default function DashboardClient() {
           </div>
           <div>
             <span style={{ fontWeight: 800 }}>Item:</span> {historyItem?.item ?? "—"} • {historicoEntradas.length} entradas
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>DB:</span>{" "}
+            {debugStats?.counts
+              ? `insumos=${String(debugStats.counts.insumos ?? "—")} • entradas=${String(debugStats.counts.entradas ?? "—")} • fornecedores=${String(debugStats.counts.fornecedores ?? "—")}`
+              : "—"}
+          </div>
+          <div style={{ marginTop: 6, color: "#6b7280" }}>
+            <span style={{ fontWeight: 800, color: "#374151" }}>Amostra:</span>{" "}
+            {historicoEntradas.slice(0, 2).map((h, i) => `${i + 1}) ${h.data} | ${h.fornecedor} | ${h.qtd} | ${h.preco} | ${h.subtotal}`).join(" • ") || "—"}
           </div>
         </div>
       ) : null}
