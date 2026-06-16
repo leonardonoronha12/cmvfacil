@@ -25,9 +25,23 @@ function parsePtNumber(value: string) {
   return neg ? -num : num;
 }
 
+function parseDateDDMMYYYY(value: string) {
+  const raw = value.trim();
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const day = Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10) - 1;
+  const year = Number.parseInt(m[3], 10);
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return d;
+}
+
 function parseDateLabelLoose(value: string) {
   const raw = value.trim();
   if (!raw) return null;
+  const ddmm = parseDateDDMMYYYY(raw);
+  if (ddmm) return ddmm;
   const m = raw.match(/^(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})[,\s]+(\d{4})$/);
   if (!m) return null;
   const day = Number.parseInt(m[1], 10);

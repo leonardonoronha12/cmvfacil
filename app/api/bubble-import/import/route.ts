@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
-import { formatDateLabelPT, formatMoneyBRL, normalizeKey, parseBubbleCsvToObjects, parseDateLoose, parsePtNumber, pickFirst, type CsvObjectRow } from "../../../lib/bubbleCsv";
+import {
+  formatDateLabelDDMMYYYY,
+  formatMoneyBRL,
+  normalizeKey,
+  parseBubbleCsvToObjects,
+  parseDateLoose,
+  parsePtNumber,
+  pickFirst,
+  type CsvObjectRow,
+} from "../../../lib/bubbleCsv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -372,7 +381,7 @@ function guessItemLabel(row: CsvObjectRow) {
 
 function buildDateLabel(value: string) {
   const d = parseDateLoose(value);
-  return d ? formatDateLabelPT(d) : String(value ?? "").trim();
+  return d ? formatDateLabelDDMMYYYY(d) : String(value ?? "").trim();
 }
 
 async function upsertInBatches<T extends Record<string, unknown>>(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, rows: T[], batchSize = 500) {
@@ -1044,8 +1053,8 @@ export async function POST(req: NextRequest) {
       const valRaw = pickFirst(row, ["data_validade", "dataValidade", "validade"]) || pickKeyLike(row, ["data_validade", "validade"]);
       const prod = parseDateLoose(prodRaw);
       const val = parseDateLoose(valRaw);
-      const dataProducao = prod ? formatDateLabelPT(prod) : String(prodRaw ?? "").trim();
-      const dataValidade = val ? formatDateLabelPT(val) : String(valRaw ?? "").trim();
+      const dataProducao = prod ? formatDateLabelDDMMYYYY(prod) : String(prodRaw ?? "").trim();
+      const dataValidade = val ? formatDateLabelDDMMYYYY(val) : String(valRaw ?? "").trim();
       const desperdicadoRaw = pickFirst(row, ["boolean_desperdicado", "desperdicado"]) || pickKeyLike(row, ["desperdic"]);
       const desperdicado = desperdicadoRaw ? desperdicadoRaw.toLowerCase() === "true" || desperdicadoRaw.toLowerCase() === "sim" || desperdicadoRaw === "1" : false;
       prePreparoEtiquetasRows.push({
@@ -1171,7 +1180,7 @@ export async function POST(req: NextRequest) {
     const d = parseDateLoose(dateRaw);
     if (!d) return;
     const iso = d.toISOString().slice(0, 10);
-    const dataLabel = formatDateLabelPT(d);
+    const dataLabel = formatDateLabelDDMMYYYY(d);
     const tipo = pickFirst(row, ["tipo", "tipo_inventario", "inventario_tipo"]) || pickKeyLike(row, ["tipo"]);
     const invId = `${prefix}inventario:${iso}${tipo ? `:${String(tipo).trim().toLowerCase()}` : ""}`;
     const invKey = invId;
@@ -1205,7 +1214,7 @@ export async function POST(req: NextRequest) {
         pickFirst(row, ["data", "date", "data_inventario", "data_contagem", "data_criacao", "created_date", "created_at", "creation_date"]) ||
         pickKeyLike(row, ["data", "date", "criacao", "created"]);
       const d = parseDateLoose(dateRaw);
-      const label = d ? formatDateLabelPT(d) : String(dateRaw ?? "").trim();
+      const label = d ? formatDateLabelDDMMYYYY(d) : String(dateRaw ?? "").trim();
       if (label) inventarioDateById.set(invId.trim(), label);
     }
 

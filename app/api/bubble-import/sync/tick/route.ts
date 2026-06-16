@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
-import { formatDateLabelPT, formatMoneyBRL, normalizeKey, parseDateLoose, parsePtNumber, pickFirst } from "../../../../lib/bubbleCsv";
+import { formatDateLabelDDMMYYYY, formatMoneyBRL, normalizeKey, parseDateLoose, parsePtNumber, pickFirst } from "../../../../lib/bubbleCsv";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -298,7 +298,7 @@ function guessItemLabel(row: Record<string, string>) {
 
 function buildDateLabel(value: string) {
   const d = parseDateLoose(value);
-  return d ? formatDateLabelPT(d) : String(value ?? "").trim();
+  return d ? formatDateLabelDDMMYYYY(d) : String(value ?? "").trim();
 }
 
 function isImportTransientErrorMessage(msg: string) {

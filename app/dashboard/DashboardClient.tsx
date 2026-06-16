@@ -741,6 +741,13 @@ function formatDateLabelShortPT(d: Date) {
   return `${day} ${month}, ${year}`;
 }
 
+function formatDateLabelDDMMYYYY(d: Date) {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  return `${dd}/${mm}/${yyyy}`;
+}
+
 function parseDateLabelLoose(value: string) {
   const raw = value.trim();
   if (!raw) return null;
@@ -797,6 +804,13 @@ function normalizeDateLabelForUI(value: string) {
   return d ? formatDateLabelShortPT(d) : raw;
 }
 
+function normalizeHistoryDateLabel(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const d = parseDateDDMMYYYY(raw) ?? parseDateLabelLoose(raw);
+  return d ? formatDateLabelDDMMYYYY(d) : raw;
+}
+
 function toIsoDate(d: Date) {
   const yyyy = d.getFullYear();
   const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -832,6 +846,18 @@ function formatQty(qty: number, unit: string) {
   const v = Number.isFinite(qty) ? qty : 0;
   const label = abs === 0 ? "0" : v.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   return `${label}${u}`;
+}
+
+function formatUnitLabelForUI(input: unknown) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "Und";
+  const key = raw.toLowerCase();
+  if (key === "un" || key === "und" || key === "unid" || key === "unidade" || key === "unidades") return "Und";
+  if (key === "kg") return "Kg";
+  if (key === "g") return "g";
+  if (key === "l") return "L";
+  if (key === "ml") return "mL";
+  return raw;
 }
 
 function sanitizeFornecedorLabelForUI(input: unknown) {
@@ -2224,18 +2250,18 @@ export default function DashboardClient() {
       }> = [];
       for (const e of list) {
         const dateLabel = String(e.dataProducao ?? "").trim() || String(e.dataValidade ?? "").trim();
-        const d = dateLabel ? parseDateLabelLoose(dateLabel) : null;
+        const d = dateLabel ? parseDateDDMMYYYY(dateLabel) ?? parseDateLabelLoose(dateLabel) : null;
         const t = d ? startOfDay(d).getTime() : 0;
         const qtyNum = parsePtNumber(String(e.quantidade ?? ""));
-        const unit = String(e.unidade ?? "").trim().toUpperCase() || "UND";
+        const unit = formatUnitLabelForUI(String(e.unidade ?? "").trim());
         const subtotalCents = parseBrlToCents(String(e.custo ?? ""));
         const unitCostCents = qtyNum > 0 ? Math.round(subtotalCents / qtyNum) : 0;
         out.push({
           t,
-          data: dateLabel || "-",
+          data: normalizeHistoryDateLabel(dateLabel || "-"),
           fornecedor: String(e.responsavel ?? "").trim() || "Pré-preparo",
           qtd: `${String(e.quantidade ?? "").trim() || "0,000"} ${unit}`.trim(),
-          preco: `${formatBrlFromCents(unitCostCents)}/${unit}`,
+          preco: `${formatBrlFromCents(unitCostCents)} / ${unit}`,
           subtotal: formatBrlFromCents(subtotalCents),
         });
       }
@@ -2246,7 +2272,7 @@ export default function DashboardClient() {
     const insumo =
       insumos.find((i) => i.id === historyItem.insumoId) ??
       (key ? insumos.find((i) => normalizeKey(i.item) === key) ?? null : null);
-    const baseUnit = (String(insumo?.medida ?? "") || "Und").trim() || "Und";
+    const baseUnit = formatUnitLabelForUI((String(insumo?.medida ?? "") || "Und").trim());
     const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       const id = String(i.id ?? "").trim();
@@ -2263,7 +2289,7 @@ export default function DashboardClient() {
     }> = [];
 
     for (const e of entradas) {
-      const d = parseDateLabelLoose(e.dataLancamento);
+      const d = parseDateDDMMYYYY(e.dataLancamento) ?? parseDateLabelLoose(e.dataLancamento);
       const t = d ? startOfDay(d).getTime() : 0;
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
@@ -2272,14 +2298,14 @@ export default function DashboardClient() {
         if (itemId && itemId === historyItem.insumoId) {
           const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
           if (!Number.isFinite(qty) || qty <= 0) continue;
-          const unitLabel = String(unit || baseUnit).trim() || baseUnit;
+          const unitLabel = formatUnitLabelForUI(String(unit || baseUnit).trim() || baseUnit);
           let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
           const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
           if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
           const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
           out.push({
             t,
-            data: e.dataLancamento,
+            data: normalizeHistoryDateLabel(e.dataLancamento),
             fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
@@ -2297,14 +2323,14 @@ export default function DashboardClient() {
 
         const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
         if (!Number.isFinite(qty) || qty <= 0) continue;
-        const unitLabel = String(unit || baseUnit).trim() || baseUnit;
+        const unitLabel = formatUnitLabelForUI(String(unit || baseUnit).trim() || baseUnit);
         let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
         const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
         if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
         const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
         out.push({
           t,
-          data: e.dataLancamento,
+          data: normalizeHistoryDateLabel(e.dataLancamento),
           fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
