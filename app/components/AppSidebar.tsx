@@ -383,7 +383,12 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const requestRestartBootstrap = async () => {
     bootstrapStopRef.current = true;
     try {
-      await fetch("/api/bubble-import/sync/restart", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
+      await fetch("/api/bubble-import/sync/restart", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hard: true }),
+        cache: "no-store",
+      });
     } catch {}
     try {
       window.sessionStorage.removeItem(bootstrapRunningKey);

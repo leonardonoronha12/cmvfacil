@@ -24,6 +24,50 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
   await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
 }
 
+async function countByPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, prefix: string) {
+  const { count, error } = await supabase.from(table).select("id", { count: "exact", head: true }).like("id", `${prefix}%`);
+  if (error) throw new Error(error.message);
+  return count ?? 0;
+}
+
+async function deleteByPrefix(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, prefix: string) {
+  const { error } = await supabase.from(table).delete().like("id", `${prefix}%`);
+  if (error) throw new Error(error.message);
+}
+
+async function deleteById(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, id: string) {
+  const { error } = await supabase.from(table).delete().eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+async function listBootstrapPaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, bootstrapPrefix: string) {
+  const { data: root, error: err1 } = await supabase.storage.from(bucket).list(bootstrapPrefix, { limit: 1000, sortBy: { column: "name", order: "asc" } });
+  if (err1) throw new Error(err1.message);
+  const out: string[] = [];
+  const folders = (root ?? []).filter((it) => (it as any).id == null);
+  const files = (root ?? []).filter((it) => (it as any).id != null);
+  for (const f of files) out.push(`${bootstrapPrefix}/${f.name}`);
+  for (const folder of folders) {
+    const p = `${bootstrapPrefix}/${folder.name}`;
+    const { data: level2, error: err2 } = await supabase.storage.from(bucket).list(p, { limit: 1000, sortBy: { column: "name", order: "asc" } });
+    if (err2) continue;
+    for (const f of level2 ?? []) {
+      if ((f as any).id == null) continue;
+      out.push(`${p}/${f.name}`);
+    }
+  }
+  return out;
+}
+
+async function removeStoragePaths(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, paths: string[]) {
+  const list = Array.from(new Set(paths.map((p) => String(p ?? "").trim()).filter(Boolean)));
+  const maxBatch = 100;
+  for (let i = 0; i < list.length; i += maxBatch) {
+    const batch = list.slice(i, i + maxBatch);
+    await supabase.storage.from(bucket).remove(batch).catch(() => {});
+  }
+}
+
 function buildAutoSyncTypes() {
   return [
     "User",
@@ -85,6 +129,9 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
+    const body = (await req.json().catch(() => null)) as any;
+    const hard = body?.hard !== false;
+
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
       supabase = getSupabaseAdmin();
@@ -94,6 +141,42 @@ export async function POST(req: NextRequest) {
 
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
+
+    let deleted: any = null;
+    if (hard) {
+      const stateId = `user:${userId}`;
+      const prefix = `${stateId}:`;
+
+      const before = {
+        entradas: await countByPrefix(supabase, "entradas", `${prefix}entrada:`).catch(() => 0),
+        desperdicios: await countByPrefix(supabase, "desperdicios", `${prefix}desperdicio:`).catch(() => 0),
+        inventario: await countByPrefix(supabase, "inventario", `${prefix}inventario:`).catch(() => 0),
+      };
+
+      await deleteByPrefix(supabase, "entradas", `${prefix}entrada:`).catch(() => {});
+      await deleteByPrefix(supabase, "desperdicios", `${prefix}desperdicio:`).catch(() => {});
+      await deleteByPrefix(supabase, "inventario", `${prefix}inventario:`).catch(() => {});
+
+      await deleteById(supabase, "insumos_state", stateId).catch(() => {});
+      await deleteById(supabase, "fornecedores_state", stateId).catch(() => {});
+      await deleteById(supabase, "insumos_templates_state", stateId).catch(() => {});
+      await deleteById(supabase, "fichas_tecnicas_state", stateId).catch(() => {});
+      await deleteById(supabase, "fichas_tecnicas_etiquetas_state", stateId).catch(() => {});
+      await deleteById(supabase, "pre_preparo_state", stateId).catch(() => {});
+      await deleteById(supabase, "pre_preparo_etiquetas_state", stateId).catch(() => {});
+
+      const after = {
+        entradas: await countByPrefix(supabase, "entradas", `${prefix}entrada:`).catch(() => 0),
+        desperdicios: await countByPrefix(supabase, "desperdicios", `${prefix}desperdicio:`).catch(() => 0),
+        inventario: await countByPrefix(supabase, "inventario", `${prefix}inventario:`).catch(() => 0),
+      };
+      deleted = { entradas: before.entradas - after.entradas, desperdicios: before.desperdicios - after.desperdicios, inventario: before.inventario - after.inventario };
+
+      const statePathPrev = `user:${userId}/bootstrap/sync-state.json`;
+      const bootstrapPrefix = `user:${userId}/bootstrap`;
+      const bootstrapPaths = await listBootstrapPaths(supabase, bucket, bootstrapPrefix).catch(() => []);
+      await removeStoragePaths(supabase, bucket, [statePathPrev, ...bootstrapPaths]).catch(() => {});
+    }
 
     const statePath = `user:${userId}/bootstrap/sync-state.json`;
     const runId = crypto.randomUUID();
@@ -106,9 +189,8 @@ export async function POST(req: NextRequest) {
     const { error } = await supabase.storage.from(bucket).upload(statePath, JSON.stringify(state), { contentType: "application/json", upsert: true });
     if (error) throw new Error(error.message);
 
-    return json({ ok: true, state }, { status: 200 });
+    return json({ ok: true, hard, deleted, state }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
