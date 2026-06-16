@@ -2414,7 +2414,8 @@ select.topInput option:checked {
 .historyTable {
   border: 1px solid #dfe4e3;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: #f7f8f8;
 }
 
@@ -2422,13 +2423,14 @@ select.topInput option:checked {
   background: #02363c;
   color: #ffffff;
   display: grid;
-  grid-template-columns: 140px 1fr 120px 120px 120px;
+  grid-template-columns: minmax(110px, 140px) minmax(180px, 1fr) minmax(80px, 120px) minmax(120px, 140px) minmax(90px, 120px);
   gap: 0;
   padding: 5px 10px;
   font-size: 9px;
   font-weight: 700;
   border-radius: 8px;
   margin: 4px;
+  min-width: 620px;
 }
 
 .fornecedorHead {
@@ -2459,7 +2461,7 @@ select.topInput option:checked {
 
 .historyRow {
   display: grid;
-  grid-template-columns: 140px 1fr 120px 120px 120px;
+  grid-template-columns: minmax(110px, 140px) minmax(180px, 1fr) minmax(80px, 120px) minmax(120px, 140px) minmax(90px, 120px);
   gap: 0;
   padding: 6px 10px;
   border-top: 1px solid #e4e8e7;
@@ -2467,6 +2469,8 @@ select.topInput option:checked {
   color: #01040e;
   margin: 0 4px;
   background: #f7f8f8;
+  min-width: 620px;
+  align-items: center;
 }
 
 .fornecedorRow {
