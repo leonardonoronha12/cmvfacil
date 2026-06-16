@@ -893,7 +893,8 @@ export async function POST(req: NextRequest) {
       const mapped = fornState.fornecedorNameById.get(fornecedorId.trim()) ?? fornecedorNameById.get(fornecedorId.trim()) ?? "";
       if (mapped) fornecedor = mapped;
     }
-    if (!fornecedor) fornecedor = fornecedorId ? fornecedorId : "-";
+    const fornecedorSanitized = String(fornecedor ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+    const fornecedorFinal = fornecedorSanitized || (fornecedorId ? fornecedorId : "-");
     const numero =
       pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
     const dataLanc = buildDateLabel(pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]));
@@ -911,7 +912,7 @@ export async function POST(req: NextRequest) {
       user_id: uid,
       numero: numeroFinal,
       data_lancamento: dataLanc || "-",
-      fornecedor: fornecedor.trim(),
+      fornecedor: fornecedorFinal,
       valor_nota: valorNum ? formatMoneyBRL(valorNum) : String(valor ?? "").trim() || "R$0,00",
       itens: `${itensCount || parsePtNumber(pickFirst(row, ["itens", "qtd_itens", "quantidade_itens"]) || pickKeyLike(row, ["itens", "qtd"])) || 0} Itens`,
       responsavel: responsavel.trim(),

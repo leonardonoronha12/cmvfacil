@@ -834,6 +834,14 @@ function formatQty(qty: number, unit: string) {
   return `${label}${u}`;
 }
 
+function sanitizeFornecedorLabelForUI(input: unknown) {
+  const raw = String(input ?? "");
+  const cleaned = raw.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+  if (!cleaned) return "-";
+  if (cleaned === "□" || cleaned === "�") return "-";
+  return cleaned;
+}
+
 function formatPercent1(value: number) {
   const v = Number.isFinite(value) ? value : 0;
   return `${v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -868,9 +876,14 @@ export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const debugMode = searchParams.get("debug_mode") === "true" || searchParams.get("debug") === "true" || searchParams.get("debug") === "1";
   const toastTimerRef = useRef<number | null>(null);
   const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [mounted, setMounted] = useState(false);
+  const [debugContext, setDebugContext] = useState<any>(null);
+  const [debugVersion, setDebugVersion] = useState<string>("");
+  const [debugBubbleBaseUrl, setDebugBubbleBaseUrl] = useState<string>("");
+  const [debugHasBubbleToken, setDebugHasBubbleToken] = useState(false);
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
@@ -1024,6 +1037,29 @@ export default function DashboardClient() {
       .then((prefix) => setUserScopePrefix(prefix))
       .catch(() => setUserScopePrefix(""));
   }, []);
+
+  useEffect(() => {
+    if (!debugMode) return;
+    void (async () => {
+      try {
+        const rawBaseUrl = String(window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        const rawToken = String(window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+        if (rawBaseUrl) setDebugBubbleBaseUrl(rawBaseUrl);
+        setDebugHasBubbleToken(Boolean(rawToken));
+      } catch {}
+      try {
+        const [ctxRes, verRes] = await Promise.all([
+          fetch("/api/debug/context", { cache: "no-store" }),
+          fetch("/api/version", { cache: "no-store" }),
+        ]);
+        const ctx = (await ctxRes.json().catch(() => null)) as any;
+        const ver = (await verRes.json().catch(() => null)) as any;
+        if (ctxRes.ok && ctx?.ok) setDebugContext(ctx);
+        const sha = String(ver?.vercel?.gitCommitSha ?? "").trim();
+        if (sha) setDebugVersion(sha.slice(0, 7));
+      } catch {}
+    })();
+  }, [debugMode]);
 
   useEffect(() => {
     (async () => {
@@ -2203,7 +2239,7 @@ export default function DashboardClient() {
           out.push({
             t,
             data: e.dataLancamento,
-            fornecedor: String(e.fornecedor ?? "").trim() || "-",
+            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2228,7 +2264,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: e.dataLancamento,
-          fornecedor: String(e.fornecedor ?? "").trim() || "-",
+          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2238,20 +2274,20 @@ export default function DashboardClient() {
 
     out.sort((a, b) => b.t - a.t);
     return out.map((x) => {
-      const raw = String(x.fornecedor ?? "").trim();
+      const raw = sanitizeFornecedorLabelForUI(x.fornecedor);
       const rawUpper = raw.toUpperCase();
       const clean = raw.split("/")[0]?.trim() || raw;
       const cleanUpper = clean.toUpperCase();
       const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[cleanUpper] || null;
       const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
       if (labelFromState) return { ...x, fornecedor: labelFromState };
-      return raw ? x : { ...x, fornecedor: "-" };
+      return { ...x, fornecedor: raw };
     });
   }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
 
   const historicoHasFornecedorIds = useMemo(() => {
     return historicoEntradas.some((h) => {
-      const raw = String(h.fornecedor ?? "").trim();
+      const raw = sanitizeFornecedorLabelForUI(h.fornecedor);
       const clean = raw.split("/")[0]?.trim() || raw;
       const id = clean.replace(/[^\d]/g, "");
       return /^\d{10,}$/.test(id);
@@ -2262,7 +2298,7 @@ export default function DashboardClient() {
     if (!historyItem) return;
     if (reimportFornecedoresTriedRef.current) return;
     const needs = historicoEntradas
-      .map((h) => String(h.fornecedor ?? "").trim())
+      .map((h) => sanitizeFornecedorLabelForUI(h.fornecedor))
       .filter(Boolean)
       .some((raw) => {
         const clean = raw.split("/")[0]?.trim() || raw;
@@ -2627,6 +2663,51 @@ export default function DashboardClient() {
     <div className={styles.dashboard}>
       <AppSidebar active={historyItem ? "insumos" : "dashboard"} />
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {debugMode ? (
+        <div
+          style={{
+            position: "fixed",
+            left: 16,
+            bottom: 16,
+            zIndex: 95,
+            background: "#ffffff",
+            border: "1px solid #e4e8e7",
+            borderRadius: 12,
+            padding: "10px 12px",
+            boxShadow: "0 10px 26px rgba(0,0,0,0.12)",
+            maxWidth: 520,
+            width: "calc(100vw - 32px)",
+            fontSize: 12,
+            color: "#0b1210",
+            lineHeight: "16px",
+            wordBreak: "break-word",
+          }}
+        >
+          <div style={{ fontWeight: 900, marginBottom: 6 }}>Debug</div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Versão:</span> {debugVersion || "—"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Conta:</span>{" "}
+            {String(debugContext?.user?.email ?? "").trim() || String(debugContext?.user?.userId ?? "").trim() || "—"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Bubble URL:</span> {debugBubbleBaseUrl || "—"} •{" "}
+            {debugHasBubbleToken ? "token ok" : "token vazio"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Sync:</span> {String(debugContext?.bubbleSync?.phase ?? "") || "—"} •{" "}
+            {String(debugContext?.bubbleSync?.import?.domain ?? "") || "—"} • {String(debugContext?.bubbleSync?.import?.status ?? "") || "—"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Filtro:</span> {String(debugContext?.bubbleSync?.filter?.mode ?? "") || "—"}{" "}
+            {String(debugContext?.bubbleSync?.filter?.email ?? "") ? `• ${String(debugContext?.bubbleSync?.filter?.email ?? "")}` : ""}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Item:</span> {historyItem?.item ?? "—"} • {historicoEntradas.length} entradas
+          </div>
+        </div>
+      ) : null}
 
       <main className={styles.content}>
         {hideAlert ? (
