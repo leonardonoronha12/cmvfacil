@@ -882,6 +882,8 @@ export default function DashboardClient() {
   const [mounted, setMounted] = useState(false);
   const [debugContext, setDebugContext] = useState<any>(null);
   const [debugVersion, setDebugVersion] = useState<string>("");
+  const [debugDeployUrl, setDebugDeployUrl] = useState<string>("");
+  const [debugHost, setDebugHost] = useState<string>("");
   const [debugBubbleBaseUrl, setDebugBubbleBaseUrl] = useState<string>("");
   const [debugHasBubbleToken, setDebugHasBubbleToken] = useState(false);
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
@@ -1042,6 +1044,9 @@ export default function DashboardClient() {
     if (!debugMode) return;
     void (async () => {
       try {
+        setDebugHost(String(window.location.host ?? ""));
+      } catch {}
+      try {
         const rawBaseUrl = String(window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
         const rawToken = String(window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
         if (rawBaseUrl) setDebugBubbleBaseUrl(rawBaseUrl);
@@ -1057,6 +1062,8 @@ export default function DashboardClient() {
         if (ctxRes.ok && ctx?.ok) setDebugContext(ctx);
         const sha = String(ver?.vercel?.gitCommitSha ?? "").trim();
         if (sha) setDebugVersion(sha.slice(0, 7));
+        const dep = String(ver?.vercel?.deploymentUrl ?? "").trim();
+        if (dep) setDebugDeployUrl(dep);
       } catch {}
     })();
   }, [debugMode]);
@@ -2686,6 +2693,12 @@ export default function DashboardClient() {
           <div style={{ fontWeight: 900, marginBottom: 6 }}>Debug</div>
           <div>
             <span style={{ fontWeight: 800 }}>Versão:</span> {debugVersion || "—"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Host:</span> {debugHost || "—"}
+          </div>
+          <div>
+            <span style={{ fontWeight: 800 }}>Deploy:</span> {debugDeployUrl || "—"}
           </div>
           <div>
             <span style={{ fontWeight: 800 }}>Conta:</span>{" "}

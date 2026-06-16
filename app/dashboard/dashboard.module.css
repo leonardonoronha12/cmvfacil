@@ -2528,6 +2528,7 @@ select.topInput option:checked {
 .historyCell {
   color: #01040e;
   line-height: 14px;
+  white-space: nowrap;
 }
 
 .historyItem {
@@ -2540,6 +2541,7 @@ select.topInput option:checked {
   text-align: right;
   font-weight: 700;
   line-height: 14px;
+  white-space: nowrap;
 }
 
 .fornecedorProdutosModal {
