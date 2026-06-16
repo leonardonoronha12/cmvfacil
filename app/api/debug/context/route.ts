@@ -13,6 +13,20 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+function getEnv(name: string) {
+  const v = (process.env[name] ?? "").trim();
+  return v || null;
+}
+
+function safeBaseUrl(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const noTrail = raw.replace(/\/+$/, "");
+  const stripped = noTrail.replace(/\/api\/1\.1\/obj$/i, "").replace(/\/api\/1\.1$/i, "");
+  if (!/^https?:\/\//i.test(stripped)) return `https://${stripped}`;
+  return stripped;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -52,6 +66,9 @@ export async function GET(req: NextRequest) {
     const statePath = `user:${userId}/bootstrap/sync-state.json`;
     const state = await downloadJsonFromStorage(supabase, bucket, statePath);
     const phase = state && typeof state === "object" ? String((state as any).phase ?? "") : "";
+    const creds = state && typeof state === "object" ? ((state as any).credentials && typeof (state as any).credentials === "object" ? (state as any).credentials : null) : null;
+    const credsBaseUrl = creds ? String(creds.baseUrl ?? "").trim() : "";
+    const credsHasToken = Boolean(creds && String(creds.token ?? "").trim());
     const currentTypeIndex = state && typeof state === "object" ? Number((state as any).currentTypeIndex ?? 0) : 0;
     const types: string[] = state && typeof state === "object" && Array.isArray((state as any).types) ? (state as any).types.map((t: any) => String(t ?? "").trim()).filter(Boolean) : [];
     const currentType = types[currentTypeIndex] ? String(types[currentTypeIndex]) : "";
@@ -68,10 +85,20 @@ export async function GET(req: NextRequest) {
     const filterBubbleUserId = state && typeof state === "object" ? String((state as any)?.filter?.bubbleUserId ?? "") : "";
     const filterCompanyId = state && typeof state === "object" ? String((state as any)?.filter?.companyId ?? "") : "";
 
+    const envBaseUrl = safeBaseUrl(getEnv("BUBBLE_BASE_URL") ?? "");
+    const envHasToken = Boolean(getEnv("BUBBLE_API_TOKEN"));
+    const effectiveBaseUrl = safeBaseUrl(credsBaseUrl || envBaseUrl || "");
+    const baseUrlSource = credsBaseUrl ? "state" : envBaseUrl ? "env" : "";
+
     return json(
       {
         ok: true,
         user: { userId: String(userId), email },
+        bubbleApi: {
+          env: { baseUrl: envBaseUrl || null, hasToken: envHasToken },
+          state: { baseUrl: credsBaseUrl || null, hasToken: credsHasToken },
+          effective: { baseUrl: effectiveBaseUrl || null, baseUrlSource: baseUrlSource || null },
+        },
         bubbleSync: {
           statePath,
           phase,
@@ -90,4 +117,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

@@ -427,8 +427,8 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => null)) as any;
     const statePath = String(body?.statePath ?? "").trim();
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
-    const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
+    const bodyBaseUrlRaw = typeof body?.baseUrl === "string" ? String(body.baseUrl) : "";
+    const bodyTokenRaw = typeof body?.token === "string" ? String(body.token) : "";
     const resume = Boolean(body?.resume);
     const stop = Boolean(body?.stop);
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
@@ -448,6 +448,12 @@ export async function POST(req: NextRequest) {
 
     const state = await downloadJson(supabase, bucket, statePath);
     if (state?.v !== 1) return json({ ok: false, error: "unsupported_state" }, { status: 400 });
+
+    const creds = state && typeof state === "object" ? ((state as any).credentials && typeof (state as any).credentials === "object" ? (state as any).credentials : null) : null;
+    const credsBaseUrl = creds ? String(creds.baseUrl ?? "").trim() : "";
+    const credsToken = creds ? String(creds.token ?? "").trim() : "";
+    const baseUrl = safeBaseUrl(bodyBaseUrlRaw || credsBaseUrl || getEnv("BUBBLE_BASE_URL") || "");
+    const token = safeToken(bodyTokenRaw || credsToken || getEnv("BUBBLE_API_TOKEN") || "");
 
     const startMs = Date.now();
     const hardMs = 22_000;

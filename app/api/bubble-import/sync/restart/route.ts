@@ -18,6 +18,20 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function safeBaseUrl(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const noTrail = raw.replace(/\/+$/, "");
+  const stripped = noTrail.replace(/\/api\/1\.1\/obj$/i, "").replace(/\/api\/1\.1$/i, "");
+  if (!/^https?:\/\//i.test(stripped)) return `https://${stripped}`;
+  return stripped;
+}
+
+function safeToken(input: string) {
+  const t = String(input ?? "").trim();
+  return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -131,6 +145,8 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => null)) as any;
     const hard = body?.hard !== false;
+    const baseUrl = safeBaseUrl(String(body?.baseUrl ?? ""));
+    const token = safeToken(String(body?.token ?? ""));
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -185,6 +201,7 @@ export async function POST(req: NextRequest) {
     (state as any).filter = null;
     (state as any).userMap = null;
     (state as any).paused = null;
+    if (baseUrl || token) (state as any).credentials = { ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) };
 
     const { error } = await supabase.storage.from(bucket).upload(statePath, JSON.stringify(state), { contentType: "application/json", upsert: true });
     if (error) throw new Error(error.message);

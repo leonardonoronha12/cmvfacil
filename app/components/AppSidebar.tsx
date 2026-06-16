@@ -383,10 +383,16 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const requestRestartBootstrap = async () => {
     bootstrapStopRef.current = true;
     try {
+      let baseUrl = "";
+      let token = "";
+      try {
+        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
       await fetch("/api/bubble-import/sync/restart", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: true }),
+        body: JSON.stringify({ hard: true, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
         cache: "no-store",
       });
     } catch {}
