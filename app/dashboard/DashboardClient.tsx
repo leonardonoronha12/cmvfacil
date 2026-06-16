@@ -1025,6 +1025,34 @@ export default function DashboardClient() {
     }
   }
 
+  async function hardRestartSyncAndReload() {
+    setIsLoadingTables(true);
+    try {
+      let baseUrl = "";
+      let token = "";
+      try {
+        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
+      const res = await fetch("/api/bubble-import/sync/restart", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hard: true, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
+        cache: "no-store",
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
+      try {
+        window.sessionStorage.removeItem("cmvfacil:bootstrapRunning:v5");
+        window.sessionStorage.removeItem("cmvfacil:bootstrapDone:v5");
+      } catch {}
+      window.location.reload();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+      setIsLoadingTables(false);
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
@@ -2734,6 +2762,23 @@ export default function DashboardClient() {
           <div style={{ marginTop: 6, color: "#6b7280" }}>
             <span style={{ fontWeight: 800, color: "#374151" }}>Amostra:</span>{" "}
             {historicoEntradas.slice(0, 2).map((h, i) => `${i + 1}) ${h.data} | ${h.fornecedor} | ${h.qtd} | ${h.preco} | ${h.subtotal}`).join(" • ") || "—"}
+          </div>
+          <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              onClick={() => void hardRestartSyncAndReload()}
+              disabled={isLoadingTables}
+              style={{
+                border: "1px solid #e4e8e7",
+                background: "#ffffff",
+                borderRadius: 10,
+                padding: "8px 10px",
+                fontWeight: 900,
+                cursor: isLoadingTables ? "default" : "pointer",
+              }}
+            >
+              Forçar reinício (hard)
+            </button>
           </div>
         </div>
       ) : null}
