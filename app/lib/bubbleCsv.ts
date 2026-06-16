@@ -112,7 +112,31 @@ export function parsePtNumber(input: string) {
   if (!s) return 0;
   const neg = s.includes("-");
   const cleaned = s.replace(/-/g, "");
-  const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  const normalized = (() => {
+    if (lastComma < 0 && lastDot < 0) return cleaned.replace(/[^\d]/g, "");
+    if (lastComma > lastDot) {
+      const intPart = cleaned.slice(0, lastComma).replace(/[^\d]/g, "");
+      const decPart = cleaned.slice(lastComma + 1).replace(/[^\d]/g, "");
+      return `${intPart || "0"}.${decPart || "0"}`;
+    }
+    const groups = cleaned.split(".");
+    const dotLooksLikeThousands =
+      lastComma < 0 &&
+      groups.length >= 2 &&
+      groups.every((g, idx) => {
+        const d = g.replace(/[^\d]/g, "");
+        if (!d) return false;
+        if (idx === 0) return d.length >= 1 && d.length <= 3;
+        return d.length === 3;
+      });
+    if (dotLooksLikeThousands) return groups.map((g) => g.replace(/[^\d]/g, "")).join("");
+    const intPart = cleaned.slice(0, lastDot).replace(/[^\d]/g, "");
+    const decPart = cleaned.slice(lastDot + 1).replace(/[^\d]/g, "");
+    if (lastComma < 0 && groups.length === 2 && decPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) return `${intPart}${decPart}`;
+    return `${intPart || "0"}.${decPart || "0"}`;
+  })();
   const n = Number.parseFloat(normalized);
   if (!Number.isFinite(n)) return 0;
   return neg ? -n : n;
