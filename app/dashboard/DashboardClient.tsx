@@ -650,26 +650,44 @@ function normalizeKey(value: string) {
 }
 
 function parsePtNumber(input: string) {
-  const s = input.replace(/[^\d,.-]/g, "").trim();
+  const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!s) return 0;
   const neg = s.includes("-");
   const cleaned = s.replace(/-/g, "");
-  const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  const normalized = (() => {
+    if (lastComma < 0 && lastDot < 0) return cleaned.replace(/[^\d]/g, "");
+    if (lastComma > lastDot) {
+      const intPart = cleaned.slice(0, lastComma).replace(/[^\d]/g, "");
+      const decPart = cleaned.slice(lastComma + 1).replace(/[^\d]/g, "");
+      return `${intPart || "0"}.${decPart || "0"}`;
+    }
+    const groups = cleaned.split(".");
+    const dotLooksLikeThousands =
+      lastComma < 0 &&
+      groups.length >= 2 &&
+      groups.every((g, idx) => {
+        const d = g.replace(/[^\d]/g, "");
+        if (!d) return false;
+        if (idx === 0) return d.length >= 1 && d.length <= 3;
+        return d.length === 3;
+      });
+    if (dotLooksLikeThousands) return groups.map((g) => g.replace(/[^\d]/g, "")).join("");
+    const intPart = cleaned.slice(0, lastDot).replace(/[^\d]/g, "");
+    const decPart = cleaned.slice(lastDot + 1).replace(/[^\d]/g, "");
+    if (lastComma < 0 && groups.length === 2 && decPart.length === 3 && intPart.length >= 1 && intPart.length <= 3) return `${intPart}${decPart}`;
+    return `${intPart || "0"}.${decPart || "0"}`;
+  })();
   const n = Number.parseFloat(normalized);
   if (!Number.isFinite(n)) return 0;
   return neg ? -n : n;
 }
 
 function parseBrlToCents(input: string) {
-  const s = input.replace(/[^\d,.-]/g, "").trim();
-  if (!s) return 0;
-  const neg = s.includes("-");
-  const cleaned = s.replace(/-/g, "");
-  const parts = cleaned.split(",");
-  const intPart = parts[0].replace(/\./g, "").replace(/[^\d]/g, "") || "0";
-  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "").padEnd(2, "0").slice(0, 2);
-  const cents = Number.parseInt(intPart, 10) * 100 + Number.parseInt(decPart || "0", 10);
-  return neg ? -cents : cents;
+  const v = parsePtNumber(String(input ?? ""));
+  if (!Number.isFinite(v)) return 0;
+  return Math.round(v * 100);
 }
 
 function parseUnitFromQtyLabel(input: string) {
@@ -1295,12 +1313,14 @@ export default function DashboardClient() {
   const avgUnitCostCentsByInsumoId = useMemo(() => {
     const insumoIdByKey = new Map<string, string>();
     const insumoNameById = new Map<string, string>();
+    const baseUnitById = new Map<string, string>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
       const id = String(i.id ?? "").trim();
       if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+      if (id && !baseUnitById.has(id)) baseUnitById.set(id, String(i.medida ?? "").trim() || "Und");
     }
     const sumQtyById = new Map<string, number>();
     const sumCentsById = new Map<string, number>();
@@ -1321,13 +1341,20 @@ export default function DashboardClient() {
         }
         const id = insumoIdByKey.get(mappedKey);
         if (!id) continue;
-        const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-        const qtyEq = qty * fator;
-        if (!Number.isFinite(qtyEq) || qtyEq <= 0) continue;
+        const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+        const qtyForSubtotal = qty * fator;
+        if (!Number.isFinite(qtyForSubtotal) || qtyForSubtotal <= 0) continue;
+        let qtyEq = qtyForSubtotal;
+        if (fator === 1) {
+          const baseUnit = baseUnitById.get(id) ?? "Und";
+          const fromUnit = String(unit || baseUnit).trim() || baseUnit;
+          const converted = convertQty(qtyEq, fromUnit, baseUnit);
+          if (Number.isFinite(converted) && converted > 0) qtyEq = converted;
+        }
         let sub = parseBrlToCents(it.subtotalLabel ?? "");
         if (!sub) {
           const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
-          if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+          if (unit && qtyForSubtotal > 0) sub = Math.round(unit * qtyForSubtotal);
         }
         if (!sub) continue;
         sumQtyById.set(id, (sumQtyById.get(id) ?? 0) + qtyEq);
@@ -3271,7 +3298,7 @@ export default function DashboardClient() {
                         </div>
                         <div className={styles.itemAsideKpiText}>
                           <div className={styles.itemAsideKpiLabel}>Última Entrada</div>
-                          <div className={styles.itemAsideKpiValue}>{normalizeDateLabelForUI(historicoEntradas[0]?.data ?? "")}</div>
+                            <div className={styles.itemAsideKpiValue}>{normalizeHistoryDateLabel(historicoEntradas[0]?.data ?? "")}</div>
                         </div>
                       </div>
                     </div>
