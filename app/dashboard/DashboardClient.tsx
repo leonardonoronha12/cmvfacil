@@ -1079,6 +1079,35 @@ export default function DashboardClient() {
     }
   }
 
+  async function syncAllAndReload() {
+    setIsLoadingTables(true);
+    try {
+      const res1 = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
+      const j1 = (await res1.json().catch(() => null)) as any;
+      if (!res1.ok || !j1?.ok) throw new Error(String(j1?.error ?? `failed_${res1.status}`));
+      const dbFornecedores = await loadFornecedoresStateFromSupabase();
+      writeFornecedorInfoMap(dbFornecedores.info);
+      writeFornecedorProdutosMap(dbFornecedores.produtos);
+      writeFornecedorEquivalenciasMap(dbFornecedores.equivalencias);
+      setFornecedorInfoMap(dbFornecedores.info);
+      setFornecedorProdutosMap(dbFornecedores.produtos);
+      setFornecedorEquivalenciasMap(dbFornecedores.equivalencias);
+
+      const res2 = await fetch("/api/bubble-import/reimport-entradas", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
+      const j2 = (await res2.json().catch(() => null)) as any;
+      if (!res2.ok || !j2?.ok) throw new Error(String(j2?.error ?? `failed_${res2.status}`));
+      const dbEntradas = await loadEntradasFromSupabase();
+      writeEntradasToStore(dbEntradas);
+      setEntradas(dbEntradas);
+
+      showToast("Fornecedores e entradas sincronizados.", "success", 5000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+    } finally {
+      setIsLoadingTables(false);
+    }
+  }
+
   async function hardRestartSyncAndReload() {
     setIsLoadingTables(true);
     try {
@@ -3209,21 +3238,38 @@ export default function DashboardClient() {
                       <>
                         <div className={styles.historyTitle} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                           <span>Histórico de Entradas</span>
-                          <button
-                            type="button"
-                            onClick={() => void reimportEntradasAndReload()}
-                            disabled={isLoadingTables}
-                            style={{
-                              border: "1px solid #e4e8e7",
-                              background: "#ffffff",
-                              borderRadius: 10,
-                              padding: "10px 12px",
-                              fontWeight: 800,
-                              cursor: isLoadingTables ? "default" : "pointer",
-                            }}
-                          >
-                            Sincronizar entradas
-                          </button>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <button
+                              type="button"
+                              onClick={() => void syncAllAndReload()}
+                              disabled={isLoadingTables}
+                              style={{
+                                border: "1px solid #e4e8e7",
+                                background: "#ffffff",
+                                borderRadius: 10,
+                                padding: "10px 12px",
+                                fontWeight: 900,
+                                cursor: isLoadingTables ? "default" : "pointer",
+                              }}
+                            >
+                              Sincronizar tudo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void reimportEntradasAndReload()}
+                              disabled={isLoadingTables}
+                              style={{
+                                border: "1px solid #e4e8e7",
+                                background: "#ffffff",
+                                borderRadius: 10,
+                                padding: "10px 12px",
+                                fontWeight: 800,
+                                cursor: isLoadingTables ? "default" : "pointer",
+                              }}
+                            >
+                              Sincronizar entradas
+                            </button>
+                          </div>
                         </div>
                         {isLoadingTables ? null : historicoEntradas.length && historicoHasFornecedorIds ? (
                           <div style={{ margin: "8px 0 0" }}>
