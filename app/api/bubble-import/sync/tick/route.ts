@@ -3,9 +3,14 @@ import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
 import { formatDateLabelDDMMYYYY, formatMoneyBRL, normalizeKey, parseDateLoose, parsePtNumber, pickFirst } from "../../../../lib/bubbleCsv";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 300;
+
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
+  headers.set("cache-control", "no-store");
   return NextResponse.json(data, { ...init, headers });
 }
 

@@ -1082,25 +1082,78 @@ export default function DashboardClient() {
   async function syncAllAndReload() {
     setIsLoadingTables(true);
     try {
-      const res1 = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
-      const j1 = (await res1.json().catch(() => null)) as any;
-      if (!res1.ok || !j1?.ok) throw new Error(String(j1?.error ?? `failed_${res1.status}`));
-      const dbFornecedores = await loadFornecedoresStateFromSupabase();
+      const m = userScopePrefix.match(/^user:([^:]+):/i);
+      const uid = String(m?.[1] ?? "").trim();
+      if (!uid) throw new Error("missing_user_scope");
+
+      let baseUrl = "";
+      let token = "";
+      try {
+        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
+      if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
+
+      const restartRes = await fetch("/api/bubble-import/sync/restart", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hard: false, baseUrl, token }),
+        cache: "no-store",
+      });
+      const restartJson = (await restartRes.json().catch(() => null)) as any;
+      if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
+
+      const statePath = `user:${uid}/bootstrap/sync-state.json`;
+      let state: any = null;
+      for (let i = 0; i < 24; i++) {
+        const tickRes = await fetch("/api/bubble-import/sync/tick", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ statePath, baseUrl, token, resume: true, maxOps: 50 }),
+          cache: "no-store",
+        });
+        const tickJson = (await tickRes.json().catch(() => null)) as any;
+        if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
+        state = tickJson?.state ?? null;
+        const phase = String(state?.phase ?? "").trim();
+        if (phase === "done") break;
+        if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
+        if (phase === "paused") throw new Error("paused_by_user");
+        await new Promise((r) => window.setTimeout(r, 400));
+      }
+      if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
+
+      const [dbInsumos, dbEntradas, dbFornecedores, dbInv, dbDesp, dbPre, dbEtiquetas] = await Promise.all([
+        loadInsumosFromSupabase().catch(() => [] as InsumoStoreItem[]),
+        loadEntradasFromSupabase().catch(() => [] as EntradaStoreRow[]),
+        loadFornecedoresStateFromSupabase().catch(() => ({ info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap })),
+        loadInventarioFromSupabase().catch(() => [] as InventarioContagem[]),
+        loadDesperdiciosFromSupabase().catch(() => [] as DesperdicioRow[]),
+        loadPrePreparoFromSupabase().catch(() => [] as PrePreparoStoreRow[]),
+        loadPrePreparoEtiquetasFromSupabase().catch(() => [] as PrePreparoEtiquetaRow[]),
+      ]);
+
+      writeInsumosToStore(dbInsumos);
+      writeEntradasToStore(dbEntradas);
       writeFornecedorInfoMap(dbFornecedores.info);
       writeFornecedorProdutosMap(dbFornecedores.produtos);
       writeFornecedorEquivalenciasMap(dbFornecedores.equivalencias);
+      writeInventarioToStore(dbInv);
+      writeDesperdiciosToStore(dbDesp);
+      writePrePreparoToStore(dbPre);
+      writePrePreparoEtiquetasToStore(dbEtiquetas);
+
+      setInsumos(dbInsumos);
+      setEntradas(dbEntradas);
       setFornecedorInfoMap(dbFornecedores.info);
       setFornecedorProdutosMap(dbFornecedores.produtos);
       setFornecedorEquivalenciasMap(dbFornecedores.equivalencias);
+      setContagens(dbInv);
+      setDesperdicios(dbDesp);
+      setPrePreparo(dbPre);
+      setPrePreparoEtiquetas(dbEtiquetas);
 
-      const res2 = await fetch("/api/bubble-import/reimport-entradas", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
-      const j2 = (await res2.json().catch(() => null)) as any;
-      if (!res2.ok || !j2?.ok) throw new Error(String(j2?.error ?? `failed_${res2.status}`));
-      const dbEntradas = await loadEntradasFromSupabase();
-      writeEntradasToStore(dbEntradas);
-      setEntradas(dbEntradas);
-
-      showToast("Fornecedores e entradas sincronizados.", "success", 5000);
+      showToast("Sincronização concluída.", "success", 5000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
     } finally {
