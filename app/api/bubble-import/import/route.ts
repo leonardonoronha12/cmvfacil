@@ -1077,9 +1077,13 @@ export async function POST(req: NextRequest) {
       const uid = resolveTargetUserId(row);
       const prePreparoRows = getPrePreparoRows(uid);
       const prePreparoIds = getPrePreparoIds(uid);
-      const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]) || pickKeyLike(row, ["categoria_id", "categoria", "slug"]);
-      const catName = catId ? categoriasById.get(catId.trim()) ?? "" : "";
-      if (!catNameLooksLikePrePreparo(catName)) return;
+      const catIdRaw = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]) || pickKeyLike(row, ["categoria_id", "categoria", "slug"]);
+      const catId = catIdRaw ? extractBubbleRefId(String(catIdRaw)) || extractBubbleIdFromText(String(catIdRaw)) || String(catIdRaw).trim() : "";
+      const catName = catId
+        ? categoriasById.get(catId.trim()) ?? categoriasById.get(String(catIdRaw ?? "").trim()) ?? ""
+        : categoriasById.get(String(catIdRaw ?? "").trim()) ?? "";
+      const catLabel = catName || String(catIdRaw ?? "").trim();
+      if (!catNameLooksLikePrePreparo(catLabel)) return;
 
       const receita = guessItemLabel(row);
       if (!receita) return;
@@ -1106,7 +1110,7 @@ export async function POST(req: NextRequest) {
 
       prePreparoRows.push({
         id,
-        categoria: catName.trim() || "-",
+        categoria: catLabel.trim() || "-",
         receita: receita.trim(),
         custoTotal,
         rendimento,
