@@ -3081,6 +3081,18 @@ export default function DashboardClient() {
               </span>
               Calcular CMV
             </button>
+
+            <button
+              type="button"
+              className={isLoadingTables ? styles.topAction : `${styles.topAction} ${styles.topActionEnabled}`}
+              onClick={() => void syncAllAndReload()}
+              disabled={isLoadingTables}
+            >
+              <span className={styles.topActionIcon}>
+                <IconSidebarStore />
+              </span>
+              Sincronizar tudo
+            </button>
           </div>
 
           <div className={styles.topHint}>
