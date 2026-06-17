@@ -3714,18 +3714,19 @@ export default function DashboardClient() {
                       <div key={name} className={styles.fornecedorProdutosRow}>
                         <div className={styles.fornecedorProdutosNameWrap}>
                           <div className={styles.fornecedorProdutosName}>{name}</div>
-                          <div className={styles.fornecedorProdutosEq}>
-                            {(() => {
+                          {(() => {
+                            const eqLabel = (() => {
                               const key = fornecedorModalKey.trim().toUpperCase();
                               const map = fornecedorEquivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
                               const eq = map?.insumoEquivalente ?? "";
-                              if (!eq) return "-";
+                              if (!eq) return "";
                               const qty = String(map?.equivalenteQuantidade ?? "").trim();
                               if (!qty) return eq;
                               const unit = String(map?.equivalenteUnidade ?? "").trim();
                               return unit ? `${eq} - ${qty} ${unit}` : `${eq} - ${qty}`;
-                            })()}
-                          </div>
+                            })();
+                            return eqLabel ? <div className={styles.fornecedorProdutosEq}>{eqLabel}</div> : null;
+                          })()}
                         </div>
                         <button type="button" className={styles.fornecedorProdutosTrash} aria-label="Remover" onClick={() => removeProdutoFornecedor(name)}>
                           <IconTrash />

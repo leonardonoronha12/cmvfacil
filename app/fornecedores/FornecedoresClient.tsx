@@ -1419,18 +1419,19 @@ export default function FornecedoresClient() {
                     >
                       <div className={styles.produtosNameWrap}>
                         <div className={styles.produtosName}>{name}</div>
-                        <div className={styles.produtosEq}>
-                          {(() => {
+                        {(() => {
+                          const eqLabel = (() => {
                             const key = (prodFornecedorKey ?? "").trim().toUpperCase();
                             const map = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
                             const eq = map?.insumoEquivalente ?? (insumosByName.get(name.toLowerCase()) ? name : "");
-                            if (!eq) return "-";
+                            if (!eq) return "";
                             const qty = String(map?.equivalenteQuantidade ?? "").trim();
                             if (!qty) return eq;
                             const unit = String(map?.equivalenteUnidade ?? insumosByName.get(eq.toLowerCase())?.medida ?? "").trim();
                             return unit ? `${eq} - ${qty} ${unit}` : `${eq} - ${qty}`;
-                          })()}
-                        </div>
+                          })();
+                          return eqLabel ? <div className={styles.produtosEq}>{eqLabel}</div> : null;
+                        })()}
                       </div>
                       <button
                         type="button"
