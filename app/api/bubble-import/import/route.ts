@@ -1083,7 +1083,25 @@ export async function POST(req: NextRequest) {
         ? categoriasById.get(catId.trim()) ?? categoriasById.get(String(catIdRaw ?? "").trim()) ?? ""
         : categoriasById.get(String(catIdRaw ?? "").trim()) ?? "";
       const catLabel = catName || String(catIdRaw ?? "").trim();
-      if (!catNameLooksLikePrePreparo(catLabel)) return;
+      const catMatches = catNameLooksLikePrePreparo(catLabel);
+      const recipeSignals =
+        pickFirst(row, [
+          "custo_total_receita",
+          "custoTotalReceita",
+          "rendimento",
+          "yield",
+          "rendimento_receita",
+          "qtde_rendimento",
+          "porcao",
+          "porcoes",
+          "dias_validade",
+          "validade_dias",
+          "validadeDias",
+          "validade",
+          "recipe_yield",
+          "recipeYield",
+        ]) || pickKeyLike(row, ["custo_total_receita", "custo", "rendimento", "yield", "porcao", "validade"]);
+      if (!catMatches && !String(recipeSignals ?? "").trim()) return;
 
       const receita = guessItemLabel(row);
       if (!receita) return;
