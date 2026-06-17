@@ -9,7 +9,7 @@ import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
-import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
+import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readInventarioFromStore, subscribeInventario, type InventarioContagem, writeInventarioToStore } from "../lib/inventarioStore";
 import { loadInventarioFromSupabase } from "../lib/inventarioSupabase";
 import { readEntradasFromStore, subscribeEntradas, type EntradaStoreRow, writeEntradasToStore } from "../lib/entradasStore";
@@ -649,6 +649,13 @@ function normalizeKey(value: string) {
     .replace(/\s+/g, " ");
 }
 
+function looksLikeItemId(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return false;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/.test(s);
+}
+
 function parsePtNumber(input: string) {
   const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!s) return 0;
@@ -982,6 +989,9 @@ export default function DashboardClient() {
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const reimportFornecedoresTriedRef = useRef(false);
+  const fornecedoresReadyRef = useRef(false);
+  const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
+  const fornecedoresSaveErrorShownRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
@@ -1212,6 +1222,7 @@ export default function DashboardClient() {
       setFornecedorInfoMap(infoRows);
       setFornecedorProdutosMap(produtosRows);
       setFornecedorEquivalenciasMap(equivalenciasRows);
+      fornecedoresReadyRef.current = true;
       setLastCalc(readLastCalc());
       setIsLoadingTables(false);
     })();
@@ -1246,6 +1257,54 @@ export default function DashboardClient() {
       unsubFornecedorEquivalencias();
     };
   }, []);
+
+  useEffect(() => {
+    if (!fornecedoresReadyRef.current) return;
+    if (!insumos.length) return;
+    const nameById = new Map<string, string>();
+    for (const i of insumos) {
+      const id = String(i.id ?? "").trim();
+      const name = String(i.item ?? "").trim();
+      if (id && name && !nameById.has(id)) nameById.set(id, name);
+    }
+    let changed = false;
+    const next: FornecedorProdutos = {};
+    for (const [k, listRaw] of Object.entries(fornecedorProdutosMap)) {
+      const key = String(k ?? "").trim().toUpperCase();
+      const list = Array.isArray(listRaw) ? listRaw : [];
+      const out: string[] = [];
+      for (const raw of list) {
+        const v = String(raw ?? "").trim();
+        if (!v) {
+          changed = true;
+          continue;
+        }
+        const mapped = looksLikeItemId(v) ? nameById.get(v) : null;
+        const label = mapped || v;
+        if (mapped) changed = true;
+        if (!out.some((x) => x.toLowerCase() === label.toLowerCase())) out.push(label);
+      }
+      if (!key) continue;
+      if (key !== k) changed = true;
+      if (out.length) next[key] = out;
+      if (!out.length && list.length) changed = true;
+    }
+    if (!changed) return;
+    setFornecedorProdutosMap(next);
+    writeFornecedorProdutosMap(next);
+  }, [fornecedorProdutosMap, insumos]);
+
+  useEffect(() => {
+    if (!fornecedoresReadyRef.current) return;
+    if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+    fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
+      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorEquivalenciasMap }).catch(() => {
+        if (fornecedoresSaveErrorShownRef.current) return;
+        fornecedoresSaveErrorShownRef.current = true;
+        showToast("Não foi possível salvar fornecedores no banco de dados.", "error", 9000);
+      });
+    }, 450);
+  }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
 
   const desperdiciosIntegrados = useMemo(() => {
     const generated = buildExpiredPrePreparoEtiquetaDesperdicios(prePreparoEtiquetas, new Date(), userScopePrefix);

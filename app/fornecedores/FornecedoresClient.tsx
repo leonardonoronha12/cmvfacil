@@ -33,6 +33,13 @@ type FornecedorRow = {
   endereco: string;
 };
 
+function looksLikeItemId(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return false;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/.test(s);
+}
+
 function IconBox() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -459,6 +466,42 @@ export default function FornecedoresClient() {
     })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
   }, []);
+
+  useEffect(() => {
+    if (!fornecedoresReadyRef.current) return;
+    if (!insumosStore.length) return;
+    const nameById = new Map<string, string>();
+    for (const i of insumosStore) {
+      const id = String(i.id ?? "").trim();
+      const name = String(i.item ?? "").trim();
+      if (id && name && !nameById.has(id)) nameById.set(id, name);
+    }
+    let changed = false;
+    const next: FornecedorProdutos = {};
+    for (const [k, listRaw] of Object.entries(produtosMap)) {
+      const key = String(k ?? "").trim().toUpperCase();
+      const list = Array.isArray(listRaw) ? listRaw : [];
+      const out: string[] = [];
+      for (const raw of list) {
+        const v = String(raw ?? "").trim();
+        if (!v) {
+          changed = true;
+          continue;
+        }
+        const mapped = looksLikeItemId(v) ? nameById.get(v) : null;
+        const label = mapped || v;
+        if (mapped) changed = true;
+        if (!out.some((x) => x.toLowerCase() === label.toLowerCase())) out.push(label);
+      }
+      if (!key) continue;
+      if (key !== k) changed = true;
+      if (out.length) next[key] = out;
+      if (!out.length && list.length) changed = true;
+    }
+    if (!changed) return;
+    writeFornecedorProdutosMap(next);
+    setProdutosMap(next);
+  }, [insumosStore, produtosMap]);
 
   useEffect(() => {
     if (!isProdutoMenuOpen) return;
