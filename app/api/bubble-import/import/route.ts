@@ -1359,6 +1359,7 @@ export async function POST(req: NextRequest) {
       const catMatches = catNameLooksLikePrePreparo(catLabel);
       const recipeSignals =
         pickFirst(row, [
+          "boolean_item_receita",
           "custo_total_receita",
           "custoTotalReceita",
           "rendimento",
@@ -1373,7 +1374,7 @@ export async function POST(req: NextRequest) {
           "validade",
           "recipe_yield",
           "recipeYield",
-        ]) || pickKeyLike(row, ["custo_total_receita", "custo", "rendimento", "yield", "porcao", "validade"]);
+        ]) || pickKeyLike(row, ["boolean_item_receita", "item_receita", "custo_total_receita", "custo", "rendimento", "yield", "porcao", "validade"]);
       if (!catMatches && !String(recipeSignals ?? "").trim()) return;
 
       const receita = guessItemLabel(row);
@@ -1399,6 +1400,18 @@ export async function POST(req: NextRequest) {
       const validade = pickFirst(row, ["dias_validade", "validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
       const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
 
+      const ingredientRefsRaw =
+        pickFirst(row, ["ingredients", "ingredientes", "ingredient_rows", "ingredientRows", "ingredient_list", "ingredients_list"]) ||
+        pickKeyLike(row, ["ingredients", "ingredientes", "ingredient"]);
+      let ingredientRefsParsed: any[] | undefined;
+      if (ingredientRefsRaw && (ingredientRefsRaw.trim().startsWith("[") || ingredientRefsRaw.trim().startsWith("{"))) {
+        try {
+          const parsed = JSON.parse(ingredientRefsRaw);
+          ingredientRefsParsed = Array.isArray(parsed) ? parsed : undefined;
+        } catch {}
+      }
+      const ingredientes = buildIngredientesForRecipe(uid, id, receita.trim(), ingredientRefsParsed) ?? buildIngredientesForRecipe(uid, id, receita.trim());
+
       prePreparoRows.push({
         id,
         categoria: catLabel.trim() || "-",
@@ -1407,7 +1420,7 @@ export async function POST(req: NextRequest) {
         rendimento,
         custoUnitario,
         validadeDias: typeof validadeDiasNum === "number" ? validadeDiasNum : undefined,
-        ingredientes: buildIngredientesForRecipe(uid, id, receita.trim()),
+        ingredientes,
       });
       prePreparoIds.add(id);
     }
