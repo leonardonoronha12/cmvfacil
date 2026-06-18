@@ -501,25 +501,30 @@ function prioritizeTypes(types: string[]) {
 
 function buildAutoSyncTypes() {
   return prioritizeTypes([
+    "Users",
     "User",
     "empresas",
     "categorias",
+    "custo_medio_items",
     "custo_medio_item",
-    "desperdicio",
-    "fichas_tecnicas",
     "etiquetas",
     "faturamentos",
     "fornecedores",
     "Ingredientes",
+    "ingredientes",
     "inventarios",
     "itens_fornecedores",
     "itens_inventarios",
     "Itens_lista_compras",
     "itens_notas",
+    "itens",
     "item",
     "motivos_desperdicios",
     "notas_fiscais",
+    "qtd_compra_reals",
     "qtd_compra_real",
+    "desperdicios",
+    "desperdicio",
   ]);
 }
 
