@@ -707,7 +707,6 @@ export async function POST(req: NextRequest) {
     }
 
     function handleCustoMedio(row: CsvObjectRow) {
-      if (!enableInsumos) return;
       const uid = resolveTargetUserId(row);
       const item = guessItemLabel(row);
       const itemKey = normalizeItemName(item);
@@ -1614,6 +1613,7 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
     await processCsvGroups("ingredientes", (row) => {
       handleInsumo(row);
+      handlePrePreparoIngredienteRow(row);
     });
     await processCsvGroups("itens", (row) => {
       handleInsumo(row);

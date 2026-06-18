@@ -89,6 +89,7 @@ function buildAutoSyncTypes() {
     "categorias",
     "custo_medio_item",
     "ingredientes",
+    "Ingredientes",
     "item",
     "fornecedores",
     "itens_fornecedores",
