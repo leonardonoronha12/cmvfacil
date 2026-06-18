@@ -970,6 +970,20 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    const sp = new URLSearchParams(window.location.search);
+    const produto = (sp.get("produto") ?? "").trim();
+    const tab = (sp.get("tab") ?? "").trim().toLowerCase();
+    const view = (sp.get("v") ?? "").trim().toLowerCase();
+    if (produto && (tab === "detalhes" || tab === "")) setDetailsRecipeId(produto);
+    if (view) {
+      if (view.includes("preparo")) setDetailsTab("preparo");
+      else if (view.includes("etiqueta")) setDetailsTab("etiquetas");
+      else setDetailsTab("ingredientes");
+    }
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
