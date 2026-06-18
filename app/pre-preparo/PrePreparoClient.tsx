@@ -692,46 +692,21 @@ export default function PrePreparoClient() {
         token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
       } catch {}
       if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
-
-      const statusRes = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
-      const statusJson = (await statusRes.json().catch(() => null)) as any;
-      if (!statusRes.ok || !statusJson?.ok) throw new Error(String(statusJson?.error ?? `failed_${statusRes.status}`));
-      const statePath = String(statusJson?.statePath ?? "").trim();
-      if (!statePath) throw new Error("missing_statePath");
-
-      const restartRes = await fetch("/api/bubble-import/sync/restart", {
+      const pullRes = await fetch("/api/bubble-import/pull-pre-preparo-one", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: false, baseUrl, token }),
+        body: JSON.stringify({ itemId: detailsRecipeId, baseUrl, token }),
         cache: "no-store",
       });
-      const restartJson = (await restartRes.json().catch(() => null)) as any;
-      if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
-
-      let state: any = null;
-      for (let i = 0; i < 24; i++) {
-        const tickRes = await fetch("/api/bubble-import/sync/tick", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ statePath, baseUrl, token, resume: true, maxOps: 50 }),
-          cache: "no-store",
-        });
-        const tickJson = (await tickRes.json().catch(() => null)) as any;
-        if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
-        state = tickJson?.state ?? null;
-        const phase = String(state?.phase ?? "").trim();
-        if (phase === "done") break;
-        if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
-        if (phase === "paused") throw new Error("paused_by_user");
-        await new Promise((r) => window.setTimeout(r, 400));
-      }
-      if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
+      const pullJson = (await pullRes.json().catch(() => null)) as any;
+      if (!pullRes.ok || !pullJson?.ok) throw new Error(String(pullJson?.error ?? `failed_${pullRes.status}`));
 
       const dbRows = await loadPrePreparoFromSupabase();
       setRows(dbRows as any);
       const hasStill = (dbRows as any[]).some((r) => String((r as any)?.id ?? "") === String(detailsRecipeId));
       if (!hasStill) setDetailsRecipeId(null);
-      showToast("Pré-preparo sincronizado.", "success", 5000);
+      const ing = typeof pullJson?.ingredientesFetched === "number" ? pullJson.ingredientesFetched : null;
+      showToast(`Pré-preparo sincronizado${ing != null ? ` (${ing} ingredientes)` : ""}.`, "success", 6000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
     } finally {

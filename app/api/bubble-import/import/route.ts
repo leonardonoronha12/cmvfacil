@@ -843,6 +843,7 @@ export async function POST(req: NextRequest) {
       const item =
         pickFirst(row, ["ingrediente_nome", "nome_ingrediente", "item_nome", "nome_item", "insumo_nome", "nome_insumo"]) ||
         (itemRefId ? itemById.get(itemRefId.trim())?.nome ?? "" : "") ||
+        (itemRefRaw ? extractBubbleNameFromText(String(itemRefRaw)) : "") ||
         guessItemLabel(row);
       if (!String(item ?? "").trim()) return;
 
