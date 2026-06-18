@@ -168,6 +168,7 @@ function classifyFile(name: string) {
   if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
   if (n.includes("invent")) return "inventario";
+  if ((n.includes("pre") && n.includes("preparo")) && ((n.includes("itens") || n.includes("items") || n.includes("ingred") || /\bitem\b/.test(n)))) return "pre_preparo_ingredientes";
   if (n.includes("pre") && n.includes("preparo")) return "pre_preparo";
   if (n.includes("etiqueta")) return "pre_preparo_etiquetas";
   if (n.includes("ficha") || n.includes("fichas") || (n.includes("receita") && !n.includes("itens"))) return "fichas_tecnicas";
@@ -584,7 +585,7 @@ export async function POST(req: NextRequest) {
     if (enableFornecedores) ["fornecedores", "itens_fornecedores", "equivalencias"].forEach((k) => enabledKinds.add(k));
     if (enableDesperdicios) ["desperdicios", "motivos_desperdicios"].forEach((k) => enabledKinds.add(k));
     if (enableEntradas) ["itens_notas", "notas_fiscais"].forEach((k) => enabledKinds.add(k));
-    if (enablePrePreparo) ["pre_preparo", "pre_preparo_etiquetas", "categorias", "itens", "ingredientes"].forEach((k) => enabledKinds.add(k));
+    if (enablePrePreparo) ["pre_preparo", "pre_preparo_etiquetas", "pre_preparo_ingredientes", "categorias", "itens", "ingredientes"].forEach((k) => enabledKinds.add(k));
     if (enableFichas) enabledKinds.add("fichas_tecnicas");
     if (enableInventario) enabledKinds.add("inventario");
     enabledKinds.add("users");
@@ -1589,12 +1590,12 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
     await processCsvGroups("ingredientes", (row) => {
       handleInsumo(row);
-      handlePrePreparoIngredienteRow(row);
     });
     await processCsvGroups("itens", (row) => {
       handleInsumo(row);
       if (enablePrePreparo) handlePrePreparoFromItemRow(row);
     });
+    await processCsvGroups("pre_preparo_ingredientes", (row) => handlePrePreparoIngredienteRow(row));
     await processCsvGroups("fornecedores", (row) => handleFornecedorInfo(row));
     await processCsvGroups("itens_fornecedores", (row) => handleFornecedorProduto(row));
     await processCsvGroups("equivalencias", (row) => handleEquivalencia(row));

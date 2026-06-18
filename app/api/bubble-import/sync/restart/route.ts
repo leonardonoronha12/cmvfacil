@@ -100,6 +100,12 @@ function buildAutoSyncTypes() {
     "inventarios",
     "inventario_contagens",
     "pre_preparo",
+    "itens_pre_preparo",
+    "itens_prepreparo",
+    "pre_preparo_ingredientes",
+    "prepreparo_ingredientes",
+    "ingredientes_pre_preparo",
+    "ingredientes_prepreparo",
     "pre_preparo_etiquetas",
     "fichas_tecnicas",
   ];
