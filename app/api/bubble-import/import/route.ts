@@ -212,6 +212,20 @@ function extractBubbleIdFromText(input: string) {
   return m ? String(m[1] ?? "").trim() : null;
 }
 
+function extractBubbleNameFromText(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+  if (s.startsWith("{")) {
+    try {
+      const obj = JSON.parse(s) as any;
+      const cand = String(obj?.nome ?? obj?.name ?? obj?.receita ?? obj?.title ?? "").trim();
+      if (cand) return cand;
+    } catch {}
+  }
+  const m = s.match(/"(?:nome|name|receita|title)"\s*:\s*"([^"]+)"/i);
+  return m ? String(m[1] ?? "").trim() : "";
+}
+
 function extractBubbleRefId(input: string) {
   const s = String(input ?? "").trim();
   if (!s) return "";
@@ -583,7 +597,7 @@ export async function POST(req: NextRequest) {
       enabledKinds.add("users");
       const onlyUsers = kinds.length === 1 && String(kinds[0] ?? "").toLowerCase() === "users";
       if (!onlyUsers) enabledKinds.add("empresas");
-      if (includeUnknown && enabledKinds.has("unknown")) enabledKinds.add("unknown");
+      if (includeUnknown) enabledKinds.add("unknown");
       if (!includeUnknown) enabledKinds.delete("unknown");
       if (!only) {
         enableInsumos = enabledKinds.has("custo_medio") || enabledKinds.has("ingredientes") || enabledKinds.has("itens");
@@ -758,6 +772,7 @@ export async function POST(req: NextRequest) {
       const uid = resolveTargetUserId(row);
       const rowsById = getPrePreparoIngredientRowsById(uid);
       const idsByRecipe = getPrePreparoIngredientIdsByRecipe(uid);
+      const idsByRecipeName = getPrePreparoIngredientIdsByRecipeName(uid);
 
       const bubbleId = pickBubbleId(row) || pickFirst(row, ["ingrediente_id", "ingredient_id", "id"]) || "";
       const id = bubbleId ? String(bubbleId).trim() : "";
@@ -766,7 +781,28 @@ export async function POST(req: NextRequest) {
       const recipeRefRaw =
         pickFirst(row, ["pre_preparo_id", "prepreparo_id", "receita_id", "recipe_id", "pre_preparo", "prepreparo", "receita", "recipe"]) ||
         pickKeyLike(row, ["pre_preparo", "prepreparo", "receita", "recipe"], { excludeParts: ["nome", "title", "name"] });
-      const recipeId = recipeRefRaw ? extractBubbleRefId(String(recipeRefRaw)) || extractBubbleIdFromText(String(recipeRefRaw)) || "" : "";
+      let recipeId = recipeRefRaw ? extractBubbleRefId(String(recipeRefRaw)) || extractBubbleIdFromText(String(recipeRefRaw)) || "" : "";
+      let recipeName = recipeRefRaw ? extractBubbleNameFromText(String(recipeRefRaw)) : "";
+      if (!recipeName && recipeRefRaw && /[A-Za-zÀ-ÿ]/.test(String(recipeRefRaw))) recipeName = String(recipeRefRaw).trim();
+
+      if (!recipeId || !recipeName) {
+        for (const [k, v] of Object.entries(row)) {
+          const kk = String(k ?? "").toLowerCase();
+          if (!(kk.includes("pre") && kk.includes("preparo")) && !kk.includes("receita") && !kk.includes("recipe")) continue;
+          const vv = String(v ?? "").trim();
+          if (!vv) continue;
+          if (!recipeId) {
+            const rid = extractBubbleRefId(vv) || extractBubbleIdFromText(vv) || "";
+            if (rid && looksLikeId(rid)) recipeId = rid;
+          }
+          if (!recipeName) {
+            const nm = extractBubbleNameFromText(vv);
+            if (nm) recipeName = nm;
+            else if (/[A-Za-zÀ-ÿ]/.test(vv)) recipeName = vv;
+          }
+          if (recipeId && recipeName) break;
+        }
+      }
 
       const itemRefRaw =
         pickFirst(row, ["item_id", "insumo_id", "ingrediente_ref", "ingrediente_id_ref", "insumo", "ingrediente"]) ||
@@ -793,6 +829,14 @@ export async function POST(req: NextRequest) {
         const list = idsByRecipe.get(recipeId) ?? [];
         list.push(id);
         idsByRecipe.set(recipeId, list);
+      }
+      if (recipeName) {
+        const key = normalizeKey(recipeName);
+        if (key) {
+          const list = idsByRecipeName.get(key) ?? [];
+          list.push(id);
+          idsByRecipeName.set(key, list);
+        }
       }
     }
 
@@ -1015,6 +1059,7 @@ export async function POST(req: NextRequest) {
     const prePreparoIdsByUser = new Map<string, Set<string>>();
     const prePreparoIngredientRowByIdByUser = new Map<string, Map<string, { id: string; item: string; quantidade: string; unidade: string; custoCents: number }>>();
     const prePreparoIngredientIdsByRecipeByUser = new Map<string, Map<string, string[]>>();
+    const prePreparoIngredientIdsByRecipeNameByUser = new Map<string, Map<string, string[]>>();
 
     const getPrePreparoRows = (uid: string) => {
       const got = prePreparoRowsByUser.get(uid);
@@ -1064,6 +1109,14 @@ export async function POST(req: NextRequest) {
       return created;
     };
 
+    const getPrePreparoIngredientIdsByRecipeName = (uid: string) => {
+      const got = prePreparoIngredientIdsByRecipeNameByUser.get(uid);
+      if (got) return got;
+      const created = new Map<string, string[]>();
+      prePreparoIngredientIdsByRecipeNameByUser.set(uid, created);
+      return created;
+    };
+
     function parseQtyLabelLoose(label: string) {
       const raw = String(label ?? "").trim();
       if (!raw) return { qty: 0, unit: "" };
@@ -1109,6 +1162,7 @@ export async function POST(req: NextRequest) {
       const seen = new Set<string>();
       const rowsById = getPrePreparoIngredientRowsById(uid);
       const idsByRecipe = getPrePreparoIngredientIdsByRecipe(uid);
+      const idsByRecipeName = getPrePreparoIngredientIdsByRecipeName(uid);
 
       const add = (ing: { id: string; item: string; quantidade: string; unidade: string; custoCents: number } | null) => {
         if (!ing || !String(ing.item ?? "").trim()) return;
@@ -1132,6 +1186,12 @@ export async function POST(req: NextRequest) {
 
       if (!out.length) {
         const ids = (recipeId && idsByRecipe.get(recipeId)) || [];
+        for (const id of ids) add(rowsById.get(id) ?? null);
+      }
+
+      if (!out.length && receitaName) {
+        const nameKey = normalizeKey(receitaName);
+        const ids = idsByRecipeName.get(nameKey) ?? [];
         for (const id of ids) add(rowsById.get(id) ?? null);
       }
 
