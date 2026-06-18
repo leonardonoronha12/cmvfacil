@@ -691,11 +691,10 @@ export default function PrePreparoClient() {
         baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
         token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
       } catch {}
-      if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
       const pullRes = await fetch("/api/bubble-live/pre-preparo-ingredients", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: detailsRecipeId, baseUrl, token }),
+        body: JSON.stringify({ itemId: detailsRecipeId, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
         cache: "no-store",
       });
       const pullJson = (await pullRes.json().catch(() => null)) as any;

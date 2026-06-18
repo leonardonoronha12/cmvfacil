@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
 export const runtime = "nodejs";
@@ -35,6 +36,11 @@ function safeBaseUrl(input: string) {
 function safeToken(input: string) {
   const t = String(input ?? "").trim();
   return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
+}
+
+function getEnv(key: string) {
+  const v = process.env[key];
+  return typeof v === "string" ? v : "";
 }
 
 function normalizeKey(input: string) {
@@ -127,19 +133,76 @@ async function fetchBubbleObject(baseUrl: string, token: string, type: string, i
   return response && typeof response === "object" ? response : {};
 }
 
+type BubbleConstraint = { key: string; constraint_type: string; value: unknown };
+
+async function fetchBubblePage(args: {
+  baseUrl: string;
+  token: string;
+  typeName: string;
+  cursor: number;
+  limit: number;
+  constraints?: BubbleConstraint[] | null;
+  sortField?: string | null;
+  descending?: boolean | null;
+}) {
+  const { baseUrl, token, typeName, cursor, limit, constraints, sortField, descending } = args;
+  const qs = new URLSearchParams();
+  qs.set("cursor", String(cursor));
+  qs.set("limit", String(limit));
+  if (sortField) qs.set("sort_field", String(sortField));
+  if (typeof descending === "boolean") qs.set("descending", descending ? "true" : "false");
+  if (constraints?.length) qs.set("constraints", JSON.stringify(constraints));
+  const raw = await fetchBubbleJson(baseUrl, token, `/api/1.1/obj/${encodeURIComponent(typeName)}?${qs.toString()}`);
+  const response = raw?.response ?? raw ?? {};
+  const results = Array.isArray(response?.results) ? response.results : Array.isArray(response) ? response : [];
+  const remaining = typeof response?.remaining === "number" ? response.remaining : null;
+  return { results: results as unknown[], remaining };
+}
+
+async function downloadJsonFromStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
+  const dl = await supabase.storage.from(bucket).download(path);
+  if (dl.error || !dl.data) return null;
+  try {
+    const buf = await dl.data.arrayBuffer();
+    const text = new TextDecoder().decode(buf);
+    return JSON.parse(text) as any;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(String(body?.baseUrl ?? ""));
-    const token = safeToken(String(body?.token ?? ""));
     const itemId = String(body?.itemId ?? "").trim();
+    if (!itemId) return json({ ok: false, error: "missing_itemId" }, { status: 400 });
 
+    let baseUrl = safeBaseUrl(String(body?.baseUrl ?? ""));
+    let token = safeToken(String(body?.token ?? ""));
+
+    if (!baseUrl || !token) {
+      let supabase: ReturnType<typeof getSupabaseAdmin> | null = null;
+      try {
+        supabase = getSupabaseAdmin();
+      } catch {
+        supabase = null;
+      }
+      if (supabase) {
+        const bucket = "bubble-imports";
+        const statePath = `user:${userId}/bootstrap/sync-state.json`;
+        const state = await downloadJsonFromStorage(supabase, bucket, statePath).catch(() => null);
+        const creds = state && typeof state === "object" && (state as any).credentials && typeof (state as any).credentials === "object" ? (state as any).credentials : null;
+        if (!baseUrl) baseUrl = safeBaseUrl(String(creds?.baseUrl ?? ""));
+        if (!token) token = safeToken(String(creds?.token ?? ""));
+      }
+    }
+    if (!baseUrl) baseUrl = safeBaseUrl(getEnv("BUBBLE_BASE_URL") || "");
+    if (!token) token = safeToken(getEnv("BUBBLE_API_TOKEN") || "");
     if (!baseUrl) return json({ ok: false, error: "missing_base_url" }, { status: 400 });
     if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
-    if (!itemId) return json({ ok: false, error: "missing_itemId" }, { status: 400 });
 
     const item = await fetchBubbleObject(baseUrl, token, "itens", itemId);
     const ingredientListRaw = getFieldLoose(item, ["Ingredients", "ingredients", "ingredientes"]);
@@ -148,6 +211,57 @@ export async function POST(req: NextRequest) {
       : typeof ingredientListRaw === "string" && ingredientListRaw.trim().startsWith("[")
         ? (JSON.parse(ingredientListRaw) as any[])
         : [];
+
+    let ingredientEntries: any[] = ingredientList;
+    let source: "item_field" | "query" = "item_field";
+    let usedConstraintKey = "";
+
+    if (!ingredientEntries.length) {
+      const typeName = "Ingredientes";
+      const candidateKeys = [
+        "item_receita_id",
+        "item_receita",
+        "receita_id",
+        "receita",
+        "pre_preparo_id",
+        "prepreparo_id",
+        "item_pre_preparo_id",
+        "item_prepreparo_id",
+        "pre_preparo",
+        "prepreparo",
+      ];
+      for (const key of candidateKeys) {
+        try {
+          const out: any[] = [];
+          for (let cursor = 0; cursor < 50_000; cursor += 200) {
+            const page = await fetchBubblePage({
+              baseUrl,
+              token,
+              typeName,
+              cursor,
+              limit: 200,
+              constraints: [{ key, constraint_type: "equals", value: itemId }],
+              sortField: "Created Date",
+              descending: false,
+            });
+            out.push(...(page.results as any[]));
+            if (!(typeof page.remaining === "number") || page.remaining <= 0) break;
+            if (!page.results.length) break;
+          }
+          if (out.length) {
+            ingredientEntries = out;
+            source = "query";
+            usedConstraintKey = key;
+            break;
+          }
+        } catch (err) {
+          const status = err instanceof BubbleApiError ? err.bubbleStatus : null;
+          if (status === 400) continue;
+          if (status === 404) break;
+          throw err;
+        }
+      }
+    }
 
     const ingredientes: Array<{ id: string; item: string; quantidade: string; unidade: string; custoCents: number }> = [];
     const itemCache = new Map<string, any>();
@@ -171,7 +285,7 @@ export async function POST(req: NextRequest) {
       return obj;
     };
 
-    for (const entry of ingredientList) {
+    for (const entry of ingredientEntries) {
       const directObj = entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as any) : null;
       const ingId = extractRefId(entry);
       const ingObj = directObj && (directObj.item_id || directObj.quantidade || directObj.qtd || directObj.qtde) ? directObj : ingId ? await getIng(ingId) : null;
@@ -197,10 +311,9 @@ export async function POST(req: NextRequest) {
       ingredientes.push({ id: rid, item: nome, quantidade, unidade, custoCents });
     }
 
-    return json({ ok: true, itemId, ingredientes }, { status: 200 });
+    return json({ ok: true, itemId, ingredientes, source, usedConstraintKey }, { status: 200 });
   } catch (err) {
     if (err instanceof BubbleApiError) return json({ ok: false, error: err.message, bubbleStatus: err.bubbleStatus, bubbleBody: err.bubbleBody }, { status: 502 });
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
