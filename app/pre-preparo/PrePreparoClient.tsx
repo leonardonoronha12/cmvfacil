@@ -692,7 +692,7 @@ export default function PrePreparoClient() {
         token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
       } catch {}
       if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
-      const pullRes = await fetch("/api/bubble-import/pull-pre-preparo-one", {
+      const pullRes = await fetch("/api/bubble-live/pre-preparo-ingredients", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ itemId: detailsRecipeId, baseUrl, token }),
@@ -700,13 +700,15 @@ export default function PrePreparoClient() {
       });
       const pullJson = (await pullRes.json().catch(() => null)) as any;
       if (!pullRes.ok || !pullJson?.ok) throw new Error(String(pullJson?.error ?? `failed_${pullRes.status}`));
-
-      const dbRows = await loadPrePreparoFromSupabase();
-      setRows(dbRows as any);
-      const hasStill = (dbRows as any[]).some((r) => String((r as any)?.id ?? "") === String(detailsRecipeId));
-      if (!hasStill) setDetailsRecipeId(null);
-      const ing = typeof pullJson?.ingredientesFetched === "number" ? pullJson.ingredientesFetched : null;
-      showToast(`Pré-preparo sincronizado${ing != null ? ` (${ing} ingredientes)` : ""}.`, "success", 6000);
+      const ingredientes = Array.isArray(pullJson?.ingredientes) ? (pullJson.ingredientes as any[]) : [];
+      setRows((prev) => {
+        const next = prev.map((r) => {
+          if (String(r.id) !== String(detailsRecipeId)) return r;
+          return { ...r, ingredientes: ingredientes.length ? (ingredientes as any) : undefined };
+        });
+        return next;
+      });
+      showToast(`Ingredientes carregados do Bubble (${ingredientes.length}).`, "success", 6000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
     } finally {
