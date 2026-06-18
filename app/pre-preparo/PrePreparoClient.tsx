@@ -577,6 +577,45 @@ function IconChevronDownDouble() {
   );
 }
 
+function IconSync() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path
+        d="M20 6v6h-6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M20 12a8 8 0 0 0-14.8-4.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 18v-6h6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M4 12a8 8 0 0 0 14.8 4.3"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
 export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
@@ -614,6 +653,7 @@ export default function PrePreparoClient() {
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [etiquetasRows, setEtiquetasRows] = useState<PrePreparoEtiquetaRow[]>([]);
+  const [isSyncingDetails, setIsSyncingDetails] = useState(false);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -638,6 +678,65 @@ export default function PrePreparoClient() {
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
     return `Não foi possível carregar do Supabase (${msg}).`;
+  }
+
+  async function syncThisPrePreparoItems() {
+    if (!detailsRecipeId) return;
+    if (isSyncingDetails) return;
+    setIsSyncingDetails(true);
+    try {
+      let baseUrl = "";
+      let token = "";
+      try {
+        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      } catch {}
+      if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
+
+      const statusRes = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
+      const statusJson = (await statusRes.json().catch(() => null)) as any;
+      if (!statusRes.ok || !statusJson?.ok) throw new Error(String(statusJson?.error ?? `failed_${statusRes.status}`));
+      const statePath = String(statusJson?.statePath ?? "").trim();
+      if (!statePath) throw new Error("missing_statePath");
+
+      const restartRes = await fetch("/api/bubble-import/sync/restart", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hard: false, baseUrl, token }),
+        cache: "no-store",
+      });
+      const restartJson = (await restartRes.json().catch(() => null)) as any;
+      if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
+
+      let state: any = null;
+      for (let i = 0; i < 24; i++) {
+        const tickRes = await fetch("/api/bubble-import/sync/tick", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ statePath, baseUrl, token, resume: true, maxOps: 50 }),
+          cache: "no-store",
+        });
+        const tickJson = (await tickRes.json().catch(() => null)) as any;
+        if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
+        state = tickJson?.state ?? null;
+        const phase = String(state?.phase ?? "").trim();
+        if (phase === "done") break;
+        if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
+        if (phase === "paused") throw new Error("paused_by_user");
+        await new Promise((r) => window.setTimeout(r, 400));
+      }
+      if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
+
+      const dbRows = await loadPrePreparoFromSupabase();
+      setRows(dbRows as any);
+      const hasStill = (dbRows as any[]).some((r) => String((r as any)?.id ?? "") === String(detailsRecipeId));
+      if (!hasStill) setDetailsRecipeId(null);
+      showToast("Pré-preparo sincronizado.", "success", 5000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+    } finally {
+      setIsSyncingDetails(false);
+    }
   }
 
   const [isNewRecipeOpen, setIsNewRecipeOpen] = useState(false);
@@ -2582,6 +2681,11 @@ export default function PrePreparoClient() {
                     <button type="button" className={ft.detailsReturnBtn} onClick={() => void downloadFichaTecnica(getPdfRow(detailsRow))}>
                       <DetailsPdfIcon />
                       Baixar Ficha Técnica
+                    </button>
+
+                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void syncThisPrePreparoItems()} disabled={isSyncingDetails}>
+                      <IconSync />
+                      {isSyncingDetails ? "Sincronizando..." : "Sincronizar itens"}
                     </button>
 
                     <div className={dash.itemAsideKpis}>
