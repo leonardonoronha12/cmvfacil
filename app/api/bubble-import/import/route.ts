@@ -1235,7 +1235,15 @@ export async function POST(req: NextRequest) {
             }
             add(null);
           } else {
-            add(normalizePrePreparoIngredientAny(x));
+            const refId =
+              x && typeof x === "object"
+                ? String((x as any)?.unique_id ?? (x as any)?._id ?? (x as any)?.id ?? (x as any)?.bubble_id ?? "").trim()
+                : "";
+            const refFromJson = !refId ? extractBubbleIdFromText(JSON.stringify(x)) || "" : "";
+            const finalRef = refId || refFromJson;
+            const mapped = finalRef ? rowsById.get(finalRef) ?? null : null;
+            if (mapped) add(mapped);
+            else add(normalizePrePreparoIngredientAny(x));
           }
         }
       }
