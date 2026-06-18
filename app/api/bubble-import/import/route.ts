@@ -1196,6 +1196,7 @@ export async function POST(req: NextRequest) {
       const rowsById = getPrePreparoIngredientRowsById(uid);
       const idsByRecipe = getPrePreparoIngredientIdsByRecipe(uid);
       const idsByRecipeName = getPrePreparoIngredientIdsByRecipeName(uid);
+      const custoByItemKey = getCustoMap(uid);
 
       const add = (ing: { id: string; item: string; quantidade: string; unidade: string; custoCents: number } | null) => {
         if (!ing || !String(ing.item ?? "").trim()) return;
@@ -1210,7 +1211,30 @@ export async function POST(req: NextRequest) {
           if (typeof x === "string") {
             const ref = extractBubbleRefId(x) || extractBubbleIdFromText(x) || x.trim();
             const mapped = ref ? rowsById.get(ref) ?? null : null;
-            add(mapped ?? null);
+            if (mapped) {
+              add(mapped);
+              continue;
+            }
+            const itemInfo = ref ? itemById.get(ref) ?? null : null;
+            if (itemInfo && itemInfo.nome) {
+              const itemKey = normalizeItemName(itemInfo.nome);
+              const custoMedioLabel = itemKey ? custoByItemKey.get(itemKey) ?? "" : "";
+              const custoCents = custoMedioLabel ? Math.max(0, Math.round(parsePtNumber(custoMedioLabel) * 100)) : 0;
+              add({
+                id: ref,
+                item: itemInfo.nome,
+                quantidade: "1,000",
+                unidade: itemInfo.unidade || "Und",
+                custoCents,
+              });
+              continue;
+            }
+            const asName = extractBubbleNameFromText(x) || "";
+            if (asName) {
+              add({ id: ref || String(Date.now()), item: asName, quantidade: "1,000", unidade: "Und", custoCents: 0 });
+              continue;
+            }
+            add(null);
           } else {
             add(normalizePrePreparoIngredientAny(x));
           }
