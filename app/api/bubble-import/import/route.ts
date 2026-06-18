@@ -804,10 +804,42 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      type Candidate = { id: string; key: string; recipeScore: number; ingScore: number };
+      const candidates: Candidate[] = [];
+      for (const [k, v] of Object.entries(row)) {
+        const vv = String(v ?? "").trim();
+        if (!vv) continue;
+        const rid = extractBubbleRefId(vv) || extractBubbleIdFromText(vv) || "";
+        if (!rid || !looksLikeId(rid)) continue;
+        const kk = String(k ?? "").toLowerCase();
+        const hasRecipe = (kk.includes("pre") && kk.includes("preparo")) || kk.includes("receita") || kk.includes("recipe");
+        const hasIng = kk.includes("ingred") || kk.includes("insumo");
+        const hasItem = kk.includes("item");
+        const recipeScore = (hasRecipe ? 5 : 0) + (hasItem ? 1 : 0) + (hasIng ? -3 : 0);
+        const ingScore = (hasIng ? 5 : 0) + (hasItem ? 1 : 0) + (hasRecipe ? -3 : 0);
+        candidates.push({ id: rid, key: kk, recipeScore, ingScore });
+      }
+      if ((!recipeId || !looksLikeId(recipeId)) && candidates.length) {
+        const best = [...candidates].sort((a, b) => b.recipeScore - a.recipeScore)[0]!;
+        if (best.recipeScore >= 2) recipeId = best.id;
+      }
+
+      const ingredientIdCandidate = candidates.length
+        ? [...candidates]
+            .filter((c) => c.id !== recipeId)
+            .sort((a, b) => b.ingScore - a.ingScore)[0] ?? null
+        : null;
+
+      if (!recipeName && recipeId) {
+        const fromItem = itemById.get(recipeId.trim())?.nome ?? "";
+        if (fromItem) recipeName = fromItem;
+      }
+
       const itemRefRaw =
         pickFirst(row, ["item_id", "insumo_id", "ingrediente_ref", "ingrediente_id_ref", "insumo", "ingrediente"]) ||
         pickKeyLike(row, ["item_id", "insumo", "ingred"], { excludeParts: ["receita", "pre_preparo", "prepreparo"] });
-      const itemRefId = itemRefRaw ? extractBubbleRefId(String(itemRefRaw)) || extractBubbleIdFromText(String(itemRefRaw)) || "" : "";
+      let itemRefId = itemRefRaw ? extractBubbleRefId(String(itemRefRaw)) || extractBubbleIdFromText(String(itemRefRaw)) || "" : "";
+      if (ingredientIdCandidate && ingredientIdCandidate.ingScore >= 2) itemRefId = ingredientIdCandidate.id;
       const item =
         pickFirst(row, ["ingrediente_nome", "nome_ingrediente", "item_nome", "nome_item", "insumo_nome", "nome_insumo"]) ||
         (itemRefId ? itemById.get(itemRefId.trim())?.nome ?? "" : "") ||
