@@ -259,6 +259,56 @@ function pickEtiquetaCode(obj: any, fallbackId: string) {
   return hashCode7(f);
 }
 
+function pickUserDisplayName(obj: any) {
+  const name = getFieldLoose(obj, ["name", "nome", "full_name", "fullName", "display_name", "displayName"]);
+  const s = String(name ?? "").trim();
+  if (s) return s;
+  const email = getFieldLoose(obj, ["email"]);
+  const e = String(email ?? "").trim();
+  return e;
+}
+
+function pickEtiquetaQtyAndUnit(obj: any, fallbackUnit: string) {
+  const unitFieldRaw = getFieldLoose(obj, ["unidade_label", "unit_label", "medida_label", "unidade", "medida", "unit", "unidade_medida", "unidadeMedida", "unidade_de_medida"]);
+  const unitField = normalizeUnit(unitFieldRaw);
+
+  const labelCandidates: unknown[] = [
+    getFieldLoose(obj, ["quantidade_label", "qtd_label", "qtde_label", "peso_label", "label", "titulo", "nome", "name"]),
+    getFieldLoose(obj, ["quantidade", "qtd", "qtde", "qty", "amount", "peso"]),
+  ];
+  let qtyFromText = 0;
+  let unitFromText = "";
+  for (const v of labelCandidates) {
+    const parsed = parseQtyAndUnitFromLabel(String(v ?? ""));
+    if (parsed.qty > 0) {
+      qtyFromText = parsed.qty;
+      unitFromText = parsed.unit;
+      break;
+    }
+  }
+
+  const qtyRaw = getFieldLoose(obj, ["quantidade", "qtd", "qtde", "qty", "amount", "peso"]);
+  let qtyNum = qtyRaw != null ? parsePtNumber(String(qtyRaw)) : 0;
+  if (!(qtyNum > 0) && qtyFromText > 0) qtyNum = qtyFromText;
+
+  if (!(qtyNum > 0)) {
+    for (const [k, v] of Object.entries(obj ?? {})) {
+      const nk = normalizeKey(k);
+      if (!(nk.includes("qtd") || nk.includes("qtde") || nk.includes("quant") || nk.includes("peso"))) continue;
+      const parsed = parseQtyAndUnitFromLabel(String(v ?? ""));
+      if (parsed.qty > 0) {
+        qtyNum = parsed.qty;
+        if (!unitFromText) unitFromText = parsed.unit;
+        break;
+      }
+    }
+  }
+
+  const unit = normalizeUnit(unitField || unitFromText || fallbackUnit || "Und") || "Und";
+  const qtyLabel = qtyNum > 0 ? formatQtyFixed3(qtyNum) : "0,000";
+  return { qtyLabel, unit };
+}
+
 function formatQtyFixed3(n: number) {
   return n.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
@@ -502,6 +552,28 @@ export async function POST(req: NextRequest) {
       "prepreparo",
     ];
     let etiquetasSource = "";
+    const userNameCache = new Map<string, string>();
+    const getUserName = async (raw: unknown) => {
+      const directObj = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as any) : null;
+      const directName = directObj ? pickUserDisplayName(directObj) : "";
+      if (directName) return directName;
+      const rawStr = String(raw ?? "").trim();
+      const refId = extractRefId(raw);
+      const id = refId || rawStr;
+      if (!id) return "";
+      if (userNameCache.has(id)) return userNameCache.get(id) || "";
+      let name = "";
+      for (const typeName of ["User", "users", "Usuarios", "usuarios"]) {
+        const obj = await fetchBubbleObject(baseUrl, token, typeName, id).catch(() => null);
+        const n = obj ? pickUserDisplayName(obj) : "";
+        if (n) {
+          name = n;
+          break;
+        }
+      }
+      userNameCache.set(id, name || rawStr);
+      return name || rawStr;
+    };
     for (const typeName of etiquetaTypeNames) {
       for (const key of etiquetaKeys) {
         try {
@@ -528,13 +600,7 @@ export async function POST(req: NextRequest) {
               if (!obj) continue;
               const bubbleId = String(obj?.unique_id ?? obj?._id ?? obj?.id ?? obj?.bubble_id ?? "").trim() || extractRefId(obj);
               if (!bubbleId) continue;
-              const qtyRaw = getFieldLoose(obj, ["quantidade", "qtd", "qtde", "qty", "amount"]);
-              const unitRaw = getUnitLoose(obj);
-              const tituloRaw = getFieldLoose(obj, ["titulo", "label", "nome", "name"]);
-              const parsedFromTitle = parseQtyAndUnitFromLabel(String(tituloRaw ?? ""));
-              const qtyNum = qtyRaw != null ? parsePtNumber(String(qtyRaw)) : parsedFromTitle.qty;
-              const qtyLabel = qtyNum > 0 ? formatQtyFixed3(qtyNum) : "0,000";
-              const unit = normalizeUnit(unitRaw ?? parsedFromTitle.unit ?? itemUnit ?? "Und") || "Und";
+              const { qtyLabel, unit } = pickEtiquetaQtyAndUnit(obj, itemUnit || "Und");
 
               const prodRaw = getFieldLoose(obj, ["data_producao", "dataProducao", "producao", "data_prod", "created_date", "Created Date"]);
               const valRaw = getFieldLoose(obj, ["data_validade", "dataValidade", "validade", "data_val", "validade_data"]);
@@ -550,7 +616,7 @@ export async function POST(req: NextRequest) {
               const code = pickEtiquetaCode(obj, bubbleId);
 
               const respRaw = getFieldLoose(obj, ["responsavel", "usuario", "user", "criador", "created_by", "Created By"]);
-              const responsavel = String((respRaw as any)?.name ?? respRaw ?? "").trim();
+              const responsavel = await getUserName(respRaw);
               const custoRaw = getFieldLoose(obj, ["custo", "valor", "subtotal", "total", "custo_total", "cost", "price"]);
               const custoNum = parsePtNumber(String(custoRaw ?? ""));
               const custo = custoNum > 0 ? `R$${custoNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "R$0,00";
