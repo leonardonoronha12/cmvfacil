@@ -649,6 +649,10 @@ function normalizeKey(value: string) {
     .replace(/\s+/g, " ");
 }
 
+function safeArray<T>(value: unknown): T[] {
+  return Array.isArray(value) ? (value as T[]) : [];
+}
+
 function looksLikeItemId(value: string) {
   const s = String(value ?? "").trim();
   if (!s) return false;
@@ -1584,16 +1588,16 @@ export default function DashboardClient() {
     const finalById = new Map<string, number>();
     const unitStartById = new Map<string, string>();
     const unitEndById = new Map<string, string>();
-    for (const cat of contagemStart.categorias ?? []) {
-      for (const it of cat.itens ?? []) {
+    for (const cat of safeArray<any>((contagemStart as any).categorias)) {
+      for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
         initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
         const u = String((it as any).unidade ?? "").trim();
         if (u) unitStartById.set(it.id, u);
       }
     }
-    for (const cat of contagemEnd.categorias ?? []) {
-      for (const it of cat.itens ?? []) {
+    for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
+      for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
         finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
         const u = String((it as any).unidade ?? "").trim();
@@ -1654,10 +1658,10 @@ export default function DashboardClient() {
       }
     }
 
-    const prePreparoItems = prePreparo.map((r) => {
+    const prePreparoItems = safeArray<any>(prePreparo).map((r) => {
       const { qty: yieldQty, unit: yieldUnit } = parseQtyLabel(String(r.rendimento ?? ""));
       let totalCents = 0;
-      for (const ing of r.ingredientes ?? []) {
+      for (const ing of safeArray<any>((r as any).ingredientes)) {
         const itemKey = normalizeKey(String(ing.item ?? ""));
         if (!itemKey) continue;
         const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
@@ -1816,16 +1820,16 @@ export default function DashboardClient() {
       const finalById = new Map<string, number>();
       const unitStartById = new Map<string, string>();
       const unitEndById = new Map<string, string>();
-      for (const cat of contagemStart.categorias ?? []) {
-        for (const it of cat.itens ?? []) {
+    for (const cat of safeArray<any>((contagemStart as any).categorias)) {
+      for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
           initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
           const u = String((it as any).unidade ?? "").trim();
           if (u) unitStartById.set(it.id, u);
         }
       }
-      for (const cat of contagemEnd.categorias ?? []) {
-        for (const it of cat.itens ?? []) {
+    for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
+      for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
           finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
           const u = String((it as any).unidade ?? "").trim();
@@ -1851,15 +1855,16 @@ export default function DashboardClient() {
       const entradasQtyById = new Map<string, number>();
       const entradasCentsById = new Map<string, number>();
       let comprasCents = 0;
-      for (const e of entradas) {
+    for (const e of safeArray<any>(entradas)) {
         const d = parseDateLabelLoose(e.dataLancamento);
         if (!d) continue;
         const t = startOfDay(d).getTime();
         if (t < minT || t > maxT) continue;
 
-        if (e.itensNota?.length) {
+      const itensNota = safeArray<any>((e as any).itensNota);
+      if (itensNota.length) {
           const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
-          for (const it of e.itensNota) {
+        for (const it of itensNota) {
             const rawNome = String(it.nome ?? "").trim();
             const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
             const rawKey = normalizeKey(resolvedNome);
@@ -1896,10 +1901,10 @@ export default function DashboardClient() {
       let finalCents = 0;
       let saidasCents = 0;
 
-      const prePreparoItems = prePreparo.map((r) => {
+    const prePreparoItems = safeArray<any>(prePreparo).map((r) => {
         const { qty: yieldQty, unit: yieldUnit } = parseQtyLabel(String(r.rendimento ?? ""));
         let totalCents = 0;
-        for (const ing of r.ingredientes ?? []) {
+      for (const ing of safeArray<any>((r as any).ingredientes)) {
           const itemKey = normalizeKey(String(ing.item ?? ""));
           if (!itemKey) continue;
           const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
@@ -2007,7 +2012,7 @@ export default function DashboardClient() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setCalcError(`Erro ao calcular CMV (${msg}).`);
-      showToast(`Erro ao calcular CMV (${msg}).`, "error", 9000);
+      showToast(`Erro ao calcular CMV (${msg}).`, "error", 20000);
     }
   }
 
@@ -3143,6 +3148,8 @@ export default function DashboardClient() {
               Sincronizar tudo
             </button>
           </div>
+
+          {calcError ? <div className={styles.calcError}>{calcError}</div> : null}
 
           <div className={styles.topHint}>
             <span className={styles.topHintIcon}>
