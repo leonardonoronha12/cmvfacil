@@ -657,6 +657,9 @@ export default function PrePreparoClient() {
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [etiquetasRows, setEtiquetasRows] = useState<PrePreparoEtiquetaRow[]>([]);
   const [isSyncingDetails, setIsSyncingDetails] = useState(false);
+  const [isBubbleCredsOpen, setIsBubbleCredsOpen] = useState(false);
+  const [bubbleBaseUrlDraft, setBubbleBaseUrlDraft] = useState("");
+  const [bubbleTokenDraft, setBubbleTokenDraft] = useState("");
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -705,6 +708,28 @@ export default function PrePreparoClient() {
     router.push("/pre-preparo");
   }
 
+  function openBubbleCredsModal() {
+    try {
+      const savedBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
+      const savedToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
+      if (savedBaseUrl && !bubbleBaseUrlDraft) setBubbleBaseUrlDraft(savedBaseUrl);
+      if (savedToken && !bubbleTokenDraft) setBubbleTokenDraft(savedToken);
+    } catch {}
+    setIsBubbleCredsOpen(true);
+  }
+
+  function saveBubbleCredsAndSync() {
+    const baseUrl = bubbleBaseUrlDraft.trim();
+    const token = bubbleTokenDraft.trim();
+    try {
+      if (baseUrl) window.localStorage.setItem("cmvfacil:bubbleBaseUrl", baseUrl);
+      if (token) window.localStorage.setItem("cmvfacil:bubbleToken", token);
+    } catch {}
+    setIsBubbleCredsOpen(false);
+    if (detailsRecipeId) autoSyncDetailsRef.current.delete(detailsRecipeId);
+    void syncThisPrePreparoItems();
+  }
+
   async function syncThisPrePreparoItems() {
     if (!detailsRecipeId) return;
     if (isSyncingDetails) return;
@@ -723,7 +748,15 @@ export default function PrePreparoClient() {
         cache: "no-store",
       });
       const pullJson = (await pullRes.json().catch(() => null)) as any;
-      if (!pullRes.ok || !pullJson?.ok) throw new Error(String(pullJson?.error ?? `failed_${pullRes.status}`));
+      if (!pullRes.ok || !pullJson?.ok) {
+        const msg = String(pullJson?.error ?? `failed_${pullRes.status}`);
+        if (msg.includes("missing_token") || msg.includes("missing_base_url")) {
+          showToast("Configure a URL e o token do Bubble para puxar os ingredientes.", "error", 9000);
+          openBubbleCredsModal();
+          return;
+        }
+        throw new Error(msg);
+      }
       const ingredientes = Array.isArray(pullJson?.ingredientes) ? (pullJson.ingredientes as any[]) : [];
       setRows((prev) => {
         const next = prev.map((r) => {
@@ -732,7 +765,13 @@ export default function PrePreparoClient() {
         });
         return next;
       });
-      showToast(`Ingredientes carregados do Bubble (${ingredientes.length}).`, "success", 6000);
+      if (!ingredientes.length) {
+        const source = pullJson?.source ? String(pullJson.source) : "";
+        const key = pullJson?.usedConstraintKey ? String(pullJson.usedConstraintKey) : "";
+        showToast(`Bubble não retornou ingredientes (source=${source || "?"}${key ? `, key=${key}` : ""}).`, "error", 9000);
+      } else {
+        showToast(`Ingredientes carregados do Bubble (${ingredientes.length}).`, "success", 6000);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
     } finally {
@@ -3785,6 +3824,39 @@ export default function PrePreparoClient() {
                 </button>
                 <button type="button" className={insumosStyles.confirmCancel} onClick={cancelDeleteCategoria}>
                   Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isBubbleCredsOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBubbleCredsOpen(false)} style={{ zIndex: 10000 }}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Conectar Bubble</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsBubbleCredsOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.modalBody}>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Bubble URL</div>
+                  <input className={styles.formInput} value={bubbleBaseUrlDraft} onChange={(e) => setBubbleBaseUrlDraft(e.target.value)} placeholder="ex: https://seuapp.bubbleapps.io" />
+                </div>
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Bubble API Token</div>
+                  <input className={styles.formInput} value={bubbleTokenDraft} onChange={(e) => setBubbleTokenDraft(e.target.value)} placeholder="Bearer ..." />
+                </div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsBubbleCredsOpen(false)}>
+                  Cancelar
+                </button>
+                <button type="button" className={styles.saveBtn} onClick={saveBubbleCredsAndSync} disabled={!bubbleBaseUrlDraft.trim() || !bubbleTokenDraft.trim()}>
+                  Salvar e Sincronizar
                 </button>
               </div>
             </div>
