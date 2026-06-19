@@ -112,6 +112,46 @@ function getFieldLoose(obj: any, names: string[]) {
   return undefined;
 }
 
+function parseJsonArrayLoose(value: unknown) {
+  if (!value) return null;
+  if (Array.isArray(value)) return value as any[];
+  if (typeof value === "string") {
+    const s = value.trim();
+    if (!s) return null;
+    if (s.startsWith("[") || s.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(s);
+        return Array.isArray(parsed) ? (parsed as any[]) : null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
+function pickIngredientListFromItem(item: any) {
+  const direct = getFieldLoose(item, ["Ingredients", "ingredients", "ingredientes"]);
+  const parsed = parseJsonArrayLoose(direct);
+  if (parsed && parsed.length) return { list: parsed, field: "Ingredients/ingredientes" };
+
+  let bestKey = "";
+  let bestList: any[] | null = null;
+  for (const [k, v] of Object.entries(item ?? {})) {
+    const nk = normalizeKey(k);
+    if (!nk.includes("ingred")) continue;
+    const arr = parseJsonArrayLoose(v);
+    if (!arr || !arr.length) continue;
+    if (!bestList || arr.length > bestList.length) {
+      bestList = arr;
+      bestKey = String(k);
+    }
+  }
+  if (bestList) return { list: bestList, field: bestKey || "unknown_ingred_field" };
+  return { list: [] as any[], field: "" };
+}
+
 async function fetchBubbleJson(baseUrl: string, token: string, path: string) {
   const url = `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`;
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
@@ -205,19 +245,16 @@ export async function POST(req: NextRequest) {
     if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
     const item = await fetchBubbleObject(baseUrl, token, "itens", itemId);
-    const ingredientListRaw = getFieldLoose(item, ["Ingredients", "ingredients", "ingredientes"]);
-    const ingredientList: any[] = Array.isArray(ingredientListRaw)
-      ? (ingredientListRaw as any[])
-      : typeof ingredientListRaw === "string" && ingredientListRaw.trim().startsWith("[")
-        ? (JSON.parse(ingredientListRaw) as any[])
-        : [];
+    const fromItem = pickIngredientListFromItem(item);
+    const ingredientList: any[] = fromItem.list;
 
     let ingredientEntries: any[] = ingredientList;
     let source: "item_field" | "query" = "item_field";
     let usedConstraintKey = "";
+    let usedItemField = fromItem.field;
 
     if (!ingredientEntries.length) {
-      const typeName = "Ingredientes";
+      const typeNames = ["Ingredientes", "ingredientes"];
       const candidateKeys = [
         "item_receita_id",
         "item_receita",
@@ -230,36 +267,39 @@ export async function POST(req: NextRequest) {
         "pre_preparo",
         "prepreparo",
       ];
-      for (const key of candidateKeys) {
-        try {
-          const out: any[] = [];
-          for (let cursor = 0; cursor < 50_000; cursor += 200) {
-            const page = await fetchBubblePage({
-              baseUrl,
-              token,
-              typeName,
-              cursor,
-              limit: 200,
-              constraints: [{ key, constraint_type: "equals", value: itemId }],
-              sortField: "Created Date",
-              descending: false,
-            });
-            out.push(...(page.results as any[]));
-            if (!(typeof page.remaining === "number") || page.remaining <= 0) break;
-            if (!page.results.length) break;
+      for (const typeName of typeNames) {
+        for (const key of candidateKeys) {
+          try {
+            const out: any[] = [];
+            for (let cursor = 0; cursor < 50_000; cursor += 200) {
+              const page = await fetchBubblePage({
+                baseUrl,
+                token,
+                typeName,
+                cursor,
+                limit: 200,
+                constraints: [{ key, constraint_type: "equals", value: itemId }],
+                sortField: "Created Date",
+                descending: false,
+              });
+              out.push(...(page.results as any[]));
+              if (!(typeof page.remaining === "number") || page.remaining <= 0) break;
+              if (!page.results.length) break;
+            }
+            if (out.length) {
+              ingredientEntries = out;
+              source = "query";
+              usedConstraintKey = `${typeName}.${key}`;
+              break;
+            }
+          } catch (err) {
+            const status = err instanceof BubbleApiError ? err.bubbleStatus : null;
+            if (status === 400) continue;
+            if (status === 404) break;
+            throw err;
           }
-          if (out.length) {
-            ingredientEntries = out;
-            source = "query";
-            usedConstraintKey = key;
-            break;
-          }
-        } catch (err) {
-          const status = err instanceof BubbleApiError ? err.bubbleStatus : null;
-          if (status === 400) continue;
-          if (status === 404) break;
-          throw err;
         }
+        if (ingredientEntries.length) break;
       }
     }
 
@@ -280,7 +320,9 @@ export async function POST(req: NextRequest) {
       const k = String(id ?? "").trim();
       if (!k) return null;
       if (ingCache.has(k)) return ingCache.get(k);
-      const obj = await fetchBubbleObject(baseUrl, token, "Ingredientes", k).catch(() => null);
+      const obj =
+        (await fetchBubbleObject(baseUrl, token, "Ingredientes", k).catch(() => null)) ||
+        (await fetchBubbleObject(baseUrl, token, "ingredientes", k).catch(() => null));
       ingCache.set(k, obj);
       return obj;
     };
@@ -288,7 +330,12 @@ export async function POST(req: NextRequest) {
     for (const entry of ingredientEntries) {
       const directObj = entry && typeof entry === "object" && !Array.isArray(entry) ? (entry as any) : null;
       const ingId = extractRefId(entry);
-      const ingObj = directObj && (directObj.item_id || directObj.quantidade || directObj.qtd || directObj.qtde) ? directObj : ingId ? await getIng(ingId) : null;
+      let ingObj: any =
+        directObj && (directObj.item_id || directObj.quantidade || directObj.qtd || directObj.qtde) ? directObj : ingId ? await getIng(ingId) : null;
+      if (!ingObj && ingId) {
+        const maybeItem = await getItem(ingId);
+        if (maybeItem && typeof maybeItem === "object") ingObj = { item_id: ingId, quantidade: 1, unidade: getFieldLoose(maybeItem, ["unidade", "medida", "unit"]) ?? "Und" };
+      }
       if (!ingObj || typeof ingObj !== "object") continue;
 
       const itemRef = getFieldLoose(ingObj, ["item_id", "item", "insumo", "ingrediente"]);
@@ -311,7 +358,17 @@ export async function POST(req: NextRequest) {
       ingredientes.push({ id: rid, item: nome, quantidade, unidade, custoCents });
     }
 
-    return json({ ok: true, itemId, ingredientes, source, usedConstraintKey }, { status: 200 });
+    return json(
+      {
+        ok: true,
+        itemId,
+        ingredientes,
+        source,
+        usedConstraintKey,
+        usedItemField: usedItemField || null,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     if (err instanceof BubbleApiError) return json({ ok: false, error: err.message, bubbleStatus: err.bubbleStatus, bubbleBody: err.bubbleBody }, { status: 502 });
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
