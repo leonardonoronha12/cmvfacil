@@ -827,6 +827,18 @@ export async function POST(req: NextRequest) {
 
           const retryAt = typeof p.nextRetryAt === "number" ? p.nextRetryAt : 0;
           if (retryAt > Date.now()) {
+            const errs = typeof p.errorCount === "number" && Number.isFinite(p.errorCount) ? p.errorCount : 0;
+            if (errs >= 3) {
+              p.status = "done";
+              p.remaining = 0;
+              p.lastError = `skipped_after_${errs}_transient_errors`;
+              p.nextRetryAt = 0;
+              idx += 1;
+              state.currentTypeIndex = idx;
+              await persist();
+              ops += 1;
+              break;
+            }
             const seconds = Math.max(1, Math.ceil((retryAt - Date.now()) / 1000));
             p.status = `aguardando (${seconds}s)`;
             await persist();
@@ -923,6 +935,19 @@ export async function POST(req: NextRequest) {
               if (attempt >= 9) {
                 p.errorCount = (p.errorCount ?? 0) + 1;
                 p.lastError = err instanceof Error ? err.message : String(err);
+                const errs = typeof p.errorCount === "number" && Number.isFinite(p.errorCount) ? p.errorCount : 0;
+                if (errs >= 3) {
+                  p.status = "done";
+                  p.remaining = 0;
+                  p.lastError = `skipped_after_${errs}_transient_errors`;
+                  p.nextRetryAt = 0;
+                  idx += 1;
+                  state.currentTypeIndex = idx;
+                  await persist();
+                  ops += 1;
+                  pausedByTransientError = true;
+                  break;
+                }
                 p.nextRetryAt = Date.now() + 60_000;
                 p.status = "aguardando";
                 await persist();
