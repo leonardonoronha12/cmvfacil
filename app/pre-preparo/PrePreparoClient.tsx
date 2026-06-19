@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -619,7 +619,6 @@ function IconSync() {
 
 export default function PrePreparoClient() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
@@ -694,10 +693,14 @@ export default function PrePreparoClient() {
   function navigateToDetails(recipeId: string, tab: "ingredientes" | "preparo" | "etiquetas" = "ingredientes") {
     const id = String(recipeId ?? "").trim();
     if (!id) return;
+    setDetailsTab(tab);
+    setDetailsRecipeId(id);
     router.push(buildDetailsUrl(id, tab));
   }
 
   function navigateToList() {
+    setDetailsRecipeId(null);
+    setDetailsTab("ingredientes");
     router.push("/pre-preparo");
   }
 
@@ -967,21 +970,23 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    const sp = searchParams;
-    const produto = (sp.get("produto") ?? "").trim();
-    const tab = (sp.get("tab") ?? "").trim().toLowerCase();
-    const view = (sp.get("v") ?? "").trim().toLowerCase();
-    if (produto && (tab === "detalhes" || tab === "")) {
-      setDetailsRecipeId(produto);
-    } else if (!produto) {
-      setDetailsRecipeId(null);
-    }
-    if (view) {
-      if (view.includes("preparo")) setDetailsTab("preparo");
-      else if (view.includes("etiqueta")) setDetailsTab("etiquetas");
-      else setDetailsTab("ingredientes");
-    }
-  }, [searchParams]);
+    if (typeof window === "undefined") return;
+    const applyFromLocation = () => {
+      const sp = new URLSearchParams(window.location.search);
+      const produto = (sp.get("produto") ?? "").trim();
+      const tab = (sp.get("tab") ?? "").trim().toLowerCase();
+      const view = (sp.get("v") ?? "").trim().toLowerCase();
+      if (produto && (tab === "detalhes" || tab === "")) setDetailsRecipeId(produto);
+      if (view) {
+        if (view.includes("preparo")) setDetailsTab("preparo");
+        else if (view.includes("etiqueta")) setDetailsTab("etiquetas");
+        else setDetailsTab("ingredientes");
+      }
+    };
+    applyFromLocation();
+    window.addEventListener("popstate", applyFromLocation);
+    return () => window.removeEventListener("popstate", applyFromLocation);
+  }, []);
 
   useEffect(() => {
     return () => {
