@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { useRouter, useSearchParams } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -617,6 +618,8 @@ function IconSync() {
 }
 
 export default function PrePreparoClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
@@ -678,6 +681,24 @@ export default function PrePreparoClient() {
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
     return `Não foi possível carregar do Supabase (${msg}).`;
+  }
+
+  function buildDetailsUrl(recipeId: string, tab: "ingredientes" | "preparo" | "etiquetas") {
+    const qs = new URLSearchParams();
+    qs.set("tab", "detalhes");
+    qs.set("produto", String(recipeId));
+    if (tab) qs.set("v", tab);
+    return `/pre-preparo?${qs.toString()}`;
+  }
+
+  function navigateToDetails(recipeId: string, tab: "ingredientes" | "preparo" | "etiquetas" = "ingredientes") {
+    const id = String(recipeId ?? "").trim();
+    if (!id) return;
+    router.push(buildDetailsUrl(id, tab));
+  }
+
+  function navigateToList() {
+    router.push("/pre-preparo");
   }
 
   async function syncThisPrePreparoItems() {
@@ -946,18 +967,21 @@ export default function PrePreparoClient() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const sp = new URLSearchParams(window.location.search);
+    const sp = searchParams;
     const produto = (sp.get("produto") ?? "").trim();
     const tab = (sp.get("tab") ?? "").trim().toLowerCase();
     const view = (sp.get("v") ?? "").trim().toLowerCase();
-    if (produto && (tab === "detalhes" || tab === "")) setDetailsRecipeId(produto);
+    if (produto && (tab === "detalhes" || tab === "")) {
+      setDetailsRecipeId(produto);
+    } else if (!produto) {
+      setDetailsRecipeId(null);
+    }
     if (view) {
       if (view.includes("preparo")) setDetailsTab("preparo");
       else if (view.includes("etiqueta")) setDetailsTab("etiquetas");
       else setDetailsTab("ingredientes");
     }
-  }, []);
+  }, [searchParams]);
 
   useEffect(() => {
     return () => {
@@ -2314,8 +2338,8 @@ export default function PrePreparoClient() {
                   type="button"
                   className={`${dash.itemBack} ${ft.detailsBackBtn}`}
                   onClick={() => {
-                    setDetailsRecipeId(null);
                     setDetailsTab("ingredientes");
+                    navigateToList();
                   }}
                 >
                   <span className={`${dash.itemBackIcon} ${ft.detailsBackIcon}`}>←</span>
@@ -2334,21 +2358,30 @@ export default function PrePreparoClient() {
                     <button
                       type="button"
                       className={detailsTab === "ingredientes" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
-                      onClick={() => setDetailsTab("ingredientes")}
+                      onClick={() => {
+                        setDetailsTab("ingredientes");
+                        if (detailsRecipeId) router.replace(buildDetailsUrl(detailsRecipeId, "ingredientes"));
+                      }}
                     >
                       Ingredientes
                     </button>
                     <button
                       type="button"
                       className={detailsTab === "preparo" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
-                      onClick={() => setDetailsTab("preparo")}
+                      onClick={() => {
+                        setDetailsTab("preparo");
+                        if (detailsRecipeId) router.replace(buildDetailsUrl(detailsRecipeId, "preparo"));
+                      }}
                     >
                       Modo de Preparo
                     </button>
                     <button
                       type="button"
                       className={detailsTab === "etiquetas" ? `${dash.itemTabActive} ${ft.detailsTabActive}` : `${dash.itemTab} ${ft.detailsTab}`}
-                      onClick={() => setDetailsTab("etiquetas")}
+                      onClick={() => {
+                        setDetailsTab("etiquetas");
+                        if (detailsRecipeId) router.replace(buildDetailsUrl(detailsRecipeId, "etiquetas"));
+                      }}
                     >
                       Etiquetas
                     </button>
@@ -2799,14 +2832,14 @@ export default function PrePreparoClient() {
                     onClick={() => {
                       setOpenMenuId(null);
                       setDetailsTab("ingredientes");
-                      setDetailsRecipeId(r.id);
+                      navigateToDetails(r.id, "ingredientes");
                     }}
                     onKeyDown={(e) => {
                       if (e.key !== "Enter" && e.key !== " ") return;
                       e.preventDefault();
                       setOpenMenuId(null);
                       setDetailsTab("ingredientes");
-                      setDetailsRecipeId(r.id);
+                      navigateToDetails(r.id, "ingredientes");
                     }}
                   >
                     <div className={styles.recipeTop}>
