@@ -100,6 +100,57 @@ function extractRefId(value: unknown) {
   return "";
 }
 
+function formatDateDDMMYYYY(d: Date) {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yyyy = String(d.getFullYear());
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function parseDateLoose(value: unknown) {
+  if (!value) return null;
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    const d = new Date(value);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+  const s = String(value ?? "").trim();
+  if (!s) return null;
+  const d = new Date(s);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+function normalizeUnit(input: unknown) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const u = raw.toLowerCase();
+  if (u === "kg" || u === "kilo" || u === "kilos" || u === "quilo" || u === "quilos") return "Kg";
+  if (u === "g" || u === "grama" || u === "gramas") return "g";
+  if (u === "l" || u === "lt" || u === "litro" || u === "litros") return "L";
+  if (u === "ml") return "mL";
+  if (u === "un" || u === "und" || u === "unid" || u === "unidade" || u === "unidades") return "Und";
+  return raw.length <= 6 ? raw : raw.slice(0, 6);
+}
+
+function getUnitLoose(obj: any) {
+  return (
+    getFieldLoose(obj, [
+      "unidade",
+      "medida",
+      "unit",
+      "unidade_medida",
+      "unidadeMedida",
+      "unidade_de_medida",
+      "item_medida",
+      "itemMedida",
+      "medida_item",
+      "medidaItem",
+      "unidade_item",
+      "unidadeItem",
+    ]) ?? undefined
+  );
+}
+
 function getFieldLoose(obj: any, names: string[]) {
   if (!obj || typeof obj !== "object") return undefined;
   for (const n of names) {
@@ -150,6 +201,39 @@ function pickIngredientListFromItem(item: any) {
   }
   if (bestList) return { list: bestList, field: bestKey || "unknown_ingred_field" };
   return { list: [] as any[], field: "" };
+}
+
+function pickModoPreparoFromItem(item: any) {
+  const direct = getFieldLoose(item, ["modo_preparo", "modoPreparo", "preparo", "modo", "modo_de_preparo", "modoDePreparo"]);
+  const directStr = String(direct ?? "").trim();
+  if (directStr) return directStr;
+  let best = "";
+  for (const [k, v] of Object.entries(item ?? {})) {
+    const nk = normalizeKey(k);
+    if (!(nk.includes("preparo") || (nk.includes("modo") && nk.includes("prep")))) continue;
+    const s = String(v ?? "").trim();
+    if (s.length > best.length) best = s;
+  }
+  return best.trim();
+}
+
+function pickItemName(item: any) {
+  const name = getFieldLoose(item, ["receita", "nome", "item", "name", "descricao", "description"]);
+  return String(name ?? "").trim();
+}
+
+function parseQtyAndUnitFromLabel(raw: string) {
+  const s = String(raw ?? "").trim();
+  if (!s) return { qty: 0, unit: "" };
+  const m = s.match(/(\d+(?:[.,]\d+)?)\s*([a-zA-Z]{1,6})/);
+  if (!m) return { qty: 0, unit: "" };
+  const qty = parsePtNumber(m[1]);
+  const unit = normalizeUnit(m[2]);
+  return { qty, unit };
+}
+
+function formatQtyFixed3(n: number) {
+  return n.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
 }
 
 async function fetchBubbleJson(baseUrl: string, token: string, path: string) {
@@ -245,6 +329,9 @@ export async function POST(req: NextRequest) {
     if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
     const item = await fetchBubbleObject(baseUrl, token, "itens", itemId);
+    const receita = pickItemName(item);
+    const modoPreparo = pickModoPreparoFromItem(item);
+    const itemUnit = normalizeUnit(getUnitLoose(item)) || "";
     const fromItem = pickIngredientListFromItem(item);
     const ingredientList: any[] = fromItem.list;
 
@@ -347,8 +434,9 @@ export async function POST(req: NextRequest) {
       const qtyRaw = getFieldLoose(ingObj, ["quantidade", "qtd", "qtde", "qty", "amount"]);
       const qtyNum = parsePtNumber(String(qtyRaw ?? ""));
       const quantidade = qtyNum > 0 ? qtyNum.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }) : "0,000";
-      const unidadeRaw = getFieldLoose(ingObj, ["unidade", "medida", "unit"]);
-      const unidade = String(unidadeRaw ?? getFieldLoose(itemObj, ["unidade", "medida", "unit"]) ?? "Und").trim() || "Und";
+      const unidadeRaw = getUnitLoose(ingObj);
+      const unidadeFromItem = getUnitLoose(itemObj);
+      const unidade = normalizeUnit(unidadeRaw ?? unidadeFromItem ?? itemUnit ?? "Und") || "Und";
 
       const custoRaw = getFieldLoose(ingObj, ["custo", "valor", "subtotal", "total", "custo_total", "cost", "price"]);
       const custoNum = parsePtNumber(String(custoRaw ?? ""));
@@ -358,10 +446,115 @@ export async function POST(req: NextRequest) {
       ingredientes.push({ id: rid, item: nome, quantidade, unidade, custoCents });
     }
 
+    const etiquetasOut: Array<{
+      id: string;
+      recipeId: string;
+      receita: string;
+      responsavel: string;
+      quantidade: string;
+      unidade: string;
+      custo: string;
+      dataProducao: string;
+      dataValidade: string;
+      wasteStatus?: "pending" | "launched" | "ignored";
+    }> = [];
+
+    const etiquetaTypeNames = ["etiquetas", "Etiquetas", "pre_preparo_etiquetas", "pre_preparo_etiqueta"];
+    const etiquetaKeys = [
+      "item_id",
+      "item",
+      "item_receita_id",
+      "item_receita",
+      "receita_id",
+      "receita",
+      "pre_preparo_id",
+      "prepreparo_id",
+      "pre_preparo",
+      "prepreparo",
+    ];
+    let etiquetasSource = "";
+    for (const typeName of etiquetaTypeNames) {
+      for (const key of etiquetaKeys) {
+        try {
+          const out: any[] = [];
+          for (let cursor = 0; cursor < 50_000; cursor += 200) {
+            const page = await fetchBubblePage({
+              baseUrl,
+              token,
+              typeName,
+              cursor,
+              limit: 200,
+              constraints: [{ key, constraint_type: "equals", value: itemId }],
+              sortField: "Created Date",
+              descending: true,
+            });
+            out.push(...(page.results as any[]));
+            if (!(typeof page.remaining === "number") || page.remaining <= 0) break;
+            if (!page.results.length) break;
+          }
+          if (out.length) {
+            etiquetasSource = `${typeName}.${key}`;
+            for (const raw of out) {
+              const obj = raw && typeof raw === "object" ? (raw as any) : null;
+              if (!obj) continue;
+              const bubbleId = String(obj?.unique_id ?? obj?._id ?? obj?.id ?? obj?.bubble_id ?? "").trim() || extractRefId(obj);
+              if (!bubbleId) continue;
+              const qtyRaw = getFieldLoose(obj, ["quantidade", "qtd", "qtde", "qty", "amount"]);
+              const unitRaw = getUnitLoose(obj);
+              const tituloRaw = getFieldLoose(obj, ["titulo", "label", "nome", "name"]);
+              const parsedFromTitle = parseQtyAndUnitFromLabel(String(tituloRaw ?? ""));
+              const qtyNum = qtyRaw != null ? parsePtNumber(String(qtyRaw)) : parsedFromTitle.qty;
+              const qtyLabel = qtyNum > 0 ? formatQtyFixed3(qtyNum) : "0,000";
+              const unit = normalizeUnit(unitRaw ?? parsedFromTitle.unit ?? itemUnit ?? "Und") || "Und";
+
+              const prodRaw = getFieldLoose(obj, ["data_producao", "dataProducao", "producao", "data_prod", "created_date", "Created Date"]);
+              const valRaw = getFieldLoose(obj, ["data_validade", "dataValidade", "validade", "data_val", "validade_data"]);
+              const prodDate = parseDateLoose(prodRaw);
+              const valDate = parseDateLoose(valRaw);
+              const dataProducao = prodDate ? formatDateDDMMYYYY(prodDate) : "";
+              const dataValidade = valDate ? formatDateDDMMYYYY(valDate) : "";
+              if (!dataValidade) continue;
+
+              const respRaw = getFieldLoose(obj, ["responsavel", "usuario", "user", "criador", "created_by", "Created By"]);
+              const responsavel = String((respRaw as any)?.name ?? respRaw ?? "").trim();
+              const custoRaw = getFieldLoose(obj, ["custo", "valor", "subtotal", "total", "custo_total", "cost", "price"]);
+              const custoNum = parsePtNumber(String(custoRaw ?? ""));
+              const custo = custoNum > 0 ? `R$${custoNum.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "R$0,00";
+
+              etiquetasOut.push({
+                id: `bubble:${bubbleId}`,
+                recipeId: itemId,
+                receita: receita || itemId,
+                responsavel,
+                quantidade: qtyLabel,
+                unidade: unit,
+                custo,
+                dataProducao: dataProducao || "-",
+                dataValidade,
+                wasteStatus: "pending",
+              });
+            }
+            break;
+          }
+        } catch (err) {
+          const status = err instanceof BubbleApiError ? err.bubbleStatus : null;
+          if (status === 400) continue;
+          if (status === 404) break;
+          throw err;
+        }
+      }
+      if (etiquetasSource) break;
+    }
+
     return json(
       {
         ok: true,
         itemId,
+        receita: receita || null,
+        modoPreparo: modoPreparo || null,
+        itemUnit: itemUnit || null,
+        etiquetas: etiquetasOut,
+        etiquetasSource: etiquetasSource || null,
         ingredientes,
         source,
         usedConstraintKey,

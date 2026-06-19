@@ -758,19 +758,63 @@ export default function PrePreparoClient() {
         throw new Error(msg);
       }
       const ingredientes = Array.isArray(pullJson?.ingredientes) ? (pullJson.ingredientes as any[]) : [];
+      const modoPreparo = typeof pullJson?.modoPreparo === "string" ? String(pullJson.modoPreparo).trim() : "";
+      const itemUnit = typeof pullJson?.itemUnit === "string" ? String(pullJson.itemUnit).trim() : "";
+      const etiquetasIncoming = Array.isArray(pullJson?.etiquetas) ? (pullJson.etiquetas as any[]) : [];
       setRows((prev) => {
         const next = prev.map((r) => {
           if (String(r.id) !== String(detailsRecipeId)) return r;
-          return { ...r, ingredientes: ingredientes.length ? (ingredientes as any) : undefined };
+          const nextRow: any = { ...r, ingredientes: ingredientes.length ? (ingredientes as any) : undefined };
+          if (modoPreparo) nextRow.modoPreparo = modoPreparo;
+          if (itemUnit) {
+            const parsed = parseQtyLabel(String(r.rendimento ?? ""));
+            const curUnit = String(parsed.unit ?? "").trim() || "Und";
+            if (curUnit === "Und" && itemUnit !== "Und") {
+              const qtyLabel = formatDecimalFixedDraft(String(parsed.qty || 1), 3);
+              nextRow.rendimento = `${qtyLabel} ${itemUnit}`;
+            }
+          }
+          return nextRow;
         });
         return next;
       });
+      if (etiquetasIncoming.length) {
+        setEtiquetasRows((prev) => {
+          const keep = prev.filter((e) => String(e.recipeId) !== String(detailsRecipeId) || !String(e.id).startsWith("bubble:"));
+          const merged: any[] = [...keep];
+          for (const raw of etiquetasIncoming) {
+            if (!raw || typeof raw !== "object") continue;
+            const id = String((raw as any).id ?? "").trim();
+            const recipeId = String((raw as any).recipeId ?? "").trim();
+            const receita = String((raw as any).receita ?? detailsRow?.receita ?? "").trim();
+            const quantidade = String((raw as any).quantidade ?? "").trim();
+            const unidade = String((raw as any).unidade ?? "").trim();
+            const dataValidade = String((raw as any).dataValidade ?? "").trim();
+            if (!id || !recipeId || !receita || !quantidade || !unidade || !dataValidade) continue;
+            merged.push({
+              id,
+              recipeId,
+              receita,
+              responsavel: String((raw as any).responsavel ?? "").trim(),
+              quantidade,
+              unidade,
+              custo: String((raw as any).custo ?? "R$0,00").trim() || "R$0,00",
+              dataProducao: String((raw as any).dataProducao ?? "-").trim() || "-",
+              dataValidade,
+              wasteStatus: String((raw as any).wasteStatus ?? "pending").trim() || "pending",
+            });
+          }
+          return merged;
+        });
+      }
       if (!ingredientes.length) {
         const source = pullJson?.source ? String(pullJson.source) : "";
         const key = pullJson?.usedConstraintKey ? String(pullJson.usedConstraintKey) : "";
-        showToast(`Bubble não retornou ingredientes (source=${source || "?"}${key ? `, key=${key}` : ""}).`, "error", 9000);
+        const field = pullJson?.usedItemField ? String(pullJson.usedItemField) : "";
+        showToast(`Bubble não retornou ingredientes (source=${source || "?"}${key ? `, key=${key}` : ""}${field ? `, field=${field}` : ""}).`, "error", 9000);
       } else {
-        showToast(`Ingredientes carregados do Bubble (${ingredientes.length}).`, "success", 6000);
+        const etiquetasCount = etiquetasIncoming.length;
+        showToast(`Itens carregados do Bubble (${ingredientes.length} ingredientes${etiquetasCount ? `, ${etiquetasCount} etiquetas` : ""}).`, "success", 7000);
       }
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
