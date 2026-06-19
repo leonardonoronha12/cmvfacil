@@ -624,6 +624,7 @@ export default function PrePreparoClient() {
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
   const prePreparoLoadedRef = useRef(false);
   const etiquetasLoadedRef = useRef(false);
+  const autoSyncDetailsRef = useRef<Set<string>>(new Set());
   const prePreparoSaveErrorShownRef = useRef(false);
   const etiquetasSaveErrorShownRef = useRef(false);
   const prePreparoLoadErrorShownRef = useRef(false);
@@ -1116,6 +1117,17 @@ export default function PrePreparoClient() {
     setYieldDraftQty("0,000");
     setYieldDraftUnit("Kg");
   }, [detailsRecipeId]);
+
+  useEffect(() => {
+    if (!detailsRecipeId) return;
+    if (detailsTab !== "ingredientes") return;
+    if (isSyncingDetails) return;
+    const hasIngredients = rows.some((r) => String(r.id) === String(detailsRecipeId) && Array.isArray(r.ingredientes) && r.ingredientes.length > 0);
+    if (hasIngredients) return;
+    if (autoSyncDetailsRef.current.has(detailsRecipeId)) return;
+    autoSyncDetailsRef.current.add(detailsRecipeId);
+    void syncThisPrePreparoItems();
+  }, [detailsRecipeId, detailsTab, isSyncingDetails, rows]);
 
   useEffect(() => {
     if (!isEditingYield) return;
@@ -2394,7 +2406,12 @@ export default function PrePreparoClient() {
 
                   {detailsTab === "ingredientes" ? (
                     <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
-                      <div className={ft.detailsSectionTitle}>Lista de Ingredientes</div>
+                      <div className={ft.detailsPrepHeader}>
+                        <div className={ft.detailsSectionTitle}>Lista de Ingredientes</div>
+                        <button type="button" className={ft.detailsEditBtn} onClick={() => void syncThisPrePreparoItems()} disabled={isSyncingDetails}>
+                          {isSyncingDetails ? "sincronizando..." : "sincronizar"}
+                        </button>
+                      </div>
 
                       <div className={ft.detailsIngredientBox}>
                         <div className={ft.detailsIngredientHead}>
