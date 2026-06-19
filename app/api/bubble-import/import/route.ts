@@ -1012,12 +1012,13 @@ export async function POST(req: NextRequest) {
     const fornecedorIdRaw =
       pickFirst(row, ["fornecedor_id", "id_fornecedor", "fornecedor_ref"]) ||
       pickKeyLike(row, ["fornecedor_id", "id_fornecedor"]);
-    const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) : "";
+    const fornecedorId = fornecedorIdRaw ? extractBubbleRefId(String(fornecedorIdRaw)) || extractBubbleIdFromText(String(fornecedorIdRaw)) || String(fornecedorIdRaw).trim() : "";
     let fornecedor =
       pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social"]) ||
       pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
     if (fornecedor && looksLikeId(fornecedor)) {
-      const mapped = fornState.fornecedorNameById.get(extractBubbleRefId(fornecedor.trim())) ?? "";
+      const fornId = extractBubbleRefId(fornecedor.trim()) || extractBubbleIdFromText(fornecedor.trim()) || fornecedor.trim();
+      const mapped = fornState.fornecedorNameById.get(fornId) ?? fornecedorNameById.get(fornId) ?? "";
       fornecedor = mapped || fornecedor;
     }
     if ((!fornecedor || looksLikeId(fornecedor)) && fornecedorId) {
@@ -1033,7 +1034,13 @@ export async function POST(req: NextRequest) {
     const numeroFinal = numero.trim() || `NF-${String(bubbleId).slice(0, 8)}`;
     const valor = pickFirst(row, ["valor_nota", "valor_total", "valor", "total", "subtotal"]) || pickKeyLike(row, ["valor", "total", "subtotal"]);
     const valorNum = parsePtNumber(valor);
-    const responsavel = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
+    let responsavel = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
+    const respSan = String(responsavel ?? "").trim();
+    if (respSan && looksLikeId(respSan)) {
+      const respBubbleId = extractBubbleRefId(respSan) || extractBubbleIdFromText(respSan) || respSan;
+      const email = bubbleUserIdToEmail.get(String(respBubbleId).trim()) ?? "";
+      if (email) responsavel = email;
+    }
     const dataCriacao = buildDateLabel(pickFirst(row, ["data_criacao", "created_date", "created_at", "created"]) || "");
     const notaKey = extractBubbleRefId(String(bubbleId)).trim() || String(bubbleId).trim();
     const itensList = notaItemsByNotaKey.get(notaKey) ?? notaItemsByNotaKey.get(numero) ?? notaItemsByNotaKey.get(numeroFinal) ?? [];

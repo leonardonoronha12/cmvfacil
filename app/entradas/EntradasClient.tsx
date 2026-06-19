@@ -61,6 +61,41 @@ type FornecedorItemMap = {
 
 type EntradaTableColumn = "dataLancamento" | "fornecedor" | "valorNota" | "responsavel" | "dataCriacao";
 
+function looksLikeUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function looksLikeBubbleId(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return false;
+  if (s.length < 12) return false;
+  if (!/^\d/.test(s)) return false;
+  return /^[0-9]+x[0-9x]+$/i.test(s);
+}
+
+function sanitizeUiLabel(value: string) {
+  return String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+}
+
+function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: FornecedorInfoMap) {
+  const raw = sanitizeUiLabel(fornecedorRaw);
+  if (!raw) return "-";
+  const rawUpper = raw.toUpperCase();
+  const rawNoSuffix = sanitizeUiLabel(raw.split("/")[0] ?? raw);
+  const rawNoSuffixUpper = rawNoSuffix.toUpperCase();
+  const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
+  const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
+  return labelFromState || rawNoSuffix || raw;
+}
+
+function resolveResponsavelDisplay(responsavelRaw: string, currentUserEmail: string) {
+  const raw = sanitizeUiLabel(responsavelRaw);
+  if (!raw) return "-";
+  if (raw.includes("@")) return raw;
+  if ((looksLikeBubbleId(raw) || looksLikeUuid(raw)) && currentUserEmail) return currentUserEmail;
+  return raw;
+}
+
 function IconEntrada() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -442,6 +477,7 @@ export default function EntradasClient() {
   const fornecedoresLoadErrorShownRef = useRef(false);
   const fornecedoresSaveErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
+  const [currentUserEmail, setCurrentUserEmail] = useState("");
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -457,6 +493,18 @@ export default function EntradasClient() {
   }, []);
 
   useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/debug/context", { cache: "no-store" });
+        const data = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !data?.ok) return;
+        const email = String(data?.user?.email ?? "").trim();
+        if (email) setCurrentUserEmail(email);
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
@@ -467,7 +515,8 @@ export default function EntradasClient() {
     const start = parseDateLabelLoose(dateStart);
     const end = parseDateLabelLoose(dateEnd);
     const filtered = rows.filter((r) => {
-      if (q && !r.fornecedor.toLowerCase().includes(q)) return false;
+      const fornLabel = resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap);
+      if (q && !fornLabel.toLowerCase().includes(q)) return false;
       if (!start && !end) return true;
       const d = parseDateLabelLoose(r.dataLancamento);
       if (!d) return true;
@@ -490,8 +539,10 @@ export default function EntradasClient() {
           break;
         }
         case "fornecedor":
+          cmp = collator.compare(resolveFornecedorDisplay(a.row.fornecedor, fornecedorInfoMap), resolveFornecedorDisplay(b.row.fornecedor, fornecedorInfoMap));
+          break;
         case "responsavel":
-          cmp = collator.compare(a.row[sortKey], b.row[sortKey]);
+          cmp = collator.compare(resolveResponsavelDisplay(a.row.responsavel, currentUserEmail), resolveResponsavelDisplay(b.row.responsavel, currentUserEmail));
           break;
         case "valorNota":
           cmp = parseBrlToCents(a.row.valorNota) - parseBrlToCents(b.row.valorNota);
@@ -501,7 +552,7 @@ export default function EntradasClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [dateEnd, dateStart, query, rows, sortDir, sortKey]);
+  }, [currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
 
   function toggleSort(key: EntradaTableColumn) {
     if (sortKey !== key) {
@@ -563,8 +614,14 @@ export default function EntradasClient() {
         </div>
       );
     }
-    if (column === "responsavel" || column === "dataCriacao") {
-      return <div className={styles.tdStrong}>{row[column]}</div>;
+    if (column === "fornecedor") {
+      return <div className={styles.td}>{resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap)}</div>;
+    }
+    if (column === "responsavel") {
+      return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserEmail)}</div>;
+    }
+    if (column === "dataCriacao") {
+      return <div className={styles.tdStrong}>{row.dataCriacao}</div>;
     }
     return <div className={styles.td}>{row[column]}</div>;
   }
