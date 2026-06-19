@@ -77,6 +77,14 @@ function sanitizeUiLabel(value: string) {
   return String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
 }
 
+function normalizeNotaItemName(value: unknown) {
+  const raw = sanitizeUiLabel(String(value ?? ""));
+  if (!raw) return "";
+  const k = raw.toLowerCase();
+  if (k === "false" || k === "true" || k === "null" || k === "undefined") return "";
+  return raw;
+}
+
 function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: FornecedorInfoMap) {
   const raw = sanitizeUiLabel(fornecedorRaw);
   if (!raw) return "-";
@@ -640,20 +648,20 @@ export default function EntradasClient() {
   const fornecedorItensNaNota = useMemo(() => {
     const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
     if (!fornecedor) return [];
-    return fornecedorItemMap[fornecedor] ?? [];
+    return (fornecedorItemMap[fornecedor] ?? []).filter((m) => Boolean(normalizeNotaItemName(m.nomeNaNota)));
   }, [detailsRow?.fornecedor, fornecedorItemMap]);
 
   const fornecedorProdutos = useMemo(() => {
     const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
     if (!fornecedor) return [];
-    return fornecedorProdutosMap[fornecedor] ?? [];
+    return (fornecedorProdutosMap[fornecedor] ?? []).map((p) => normalizeNotaItemName(p)).filter(Boolean);
   }, [detailsRow?.fornecedor, fornecedorProdutosMap]);
 
   const fornecedorProdutosMerged = useMemo(() => {
     const set = new Set<string>();
     const out: string[] = [];
     for (const p of fornecedorProdutos) {
-      const name = p.trim();
+      const name = normalizeNotaItemName(p);
       if (!name) continue;
       const k = name.toLowerCase();
       if (set.has(k)) continue;
@@ -661,7 +669,7 @@ export default function EntradasClient() {
       out.push(name);
     }
     for (const m of fornecedorItensNaNota) {
-      const name = m.nomeNaNota.trim();
+      const name = normalizeNotaItemName(m.nomeNaNota);
       if (!name) continue;
       const k = name.toLowerCase();
       if (set.has(k)) continue;
@@ -677,7 +685,7 @@ export default function EntradasClient() {
     const set = new Set<string>();
     const out: string[] = [];
     for (const p of fornecedorProdutosMap[key] ?? []) {
-      const name = String(p ?? "").trim();
+      const name = normalizeNotaItemName(p);
       if (!name) continue;
       const k = name.toLowerCase();
       if (set.has(k)) continue;
@@ -685,7 +693,7 @@ export default function EntradasClient() {
       out.push(name);
     }
     for (const m of fornecedorItemMap[key] ?? []) {
-      const name = m.nomeNaNota.trim();
+      const name = normalizeNotaItemName(m.nomeNaNota);
       if (!name) continue;
       const k = name.toLowerCase();
       if (set.has(k)) continue;
@@ -710,7 +718,7 @@ export default function EntradasClient() {
   }, [detailItemName, fornecedorProdutos]);
 
   const canAddNotaItem = useMemo(() => {
-    if (!detailItemName.trim()) return false;
+    if (!normalizeNotaItemName(detailItemName)) return false;
     const qty = parsePtNumber(detailQty);
     if (!Number.isFinite(qty) || qty <= 0) return false;
     const subtotalCents = parseBrlToCents(detailSubtotal);
@@ -1082,10 +1090,10 @@ export default function EntradasClient() {
   }
 
   function openFornecedorProdutosModal() {
-    const fornecedor = (detailsRow?.fornecedor ?? "").trim();
-    if (!fornecedor) return;
-    setFornecedorModalKey(fornecedor.toUpperCase());
-    setFornecedorModalLabel(fornecedor);
+    const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+    if (!fornecedorRaw) return;
+    setFornecedorModalKey(fornecedorRaw.toUpperCase());
+    setFornecedorModalLabel(resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap));
     setFornecedorProdutosSearch("");
     setFornecedorProdutosPick("");
     setIsFornecedorProdutosOpen(true);
@@ -1187,9 +1195,9 @@ export default function EntradasClient() {
   function confirmAddNotaItem() {
     const id = detailsId;
     if (!id) return;
-    const nome = detailItemName.trim();
+    const nome = normalizeNotaItemName(detailItemName);
     if (!nome) {
-      showToast("Informe o item.", "error");
+      showToast("Selecione um item válido.", "error");
       return;
     }
     const subtotalCents = parseBrlToCents(detailSubtotal);
@@ -1901,7 +1909,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Fornecedor</div>
-                      <div className={styles.sideValue}>{detailsRow.fornecedor}</div>
+                      <div className={styles.sideValue}>{resolveFornecedorDisplay(detailsRow.fornecedor, fornecedorInfoMap)}</div>
                     </div>
                   </button>
 
@@ -1921,7 +1929,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Responsável</div>
-                      <div className={styles.sideValue}>{detailsRow.responsavel}</div>
+                      <div className={styles.sideValue}>{resolveResponsavelDisplay(detailsRow.responsavel, currentUserEmail)}</div>
                     </div>
                   </div>
                 </aside>
@@ -1976,12 +1984,12 @@ export default function EntradasClient() {
                                   type="button"
                                   className={styles.itemOption}
                                   onClick={() => {
-                                    setDetailItemName(m.nomeNaNota);
+                                    setDetailItemName(normalizeNotaItemName(m.nomeNaNota) || "");
                                     setDetailUnit(m.unidadeNaNota);
                                     setIsItemMenuOpen(false);
                                   }}
                                 >
-                                  {m.nomeNaNota}
+                                  {normalizeNotaItemName(m.nomeNaNota) || "-"}
                                 </button>
                               ))}
                               {filteredFornecedorProdutos
@@ -1992,7 +2000,7 @@ export default function EntradasClient() {
                                     type="button"
                                     className={styles.itemOption}
                                     onClick={() => {
-                                      setDetailItemName(name);
+                                      setDetailItemName(normalizeNotaItemName(name) || "");
                                       const fornecedorKey = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
                                       const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
                                       const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
@@ -2000,7 +2008,7 @@ export default function EntradasClient() {
                                       setIsItemMenuOpen(false);
                                     }}
                                   >
-                                    {name}
+                                    {normalizeNotaItemName(name) || "-"}
                                   </button>
                                 ))}
                               {!filteredNotaItems[0] && !filteredFornecedorProdutos[0] ? (
@@ -2137,12 +2145,14 @@ export default function EntradasClient() {
                     {(detailsRow.itensNota ?? []).map((it) => (
                       <div key={it.id} className={styles.itemsRow}>
                         <div className={styles.itemsNameWrap}>
-                          <div className={styles.itemsName}>{it.nome}</div>
+                          <div className={styles.itemsName}>{normalizeNotaItemName((it as any).nome) || "-"}</div>
                           <div className={styles.itemsEq}>
                             {(() => {
                               const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                              const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === it.nome.toLowerCase()) ?? null;
-                              const eq = map?.insumoEquivalente ?? (insumosByName.get(it.nome.toLowerCase()) ? it.nome : "");
+                              const nome = normalizeNotaItemName((it as any).nome);
+                              if (!nome) return "-";
+                              const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
+                              const eq = map?.insumoEquivalente ?? (insumosByName.get(nome.toLowerCase()) ? nome : "");
                               return eq || "-";
                             })()}
                           </div>
@@ -2150,7 +2160,9 @@ export default function EntradasClient() {
                         <div className={styles.itemsQty}>
                           {(() => {
                             const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                            const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === it.nome.toLowerCase()) ?? null;
+                            const nome = normalizeNotaItemName((it as any).nome);
+                            if (!nome) return it.quantidadeLabel;
+                            const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
                             const factor = map ? parsePtNumber(map.equivalenteQuantidade) : 0;
                             if (!map || !factor) return it.quantidadeLabel;
                             const { qty } = parseQtyLabel(it.quantidadeLabel);
@@ -2170,7 +2182,9 @@ export default function EntradasClient() {
                           <div className={styles.itemsUnitCost}>
                             {(() => {
                               const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                              const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === it.nome.toLowerCase()) ?? null;
+                              const nome = normalizeNotaItemName((it as any).nome);
+                              if (!nome) return it.custoUnitarioLabel;
+                              const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
                               const factor = map ? parsePtNumber(map.equivalenteQuantidade) : 0;
                               if (!map || !factor) return it.custoUnitarioLabel;
                               const { qty } = parseQtyLabel(it.quantidadeLabel);
