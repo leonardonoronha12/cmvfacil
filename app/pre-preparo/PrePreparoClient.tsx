@@ -656,6 +656,8 @@ export default function PrePreparoClient() {
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [etiquetasRows, setEtiquetasRows] = useState<PrePreparoEtiquetaRow[]>([]);
+  const [etiquetasResponsavelFilter, setEtiquetasResponsavelFilter] = useState("Responsável");
+  const [etiquetasSortMode, setEtiquetasSortMode] = useState<"Mais Antigo (Validade)" | "Mais Novo (Validade)">("Mais Antigo (Validade)");
   const [isSyncingDetails, setIsSyncingDetails] = useState(false);
   const [isBubbleCredsOpen, setIsBubbleCredsOpen] = useState(false);
   const [bubbleBaseUrlDraft, setBubbleBaseUrlDraft] = useState("");
@@ -801,6 +803,8 @@ export default function PrePreparoClient() {
               custo: String((raw as any).custo ?? "R$0,00").trim() || "R$0,00",
               dataProducao: String((raw as any).dataProducao ?? "-").trim() || "-",
               dataValidade,
+              code: String((raw as any).code ?? "").trim() || undefined,
+              createdAt: String((raw as any).createdAt ?? "").trim() || undefined,
               wasteStatus: String((raw as any).wasteStatus ?? "pending").trim() || "pending",
             });
           }
@@ -1964,6 +1968,11 @@ export default function PrePreparoClient() {
     return rows.find((r) => r.id === detailsRecipeId) ?? null;
   }, [detailsRecipeId, rows]);
 
+  useEffect(() => {
+    setEtiquetasResponsavelFilter("Responsável");
+    setEtiquetasSortMode("Mais Antigo (Validade)");
+  }, [detailsRecipeId]);
+
   const detailsEtiquetas = useMemo(() => {
     if (!detailsRecipeId) return [];
     return etiquetasRows
@@ -1981,6 +1990,34 @@ export default function PrePreparoClient() {
         return String(b.id ?? "").localeCompare(String(a.id ?? ""), "pt-BR");
       });
   }, [detailsRecipeId, etiquetasRows]);
+
+  const detailsEtiquetaResponsaveis = useMemo(() => {
+    const set = new Set<string>();
+    for (const e of detailsEtiquetas) {
+      const name = String(e.responsavel ?? "").trim();
+      if (name) set.add(name);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [detailsEtiquetas]);
+
+  const detailsEtiquetasView = useMemo(() => {
+    let list = detailsEtiquetas;
+    if (etiquetasResponsavelFilter !== "Responsável") {
+      list = list.filter((e) => String(e.responsavel ?? "").trim() === etiquetasResponsavelFilter);
+    }
+    const next = list.slice().sort((a, b) => {
+      const ad = parseDateLabelLoose(String(a.dataValidade ?? "")) ?? parseDateLabelLoose(String(a.dataProducao ?? ""));
+      const bd = parseDateLabelLoose(String(b.dataValidade ?? "")) ?? parseDateLabelLoose(String(b.dataProducao ?? ""));
+      const at = ad ? new Date(ad.getFullYear(), ad.getMonth(), ad.getDate()).getTime() : 0;
+      const bt = bd ? new Date(bd.getFullYear(), bd.getMonth(), bd.getDate()).getTime() : 0;
+      if (at !== bt) return etiquetasSortMode === "Mais Antigo (Validade)" ? at - bt : bt - at;
+      const aid = Number.parseInt(String(a.id ?? ""), 10);
+      const bid = Number.parseInt(String(b.id ?? ""), 10);
+      if (Number.isFinite(bid) && Number.isFinite(aid) && bid !== aid) return bid - aid;
+      return String(b.id ?? "").localeCompare(String(a.id ?? ""), "pt-BR");
+    });
+    return next;
+  }, [detailsEtiquetas, etiquetasResponsavelFilter, etiquetasSortMode]);
 
   const ingredientOptionGroups = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
@@ -2136,6 +2173,48 @@ export default function PrePreparoClient() {
     return Boolean(newRecipeName.trim() && newRecipeCategory && newRecipeUnit && newRecipeIngredients.length && recipeYieldValue > 0);
   }, [newRecipeCategory, newRecipeIngredients.length, newRecipeName, newRecipeUnit, recipeYieldValue]);
 
+  function hashCode7(input: string) {
+    const s = String(input ?? "").trim();
+    if (!s) return "";
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i += 1) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    const base = Math.abs(h >>> 0).toString(36).toUpperCase();
+    return base.padStart(7, "0").slice(0, 7);
+  }
+
+  function formatEtiquetaQtyNoSpace(qtyLabel: string, unitLabel: string) {
+    const unit = String(unitLabel ?? "").trim() || "Und";
+    const n = parsePtNumber(String(qtyLabel ?? ""));
+    if (!Number.isFinite(n) || n <= 0) {
+      const raw = String(qtyLabel ?? "").trim() || "0";
+      return `${raw}${unit}`;
+    }
+    const qty = n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+    return `${qty}${unit}`;
+  }
+
+  function formatEtiquetaCreatedMeta(e: PrePreparoEtiquetaRow) {
+    const code = String(e.code ?? "").trim() || hashCode7(String(e.id ?? ""));
+    const created = e.createdAt ? new Date(e.createdAt) : null;
+    if (created && Number.isFinite(created.getTime())) {
+      const date = created.toLocaleDateString("pt-BR");
+      const time = created.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      return `#${code} • Criado em ${date} às ${time}`;
+    }
+    const prod = String(e.dataProducao ?? "").trim();
+    if (prod) return `#${code} • Produção ${prod}`;
+    return `#${code}`;
+  }
+
+  function deleteEtiquetaRow(id: string) {
+    const target = String(id ?? "").trim();
+    if (!target) return;
+    setEtiquetasRows((prev) => prev.filter((e) => String(e.id) !== target));
+  }
+
   async function downloadEtiquetaPdf(label: {
     receita: string;
     responsavel: string;
@@ -2143,6 +2222,8 @@ export default function PrePreparoClient() {
     unidade: string;
     dataProducao: string;
     dataValidade: string;
+    code?: string;
+    createdAt?: string;
   }) {
     const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
     const doc = await PDFDocument.create();
@@ -2205,7 +2286,11 @@ export default function PrePreparoClient() {
     page.drawLine({ start: { x: margin + 16, y: y + 6 }, end: { x: pageW - margin - 16, y: y + 6 }, thickness: 1.2, color: rgb(0.82, 0.84, 0.86) });
 
     const now = new Date();
-    const footer = `Impresso em ${formatDateNumeric(now)} às ${now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} · Por CMV Fácil`;
+    const code = String(label.code ?? "").trim();
+    const created = label.createdAt ? new Date(label.createdAt) : null;
+    const base = created && Number.isFinite(created.getTime()) ? created : now;
+    const stamp = `Criado em ${formatDateNumeric(base)} às ${base.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`;
+    const footer = `${code ? `#${code} · ` : ""}${stamp} · Por CMV Fácil`;
     page.drawText(footer, { x: margin + 16, y: margin + 12, size: 9, font, color: rgb(0.4, 0.43, 0.46) });
 
     const bytes = await doc.save();
@@ -2232,8 +2317,10 @@ export default function PrePreparoClient() {
     const dataValidade = parseDateLabelLoose(etiquetaDataVal);
     if (!Number.isFinite(quantidade) || quantidade <= 0 || !dataProducao || !dataValidade) return;
     const custoCents = computeEtiquetaCostCents(etiquetaSelectedRecipe, quantidade, etiquetaUnidade);
+    const createdAt = new Date().toISOString();
+    const id = String(Date.now());
     const next = {
-      id: String(Date.now()),
+      id,
       recipeId: etiquetaSelectedRecipe.id,
       receita: etiquetaSelectedRecipe.receita,
       responsavel: etiquetaResponsavel.trim(),
@@ -2242,6 +2329,8 @@ export default function PrePreparoClient() {
       custo: formatCurrencyBRLFromCents(custoCents),
       dataProducao: formatDateLabel(dataProducao),
       dataValidade: formatDateLabel(dataValidade),
+      code: hashCode7(id),
+      createdAt,
       wasteStatus: "pending" as const,
     };
     setEtiquetasRows((prev) => [next, ...prev]);
@@ -2751,35 +2840,64 @@ export default function PrePreparoClient() {
                     </div>
                   ) : (
                     <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
-                      <div className={ft.detailsSectionTitle}>{`Etiquetas (${detailsEtiquetas.length})`}</div>
-                      <div className={ft.detailsTableWrap}>
-                        <table className={ft.detailsTable}>
-                          <thead>
-                            <tr>
-                              <th className={ft.detailsTh}>Produção</th>
-                              <th className={ft.detailsTh}>Validade</th>
-                              <th className={ft.detailsThRight}>Quantidade</th>
-                              <th className={ft.detailsTh}>Responsável</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {detailsEtiquetas.map((e) => (
-                              <tr key={e.id} className={ft.detailsTr}>
-                                <td className={ft.detailsTd}>{e.dataProducao || "-"}</td>
-                                <td className={ft.detailsTd}>{e.dataValidade || "-"}</td>
-                                <td className={ft.detailsTdRight}>{`${e.quantidade} ${e.unidade}`}</td>
-                                <td className={ft.detailsTdStrong}>{e.responsavel || "-"}</td>
-                              </tr>
+                      <div className={styles.etiquetasHeader}>
+                        <div className={styles.etiquetasHeaderTitle}>{`Etiquetas em Uso (${detailsEtiquetasView.length})`}</div>
+                        <div className={styles.etiquetasHeaderControls}>
+                          <select className={styles.etiquetasHeaderSelect} value={etiquetasResponsavelFilter} onChange={(e) => setEtiquetasResponsavelFilter(e.target.value)}>
+                            <option value="Responsável">Responsável</option>
+                            {detailsEtiquetaResponsaveis.map((name) => (
+                              <option key={name} value={name}>
+                                {name}
+                              </option>
                             ))}
-                            {!detailsEtiquetas.length ? (
-                              <tr className={ft.detailsTr}>
-                                <td className={ft.detailsTdMuted} colSpan={4}>
-                                  Nenhuma etiqueta cadastrada.
-                                </td>
-                              </tr>
-                            ) : null}
-                          </tbody>
-                        </table>
+                          </select>
+                          <select className={styles.etiquetasHeaderSelect} value={etiquetasSortMode} onChange={(e) => setEtiquetasSortMode(e.target.value as any)}>
+                            <option value="Mais Antigo (Validade)">Mais Antigo (Validade)</option>
+                            <option value="Mais Novo (Validade)">Mais Novo (Validade)</option>
+                          </select>
+                          <button type="button" className={styles.etiquetasNewBtn} onClick={() => openEtiquetaModal(detailsRow)} disabled={!detailsRow}>
+                            <span className={styles.etiquetasNewPlus} aria-hidden>
+                              +
+                            </span>
+                            Nova Etiqueta
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className={styles.etiquetasCards}>
+                        {detailsEtiquetasView.map((e) => (
+                          <div key={e.id} className={styles.etiquetaCard}>
+                            <div className={styles.etiquetaCardTop}>
+                              <div className={styles.etiquetaCardQty}>{formatEtiquetaQtyNoSpace(e.quantidade, e.unidade)}</div>
+                              <div className={styles.etiquetaCardMeta}>{formatEtiquetaCreatedMeta(e)}</div>
+                            </div>
+
+                            <div className={styles.etiquetaCardLines}>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Responsável:</div>
+                                <div className={styles.etiquetaCardValue}>{e.responsavel || "-"}</div>
+                              </div>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Data Produção:</div>
+                                <div className={styles.etiquetaCardValue}>{e.dataProducao || "-"}</div>
+                              </div>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Data de Validade:</div>
+                                <div className={styles.etiquetaCardValue}>{e.dataValidade || "-"}</div>
+                              </div>
+                            </div>
+
+                            <div className={styles.etiquetaCardActions}>
+                              <button type="button" className={styles.etiquetaCardIconBtn} aria-label="Excluir etiqueta" onClick={() => deleteEtiquetaRow(e.id)}>
+                                <DetailsTrashIcon />
+                              </button>
+                              <button type="button" className={styles.etiquetaCardPrintBtn} onClick={() => void downloadEtiquetaPdf(e)}>
+                                Imprimir
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {!detailsEtiquetasView.length ? <div className={styles.etiquetasEmpty}>Nenhuma etiqueta cadastrada.</div> : null}
                       </div>
                     </div>
                   )}

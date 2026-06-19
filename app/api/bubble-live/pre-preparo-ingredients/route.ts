@@ -107,6 +107,12 @@ function formatDateDDMMYYYY(d: Date) {
   return `${dd}/${mm}/${yyyy}`;
 }
 
+function formatTimeHHMM(d: Date) {
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mm = String(d.getMinutes()).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
 function parseDateLoose(value: unknown) {
   if (!value) return null;
   if (value instanceof Date && Number.isFinite(value.getTime())) return value;
@@ -230,6 +236,27 @@ function parseQtyAndUnitFromLabel(raw: string) {
   const qty = parsePtNumber(m[1]);
   const unit = normalizeUnit(m[2]);
   return { qty, unit };
+}
+
+function hashCode7(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const base = Math.abs(h >>> 0).toString(36).toUpperCase();
+  return base.padStart(7, "0").slice(0, 7);
+}
+
+function pickEtiquetaCode(obj: any, fallbackId: string) {
+  const direct = getFieldLoose(obj, ["codigo", "code", "hash", "short_id", "shortId", "uid", "identificador"]);
+  const s = String(direct ?? "").trim();
+  if (s && s.length <= 16) return s.replace(/^#/, "");
+  const f = String(fallbackId ?? "").trim();
+  if (!f) return "";
+  return hashCode7(f);
 }
 
 function formatQtyFixed3(n: number) {
@@ -456,6 +483,8 @@ export async function POST(req: NextRequest) {
       custo: string;
       dataProducao: string;
       dataValidade: string;
+      code?: string;
+      createdAt?: string;
       wasteStatus?: "pending" | "launched" | "ignored";
     }> = [];
 
@@ -515,6 +544,11 @@ export async function POST(req: NextRequest) {
               const dataValidade = valDate ? formatDateDDMMYYYY(valDate) : "";
               if (!dataValidade) continue;
 
+              const createdRaw = getFieldLoose(obj, ["Created Date", "created_date", "createdAt", "created_at", "created"]);
+              const createdDate = parseDateLoose(createdRaw);
+              const createdAt = createdDate ? createdDate.toISOString() : "";
+              const code = pickEtiquetaCode(obj, bubbleId);
+
               const respRaw = getFieldLoose(obj, ["responsavel", "usuario", "user", "criador", "created_by", "Created By"]);
               const responsavel = String((respRaw as any)?.name ?? respRaw ?? "").trim();
               const custoRaw = getFieldLoose(obj, ["custo", "valor", "subtotal", "total", "custo_total", "cost", "price"]);
@@ -531,6 +565,8 @@ export async function POST(req: NextRequest) {
                 custo,
                 dataProducao: dataProducao || "-",
                 dataValidade,
+                code: code || undefined,
+                createdAt: createdAt || undefined,
                 wasteStatus: "pending",
               });
             }

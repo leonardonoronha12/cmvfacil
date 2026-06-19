@@ -10,6 +10,8 @@ export type PrePreparoEtiquetaRow = {
   custo: string;
   dataProducao: string;
   dataValidade: string;
+  code?: string;
+  createdAt?: string;
   wasteStatus?: "pending" | "launched" | "ignored";
 };
 
@@ -28,6 +30,8 @@ function normalizeRow(input: unknown): PrePreparoEtiquetaRow | null {
   const custo = String(r.custo ?? "").trim();
   const dataProducao = String(r.dataProducao ?? "").trim();
   const dataValidade = String(r.dataValidade ?? "").trim();
+  const code = String(r.code ?? "").trim();
+  const createdAt = String(r.createdAt ?? "").trim();
   if (!id || !recipeId || !receita || !quantidade || !unidade || !dataValidade) return null;
   const wsRaw = String(r.wasteStatus ?? "").trim().toLowerCase();
   const wasteStatus: "pending" | "launched" | "ignored" = wsRaw === "launched" ? "launched" : wsRaw === "ignored" ? "ignored" : "pending";
@@ -41,6 +45,8 @@ function normalizeRow(input: unknown): PrePreparoEtiquetaRow | null {
     custo,
     dataProducao,
     dataValidade,
+    code: code || undefined,
+    createdAt: createdAt || undefined,
     wasteStatus,
   };
 }

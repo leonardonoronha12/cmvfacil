@@ -1764,3 +1764,165 @@
 .toastError {
   border-color: rgba(239, 68, 68, 0.35);
 }
+
+.etiquetasHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.etiquetasHeaderTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.etiquetasHeaderControls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.etiquetasHeaderSelect {
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  color: #01040e;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.etiquetasNewBtn {
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #01040e;
+  background: #01040e;
+  color: #ffffff;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.etiquetasNewBtn:disabled {
+  border-color: #e1e5e4;
+  background: #e1e5e4;
+  color: #95a8a6;
+  cursor: not-allowed;
+}
+
+.etiquetasNewPlus {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.etiquetasCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 420px));
+  gap: 14px;
+}
+
+.etiquetasEmpty {
+  padding: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #95a8a6;
+}
+
+.etiquetaCard {
+  border: 1px solid #eef1f1;
+  border-radius: 12px;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.etiquetaCardTop {
+  padding: 12px 14px 10px;
+}
+
+.etiquetaCardQty {
+  font-size: 18px;
+  font-weight: 900;
+  color: #01040e;
+  line-height: 20px;
+}
+
+.etiquetaCardMeta {
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 800;
+  color: #95a8a6;
+}
+
+.etiquetaCardLines {
+  padding: 10px 14px 12px;
+  background: #f7f8f8;
+  border-top: 1px solid #eef1f1;
+  border-bottom: 1px solid #eef1f1;
+}
+
+.etiquetaCardLine {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 6px 0;
+  gap: 12px;
+}
+
+.etiquetaCardLabel {
+  font-size: 12px;
+  font-weight: 900;
+  color: #01040e;
+}
+
+.etiquetaCardValue {
+  font-size: 12px;
+  font-weight: 900;
+  color: #01040e;
+  text-align: right;
+}
+
+.etiquetaCardActions {
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.etiquetaCardIconBtn {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #eef1f1;
+  background: #ffffff;
+  color: #01040e;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.etiquetaCardPrintBtn {
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid #01040e;
+  background: #01040e;
+  color: #ffffff;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
