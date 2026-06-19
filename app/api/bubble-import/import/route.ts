@@ -1358,25 +1358,33 @@ export async function POST(req: NextRequest) {
         : categoriasById.get(String(catIdRaw ?? "").trim()) ?? "";
       const catLabel = catName || String(catIdRaw ?? "").trim();
       const catMatches = catNameLooksLikePrePreparo(catLabel);
-      const recipeSignals =
-        pickFirst(row, [
-          "boolean_item_receita",
-          "custo_total_receita",
-          "custoTotalReceita",
-          "rendimento",
-          "yield",
-          "rendimento_receita",
-          "qtde_rendimento",
-          "porcao",
-          "porcoes",
-          "dias_validade",
-          "validade_dias",
-          "validadeDias",
-          "validade",
-          "recipe_yield",
-          "recipeYield",
-        ]) || pickKeyLike(row, ["boolean_item_receita", "item_receita", "custo_total_receita", "custo", "rendimento", "yield", "porcao", "validade"]);
-      if (!catMatches && !String(recipeSignals ?? "").trim()) return;
+      const flagRaw =
+        pickFirst(row, ["boolean_item_receita", "item_receita", "is_receita", "is_receita_bool", "isRecipe"]) ||
+        pickKeyLike(row, ["boolean_item_receita", "item_receita", "is_receita"], { excludeParts: ["url", "nome", "name"] });
+      const flag = String(flagRaw ?? "").trim().toLowerCase();
+      const isRecipeFlag = flag === "true" || flag === "sim" || flag === "1" || flag === "yes";
+
+      const modoPreparoRaw = pickFirst(row, ["modo_preparo", "modoPreparo"]) || pickKeyLike(row, ["modo", "preparo"]) || "";
+      const hasModoPreparo = Boolean(String(modoPreparoRaw ?? "").trim());
+
+      const yieldRaw = pickFirst(row, ["rendimento", "yield", "rendimento_receita", "porcao", "porcoes", "qtde_rendimento", "recipe_yield", "recipeYield"]) || pickKeyLike(row, ["rendimento", "yield", "porcao"]);
+      const yieldNum = parsePtNumber(yieldRaw);
+      const hasYield = yieldNum > 0;
+
+      const validade = pickFirst(row, ["dias_validade", "validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
+      const validadeDiasNumValue = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : 0;
+      const hasValidity = validadeDiasNumValue > 0;
+
+      const custoReceitaRaw = pickFirst(row, ["custo_total_receita", "custoTotalReceita", "custo_total_receita_label", "custoTotalReceitaLabel"]);
+      const custoReceitaNum = parsePtNumber(custoReceitaRaw);
+      const hasRecipeCost = custoReceitaNum > 0;
+
+      const ingredientRefsRaw =
+        pickFirst(row, ["ingredients", "ingredientes", "ingredient_rows", "ingredientRows", "ingredient_list", "ingredients_list"]) ||
+        pickKeyLike(row, ["ingredients", "ingredientes", "ingredient"]);
+      const hasIngredientRefs = Boolean(ingredientRefsRaw && String(ingredientRefsRaw).trim().startsWith("["));
+
+      if (!catMatches && !isRecipeFlag && !hasIngredientRefs && !(hasYield && (hasValidity || hasRecipeCost || hasModoPreparo))) return;
 
       const receita = guessItemLabel(row);
       if (!receita) return;
@@ -1389,21 +1397,15 @@ export async function POST(req: NextRequest) {
       const totalNum = parsePtNumber(custoTotalRaw);
       const custoTotal = totalNum ? formatMoneyBRL(totalNum) : String(custoTotalRaw ?? "").trim() || "-";
 
-      const yieldRaw = pickFirst(row, ["rendimento", "yield", "rendimento_receita", "porcao", "porcoes", "qtde_rendimento"]) || pickKeyLike(row, ["rendimento", "yield", "porcao"]);
       const yieldUnit =
         pickFirst(row, ["unidade_rendimento", "unidade", "medida", "item_medida", "unidade_medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
-      const yieldNum = parsePtNumber(yieldRaw);
       const rendimento = yieldNum ? `${yieldNum.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 })}${yieldUnit ? yieldUnit : ""}` : `${String(yieldRaw ?? "").trim() || "1"}${yieldUnit ? yieldUnit : ""}`;
 
       const unitCost = yieldNum > 0 && totalNum > 0 ? totalNum / yieldNum : 0;
       const custoUnitario = unitCost > 0 ? `${formatMoneyBRL(unitCost)} / ${yieldUnit}` : "-";
 
-      const validade = pickFirst(row, ["dias_validade", "validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
-      const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
+      const validadeDiasNum = hasValidity ? validadeDiasNumValue : undefined;
 
-      const ingredientRefsRaw =
-        pickFirst(row, ["ingredients", "ingredientes", "ingredient_rows", "ingredientRows", "ingredient_list", "ingredients_list"]) ||
-        pickKeyLike(row, ["ingredients", "ingredientes", "ingredient"]);
       let ingredientRefsParsed: any[] | undefined;
       if (ingredientRefsRaw && (ingredientRefsRaw.trim().startsWith("[") || ingredientRefsRaw.trim().startsWith("{"))) {
         try {
