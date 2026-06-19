@@ -923,6 +923,15 @@ function prePreparoInventoryId(id: string) {
   return `prep:${id}`;
 }
 
+function isPrePreparoInventoryId(value: string) {
+  return String(value ?? "").startsWith("prep:");
+}
+
+function extractPrePreparoIdFromInventoryId(value: string) {
+  const raw = String(value ?? "");
+  return raw.startsWith("prep:") ? raw.slice("prep:".length).trim() : "";
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -1771,226 +1780,234 @@ export default function DashboardClient() {
     parsePtNumber(targetCmv) <= 99;
 
   function handleCalculate() {
-    if (!canCalculate) {
-      setCalcError("Preencha datas, faturamento e CMV meta para calcular.");
-      return;
-    }
-    setCalcError("");
-    const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? inventoryOptions.find((o) => o.label === startDate) ?? null;
-    const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? inventoryOptions.find((o) => o.label === endDate) ?? null;
-    if (!startOpt || !endOpt) {
-      setCalcError("Cadastre pelo menos 2 inventários para calcular o CMV.");
-      return;
-    }
-
-    const startD = parseDateDDMMYYYY(startOpt.label);
-    const endD = parseDateDDMMYYYY(endOpt.label);
-    if (!startD || !endD) {
-      setCalcError("As datas de inventário precisam estar no formato DD/MM/AAAA.");
-      return;
-    }
-
-    const startT = startOfDay(startD).getTime();
-    const endT = startOfDay(endD).getTime();
-    const minT = Math.min(startT, endT);
-    const maxT = Math.max(startT, endT);
-
-    const contagemStart = contagens.find((c) => c.data === startOpt.label) ?? null;
-    const contagemEnd = contagens.find((c) => c.data === endOpt.label) ?? null;
-    if (!contagemStart || !contagemEnd) {
-      setCalcError("Não foi possível localizar os inventários selecionados.");
-      return;
-    }
-
-    const initialById = new Map<string, number>();
-    const finalById = new Map<string, number>();
-    const unitStartById = new Map<string, string>();
-    const unitEndById = new Map<string, string>();
-    for (const cat of contagemStart.categorias ?? []) {
-      for (const it of cat.itens ?? []) {
-        if (Boolean((it as any).removido)) continue;
-        initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
-        const u = String((it as any).unidade ?? "").trim();
-        if (u) unitStartById.set(it.id, u);
+    try {
+      if (!canCalculate) {
+        setCalcError("Preencha datas, faturamento e CMV meta para calcular.");
+        return;
       }
-    }
-    for (const cat of contagemEnd.categorias ?? []) {
-      for (const it of cat.itens ?? []) {
-        if (Boolean((it as any).removido)) continue;
-        finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
-        const u = String((it as any).unidade ?? "").trim();
-        if (u) unitEndById.set(it.id, u);
+      setCalcError("");
+      const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? inventoryOptions.find((o) => o.label === startDate) ?? null;
+      const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? inventoryOptions.find((o) => o.label === endDate) ?? null;
+      if (!startOpt || !endOpt) {
+        setCalcError("Cadastre pelo menos 2 inventários para calcular o CMV.");
+        return;
       }
-    }
-    const unitById = new Map<string, string>();
-    for (const [id, u] of unitEndById.entries()) unitById.set(id, u);
-    for (const [id, u] of unitStartById.entries()) if (!unitById.has(id)) unitById.set(id, u);
 
-    const insumoIdByKey = new Map<string, string>();
-    const ocultarByInsumoId = new Map<string, boolean>();
-    const insumoNameById = new Map<string, string>();
-    for (const i of insumos) {
-      ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
-      const key = normalizeKey(i.item);
-      if (!key) continue;
-      if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
-      const id = String(i.id ?? "").trim();
-      if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
-    }
+      const startD = parseDateDDMMYYYY(startOpt.label);
+      const endD = parseDateDDMMYYYY(endOpt.label);
+      if (!startD || !endD) {
+        setCalcError("As datas de inventário precisam estar no formato DD/MM/AAAA.");
+        return;
+      }
 
-    const entradasQtyById = new Map<string, number>();
-    const entradasCentsById = new Map<string, number>();
-    let comprasCents = 0;
-    for (const e of entradas) {
-      const d = parseDateLabelLoose(e.dataLancamento);
-      if (!d) continue;
-      const t = startOfDay(d).getTime();
-      if (t < minT || t > maxT) continue;
+      const startT = startOfDay(startD).getTime();
+      const endT = startOfDay(endD).getTime();
+      const minT = Math.min(startT, endT);
+      const maxT = Math.max(startT, endT);
 
-      if (e.itensNota?.length) {
-        const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
-        for (const it of e.itensNota) {
-          const rawNome = String(it.nome ?? "").trim();
-          const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
-          const rawKey = normalizeKey(resolvedNome);
-          let mappedKey = rawKey;
-          let fator = 1;
-          const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
-          if (eq) {
-            mappedKey = normalizeKey(eq.insumoEquivalente);
-            const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
-            if (Number.isFinite(f) && f > 0) fator = f;
-          }
-          const id = insumoIdByKey.get(mappedKey);
-          const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
-          const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-          const qtyEq = qty * fator;
-          if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
+      const contagemStart = contagens.find((c) => c.data === startOpt.label) ?? null;
+      const contagemEnd = contagens.find((c) => c.data === endOpt.label) ?? null;
+      if (!contagemStart || !contagemEnd) {
+        setCalcError("Não foi possível localizar os inventários selecionados.");
+        return;
+      }
 
-          let sub = parseBrlToCents(it.subtotalLabel ?? "");
-          if (!sub) {
-            const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
-            if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
-          }
-
-          if (sub && (!id || !isHidden)) comprasCents += sub;
-          if (id && !isHidden && sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
+      const initialById = new Map<string, number>();
+      const finalById = new Map<string, number>();
+      const unitStartById = new Map<string, string>();
+      const unitEndById = new Map<string, string>();
+      for (const cat of contagemStart.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if (Boolean((it as any).removido)) continue;
+          initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+          const u = String((it as any).unidade ?? "").trim();
+          if (u) unitStartById.set(it.id, u);
         }
-      } else {
-        comprasCents += parseBrlToCents(e.valorNota ?? "");
       }
-    }
-
-    const computedRows: Row[] = [];
-    let initialCents = 0;
-    let finalCents = 0;
-    let saidasCents = 0;
-
-    const prePreparoItems = prePreparo.map((r) => {
-      const { qty: yieldQty, unit: yieldUnit } = parseQtyLabel(String(r.rendimento ?? ""));
-      let totalCents = 0;
-      for (const ing of r.ingredientes ?? []) {
-        const itemKey = normalizeKey(String(ing.item ?? ""));
-        if (!itemKey) continue;
-        const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
-        if (!ins) continue;
-        const unitCost = avgUnitCostCentsByInsumoId.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
-        if (!unitCost) continue;
-        const qty = parsePtNumber(String(ing.quantidade ?? ""));
-        if (!Number.isFinite(qty) || qty <= 0) continue;
-        const fromUnit = String(ing.unidade ?? "").trim() || String(ins.medida ?? "Und").trim() || "Und";
-        const toUnit = String(ins.medida ?? "Und").trim() || "Und";
-        const qtyInBase = fromUnit ? convertQty(qty, fromUnit, toUnit) : qty;
-        const finalQty = Number.isFinite(qtyInBase) && qtyInBase > 0 ? qtyInBase : qty;
-        totalCents += Math.round(unitCost * finalQty);
+      for (const cat of contagemEnd.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if (Boolean((it as any).removido)) continue;
+          finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+          const u = String((it as any).unidade ?? "").trim();
+          if (u) unitEndById.set(it.id, u);
+        }
       }
-      const unitCents = yieldQty > 0 && totalCents > 0 ? Math.round(totalCents / yieldQty) : 0;
-      return {
-        id: prePreparoInventoryId(r.id),
-        item: r.receita,
-        categoria: r.categoria ?? "-",
-        medida: (yieldUnit || "Und").trim() || "Und",
-        yieldUnit: (yieldUnit || "Und").trim() || "Und",
-        custoUnitCents: unitCents,
-      };
-    });
+      const unitById = new Map<string, string>();
+      for (const [id, u] of unitEndById.entries()) unitById.set(id, u);
+      for (const [id, u] of unitStartById.entries()) if (!unitById.has(id)) unitById.set(id, u);
 
-    const list = [
-      ...insumos.filter((i) => !i.ocultar).map((i) => ({ kind: "insumo" as const, id: i.id, item: i.item, categoria: i.categoria ?? "-", medida: i.medida || "Und", custoInicial: String(i.custoMedio ?? "") })),
-      ...prePreparoItems.map((p) => ({ kind: "prepreparo" as const, id: p.id, item: p.item, categoria: p.categoria, medida: p.medida, custoUnitCents: p.custoUnitCents })),
-    ].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
+      const insumoIdByKey = new Map<string, string>();
+      const ocultarByInsumoId = new Map<string, boolean>();
+      const insumoNameById = new Map<string, string>();
+      for (const i of insumos) {
+        ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
+        const key = normalizeKey(i.item);
+        if (!key) continue;
+        if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
+        const id = String(i.id ?? "").trim();
+        if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+      }
 
-    for (const i of list) {
-      const inventoryUnit = (unitById.get(i.id) ?? "").trim();
-      const unit = inventoryUnit || i.medida || "Und";
-      const initialQty = initialById.get(i.id) ?? 0;
-      const finalQty = finalById.get(i.id) ?? 0;
-      const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
-      const saidasQty = initialQty + entradasQty - finalQty;
-      const baseCostCents =
-        i.kind === "insumo" ? avgUnitCostCentsByInsumoId.get(i.id) ?? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
-      const baseUnit = i.medida || "Und";
-      const qtyInBaseForOne = unit ? convertQty(1, unit, baseUnit) : 1;
-      const unitCostCents = Number.isFinite(qtyInBaseForOne) && qtyInBaseForOne > 0 ? Math.round(baseCostCents * qtyInBaseForOne) : baseCostCents;
-      const initialValCents = Math.round(initialQty * unitCostCents);
-      const itemFinalCents = Math.round(finalQty * unitCostCents);
-      const itemSaidasCents = Math.round(saidasQty * unitCostCents);
-      initialCents += initialValCents;
-      finalCents += itemFinalCents;
-      saidasCents += itemSaidasCents;
+      const entradasQtyById = new Map<string, number>();
+      const entradasCentsById = new Map<string, number>();
+      let comprasCents = 0;
+      for (const e of entradas) {
+        const d = parseDateLabelLoose(e.dataLancamento);
+        if (!d) continue;
+        const t = startOfDay(d).getTime();
+        if (t < minT || t > maxT) continue;
 
-      const cmvTone: Row["cmvTone"] = saidasQty < 0 ? "red" : "green";
+        if (e.itensNota?.length) {
+          const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
+          for (const it of e.itensNota) {
+            const rawNome = String(it.nome ?? "").trim();
+            const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
+            const rawKey = normalizeKey(resolvedNome);
+            let mappedKey = rawKey;
+            let fator = 1;
+            const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
+            if (eq) {
+              mappedKey = normalizeKey(eq.insumoEquivalente);
+              const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
+              if (Number.isFinite(f) && f > 0) fator = f;
+            }
+            const id = insumoIdByKey.get(mappedKey);
+            const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
+            const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
+            const qtyEq = qty * fator;
+            if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
 
-      computedRows.push({
-        index: computedRows.length + 1,
-        insumoId: i.id,
-        item: i.item,
-        categoria: i.categoria ?? "-",
-        initial: formatQty(initialQty, unit),
-        entradas: formatQty(entradasQty, unit),
-        final: formatQty(finalQty, unit),
-        saidas: formatQty(saidasQty, unit),
-        custo: unitCostCents ? formatBrlFromCents(unitCostCents) : "-",
-        cmv: unitCostCents ? formatBrlFromCents(itemSaidasCents) : "-",
-        cmvTone,
+            let sub = parseBrlToCents(it.subtotalLabel ?? "");
+            if (!sub) {
+              const unit = parseBrlToCents(it.custoUnitarioLabel ?? "");
+              if (unit && qtyEq > 0) sub = Math.round(unit * qtyEq);
+            }
+
+            if (sub && (!id || !isHidden)) comprasCents += sub;
+            if (id && !isHidden && sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
+          }
+        } else {
+          comprasCents += parseBrlToCents(e.valorNota ?? "");
+        }
+      }
+
+      const computedRows: Row[] = [];
+      let initialCents = 0;
+      let finalCents = 0;
+      let saidasCents = 0;
+
+      const prePreparoItems = prePreparo.map((r) => {
+        const { qty: yieldQty, unit: yieldUnit } = parseQtyLabel(String(r.rendimento ?? ""));
+        let totalCents = 0;
+        for (const ing of r.ingredientes ?? []) {
+          const itemKey = normalizeKey(String(ing.item ?? ""));
+          if (!itemKey) continue;
+          const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
+          if (!ins) continue;
+          const unitCost = avgUnitCostCentsByInsumoId.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
+          if (!unitCost) continue;
+          const qty = parsePtNumber(String(ing.quantidade ?? ""));
+          if (!Number.isFinite(qty) || qty <= 0) continue;
+          const fromUnit = String(ing.unidade ?? "").trim() || String(ins.medida ?? "Und").trim() || "Und";
+          const toUnit = String(ins.medida ?? "Und").trim() || "Und";
+          const qtyInBase = fromUnit ? convertQty(qty, fromUnit, toUnit) : qty;
+          const finalQty = Number.isFinite(qtyInBase) && qtyInBase > 0 ? qtyInBase : qty;
+          totalCents += Math.round(unitCost * finalQty);
+        }
+        const unitCents = yieldQty > 0 && totalCents > 0 ? Math.round(totalCents / yieldQty) : 0;
+        return {
+          id: prePreparoInventoryId(r.id),
+          item: r.receita,
+          categoria: r.categoria ?? "-",
+          medida: (yieldUnit || "Und").trim() || "Und",
+          yieldUnit: (yieldUnit || "Und").trim() || "Und",
+          custoUnitCents: unitCents,
+        };
       });
-    }
 
-    const revenueCents = parseBrlToCents(revenue);
-    const target = parsePtNumber(targetCmv);
-    const cmvPercent = revenueCents > 0 ? (saidasCents / revenueCents) * 100 : 0;
-    const deltaPp = cmvPercent - target;
+      const list = [
+        ...insumos
+          .filter((i) => !i.ocultar)
+          .map((i) => ({ kind: "insumo" as const, id: i.id, item: i.item, categoria: i.categoria ?? "-", medida: i.medida || "Und", custoInicial: String(i.custoMedio ?? "") })),
+        ...prePreparoItems.map((p) => ({ kind: "prepreparo" as const, id: p.id, item: p.item, categoria: p.categoria, medida: p.medida, custoUnitCents: p.custoUnitCents })),
+      ].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
 
-    let desperdiciosCents = 0;
-    for (const d of desperdiciosIntegrados) {
-      const dd = parseDateLabelLoose(d.data);
-      if (!dd) continue;
-      const t = startOfDay(dd).getTime();
-      if (t < minT || t > maxT) continue;
-      desperdiciosCents += parseBrlToCents(d.custo ?? "");
-    }
+      for (const i of list) {
+        const inventoryUnit = (unitById.get(i.id) ?? "").trim();
+        const unit = inventoryUnit || i.medida || "Und";
+        const initialQty = initialById.get(i.id) ?? 0;
+        const finalQty = finalById.get(i.id) ?? 0;
+        const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
+        const saidasQty = initialQty + entradasQty - finalQty;
+        const baseCostCents =
+          i.kind === "insumo" ? avgUnitCostCentsByInsumoId.get(i.id) ?? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
+        const baseUnit = i.medida || "Und";
+        const qtyInBaseForOne = unit ? convertQty(1, unit, baseUnit) : 1;
+        const unitCostCents = Number.isFinite(qtyInBaseForOne) && qtyInBaseForOne > 0 ? Math.round(baseCostCents * qtyInBaseForOne) : baseCostCents;
+        const initialValCents = Math.round(initialQty * unitCostCents);
+        const itemFinalCents = Math.round(finalQty * unitCostCents);
+        const itemSaidasCents = Math.round(saidasQty * unitCostCents);
+        initialCents += initialValCents;
+        finalCents += itemFinalCents;
+        saidasCents += itemSaidasCents;
 
-    const prev = readLastCalc();
-    setLastCalc(prev);
+        const cmvTone: Row["cmvTone"] = saidasQty < 0 ? "red" : "green";
 
-    setCalc({
-      cmvPercent,
-      deltaPp,
-      initialCents,
-      comprasCents,
-      finalCents,
-      saidasCents,
-      revenueCents,
-      desperdiciosCents,
-      rows: computedRows,
-    });
-    const computedAt = Date.now();
-    setCalcComputedAt(computedAt);
-    writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
-    showToast("Cálculo feito.", "success");
-    if (!searchParams.get("itemId") && !searchParams.get("item")) {
-      setHistoryItem(null);
-      setDetailsTab("entradas");
+        computedRows.push({
+          index: computedRows.length + 1,
+          insumoId: i.id,
+          item: i.item,
+          categoria: i.categoria ?? "-",
+          initial: formatQty(initialQty, unit),
+          entradas: formatQty(entradasQty, unit),
+          final: formatQty(finalQty, unit),
+          saidas: formatQty(saidasQty, unit),
+          custo: unitCostCents ? formatBrlFromCents(unitCostCents) : "-",
+          cmv: unitCostCents ? formatBrlFromCents(itemSaidasCents) : "-",
+          cmvTone,
+        });
+      }
+
+      const revenueCents = parseBrlToCents(revenue);
+      const target = parsePtNumber(targetCmv);
+      const cmvPercent = revenueCents > 0 ? (saidasCents / revenueCents) * 100 : 0;
+      const deltaPp = cmvPercent - target;
+
+      let desperdiciosCents = 0;
+      for (const d of desperdiciosIntegrados) {
+        const dd = parseDateLabelLoose(d.data);
+        if (!dd) continue;
+        const t = startOfDay(dd).getTime();
+        if (t < minT || t > maxT) continue;
+        desperdiciosCents += parseBrlToCents(d.custo ?? "");
+      }
+
+      const prev = readLastCalc();
+      setLastCalc(prev);
+
+      setCalc({
+        cmvPercent,
+        deltaPp,
+        initialCents,
+        comprasCents,
+        finalCents,
+        saidasCents,
+        revenueCents,
+        desperdiciosCents,
+        rows: computedRows,
+      });
+      const computedAt = Date.now();
+      setCalcComputedAt(computedAt);
+      writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
+      showToast("Cálculo feito.", "success");
+      if (!searchParams.get("itemId") && !searchParams.get("item")) {
+        setHistoryItem(null);
+        setDetailsTab("entradas");
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCalcError(`Erro ao calcular CMV (${msg}).`);
+      showToast(`Erro ao calcular CMV (${msg}).`, "error", 9000);
     }
   }
 
@@ -2200,12 +2217,34 @@ export default function DashboardClient() {
             role="button"
             tabIndex={0}
             onClick={() => {
+              if (isPrePreparoInventoryId(row.insumoId)) {
+                const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
+                if (preId) {
+                  const qs = new URLSearchParams();
+                  qs.set("tab", "detalhes");
+                  qs.set("produto", preId);
+                  qs.set("v", "ingredientes");
+                  router.push(`/pre-preparo?${qs.toString()}`);
+                  return;
+                }
+              }
               setHistoryItem({ insumoId: row.insumoId, item: row.item });
               setDetailsTab("entradas");
             }}
             onKeyDown={(e) => {
               if (e.key !== "Enter" && e.key !== " ") return;
               e.preventDefault();
+              if (isPrePreparoInventoryId(row.insumoId)) {
+                const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
+                if (preId) {
+                  const qs = new URLSearchParams();
+                  qs.set("tab", "detalhes");
+                  qs.set("produto", preId);
+                  qs.set("v", "ingredientes");
+                  router.push(`/pre-preparo?${qs.toString()}`);
+                  return;
+                }
+              }
               setHistoryItem({ insumoId: row.insumoId, item: row.item });
               setDetailsTab("entradas");
             }}
@@ -2214,6 +2253,17 @@ export default function DashboardClient() {
               type="button"
               className={styles.rowItemBtn}
               onClick={() => {
+                if (isPrePreparoInventoryId(row.insumoId)) {
+                  const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
+                  if (preId) {
+                    const qs = new URLSearchParams();
+                    qs.set("tab", "detalhes");
+                    qs.set("produto", preId);
+                    qs.set("v", "ingredientes");
+                    router.push(`/pre-preparo?${qs.toString()}`);
+                    return;
+                  }
+                }
                 setHistoryItem({ insumoId: row.insumoId, item: row.item });
                 setDetailsTab("entradas");
               }}
@@ -3074,7 +3124,6 @@ export default function DashboardClient() {
               type="button"
               className={canCalculate ? `${styles.topAction} ${styles.topActionEnabled}` : styles.topAction}
               onClick={handleCalculate}
-              disabled={!canCalculate}
             >
               <span className={styles.topActionIcon}>
                 <IconCalendarSmall />
