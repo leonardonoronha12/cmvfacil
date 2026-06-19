@@ -782,8 +782,11 @@ export default function PrePreparoClient() {
       });
       if (etiquetasIncoming.length) {
         setEtiquetasRows((prev) => {
-          const keep = prev.filter((e) => String(e.recipeId) !== String(detailsRecipeId) || !String(e.id).startsWith("bubble:"));
-          const merged: any[] = [...keep];
+          const recipeIdKey = String(detailsRecipeId);
+          const others = prev.filter((e) => String(e.recipeId) !== recipeIdKey);
+          const existingSameRecipe = prev.filter((e) => String(e.recipeId) === recipeIdKey);
+
+          const incoming: any[] = [];
           for (const raw of etiquetasIncoming) {
             if (!raw || typeof raw !== "object") continue;
             const id = String((raw as any).id ?? "").trim();
@@ -793,7 +796,7 @@ export default function PrePreparoClient() {
             const unidade = String((raw as any).unidade ?? "").trim();
             const dataValidade = String((raw as any).dataValidade ?? "").trim();
             if (!id || !recipeId || !receita || !quantidade || !unidade || !dataValidade) continue;
-            merged.push({
+            incoming.push({
               id,
               recipeId,
               receita,
@@ -808,7 +811,27 @@ export default function PrePreparoClient() {
               wasteStatus: String((raw as any).wasteStatus ?? "pending").trim() || "pending",
             });
           }
-          return merged;
+
+          const incomingById = new Map<string, any>();
+          for (const e of incoming) {
+            if (!String(e.id ?? "").trim()) continue;
+            incomingById.set(String(e.id), e);
+          }
+
+          const incomingSignatures = new Set<string>();
+          for (const e of incomingById.values()) {
+            const sig = `${String(e.recipeId)}|${String(e.dataProducao)}|${String(e.dataValidade)}|${String(e.quantidade)}|${String(e.unidade)}|${String(e.responsavel ?? "")}`;
+            incomingSignatures.add(sig);
+          }
+
+          const keepManualSameRecipe = existingSameRecipe.filter((e) => {
+            const id = String(e.id ?? "");
+            if (id.startsWith("bubble:")) return false;
+            const sig = `${String(e.recipeId)}|${String(e.dataProducao)}|${String(e.dataValidade)}|${String(e.quantidade)}|${String(e.unidade)}|${String(e.responsavel ?? "")}`;
+            return !incomingSignatures.has(sig);
+          });
+
+          return [...others, ...keepManualSameRecipe, ...Array.from(incomingById.values())];
         });
       }
       if (!ingredientes.length) {
