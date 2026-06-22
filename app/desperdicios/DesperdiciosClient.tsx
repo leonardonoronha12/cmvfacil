@@ -159,6 +159,7 @@ function normalizeMotivoOptionName(value: unknown) {
   if (!raw) return "";
   if (looksLikeSerializedIdArray(raw)) return "";
   if (looksLikeBubbleThingId(raw)) return "";
+  if (/^\d{1,6}$/.test(raw)) return "";
   return raw;
 }
 
@@ -167,6 +168,7 @@ function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoR
   if (!raw) return "Sem motivo";
   if (looksLikeSerializedIdArray(raw)) return "Sem motivo";
   if (looksLikeBubbleThingId(raw)) return "Sem motivo";
+  if (/^\d{1,6}$/.test(raw)) return "Sem motivo";
   const mapped = motivosStore.find((m) => String(m.id ?? "").trim() === raw) ?? null;
   const name = mapped ? sanitizeUiLabel(mapped.nome) : "";
   return name || raw;

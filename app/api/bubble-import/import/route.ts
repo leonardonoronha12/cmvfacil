@@ -1062,7 +1062,9 @@ export async function POST(req: NextRequest) {
     const desperdiciosRows: any[] = [];
     function handleMotivoDesperdicio(row: CsvObjectRow) {
       const bubbleId = pickBubbleId(row) || pickFirst(row, ["motivo_id"]) || pickKeyLike(row, ["motivo_id"]);
-      const titulo = pickFirst(row, ["titulo", "motivo", "nome", "name"]) || pickKeyLike(row, ["titulo", "motivo", "nome", "name"]);
+      const titulo =
+        pickFirst(row, ["titulo", "motivo", "nome", "name", "descricao", "descrição", "description", "label", "texto"]) ||
+        pickKeyLike(row, ["titulo", "motivo", "nome", "name", "descricao", "descr", "description", "label", "texto"]);
       if (!bubbleId || !titulo) return;
       motivoNameById.set(String(bubbleId).trim(), String(titulo).trim());
     }
@@ -1077,11 +1079,12 @@ export async function POST(req: NextRequest) {
     const data = buildDateLabel(pickFirst(row, ["data", "date", "data_desperdicio", "created_date", "created_at"]) || pickKeyLike(row, ["data", "date"]));
     const quantidade = pickFirst(row, ["quantidade", "qtd", "qtde", "quantidade_label"]) || pickKeyLike(row, ["quantidade", "qtd"]);
     const custo = pickFirst(row, ["custo", "valor", "total", "subtotal"]) || pickKeyLike(row, ["custo", "valor", "total", "subtotal"]);
-    const motivoId = pickFirst(row, ["motivo_id", "etiqueta_id"]) || pickKeyLike(row, ["motivo_id", "etiqueta_id"]);
-    const motivo =
-      pickFirst(row, ["motivo", "reason", "descricao", "obs", "observacao"]) ||
-      (motivoId ? motivoNameById.get(motivoId.trim()) ?? "" : "") ||
-      pickKeyLike(row, ["motivo", "reason", "obs", "descr"]);
+    const motivoId = pickFirst(row, ["motivo_id"]) || pickKeyLike(row, ["motivo_id"]);
+    const motivoById = motivoId ? motivoNameById.get(motivoId.trim()) ?? "" : "";
+    const motivoRaw = pickFirst(row, ["motivo", "reason", "descricao", "obs", "observacao"]) || pickKeyLike(row, ["motivo", "reason", "obs", "descr"]);
+    const motivoRawSan = String(motivoRaw ?? "").trim();
+    const motivoLooksLikeNumericId = /^\d{1,6}$/.test(motivoRawSan);
+    const motivo = motivoById || (motivoRawSan && !motivoLooksLikeNumericId ? motivoRawSan : "");
     const custoNum = parsePtNumber(custo);
     desperdiciosRows.push({
       id: `${prefix}desperdicio:${bubbleId}`,
@@ -1336,30 +1339,48 @@ export async function POST(req: NextRequest) {
       const uid = resolveTargetUserId(row);
       const prefix = `user:${uid}:`;
       const prePreparoEtiquetasRows = getPrePreparoEtiquetasRows(uid);
-      const prePreparoIds = getPrePreparoIds(uid);
       const codigo = pickFirst(row, ["codigo", "code"]) || pickKeyLike(row, ["codigo", "code"]);
       const bubbleId = pickBubbleId(row) || codigo || String(prePreparoEtiquetasRows.length + 1);
+      const refRaw =
+        pickFirst(row, ["pre_preparo_id", "pre_preparo", "receita_id", "recipe_id", "produto_id", "item_id"]) ||
+        pickKeyLike(row, ["pre_preparo", "receita", "recipe", "produto", "item"], { excludeParts: ["nome", "name", "codigo", "code"] });
+      const recipeIdRef = refRaw ? extractBubbleRefId(String(refRaw)) || extractBubbleIdFromText(String(refRaw)) || String(refRaw).trim() : "";
+      const prePreparoRows = getPrePreparoRows(uid);
+      const recipeMatch = recipeIdRef ? prePreparoRows.find((r) => String((r as any)?.id ?? "").trim() === recipeIdRef.trim()) ?? null : null;
       const prodRaw = pickFirst(row, ["data_producao", "dataProducao", "producao"]) || pickKeyLike(row, ["data_producao", "producao"]);
       const valRaw = pickFirst(row, ["data_validade", "dataValidade", "validade"]) || pickKeyLike(row, ["data_validade", "validade"]);
       const prod = parseDateLoose(prodRaw);
       const val = parseDateLoose(valRaw);
       const dataProducao = prod ? formatDateLabelDDMMYYYY(prod) : String(prodRaw ?? "").trim();
       const dataValidade = val ? formatDateLabelDDMMYYYY(val) : String(valRaw ?? "").trim();
+      const responsavelRaw = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario", "user", "criador"]);
+      let responsavel = String(responsavelRaw ?? "").trim() || "-";
+      if (responsavel && looksLikeId(responsavel)) {
+        const respBubbleId = extractBubbleRefId(responsavel) || extractBubbleIdFromText(responsavel) || responsavel;
+        const email = bubbleUserIdToEmail.get(String(respBubbleId).trim()) ?? "";
+        if (email) responsavel = email;
+      }
+      const quantidadeRaw = pickFirst(row, ["quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
+      const quantidadeNum = parsePtNumber(String(quantidadeRaw ?? ""));
+      const unidadeRaw = pickFirst(row, ["unidade", "medida"]) || pickKeyLike(row, ["unidade", "medida"]);
+      const unidade = String(unidadeRaw ?? "").trim() || "Und";
+      const custoRaw = pickFirst(row, ["custo", "valor", "total", "subtotal", "custo_total"]) || pickKeyLike(row, ["custo", "valor", "total"]);
+      const custoNum = parsePtNumber(String(custoRaw ?? ""));
+      const custo = custoNum ? formatMoneyBRL(custoNum) : String(custoRaw ?? "").trim() || "R$0,00";
       const desperdicadoRaw = pickFirst(row, ["boolean_desperdicado", "desperdicado"]) || pickKeyLike(row, ["desperdic"]);
       const desperdicado = desperdicadoRaw ? desperdicadoRaw.toLowerCase() === "true" || desperdicadoRaw.toLowerCase() === "sim" || desperdicadoRaw === "1" : false;
       prePreparoEtiquetasRows.push({
         id: `${prefix}etiqueta:${bubbleId}`,
-        recipeId: "unknown",
-        receita: codigo ? `Etiqueta ${codigo}` : "Etiqueta",
-        responsavel: "-",
-        quantidade: "1",
-        unidade: "Und",
-        custo: "R$0,00",
+        recipeId: recipeIdRef || "unknown",
+        receita: (recipeMatch ? String((recipeMatch as any).receita ?? "").trim() : "") || (codigo ? `Etiqueta ${codigo}` : "Etiqueta"),
+        responsavel,
+        quantidade: quantidadeNum > 0 ? quantidadeNum.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 3 }) : "1",
+        unidade: unidade.toUpperCase(),
+        custo,
         dataProducao: dataProducao || "-",
         dataValidade: dataValidade || "-",
         wasteStatus: desperdicado ? ("launched" as const) : ("pending" as const),
       });
-      prePreparoIds.add(String(bubbleId));
     }
 
     function handlePrePreparoFromItemRow(row: CsvObjectRow) {
