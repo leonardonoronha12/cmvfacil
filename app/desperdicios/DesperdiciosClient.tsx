@@ -173,6 +173,7 @@ function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoR
 }
 
 function cleanMotivosRows(input: DesperdicioMotivoRow[]) {
+  const defaults = ["Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
   const out: DesperdicioMotivoRow[] = [{ id: "protected-validade-vencida", nome: "Validade Vencida" }];
   const seen = new Set<string>([normalizeKey("Validade Vencida")]);
   for (const m of Array.isArray(input) ? input : []) {
@@ -185,7 +186,27 @@ function cleanMotivosRows(input: DesperdicioMotivoRow[]) {
     const id = sanitizeUiLabel((m as any).id) || `${Date.now()}-${out.length}`;
     out.push({ id, nome });
   }
+  if (out.length === 1) {
+    for (const nome of defaults) {
+      const key = normalizeKey(nome);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push({ id: `default-${key}`, nome });
+    }
+  }
   return out;
+}
+
+function motivosEquivalent(a: DesperdicioMotivoRow[], b: DesperdicioMotivoRow[]) {
+  const ak = (Array.isArray(a) ? a : [])
+    .map((m) => normalizeKey(normalizeMotivoOptionName((m as any)?.nome)))
+    .filter(Boolean);
+  const bk = (Array.isArray(b) ? b : [])
+    .map((m) => normalizeKey(normalizeMotivoOptionName((m as any)?.nome)))
+    .filter(Boolean);
+  if (ak.length !== bk.length) return false;
+  for (let i = 0; i < ak.length; i++) if (ak[i] !== bk[i]) return false;
+  return true;
 }
 
 function formatQtyInput3(value: string) {
@@ -864,9 +885,11 @@ export default function DesperdiciosClient() {
     const stored = readDesperdicioMotivosFromStore();
     const cleaned = cleanMotivosRows(stored);
     setMotivosStore(cleaned);
-    writeDesperdicioMotivosToStore(cleaned);
+    if (!motivosEquivalent(stored, cleaned)) writeDesperdicioMotivosToStore(cleaned);
     return subscribeDesperdicioMotivos((rows) => {
-      setMotivosStore(cleanMotivosRows(rows));
+      const next = cleanMotivosRows(rows);
+      setMotivosStore(next);
+      if (!motivosEquivalent(rows, next)) writeDesperdicioMotivosToStore(next);
     });
   }, []);
 
