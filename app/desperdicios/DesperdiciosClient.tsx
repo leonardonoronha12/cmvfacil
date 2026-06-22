@@ -172,6 +172,22 @@ function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoR
   return name || raw;
 }
 
+function cleanMotivosRows(input: DesperdicioMotivoRow[]) {
+  const out: DesperdicioMotivoRow[] = [{ id: "protected-validade-vencida", nome: "Validade Vencida" }];
+  const seen = new Set<string>([normalizeKey("Validade Vencida")]);
+  for (const m of Array.isArray(input) ? input : []) {
+    if (!m || typeof m !== "object") continue;
+    const nome = normalizeMotivoOptionName((m as any).nome);
+    if (!nome) continue;
+    const key = normalizeKey(nome);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const id = sanitizeUiLabel((m as any).id) || `${Date.now()}-${out.length}`;
+    out.push({ id, nome });
+  }
+  return out;
+}
+
 function formatQtyInput3(value: string) {
   const raw = String(value ?? "");
   const cleaned = raw.replace(/[^\d,.-]/g, "");
@@ -846,13 +862,11 @@ export default function DesperdiciosClient() {
 
   useEffect(() => {
     const stored = readDesperdicioMotivosFromStore();
-    const base = stored[0] ? stored : [];
-    const hasProtected = base.some((m) => isProtectedMotivo(m.nome));
-    const normalized = hasProtected ? base : [{ id: "protected-validade-vencida", nome: "Validade Vencida" }, ...base];
-    if (normalized[0]) setMotivosStore(normalized);
+    const cleaned = cleanMotivosRows(stored);
+    setMotivosStore(cleaned);
+    writeDesperdicioMotivosToStore(cleaned);
     return subscribeDesperdicioMotivos((rows) => {
-      const has = rows.some((m) => isProtectedMotivo(m.nome));
-      setMotivosStore(has ? rows : [{ id: "protected-validade-vencida", nome: "Validade Vencida" }, ...rows]);
+      setMotivosStore(cleanMotivosRows(rows));
     });
   }, []);
 
@@ -2146,7 +2160,7 @@ export default function DesperdiciosClient() {
                         </>
                       ) : (
                         <>
-                          <div className={styles.motivosName}>{m.nome}</div>
+                          <div className={styles.motivosName}>{normalizeMotivoOptionName(m.nome) || "Sem motivo"}</div>
                           <div className={styles.motivosRight}>
                             <div className={styles.motivosCount}>{motivoLaunchCountLabel(motivoLaunchCount(m.nome))}</div>
                             <div className={styles.motivosActions}>
