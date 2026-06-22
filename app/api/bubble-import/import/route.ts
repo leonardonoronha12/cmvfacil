@@ -1094,7 +1094,14 @@ export async function POST(req: NextRequest) {
     const motivoById =
       (motivoId ? motivoNameById.get(String(motivoId).trim()) ?? "" : "") ||
       (motivoRawSan && (motivoLooksLikeNumericId || looksLikeId(motivoRawSan)) ? motivoNameById.get(motivoRawSan) ?? "" : "");
-    const motivo = motivoById || (motivoRawSan && !motivoLooksLikeNumericId ? motivoRawSan : "");
+    let motivo = "";
+    if (motivoById) {
+      motivo = motivoById;
+    } else if (motivoRawSan) {
+      const looksLikeJsonArray = motivoRawSan.startsWith("[") && motivoRawSan.endsWith("]");
+      if (motivoLooksLikeNumericId) motivo = motivoRawSan;
+      else if (!looksLikeId(motivoRawSan) && !looksLikeJsonArray) motivo = motivoRawSan;
+    }
     const custoNum = parsePtNumber(custo);
     desperdiciosRows.push({
       id: `${prefix}desperdicio:${bubbleId}`,
