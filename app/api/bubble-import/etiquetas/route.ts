@@ -141,12 +141,15 @@ export async function GET(req: NextRequest) {
       .map((p) => p.path)
       .filter((p) => {
         const lower = p.toLowerCase();
-        return lower.includes("bubble-api-etiqueta") || lower.includes("bubble-api-etiquetas");
+        if (!lower.includes("bubble-api-")) return false;
+        if (!lower.endsWith(".json")) return false;
+        if (lower.endsWith("state.json")) return false;
+        return lower.includes("etiqueta");
       })
       .sort((a, b) => b.localeCompare(a));
 
     const latest = candidates[0] ?? "";
-    if (!latest) return json({ ok: true, rows: [], sourcePath: null }, { status: 200 });
+    if (!latest) return json({ ok: true, rows: [], sourcePath: null, candidates: 0 }, { status: 200 });
 
     const payload = await downloadJsonFromStorage(supabase, bucket, latest);
     const list = payload && typeof payload === "object" ? (payload as any).rows : null;
@@ -211,6 +214,7 @@ export async function GET(req: NextRequest) {
         ok: true,
         sourcePath: latest,
         type: payload && typeof payload === "object" ? String((payload as any)?.type ?? "") : "",
+        candidates: candidates.length,
         rows: out,
       },
       { status: 200 },
@@ -219,4 +223,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
