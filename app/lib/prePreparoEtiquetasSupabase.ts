@@ -3,7 +3,7 @@
 import type { PrePreparoEtiquetaRow } from "./prePreparoEtiquetasStore";
 
 export async function loadPrePreparoEtiquetasFromSupabase() {
-  const res = await fetch("/api/pre-preparo-etiquetas", { method: "GET" });
+  const res = await fetch(`/api/pre-preparo-etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: unknown[]; error?: string } | null;
   if (!res.ok || !json) throw new Error(json?.error || `failed_to_load_${res.status}`);
   return (Array.isArray(json.rows) ? (json.rows as any[]) : []) as PrePreparoEtiquetaRow[];
