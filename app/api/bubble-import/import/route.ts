@@ -974,7 +974,21 @@ export async function POST(req: NextRequest) {
           "entrada",
         ]) || pickKeyLike(row, ["nota", "entrada"]);
       if (!notaId) return;
-      const notaKey = extractBubbleRefId(String(notaId)).trim() || String(notaId).trim();
+      const notaIdStr = String(notaId).trim();
+      let notaKey = extractBubbleRefId(notaIdStr).trim() || (extractBubbleIdFromText(notaIdStr) ?? "").trim();
+      if (!notaKey) {
+        const isJsonArray = notaIdStr.startsWith("[") && notaIdStr.endsWith("]");
+        if (isJsonArray) {
+          try {
+            const parsed = JSON.parse(notaIdStr) as unknown;
+            if (Array.isArray(parsed) && parsed[0] != null) {
+              const first = String(parsed[0]).trim();
+              notaKey = extractBubbleRefId(first).trim() || (extractBubbleIdFromText(first) ?? "").trim() || first;
+            }
+          } catch {}
+        }
+      }
+      notaKey = notaKey || notaIdStr.replace(/^[\[\("'\s]+|[\]\)"'\s]+$/g, "").trim();
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
@@ -1001,7 +1015,7 @@ export async function POST(req: NextRequest) {
         id: `${prefix}nota_item:${bubbleKey}`,
         itemId: itemId || undefined,
         nome,
-        quantidadeLabel: qtd.trim(),
+        quantidadeLabel: String(qtd ?? "").trim(),
         subtotalLabel: subtotal ? (parsePtNumber(subtotal) ? formatMoneyBRL(parsePtNumber(subtotal)) : subtotal.trim()) : "",
         custoUnitarioLabel: unit ? (parsePtNumber(unit) ? formatMoneyBRL(parsePtNumber(unit)) : unit.trim()) : "",
       });
