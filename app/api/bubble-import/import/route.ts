@@ -1836,7 +1836,33 @@ export async function POST(req: NextRequest) {
       for (const [uid, rows] of fichasRowsByUser.entries()) {
         if (!rows.length) continue;
         const stateId = `user:${uid}`;
-        const { error } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload: rows } as any, { onConflict: "id" });
+        const importedIds = new Set<string>();
+        const imported: any[] = [];
+        for (const r of rows) {
+          if (!r || typeof r !== "object") continue;
+          const rid = String((r as any).id ?? "").trim();
+          if (!rid || importedIds.has(rid)) continue;
+          importedIds.add(rid);
+          imported.push(r);
+        }
+
+        let payload = imported;
+        try {
+          const { data } = await supabase.from("fichas_tecnicas_state").select("payload").eq("id", stateId).maybeSingle();
+          const existing = Array.isArray((data as any)?.payload) ? ((data as any).payload as any[]) : [];
+          if (existing.length) {
+            const merged = [...imported];
+            for (const r of existing) {
+              if (!r || typeof r !== "object") continue;
+              const rid = String((r as any).id ?? "").trim();
+              if (!rid || importedIds.has(rid)) continue;
+              merged.push(r);
+            }
+            payload = merged;
+          }
+        } catch {}
+
+        const { error } = await supabase.from("fichas_tecnicas_state").upsert({ id: stateId, payload } as any, { onConflict: "id" });
         if (error) return json({ ok: false, error: `fichas_tecnicas_state:${error.message}`, stage }, { status: 500 });
       }
     }
