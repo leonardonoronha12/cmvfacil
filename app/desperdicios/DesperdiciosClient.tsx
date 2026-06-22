@@ -282,6 +282,16 @@ function parseDateNumericLoose(value: string) {
 function parseDateLabelLoose(value: string) {
   const raw = value.trim();
   if (!raw) return null;
+  const num = parseDateNumericLoose(raw);
+  if (num) return num;
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) {
+    const year = Number.parseInt(iso[1], 10);
+    const month = Number.parseInt(iso[2], 10) - 1;
+    const day = Number.parseInt(iso[3], 10);
+    const d = new Date(year, month, day);
+    if (d.getFullYear() === year && d.getMonth() === month && d.getDate() === day) return d;
+  }
   const m = raw.match(/^(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})[,\s]+(\d{4})$/);
   if (!m) return null;
   const day = Number.parseInt(m[1], 10);
