@@ -2,6 +2,7 @@
 
 export type FichaTecnicaRow = {
   id: string;
+  origin?: "manual" | "bubble";
   receita: string;
   precoVenda: string;
   precoVendaSub?: string;
@@ -36,6 +37,8 @@ function normalizeRow(input: unknown): FichaTecnicaRow | null {
   const id = String(r.id ?? "").trim();
   const receita = String(r.receita ?? "").trim();
   if (!id || !receita) return null;
+  const originRaw = String(r.origin ?? "").trim().toLowerCase();
+  const origin: FichaTecnicaRow["origin"] = originRaw === "manual" || originRaw === "bubble" ? (originRaw as any) : undefined;
   const bcgRaw = String(r.bcg ?? "").trim();
   const thumbRaw = String(r.thumb ?? "").trim();
   const bcg: FichaTecnicaRow["bcg"] =
@@ -66,6 +69,7 @@ function normalizeRow(input: unknown): FichaTecnicaRow | null {
     : undefined;
   return {
     id,
+    origin,
     receita,
     precoVenda: String(r.precoVenda ?? "").trim(),
     precoVendaSub: precoVendaSub ? precoVendaSub : undefined,

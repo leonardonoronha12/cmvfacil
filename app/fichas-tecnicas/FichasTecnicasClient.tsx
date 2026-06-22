@@ -1558,6 +1558,7 @@ export default function FichasTecnicasClient() {
     setAndPersistTableRows((prev) => [
       {
         id,
+        origin: "manual",
         receita: recipeName.trim() || "Sem nome",
         precoVenda: formatMoney(priceValue),
         precoVendaSub: precoSugeridoLabel,

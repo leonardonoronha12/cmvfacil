@@ -1464,7 +1464,7 @@ export async function POST(req: NextRequest) {
         : categoriasById.get(String(catIdRaw ?? "").trim()) ?? "";
       const catLabel = catName || String(catIdRaw ?? "").trim();
       const catLower = String(catLabel ?? "").trim().toLowerCase();
-      const catMatches = catNameLooksLikePrePreparo(catLabel) || catLower.includes("ficha");
+      const catMatches = catLower.includes("ficha") || catLower.includes("tecnica");
 
       const flagRaw =
         pickFirst(row, ["boolean_item_receita", "item_receita", "is_receita", "is_receita_bool", "isRecipe"]) ||
@@ -1488,7 +1488,11 @@ export async function POST(req: NextRequest) {
       const cmvMetaRaw = pickFirst(row, ["cmv_meta", "cmvMeta", "meta_cmv"]) || pickKeyLike(row, ["cmv", "meta"]);
       const cmvMetaNum = parsePtNumber(String(cmvMetaRaw ?? ""));
 
-      if (!catMatches && !isRecipeFlag && !hasIngredientRefs && !(hasYield && (precoVendaNum > 0 || cmvMetaNum > 0))) return;
+      const keys = Object.keys(row).map((k) => String(k ?? "").toLowerCase());
+      const hasKey = (p: string) => keys.some((k) => k.includes(p));
+      const looksFichaByKeys = hasKey("cmv") || hasKey("bcg") || ((hasKey("preco") || hasKey("valor")) && hasKey("venda") && hasKey("custo"));
+      if (!looksFichaByKeys && !catMatches) return;
+      if (!isRecipeFlag && !hasIngredientRefs && !(hasYield && (precoVendaNum > 0 || cmvMetaNum > 0))) return;
 
       let ingredientRefsParsed: any[] | undefined;
       if (ingredientRefsRaw && (ingredientRefsRaw.trim().startsWith("[") || ingredientRefsRaw.trim().startsWith("{"))) {
@@ -1534,6 +1538,7 @@ export async function POST(req: NextRequest) {
 
       fichasRows.push({
         id,
+        origin: "bubble",
         receita: receita.trim(),
         precoVenda,
         custoUnitario,
@@ -1594,6 +1599,7 @@ export async function POST(req: NextRequest) {
     const modoPreparo = pickFirst(row, ["modo_preparo", "modoPreparo"]) || pickKeyLike(row, ["modo", "preparo"]) || "";
     fichasRows.push({
       id: bubbleId,
+      origin: "bubble",
       receita: receita.trim(),
       precoVenda: String(precoVenda ?? "").trim(),
       custoUnitario: String(custoUnitario ?? "").trim(),
@@ -1851,14 +1857,19 @@ export async function POST(req: NextRequest) {
           const { data } = await supabase.from("fichas_tecnicas_state").select("payload").eq("id", stateId).maybeSingle();
           const existing = Array.isArray((data as any)?.payload) ? ((data as any).payload as any[]) : [];
           if (existing.length) {
-            const merged = [...imported];
+            const keep: any[] = [];
+            const keptIds = new Set<string>(importedIds);
             for (const r of existing) {
               if (!r || typeof r !== "object") continue;
               const rid = String((r as any).id ?? "").trim();
-              if (!rid || importedIds.has(rid)) continue;
-              merged.push(r);
+              if (!rid || keptIds.has(rid)) continue;
+              const origin = String((r as any).origin ?? "").trim().toLowerCase();
+              const isManual = origin === "manual" || (/^\d{12,}$/.test(rid) && !rid.includes("x"));
+              if (!isManual) continue;
+              keptIds.add(rid);
+              keep.push(r);
             }
-            payload = merged;
+            payload = [...imported, ...keep];
           }
         } catch {}
 
