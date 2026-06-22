@@ -166,6 +166,9 @@ function classifyFile(name: string) {
   if (n.includes("empresas") || n.includes("empresa")) return "empresas";
   if (n.includes("categoria")) return "categorias";
   if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
+  if (n.includes("motivo") && (n.includes("waste") || n.includes("loss") || n.includes("perda"))) return "motivos_desperdicios";
+  if (n.startsWith("motivos.")) return "motivos_desperdicios";
+  if (n.startsWith("motivos_")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
   if (n.includes("invent")) return "inventario";
   if ((n.includes("pre") && n.includes("preparo")) && ((n.includes("itens") || n.includes("items") || n.includes("ingred") || /\bitem\b/.test(n)))) return "pre_preparo_ingredientes";
@@ -1061,7 +1064,10 @@ export async function POST(req: NextRequest) {
 
     const desperdiciosRows: any[] = [];
     function handleMotivoDesperdicio(row: CsvObjectRow) {
-      const bubbleId = pickBubbleId(row) || pickFirst(row, ["motivo_id"]) || pickKeyLike(row, ["motivo_id"]);
+      const bubbleId =
+        pickBubbleId(row) ||
+        pickFirst(row, ["motivo_id", "codigo", "code", "numero", "id_motivo"]) ||
+        pickKeyLike(row, ["motivo_id", "id_motivo", "codigo", "code", "numero"]);
       const titulo =
         pickFirst(row, ["titulo", "motivo", "nome", "name", "descricao", "descrição", "description", "label", "texto"]) ||
         pickKeyLike(row, ["titulo", "motivo", "nome", "name", "descricao", "descr", "description", "label", "texto"]);
@@ -1079,11 +1085,13 @@ export async function POST(req: NextRequest) {
     const data = buildDateLabel(pickFirst(row, ["data", "date", "data_desperdicio", "created_date", "created_at"]) || pickKeyLike(row, ["data", "date"]));
     const quantidade = pickFirst(row, ["quantidade", "qtd", "qtde", "quantidade_label"]) || pickKeyLike(row, ["quantidade", "qtd"]);
     const custo = pickFirst(row, ["custo", "valor", "total", "subtotal"]) || pickKeyLike(row, ["custo", "valor", "total", "subtotal"]);
-    const motivoId = pickFirst(row, ["motivo_id"]) || pickKeyLike(row, ["motivo_id"]);
-    const motivoById = motivoId ? motivoNameById.get(motivoId.trim()) ?? "" : "";
+    const motivoId = pickFirst(row, ["motivo_id", "id_motivo"]) || pickKeyLike(row, ["motivo_id", "id_motivo"]);
     const motivoRaw = pickFirst(row, ["motivo", "reason", "descricao", "obs", "observacao"]) || pickKeyLike(row, ["motivo", "reason", "obs", "descr"]);
     const motivoRawSan = String(motivoRaw ?? "").trim();
     const motivoLooksLikeNumericId = /^\d{1,6}$/.test(motivoRawSan);
+    const motivoById =
+      (motivoId ? motivoNameById.get(String(motivoId).trim()) ?? "" : "") ||
+      (motivoRawSan && (motivoLooksLikeNumericId || looksLikeId(motivoRawSan)) ? motivoNameById.get(motivoRawSan) ?? "" : "");
     const motivo = motivoById || (motivoRawSan && !motivoLooksLikeNumericId ? motivoRawSan : "");
     const custoNum = parsePtNumber(custo);
     desperdiciosRows.push({
@@ -1724,6 +1732,8 @@ export async function POST(req: NextRequest) {
     if ((has("fornecedor") || has("empresa")) && (has("whatsapp") || has("telefone") || has("endereco") || has("vendedor"))) return "fornecedores";
     if ((has("fornecedor") || has("empresa")) && (has("produto") || has("item")) && !has("numero")) return "itens_fornecedores";
     if (has("equival") && (has("insumo") || has("item"))) return "equivalencias";
+    if ((has("titulo") || has("nome") || has("name") || has("descricao") || has("descr") || has("label")) && has("motivo") && !has("quantidade") && !has("qtd"))
+      return "motivos_desperdicios";
     if (has("motivo") && (has("quantidade") || has("qtd"))) return "desperdicios";
       if (has("codigo") && has("data_validade") && (has("data_producao") || has("dias_validade"))) return "pre_preparo_etiquetas";
       if ((has("pre") && has("preparo")) || (has("validade") && (has("rendimento") || has("yield")))) return "pre_preparo";
@@ -1761,6 +1771,7 @@ export async function POST(req: NextRequest) {
             else if (kind === "fornecedores" && enableFornecedores) handleFornecedorInfo(r);
             else if (kind === "itens_fornecedores" && enableFornecedores) handleFornecedorProduto(r);
             else if (kind === "equivalencias" && enableFornecedores) handleEquivalencia(r);
+            else if (kind === "motivos_desperdicios" && enableDesperdicios) handleMotivoDesperdicio(r);
             else if (kind === "desperdicios" && enableDesperdicios) handleDesperdicio(r);
             else if (kind === "users") handleUserRow(r);
             else if (kind === "pre_preparo" && enablePrePreparo) handlePrePreparo(r);
