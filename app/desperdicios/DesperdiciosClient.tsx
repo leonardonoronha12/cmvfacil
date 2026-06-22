@@ -880,6 +880,19 @@ export default function DesperdiciosClient() {
     const cleaned = cleanMotivosRows(stored);
     setMotivosStore(cleaned);
     if (!motivosEquivalent(stored, cleaned)) writeDesperdicioMotivosToStore(cleaned);
+    void (async () => {
+      try {
+        const res = await fetch(`/api/bubble-import/motivos?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as any;
+        const rows = Array.isArray(json?.rows) ? (json.rows as DesperdicioMotivoRow[]) : [];
+        if (!rows.length) return;
+        setMotivosStore((prev) => {
+          const merged = cleanMotivosRows([...prev, ...rows]);
+          writeDesperdicioMotivosToStore(merged);
+          return merged;
+        });
+      } catch {}
+    })();
     return subscribeDesperdicioMotivos((rows) => {
       const next = cleanMotivosRows(rows);
       setMotivosStore(next);
