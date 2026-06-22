@@ -859,7 +859,7 @@ export default function FichasTecnicasClient() {
   const [isSupabaseFichasEnabled, setIsSupabaseFichasEnabled] = useState(true);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
-  const [tableRows, setTableRows] = useState<RecipeRow[]>([]);
+  const [tableRows, setTableRows] = useState<RecipeRow[]>(() => readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
   const [query, setQuery] = useState("");
   const [quadrante, setQuadrante] = useState("Quadrante");
   const [columnOrder, setColumnOrder] = useState<FichaTableColumn[]>([
@@ -1001,8 +1001,10 @@ export default function FichasTecnicasClient() {
     void (async () => {
       try {
         const rows = await loadFichasTecnicasFromSupabase();
-        setTableRows(rows as unknown as RecipeRow[]);
-        writeFichasTecnicasToStore(rows as any);
+        const stored = readFichasTecnicasFromStore([]) as unknown as RecipeRow[];
+        const effective = (rows as unknown as RecipeRow[]).length ? (rows as unknown as RecipeRow[]) : stored;
+        setTableRows(effective);
+        if ((rows as unknown as RecipeRow[]).length) writeFichasTecnicasToStore(rows as any);
         setIsSupabaseFichasEnabled(true);
       } catch (err) {
         setTableRows(readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
@@ -1023,6 +1025,24 @@ export default function FichasTecnicasClient() {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (openedFromQueryRef.current) return;
+    const produto = (searchParams.get("produto") || searchParams.get("id") || "").trim();
+    if (!produto) return;
+    const row = tableRows.find((r) => String(r.id ?? "").trim() === produto) ?? null;
+    if (!row) return;
+    openedFromQueryRef.current = true;
+    const v = (searchParams.get("v") || "").trim().toLowerCase();
+    setDetailsRecipe(buildDetailsRecipeFromRow(row));
+    setDetailsViewTab(v === "preparo" ? "preparo" : "ingredientes");
+    setDetailIngredientId("");
+    setDetailIngredientQty("0,000");
+    cancelRowEdit();
+    setIsEditingPrep(false);
+    setPrepDraft("");
+    setActionMenuRowId(null);
+  }, [searchParams, tableRows]);
 
   function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
     setTableRows((prev) => {

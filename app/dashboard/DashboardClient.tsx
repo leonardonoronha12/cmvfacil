@@ -21,6 +21,8 @@ import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { buildExpiredPrePreparoEtiquetaDesperdicios, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
+import { readFichasTecnicasFromStore, subscribeFichasTecnicas, type FichaTecnicaRow, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
+import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
 import { requireUserScopePrefix } from "../lib/userScope";
 import {
@@ -936,6 +938,11 @@ function extractPrePreparoIdFromInventoryId(value: string) {
   return raw.startsWith("prep:") ? raw.slice("prep:".length).trim() : "";
 }
 
+function extractFichaTecnicaIdFromInventoryId(value: string) {
+  const raw = String(value ?? "");
+  return raw.startsWith("ficha:") ? raw.slice("ficha:".length).trim() : "";
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
@@ -961,6 +968,7 @@ export default function DashboardClient() {
   const [desperdicios, setDesperdicios] = useState<DesperdicioRow[]>([]);
   const [prePreparo, setPrePreparo] = useState<PrePreparoStoreRow[]>([]);
   const [prePreparoEtiquetas, setPrePreparoEtiquetas] = useState<PrePreparoEtiquetaRow[]>([]);
+  const [fichasTecnicas, setFichasTecnicas] = useState<FichaTecnicaRow[]>([]);
   const [tableQuery, setTableQuery] = useState(() => readCmvRealSnapshot()?.tableQuery ?? "");
   const [tableCategoria, setTableCategoria] = useState(() => readCmvRealSnapshot()?.tableCategoria ?? "todas");
   const [tableColumnOrder, setTableColumnOrder] = useState<DashboardTableColumn[]>(() => readCmvRealSnapshot()?.tableColumnOrder ?? ["item", "initial", "entradas", "final", "saidas", "custo", "cmv"]);
@@ -1136,7 +1144,7 @@ export default function DashboardClient() {
       }
       if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
 
-      const [dbInsumos, dbEntradas, dbFornecedores, dbInv, dbDesp, dbPre, dbEtiquetas] = await Promise.all([
+      const [dbInsumos, dbEntradas, dbFornecedores, dbInv, dbDesp, dbPre, dbEtiquetas, dbFichas] = await Promise.all([
         loadInsumosFromSupabase().catch(() => [] as InsumoStoreItem[]),
         loadEntradasFromSupabase().catch(() => [] as EntradaStoreRow[]),
         loadFornecedoresStateFromSupabase().catch(() => ({ info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap })),
@@ -1144,6 +1152,7 @@ export default function DashboardClient() {
         loadDesperdiciosFromSupabase().catch(() => [] as DesperdicioRow[]),
         loadPrePreparoFromSupabase().catch(() => [] as PrePreparoStoreRow[]),
         loadPrePreparoEtiquetasFromSupabase().catch(() => [] as PrePreparoEtiquetaRow[]),
+        loadFichasTecnicasFromSupabase().catch(() => [] as FichaTecnicaRow[]),
       ]);
 
       writeInsumosToStore(dbInsumos);
@@ -1155,6 +1164,7 @@ export default function DashboardClient() {
       writeDesperdiciosToStore(dbDesp);
       writePrePreparoToStore(dbPre);
       writePrePreparoEtiquetasToStore(dbEtiquetas);
+      writeFichasTecnicasToStore(dbFichas);
 
       setInsumos(dbInsumos);
       setEntradas(dbEntradas);
@@ -1165,6 +1175,7 @@ export default function DashboardClient() {
       setDesperdicios(dbDesp);
       setPrePreparo(dbPre);
       setPrePreparoEtiquetas(dbEtiquetas);
+      setFichasTecnicas(dbFichas);
 
       showToast("Sincronização concluída.", "success", 5000);
     } catch (err) {
@@ -1308,12 +1319,20 @@ export default function DashboardClient() {
       } catch {}
       writePrePreparoEtiquetasToStore(etiquetasRows);
 
+      let fichasRows: FichaTecnicaRow[] = [];
+      try {
+        fichasRows = await loadFichasTecnicasFromSupabase();
+      } catch {}
+      if (fichasRows.length) writeFichasTecnicasToStore(fichasRows);
+      if (!fichasRows.length) fichasRows = readFichasTecnicasFromStore([]);
+
       setInsumos(insumosRows);
       setContagens(contagensRows);
       setEntradas(entradasRows);
       setDesperdicios(desperdiciosRows);
       setPrePreparo(prePreparoRows);
       setPrePreparoEtiquetas(etiquetasRows);
+      setFichasTecnicas(fichasRows);
       setFornecedorInfoMap(infoRows);
       setFornecedorProdutosMap(produtosRows);
       setFornecedorEquivalenciasMap(equivalenciasRows);
@@ -1336,6 +1355,7 @@ export default function DashboardClient() {
     const unsubDesp = subscribeDesperdicios((rows) => setDesperdicios(rows));
     const unsubPrePreparo = subscribePrePreparo((rows) => setPrePreparo(rows));
     const unsubEtiquetas = subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
+    const unsubFichas = subscribeFichasTecnicas((rows) => setFichasTecnicas(rows));
     const unsubFornecedorInfo = subscribeFornecedorInfo((rows) => setFornecedorInfoMap(rows));
     const unsubFornecedorProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
     const unsubFornecedorEquivalencias = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
@@ -1347,6 +1367,7 @@ export default function DashboardClient() {
       unsubDesp();
       unsubPrePreparo();
       unsubEtiquetas();
+      unsubFichas();
       unsubFornecedorInfo();
       unsubFornecedorProdutos();
       unsubFornecedorEquivalencias();
@@ -2213,6 +2234,38 @@ export default function DashboardClient() {
     return tableColumnOrder.map((column) => widths[column]).join(" ");
   }, [tableColumnOrder]);
 
+  function openDashboardRow(row: Row) {
+    if (isPrePreparoInventoryId(row.insumoId)) {
+      const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
+      if (preId) {
+        const qs = new URLSearchParams();
+        qs.set("tab", "detalhes");
+        qs.set("produto", preId);
+        qs.set("v", "ingredientes");
+        router.push(`/pre-preparo?${qs.toString()}`);
+        return;
+      }
+    }
+
+    const rawId = String(row.insumoId ?? "").trim();
+    const fichaId = extractFichaTecnicaIdFromInventoryId(rawId) || rawId;
+    const ficha =
+      fichasTecnicas.find((f) => String(f.id ?? "").trim() === fichaId) ??
+      fichasTecnicas.find((f) => normalizeKey(String(f.receita ?? "")) === normalizeKey(String(row.item ?? ""))) ??
+      null;
+    if (ficha) {
+      const qs = new URLSearchParams();
+      qs.set("tab", "detalhes");
+      qs.set("produto", String(ficha.id ?? "").trim());
+      qs.set("v", "ingredientes");
+      router.push(`/fichas-tecnicas?${qs.toString()}`);
+      return;
+    }
+
+    setHistoryItem({ insumoId: row.insumoId, item: row.item });
+    setDetailsTab("entradas");
+  }
+
   function renderDashboardCell(row: Row, column: DashboardTableColumn) {
     if (column === "item") {
       return (
@@ -2222,55 +2275,19 @@ export default function DashboardClient() {
             role="button"
             tabIndex={0}
             onClick={() => {
-              if (isPrePreparoInventoryId(row.insumoId)) {
-                const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
-                if (preId) {
-                  const qs = new URLSearchParams();
-                  qs.set("tab", "detalhes");
-                  qs.set("produto", preId);
-                  qs.set("v", "ingredientes");
-                  router.push(`/pre-preparo?${qs.toString()}`);
-                  return;
-                }
-              }
-              setHistoryItem({ insumoId: row.insumoId, item: row.item });
-              setDetailsTab("entradas");
+              openDashboardRow(row);
             }}
             onKeyDown={(e) => {
               if (e.key !== "Enter" && e.key !== " ") return;
               e.preventDefault();
-              if (isPrePreparoInventoryId(row.insumoId)) {
-                const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
-                if (preId) {
-                  const qs = new URLSearchParams();
-                  qs.set("tab", "detalhes");
-                  qs.set("produto", preId);
-                  qs.set("v", "ingredientes");
-                  router.push(`/pre-preparo?${qs.toString()}`);
-                  return;
-                }
-              }
-              setHistoryItem({ insumoId: row.insumoId, item: row.item });
-              setDetailsTab("entradas");
+              openDashboardRow(row);
             }}
           >
             <button
               type="button"
               className={styles.rowItemBtn}
               onClick={() => {
-                if (isPrePreparoInventoryId(row.insumoId)) {
-                  const preId = extractPrePreparoIdFromInventoryId(row.insumoId);
-                  if (preId) {
-                    const qs = new URLSearchParams();
-                    qs.set("tab", "detalhes");
-                    qs.set("produto", preId);
-                    qs.set("v", "ingredientes");
-                    router.push(`/pre-preparo?${qs.toString()}`);
-                    return;
-                  }
-                }
-                setHistoryItem({ insumoId: row.insumoId, item: row.item });
-                setDetailsTab("entradas");
+                openDashboardRow(row);
               }}
             >
               {row.item}
