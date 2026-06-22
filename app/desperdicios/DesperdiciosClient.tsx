@@ -112,29 +112,61 @@ function sanitizeUiLabel(value: unknown) {
   return String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
 }
 
-function looksLikeBubbleThingId(value: string) {
+function extractBubbleThingIdToken(value: string) {
   const s = sanitizeUiLabel(value);
-  if (!s) return false;
-  if (/^\d{10,}$/.test(s)) return true;
-  return /^\d{8,}x\d{6,}$/.test(s);
+  if (!s) return "";
+  const m1 = s.match(/\b\d{10,}\b/);
+  if (m1?.[0]) return m1[0];
+  const m2 = s.match(/\b\d{8,}x\d{6,}\b/i);
+  if (m2?.[0]) return m2[0];
+  return "";
+}
+
+function looksLikeBubbleThingId(value: string) {
+  return Boolean(extractBubbleThingIdToken(value));
+}
+
+function looksLikeSerializedIdArray(value: string) {
+  const s = sanitizeUiLabel(value);
+  if (!s.startsWith("[") || !s.endsWith("]")) return false;
+  try {
+    const parsed = JSON.parse(s) as any;
+    if (!Array.isArray(parsed)) return false;
+    const items = parsed.map((x) => String(x ?? "")).filter(Boolean);
+    if (!items.length) return false;
+    return items.every((x) => Boolean(extractBubbleThingIdToken(x)));
+  } catch {
+    return false;
+  }
 }
 
 function resolveItemLabel(itemRaw: unknown, insumos: InsumoStoreItem[], prePreparo: PrePreparoStoreRow[], fichas: FichaTecnicaRow[]) {
   const raw = sanitizeUiLabel(itemRaw);
   if (!raw) return "-";
-  if (!looksLikeBubbleThingId(raw)) return raw;
-  const ins = insumos.find((i) => String(i.id ?? "").trim() === raw) ?? null;
+  const id = extractBubbleThingIdToken(raw);
+  if (!id) return raw;
+  const ins = insumos.find((i) => String(i.id ?? "").trim() === id) ?? null;
   if (ins?.item) return String(ins.item).trim() || raw;
-  const prep = prePreparo.find((r) => String(r.id ?? "").trim() === raw) ?? null;
+  const prep = prePreparo.find((r) => String(r.id ?? "").trim() === id) ?? null;
   if (prep?.receita) return String(prep.receita).trim() || raw;
-  const ficha = fichas.find((r) => String((r as any)?.id ?? "").trim() === raw) ?? null;
+  const ficha = fichas.find((r) => String((r as any)?.id ?? "").trim() === id) ?? null;
   if (ficha && typeof (ficha as any).receita === "string" && String((ficha as any).receita).trim()) return String((ficha as any).receita).trim();
+  return raw;
+}
+
+function normalizeMotivoOptionName(value: unknown) {
+  const raw = sanitizeUiLabel(value);
+  if (!raw) return "";
+  if (looksLikeSerializedIdArray(raw)) return "";
+  if (looksLikeBubbleThingId(raw)) return "";
   return raw;
 }
 
 function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoRow[]) {
   const raw = sanitizeUiLabel(motivoRaw);
-  if (!raw || looksLikeBubbleThingId(raw)) return "Sem motivo";
+  if (!raw) return "Sem motivo";
+  if (looksLikeSerializedIdArray(raw)) return "Sem motivo";
+  if (looksLikeBubbleThingId(raw)) return "Sem motivo";
   const mapped = motivosStore.find((m) => String(m.id ?? "").trim() === raw) ?? null;
   const name = mapped ? sanitizeUiLabel(mapped.nome) : "";
   return name || raw;
@@ -465,10 +497,20 @@ export default function DesperdiciosClient() {
   const editMotivoInputRef = useRef<HTMLInputElement | null>(null);
 
   const motivos = useMemo(() => {
-    const list = motivosStore
-      .map((m) => sanitizeUiLabel(m.nome))
-      .filter((n) => Boolean(n) && !looksLikeBubbleThingId(n));
-    return list[0] ? list : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
+    const list = motivosStore.map((m) => normalizeMotivoOptionName(m.nome)).filter(Boolean);
+    const base = list[0]
+      ? list
+      : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
+    const uniq: string[] = [];
+    const seen = new Set<string>();
+    for (const m of ["Sem motivo", ...base]) {
+      const v = sanitizeUiLabel(m);
+      const k = v.toLowerCase();
+      if (!v || seen.has(k)) continue;
+      seen.add(k);
+      uniq.push(v);
+    }
+    return uniq;
   }, [motivosStore]);
 
   const integratedRows = useMemo(() => rows, [rows]);
@@ -937,9 +979,8 @@ export default function DesperdiciosClient() {
       const seen = new Set(base.map((m) => m.nome.toLowerCase()));
       const next = [...base];
       for (const r of rows) {
-        const nome = sanitizeUiLabel(r.motivo);
+        const nome = normalizeMotivoOptionName(r.motivo);
         if (!nome) continue;
-        if (looksLikeBubbleThingId(nome)) continue;
         const key = nome.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
@@ -1266,7 +1307,8 @@ export default function DesperdiciosClient() {
     const totalCents = parseBrlToCents(row.custo ?? "");
     const unitCost = qtyNum > 0 ? totalCents / 100 / qtyNum : 0;
     setDraftUnitCost(formatPtNumber(unitCost, 2));
-    setDraftMotivo(row.motivo || "Validade vencida");
+    const motivoLabel = normalizeMotivoOptionName(row.motivo);
+    setDraftMotivo(motivoLabel || "Sem motivo");
     const parsed = parseDateLabelLoose(row.data);
     setDataCalMonth(startOfMonth(parsed ?? new Date()));
     setIsDataCalOpen(false);
