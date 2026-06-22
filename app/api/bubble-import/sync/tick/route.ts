@@ -780,8 +780,8 @@ export async function POST(req: NextRequest) {
         entradas: ["itens_notas", "notas_fiscais"],
         desperdicios: ["desperdicios", "motivos_desperdicios"],
         inventario: ["inventario"],
-          pre_preparo: ["pre_preparo", "pre_preparo_etiquetas", "pre_preparo_ingredientes", "categorias", "itens", "ingredientes"],
-        fichas_tecnicas: ["fichas_tecnicas"],
+        pre_preparo: ["pre_preparo", "pre_preparo_etiquetas", "pre_preparo_ingredientes", "categorias", "itens", "ingredientes"],
+        fichas_tecnicas: ["fichas_tecnicas", "categorias", "custo_medio", "itens", "ingredientes"],
       };
       const res = await fetch(url, {
         method: "POST",
