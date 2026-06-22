@@ -173,26 +173,19 @@ function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoR
 }
 
 function cleanMotivosRows(input: DesperdicioMotivoRow[]) {
-  const defaults = ["Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
   const out: DesperdicioMotivoRow[] = [{ id: "protected-validade-vencida", nome: "Validade Vencida" }];
   const seen = new Set<string>([normalizeKey("Validade Vencida")]);
   for (const m of Array.isArray(input) ? input : []) {
     if (!m || typeof m !== "object") continue;
+    const incomingId = sanitizeUiLabel((m as any).id);
+    if (incomingId && incomingId.startsWith("default-")) continue;
     const nome = normalizeMotivoOptionName((m as any).nome);
     if (!nome) continue;
     const key = normalizeKey(nome);
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    const id = sanitizeUiLabel((m as any).id) || `${Date.now()}-${out.length}`;
+    const id = incomingId || `${Date.now()}-${out.length}`;
     out.push({ id, nome });
-  }
-  if (out.length === 1) {
-    for (const nome of defaults) {
-      const key = normalizeKey(nome);
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push({ id: `default-${key}`, nome });
-    }
   }
   return out;
 }
@@ -534,9 +527,10 @@ export default function DesperdiciosClient() {
   const editMotivoInputRef = useRef<HTMLInputElement | null>(null);
 
   const motivos = useMemo(() => {
-    const list = motivosStore.map((m) => normalizeMotivoOptionName(m.nome)).filter(Boolean);
-    const base = list[0]
-      ? list
+    const stored = motivosStore.map((m) => normalizeMotivoOptionName(m.nome)).filter(Boolean);
+    const storedNonProtected = stored.filter((n) => !isProtectedMotivo(n));
+    const base = storedNonProtected.length
+      ? ["Validade Vencida", ...storedNonProtected]
       : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
     const uniq: string[] = [];
     const seen = new Set<string>();
@@ -1012,7 +1006,7 @@ export default function DesperdiciosClient() {
   useEffect(() => {
     if (!rowsReadyRef.current) return;
     setMotivosStore((prev) => {
-      const base = prev[0] ? prev : motivos.map((n, i) => ({ id: String(i + 1), nome: n }));
+      const base = prev;
       const seen = new Set(base.map((m) => m.nome.toLowerCase()));
       const next = [...base];
       for (const r of rows) {
@@ -2151,7 +2145,15 @@ export default function DesperdiciosClient() {
                 <div className={styles.motivosDivider} />
 
                 <div className={styles.motivosList}>
-                  {(motivosStore[0] ? motivosStore : motivos.map((n, i) => ({ id: String(i + 1), nome: n }))).map((m) => (
+                  {(() => {
+                    const cleaned = motivosStore.filter((m) => !String(m.id ?? "").startsWith("default-"));
+                    const hasCustom = cleaned.some((m) => !isProtectedMotivo(m.nome));
+                    if (hasCustom) return cleaned;
+                    const suggested = motivos
+                      .filter((n) => normalizeKey(n) !== "sem motivo" && normalizeKey(n) !== "validade vencida")
+                      .map((n, i) => ({ id: `suggested-${i + 1}`, nome: n }));
+                    return [{ id: "protected-validade-vencida", nome: "Validade Vencida" }, ...suggested];
+                  })().map((m) => (
                     <div key={m.id} className={styles.motivosRow}>
                       {editingMotivoId === m.id ? (
                         <>
