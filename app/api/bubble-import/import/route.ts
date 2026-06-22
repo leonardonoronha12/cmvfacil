@@ -162,13 +162,15 @@ function groupParts(files: { path: string; name: string }[]) {
 
 function classifyFile(name: string) {
   const n = name.toLowerCase();
+  const apiMatch = n.match(/\bbubble-api-([a-z0-9_]+)/i);
+  const apiType = apiMatch?.[1] ? String(apiMatch[1]).trim().toLowerCase() : "";
+  const t = apiType || n;
   if (/(^|[^a-z])user([^a-z]|$)/.test(n) || n.includes("usuarios") || n.includes("usuario")) return "users";
   if (n.includes("empresas") || n.includes("empresa")) return "empresas";
   if (n.includes("categoria")) return "categorias";
-  if (n.includes("motivo") && n.includes("desperd")) return "motivos_desperdicios";
-  if (n.includes("motivo") && (n.includes("waste") || n.includes("loss") || n.includes("perda"))) return "motivos_desperdicios";
-  if (n.startsWith("motivos.")) return "motivos_desperdicios";
-  if (n.startsWith("motivos_")) return "motivos_desperdicios";
+  if (t.includes("motivo") && t.includes("desperd")) return "motivos_desperdicios";
+  if (t.includes("motivo") && (t.includes("waste") || t.includes("loss") || t.includes("perda"))) return "motivos_desperdicios";
+  if (t === "motivos" || t.startsWith("motivos") || t.startsWith("motivo")) return "motivos_desperdicios";
   if (n.includes("equival")) return "equivalencias";
   if (n.includes("invent")) return "inventario";
   if ((n.includes("pre") && n.includes("preparo")) && ((n.includes("itens") || n.includes("items") || n.includes("ingred") || /\bitem\b/.test(n)))) return "pre_preparo_ingredientes";
