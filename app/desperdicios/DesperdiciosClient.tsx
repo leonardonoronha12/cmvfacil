@@ -870,6 +870,26 @@ export default function DesperdiciosClient() {
         const db = await loadPrePreparoEtiquetasFromSupabase();
         if (db.length) writePrePreparoEtiquetasToStore(db);
       } catch {}
+      try {
+        const res = await fetch(`/api/bubble-import/etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as any;
+        const bubbleRows = Array.isArray(json?.rows) ? (json.rows as PrePreparoEtiquetaRow[]) : [];
+        if (bubbleRows.length) {
+          const byId = new Map<string, PrePreparoEtiquetaRow>();
+          for (const r of readPrePreparoEtiquetasFromStore()) byId.set(r.id, r);
+          for (const r of bubbleRows) {
+            const existing = byId.get(r.id) ?? null;
+            if (!existing) {
+              byId.set(r.id, r);
+              continue;
+            }
+            byId.set(r.id, { ...r, wasteStatus: existing.wasteStatus ?? r.wasteStatus });
+          }
+          const merged = Array.from(byId.values());
+          writePrePreparoEtiquetasToStore(merged);
+          void savePrePreparoEtiquetasToSupabase(merged).catch(() => {});
+        }
+      } catch {}
       setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
     })();
     return subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));

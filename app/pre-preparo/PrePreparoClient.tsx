@@ -1161,6 +1161,28 @@ export default function PrePreparoClient() {
           showToast(supabaseLoadErrorMessage(err), "error");
         }
       }
+      try {
+        const res = await fetch(`/api/bubble-import/etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as any;
+        const bubbleRows = Array.isArray(json?.rows) ? (json.rows as any[]) : [];
+        if (bubbleRows.length) {
+          setEtiquetasRows((prev) => {
+            const byId = new Map<string, any>();
+            for (const r of prev) byId.set(String(r.id ?? "").trim(), r);
+            for (const r of bubbleRows) {
+              const rid = String((r as any)?.id ?? "").trim();
+              if (!rid) continue;
+              const existing = byId.get(rid) ?? null;
+              if (!existing) {
+                byId.set(rid, r);
+                continue;
+              }
+              byId.set(rid, { ...r, wasteStatus: existing.wasteStatus ?? (r as any).wasteStatus });
+            }
+            return Array.from(byId.values());
+          });
+        }
+      } catch {}
     })();
   }, []);
 
