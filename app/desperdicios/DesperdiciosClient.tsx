@@ -108,6 +108,38 @@ function parsePtNumber(value: string) {
   return neg ? -num : num;
 }
 
+function sanitizeUiLabel(value: unknown) {
+  return String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+}
+
+function looksLikeBubbleThingId(value: string) {
+  const s = sanitizeUiLabel(value);
+  if (!s) return false;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/.test(s);
+}
+
+function resolveItemLabel(itemRaw: unknown, insumos: InsumoStoreItem[], prePreparo: PrePreparoStoreRow[], fichas: FichaTecnicaRow[]) {
+  const raw = sanitizeUiLabel(itemRaw);
+  if (!raw) return "-";
+  if (!looksLikeBubbleThingId(raw)) return raw;
+  const ins = insumos.find((i) => String(i.id ?? "").trim() === raw) ?? null;
+  if (ins?.item) return String(ins.item).trim() || raw;
+  const prep = prePreparo.find((r) => String(r.id ?? "").trim() === raw) ?? null;
+  if (prep?.receita) return String(prep.receita).trim() || raw;
+  const ficha = fichas.find((r) => String((r as any)?.id ?? "").trim() === raw) ?? null;
+  if (ficha && typeof (ficha as any).receita === "string" && String((ficha as any).receita).trim()) return String((ficha as any).receita).trim();
+  return raw;
+}
+
+function resolveMotivoLabel(motivoRaw: unknown, motivosStore: DesperdicioMotivoRow[]) {
+  const raw = sanitizeUiLabel(motivoRaw);
+  if (!raw || looksLikeBubbleThingId(raw)) return "Sem motivo";
+  const mapped = motivosStore.find((m) => String(m.id ?? "").trim() === raw) ?? null;
+  const name = mapped ? sanitizeUiLabel(mapped.nome) : "";
+  return name || raw;
+}
+
 function formatQtyInput3(value: string) {
   const raw = String(value ?? "");
   const cleaned = raw.replace(/[^\d,.-]/g, "");
@@ -433,7 +465,9 @@ export default function DesperdiciosClient() {
   const editMotivoInputRef = useRef<HTMLInputElement | null>(null);
 
   const motivos = useMemo(() => {
-    const list = motivosStore.map((m) => m.nome).filter(Boolean);
+    const list = motivosStore
+      .map((m) => sanitizeUiLabel(m.nome))
+      .filter((n) => Boolean(n) && !looksLikeBubbleThingId(n));
     return list[0] ? list : ["Validade Vencida", "Erro operacional", "Sobra do dia", "Item avariado (Fornecedor)", "Pedido retornou pra loja", "Talos de Produção", "Outro"];
   }, [motivosStore]);
 
@@ -441,7 +475,7 @@ export default function DesperdiciosClient() {
 
   const kpiRows = useMemo(() => {
     let filtered = integratedRows;
-    if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => (r.motivo || "Sem motivo") === motivoFilter);
+    if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => resolveMotivoLabel(r.motivo, motivosStore) === motivoFilter);
     const p = periodo.trim();
     if (p) {
       const parts = p.split("-").map((x) => x.trim()).filter(Boolean);
@@ -460,12 +494,18 @@ export default function DesperdiciosClient() {
       });
     }
     return filtered;
-  }, [integratedRows, motivoFilter, periodo]);
+  }, [integratedRows, motivoFilter, motivosStore, periodo]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
-    let filtered = q ? integratedRows.filter((r) => `${r.data} ${r.item} ${r.motivo}`.toLowerCase().includes(q)) : integratedRows;
-    if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => (r.motivo || "Sem motivo") === motivoFilter);
+    let filtered = q
+      ? integratedRows.filter((r) => {
+          const itemLabel = resolveItemLabel(r.item, insumosStore, prePreparoStore, fichasTecnicas);
+          const motivoLabel = resolveMotivoLabel(r.motivo, motivosStore);
+          return `${r.data} ${itemLabel} ${motivoLabel}`.toLowerCase().includes(q);
+        })
+      : integratedRows;
+    if (motivoFilter !== "Motivo") filtered = filtered.filter((r) => resolveMotivoLabel(r.motivo, motivosStore) === motivoFilter);
     const p = periodo.trim();
     if (p) {
       const parts = p.split("-").map((x) => x.trim()).filter(Boolean);
@@ -511,7 +551,7 @@ export default function DesperdiciosClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [integratedRows, motivoFilter, periodo, query, sortDir, sortKey]);
+  }, [fichasTecnicas, insumosStore, integratedRows, motivoFilter, motivosStore, periodo, prePreparoStore, query, sortDir, sortKey]);
 
   function toggleSort(key: DesperdicioTableColumn) {
     if (sortKey !== key) {
@@ -562,7 +602,7 @@ export default function DesperdiciosClient() {
       return (
         <div className={styles.itemCell}>
           <div className={styles.itemDot} aria-hidden />
-          <div className={styles.itemName}>{row.item}</div>
+          <div className={styles.itemName}>{resolveItemLabel(row.item, insumosStore, prePreparoStore, fichasTecnicas)}</div>
         </div>
       );
     }
@@ -577,7 +617,7 @@ export default function DesperdiciosClient() {
         </div>
       );
     }
-    return <div className={styles.muted}>{row.motivo || "-"}</div>;
+    return <div className={styles.muted}>{resolveMotivoLabel(row.motivo, motivosStore)}</div>;
   }
 
   const etiquetaWasteSummary = useMemo(() => {
@@ -628,11 +668,11 @@ export default function DesperdiciosClient() {
   const motivoCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const r of integratedRows) {
-      const key = normalizeKey(String(r.motivo ?? "")) || "sem-motivo";
+      const key = normalizeKey(resolveMotivoLabel(r.motivo, motivosStore)) || "sem-motivo";
       map.set(key, (map.get(key) ?? 0) + 1);
     }
     return map;
-  }, [integratedRows]);
+  }, [integratedRows, motivosStore]);
 
   function motivoLaunchCount(nome: string) {
     const key = normalizeKey(nome) || "sem-motivo";
@@ -646,13 +686,13 @@ export default function DesperdiciosClient() {
   const chartData = useMemo(() => {
     const byMotivo = new Map<string, number>();
     for (const r of visible) {
-      const k = r.motivo || "Sem motivo";
+      const k = resolveMotivoLabel(r.motivo, motivosStore);
       byMotivo.set(k, (byMotivo.get(k) ?? 0) + parseBrlToCents(r.custo));
     }
     const list = Array.from(byMotivo.entries()).map(([motivo, cents]) => ({ motivo, cents }));
     list.sort((a, b) => b.cents - a.cents);
     return list.slice(0, 5);
-  }, [visible]);
+  }, [motivosStore, visible]);
 
   const chartMax = useMemo(() => Math.max(1, ...chartData.map((d) => d.cents)), [chartData]);
   const yMax = useMemo(() => {
@@ -897,8 +937,9 @@ export default function DesperdiciosClient() {
       const seen = new Set(base.map((m) => m.nome.toLowerCase()));
       const next = [...base];
       for (const r of rows) {
-        const nome = String(r.motivo ?? "").trim();
+        const nome = sanitizeUiLabel(r.motivo);
         if (!nome) continue;
+        if (looksLikeBubbleThingId(nome)) continue;
         const key = nome.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
