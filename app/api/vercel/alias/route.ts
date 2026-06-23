@@ -113,21 +113,35 @@ export async function POST(req: NextRequest) {
       const projectId = String(projJson?.id ?? "").trim();
       if (!projectId) return json({ ok: false, error: "missing_project_id" }, { status: 400 });
 
-      const qs = new URLSearchParams();
-      qs.set("projectId", projectId);
-      qs.set("target", "production");
-      qs.set("state", "READY");
-      qs.set("limit", "20");
-      qs.set("slug", teamSlug);
-      if (sha) qs.set("sha", sha);
+      const listDeployments = async (target?: "production") => {
+        const qs = new URLSearchParams();
+        qs.set("projectId", projectId);
+        if (target) qs.set("target", target);
+        qs.set("state", "READY");
+        qs.set("limit", "20");
+        qs.set("slug", teamSlug);
+        if (sha) qs.set("sha", sha);
+        const depRes = await vercelFetch(token, `https://api.vercel.com/v7/deployments?${qs.toString()}`, { method: "GET" });
+        const depJson = (await depRes.json().catch(() => null)) as any;
+        if (!depRes.ok) {
+          return { ok: false as const, status: depRes.status, details: depJson, list: [] as any[] };
+        }
+        const list = Array.isArray(depJson?.deployments) ? (depJson.deployments as any[]) : [];
+        return { ok: true as const, status: depRes.status, details: depJson, list };
+      };
 
-      const depRes = await vercelFetch(token, `https://api.vercel.com/v7/deployments?${qs.toString()}`, { method: "GET" });
-      const depJson = (await depRes.json().catch(() => null)) as any;
-      if (!depRes.ok) {
-        return json({ ok: false, error: "vercel_deployments_list_failed", status: depRes.status, details: depJson }, { status: 400 });
+      const firstTry = await listDeployments("production");
+      if (!firstTry.ok) {
+        return json({ ok: false, error: "vercel_deployments_list_failed", status: firstTry.status, details: firstTry.details }, { status: 400 });
       }
-      const list = Array.isArray(depJson?.deployments) ? (depJson.deployments as any[]) : [];
-      chosen = list[0] ?? null;
+      chosen = firstTry.list[0] ?? null;
+      if (!chosen) {
+        const fallback = await listDeployments(undefined);
+        if (!fallback.ok) {
+          return json({ ok: false, error: "vercel_deployments_list_failed", status: fallback.status, details: fallback.details }, { status: 400 });
+        }
+        chosen = fallback.list[0] ?? null;
+      }
       const uid = String(chosen?.uid ?? chosen?.id ?? "").trim();
       const url = safeHost(chosen?.url);
       targetDeploymentIdOrUrl = uid || url;

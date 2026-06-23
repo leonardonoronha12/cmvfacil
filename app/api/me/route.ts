@@ -150,7 +150,19 @@ async function loadRowsForPath(supabase: ReturnType<typeof getSupabaseAdmin>, bu
   if (lower.endsWith(".json")) {
     const text = await downloadText(supabase, bucket, path);
     const raw = JSON.parse(text) as any;
-    const arr: any[] = Array.isArray(raw) ? raw : Array.isArray(raw?.rows) ? raw.rows : [];
+    const arr: any[] = Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.rows)
+        ? raw.rows
+        : Array.isArray(raw?.results)
+          ? raw.results
+          : Array.isArray(raw?.response?.results)
+            ? raw.response.results
+            : Array.isArray(raw?.data)
+              ? raw.data
+              : Array.isArray(raw?.items)
+                ? raw.items
+                : [];
     return arr.filter((x) => x && typeof x === "object").map((x) => x as CsvObjectRow);
   }
   return [];
@@ -160,14 +172,24 @@ function scoreFile(path: StoredPath, kind: "users" | "empresas") {
   const name = path.name.toLowerCase();
   const p = path.path.toLowerCase();
   let s = 0;
+  const isBubbleApi = name.includes("bubble-api-") || p.includes("/bootstrap/") || p.includes("/sync-");
+  const isExport = name.includes("export_") || name.includes("export-") || name.includes("exportall") || name.includes("export_all") || name.includes("export");
+  const isCsv = name.endsWith(".csv");
+  const isXlsx = name.endsWith(".xlsx") || name.endsWith(".xls");
   if (kind === "users") {
     if (name.includes("user") || name.includes("usu")) s += 50;
     if (p.includes("/users") || p.includes("/usuarios") || p.includes("/usuario")) s += 50;
     if (name === "users.csv" || name === "usuarios.csv") s += 50;
+    if (isExport) s += 40;
+    if (isCsv || isXlsx) s += 20;
+    if (isBubbleApi) s -= 120;
   } else {
     if (name.includes("empresa") || name.includes("company") || name.includes("restaurante")) s += 50;
     if (p.includes("/empresas") || p.includes("/empresa") || p.includes("/companies") || p.includes("/company") || p.includes("/restaurante")) s += 50;
     if (name === "empresas.csv" || name === "companies.csv") s += 50;
+    if (isExport) s += 20;
+    if (isCsv || isXlsx) s += 10;
+    if (isBubbleApi) s -= 40;
   }
   return s;
 }
@@ -188,7 +210,7 @@ function extractUrlFromText(value: string) {
   return "";
 }
 
-function resolveOwnerEmailFromCompanyRow(row: CsvObjectRow) {
+function resolveOwnerEmailFromCompanyRow(row: CsvObjectRow, bubbleIdToEmail?: Map<string, string>) {
   const ownerRef =
     pickFirst(row, [
       "user_id",
@@ -211,6 +233,12 @@ function resolveOwnerEmailFromCompanyRow(row: CsvObjectRow) {
     ]) || pickKeyLike(row, ["user", "usuario", "owner", "created", "criador", "responsavel", "account"], ["nome", "name", "empresa", "company", "restaurante"]);
   const direct = extractEmail(ownerRef);
   if (direct) return direct;
+  if (bubbleIdToEmail && ownerRef) {
+    const raw = String(ownerRef ?? "").trim();
+    const bubbleId = extractBubbleIdFromText(raw) || raw;
+    const mapped = String(bubbleIdToEmail.get(bubbleId) ?? "").trim().toLowerCase();
+    if (mapped) return mapped;
+  }
   for (const v of Object.values(row)) {
     const em = extractEmail(String(v ?? ""));
     if (em) return em;
@@ -397,6 +425,7 @@ type LoadedContext = {
   usersAllRows: CsvObjectRow[];
   bubbleRow: CsvObjectRow | null;
   bubbleRowNorm: CsvObjectRow | null;
+  usersEmailRowsCount: number;
 };
 
 async function loadContextForPrefix(args: {
@@ -416,11 +445,13 @@ async function loadContextForPrefix(args: {
   let usersAllRows: CsvObjectRow[] = [];
   let bubbleRow: CsvObjectRow | null = null;
   let bubbleRowNorm: CsvObjectRow | null = null;
+  let usersEmailRowsCount = 0;
 
   if (usersFile) {
     usersAllRows = await loadRowsForPath(supabase, bucket, usersFile.path, usersFile.name);
     for (const rr of usersAllRows) {
       const row = normalizeRowKeys(rr);
+      if (Object.values(row).some((v) => extractEmail(String(v ?? "")))) usersEmailRowsCount++;
       const emailRaw =
         pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) ||
         pickKeyLike(row, ["email", "mail", "login", "username"], ["id", "uuid"]);
@@ -439,7 +470,7 @@ async function loadContextForPrefix(args: {
     }
   }
 
-  return { prefix, paths, usersFile, empresasFile, usersAllRows, bubbleRow, bubbleRowNorm } satisfies LoadedContext;
+  return { prefix, paths, usersFile, empresasFile, usersAllRows, bubbleRow, bubbleRowNorm, usersEmailRowsCount } satisfies LoadedContext;
 }
 
 export async function GET(req: NextRequest) {
@@ -472,6 +503,7 @@ export async function GET(req: NextRequest) {
         break;
       }
       if (!ctx) ctx = loaded;
+      else if (loaded.usersEmailRowsCount > ctx.usersEmailRowsCount) ctx = loaded;
     }
     if (!ctx) return json({ ok: false, error: "no_context" }, { status: 500 });
 
@@ -522,7 +554,7 @@ export async function GET(req: NextRequest) {
           if (!companyIdToName.has(companyId)) companyIdToName.set(companyId, name);
           if (!companyRowNormById.has(companyId)) companyRowNormById.set(companyId, row);
         }
-        const ownerEmail = resolveOwnerEmailFromCompanyRow(row);
+        const ownerEmail = resolveOwnerEmailFromCompanyRow(row, bubbleUserIdToEmail);
         if (companyId && ownerEmail) {
           const set = companyOwnerEmailsById.get(companyId) ?? new Set<string>();
           set.add(ownerEmail);
@@ -698,6 +730,7 @@ export async function GET(req: NextRequest) {
         empresasFile: empresasFile ? { path: empresasFile.path, name: empresasFile.name } : null,
         hasBubbleMatch: Boolean(bubbleRowNorm),
         primaryCompanyId: primaryCompanyId || null,
+        usersEmailRowsCount: ctx.usersEmailRowsCount,
       },
     });
   } catch (err) {
