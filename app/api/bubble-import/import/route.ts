@@ -992,11 +992,29 @@ export async function POST(req: NextRequest) {
       const itemIdRaw =
         pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
-      const nomePicked = pickFirst(row, ["nome", "item", "produto", "descricao", "nome_item", "cadastro_item"]);
-      const nomeFromPicked = typeof nomePicked === "string" ? nomePicked.trim() : "";
+      const nomePicked = pickFirst(row, [
+        "nome",
+        "item_nome",
+        "nome_item",
+        "produto_nome",
+        "nome_produto",
+        "nome_na_nota",
+        "item",
+        "produto",
+        "descricao",
+        "descricao_item",
+        "cadastro_item",
+      ]);
+      let nomeFromPicked = typeof nomePicked === "string" ? nomePicked.trim() : "";
+      if (nomeFromPicked === "[object Object]") nomeFromPicked = "";
+      if (nomeFromPicked && (nomeFromPicked.startsWith("{") || nomeFromPicked.includes("\"name\"") || nomeFromPicked.includes("\"nome\""))) {
+        const extracted = extractBubbleNameFromText(nomeFromPicked);
+        if (extracted) nomeFromPicked = extracted;
+      }
       const nomeFromItem = itemId ? String(itemById.get(itemId.trim())?.nome ?? "").trim() : "";
       const nomeFromGuess = String(guessItemLabel(row) ?? "").trim();
-      const nome = nomeFromPicked || nomeFromItem || nomeFromGuess;
+      const nomeFromItemRef = !nomeFromPicked && itemIdRaw ? extractBubbleNameFromText(String(itemIdRaw)) : "";
+      const nome = nomeFromPicked || nomeFromItem || nomeFromItemRef || nomeFromGuess;
       if (!nome) return;
       const seen = notaItemSeenByNotaKey.get(notaKey) ?? new Set<string>();
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
