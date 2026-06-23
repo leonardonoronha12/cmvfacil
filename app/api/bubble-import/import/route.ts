@@ -961,12 +961,20 @@ export async function POST(req: NextRequest) {
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
       const sanitizeText = (value: unknown) => String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+      const looksLikeBubbleId = (value: string) => {
+        const s = sanitizeText(value);
+        if (!s) return false;
+        if (s.length < 12) return false;
+        if (!/^\d/.test(s)) return false;
+        return /^[0-9]+x[0-9x]+$/i.test(s);
+      };
       const normalizeNameCandidate = (value: unknown) => {
         const raw = sanitizeText(value);
         if (!raw) return "";
         const k = raw.toLowerCase();
         if (k === "false" || k === "true" || k === "null" || k === "undefined" || k === "-") return "";
         if (raw === "[object Object]") return "";
+        if (looksLikeBubbleId(raw)) return "";
         return raw;
       };
       const extractNameFromValue = (value: unknown, depth = 0): string => {
