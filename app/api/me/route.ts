@@ -239,11 +239,40 @@ function resolveOwnerEmailFromCompanyRow(row: CsvObjectRow, bubbleIdToEmail?: Ma
     const mapped = String(bubbleIdToEmail.get(bubbleId) ?? "").trim().toLowerCase();
     if (mapped) return mapped;
   }
+  if (bubbleIdToEmail) {
+    for (const v of Object.values(row)) {
+      const raw = String(v ?? "").trim();
+      if (!raw) continue;
+      const bubbleId = extractBubbleIdFromText(raw);
+      if (!bubbleId) continue;
+      const mapped = String(bubbleIdToEmail.get(bubbleId) ?? "").trim().toLowerCase();
+      if (mapped) return mapped;
+    }
+  }
   for (const v of Object.values(row)) {
     const em = extractEmail(String(v ?? ""));
     if (em) return em;
   }
   return null;
+}
+
+function rowMentionsUser(rowNorm: CsvObjectRow, userEmail: string, userBubbleId: string) {
+  const email = String(userEmail ?? "").trim().toLowerCase();
+  const bubbleId = String(userBubbleId ?? "").trim();
+  for (const v of Object.values(rowNorm)) {
+    const raw = String(v ?? "").trim();
+    if (!raw) continue;
+    if (email) {
+      const em = extractEmail(raw);
+      if (em && em === email) return true;
+    }
+    if (bubbleId) {
+      if (raw === bubbleId) return true;
+      const extracted = extractBubbleIdFromText(raw);
+      if (extracted && extracted === bubbleId) return true;
+    }
+  }
+  return false;
 }
 
 function normalizePhone(value: string) {
@@ -536,6 +565,9 @@ export async function GET(req: NextRequest) {
       if (em && id) bubbleEmailToUserId.set(em, id);
     }
 
+    const userBubbleIdRaw = bubbleRowNorm ? (pickBubbleId(bubbleRowNorm) || pickFirst(bubbleRowNorm, ["user_id", "usuario_id", "id_usuario"])) : "";
+    const userBubbleId = String(userBubbleIdRaw ?? "").trim();
+
     const companyIdToName = new Map<string, string>();
     const companyOwnerEmailsById = new Map<string, Set<string>>();
     const companyRowNormById = new Map<string, CsvObjectRow>();
@@ -561,6 +593,9 @@ export async function GET(req: NextRequest) {
           companyOwnerEmailsById.set(companyId, set);
         }
         if (companyId && ownerEmail && ownerEmail === email) myCompanyIds.add(companyId);
+        if (companyId && !myCompanyIds.has(companyId) && rowMentionsUser(row, email, userBubbleId)) {
+          myCompanyIds.add(companyId);
+        }
       }
     }
 
@@ -731,6 +766,7 @@ export async function GET(req: NextRequest) {
         hasBubbleMatch: Boolean(bubbleRowNorm),
         primaryCompanyId: primaryCompanyId || null,
         usersEmailRowsCount: ctx.usersEmailRowsCount,
+        userBubbleId: userBubbleId || null,
       },
     });
   } catch (err) {
