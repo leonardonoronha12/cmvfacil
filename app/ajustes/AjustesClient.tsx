@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import styles from "./ajustes.module.css";
+import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 
 function IconGearSmall() {
   return (
@@ -59,17 +60,17 @@ export default function AjustesClient() {
     return "minha-conta";
   }, [searchParams]);
 
-  const [nome, setNome] = useState("Gold Burger");
-  const [sobrenome, setSobrenome] = useState("São Vicente");
-  const [email, setEmail] = useState("goldburger02@gmail.com");
-  const [whatsapp, setWhatsapp] = useState("(00) 00000-0000");
+  const [nome, setNome] = useState(() => String(readMeFromStore()?.nome ?? "").trim());
+  const [sobrenome, setSobrenome] = useState(() => String(readMeFromStore()?.sobrenome ?? "").trim());
+  const [email, setEmail] = useState(() => String(readMeFromStore()?.email ?? "").trim());
+  const [whatsapp, setWhatsapp] = useState(() => String(readMeFromStore()?.whatsapp ?? "").trim());
   const [permissao, setPermissao] = useState<"Administrador" | "Colaborador">("Colaborador");
 
   const [senhaAtual, setSenhaAtual] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
   const [repitaSenha, setRepitaSenha] = useState("");
 
-  const [empresaNome, setEmpresaNome] = useState("Gold Burger - São Vicente");
+  const [empresaNome, setEmpresaNome] = useState(() => String(readMeFromStore()?.companyName ?? "").trim());
   const [cnpj, setCnpj] = useState("51.590.020/0001-25");
   const [emailCorp, setEmailCorp] = useState("");
   const [empresaWhats, setEmpresaWhats] = useState("(00) 00000-0000");
@@ -87,6 +88,25 @@ export default function AjustesClient() {
   function tabClass(key: TabKey) {
     return key === tab ? `${styles.tab} ${styles.tabActive}` : styles.tab;
   }
+
+  const [avatarUrl, setAvatarUrl] = useState(() => String(readMeFromStore()?.avatarUrl ?? "").trim());
+
+  useEffect(() => {
+    const apply = () => {
+      const me = readMeFromStore();
+      if (!me) return;
+      setNome((prev) => (prev.trim() ? prev : String(me.nome ?? "").trim()));
+      setSobrenome((prev) => (prev.trim() ? prev : String(me.sobrenome ?? "").trim()));
+      setEmail((prev) => (prev.trim() ? prev : String(me.email ?? "").trim()));
+      setWhatsapp((prev) => (prev.trim() ? prev : String(me.whatsapp ?? "").trim()));
+      setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
+      setAvatarUrl(String(me.avatarUrl ?? "").trim());
+    };
+    apply();
+    const unsub = subscribeMe(() => apply());
+    void loadMeFromApi().then(() => apply());
+    return () => unsub();
+  }, []);
 
   return (
     <div className={dash.dashboard}>
@@ -125,7 +145,7 @@ export default function AjustesClient() {
                   <div className={styles.avatarRow}>
                     <div className={styles.avatarBox}>
                       <span className={styles.avatarIcon} aria-hidden>
-                        <IconBurgerBadge />
+                        {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
                       </span>
                       <span>Enviar Imagem</span>
                     </div>

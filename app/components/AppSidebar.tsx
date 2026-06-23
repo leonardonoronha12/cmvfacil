@@ -10,6 +10,7 @@ import { writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { writeInsumosToStore } from "../lib/insumosStore";
 import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
+import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import suporteStyles from "../suporte/suporte.module.css";
 
 function parseDateLabelLoose(value: string) {
@@ -295,6 +296,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [me, setMe] = useState(() => readMeFromStore());
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const lastSyncRunIdRef = useRef("");
@@ -607,6 +609,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, []);
 
   useEffect(() => {
+    setMe(readMeFromStore());
+    const unsub = subscribeMe(() => setMe(readMeFromStore()));
+    void loadMeFromApi().then((next) => {
+      if (next) setMe(next);
+    });
+    return () => unsub();
+  }, []);
+
+  useEffect(() => {
     void (async () => {
       try {
         const dbRows = await loadPrePreparoEtiquetasFromSupabase();
@@ -903,6 +914,14 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (isMobile) setIsDrawerOpen(false);
   };
 
+  const companyName = String(me?.companyName ?? "").trim() || "—";
+  const userLabel =
+    String(me?.nome ?? "").trim() ||
+    String(me?.nomeCompleto ?? "").trim() ||
+    companyName.split("-")[0]?.trim() ||
+    "—";
+  const avatarUrl = String(me?.avatarUrl ?? "").trim();
+
   const sidebarBody = (includeBrand: boolean) => (
     <>
       <div className={dash.menuTop}>
@@ -914,10 +933,10 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.companyCard}>
           <div className={dash.companyAvatar} aria-hidden>
-            <IconBurgerBadge />
+            {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
           </div>
           <div className={dash.companyMeta}>
-            <p className={dash.companyName}>Gold Burger - Ocian</p>
+            <p className={dash.companyName}>{companyName}</p>
             <p className={dash.companyPlan}>PRO Mensal</p>
           </div>
         </div>
@@ -996,9 +1015,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         <a className={dash.userDropdown} href="/ajustes?tab=minha-conta" onClick={closeDrawer}>
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>
-              <IconBurgerBadge />
+              {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
             </div>
-            <p className={dash.userHello}>Olá, Gold Burger</p>
+            <p className={dash.userHello}>Olá, {userLabel}</p>
           </div>
           <span className={dash.userChevron} aria-hidden>
             <IconChevronRight />

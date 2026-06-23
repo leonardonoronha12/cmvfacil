@@ -100,7 +100,10 @@ export async function middleware(req: NextRequest) {
     isLocalhost &&
     (pathname === "/ajustes/vercel-cli" ||
       pathname.startsWith("/ajustes/vercel-cli/") ||
+      pathname === "/ajustes/vercel-alias" ||
+      pathname.startsWith("/ajustes/vercel-alias/") ||
       pathname.startsWith("/api/vercel-cli/") ||
+      pathname === "/api/vercel/alias" ||
       pathname === "/debug-supabase" ||
       pathname.startsWith("/debug-supabase/") ||
       pathname.startsWith("/api/debug/"))
