@@ -37,7 +37,7 @@ function safeJsonParse<T>(raw: string): T | null {
 function readLocal(): MeProfile | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = window.localStorage.getItem("cmvfacil:me:v1");
+    const raw = window.localStorage.getItem("cmvfacil:me:v2");
     if (!raw) return null;
     const parsed = safeJsonParse<MeProfile>(raw);
     if (!parsed) return null;
@@ -52,10 +52,10 @@ function writeLocal(next: MeProfile | null) {
   if (typeof window === "undefined") return;
   try {
     if (!next) {
-      window.localStorage.removeItem("cmvfacil:me:v1");
+      window.localStorage.removeItem("cmvfacil:me:v2");
       return;
     }
-    window.localStorage.setItem("cmvfacil:me:v1", JSON.stringify(next));
+    window.localStorage.setItem("cmvfacil:me:v2", JSON.stringify(next));
   } catch {}
 }
 
