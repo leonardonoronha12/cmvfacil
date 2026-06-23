@@ -1075,7 +1075,8 @@ export async function POST(req: NextRequest) {
       const nomeFromItem = itemId ? extractNameFromValue(itemById.get(itemId.trim())?.nome ?? "") : "";
       const nomeFromItemRef = itemIdRaw ? extractNameFromValue(itemIdRaw) : "";
       const nomeFromGuess = extractNameFromValue(guessItemLabel(row) ?? "");
-      const nome = nomeFromValue || nomeFromItem || nomeFromItemRef || nomeFromGuess;
+      const nomeResolved = nomeFromValue || nomeFromItem || nomeFromItemRef || nomeFromGuess;
+      const nome = nomeResolved || (itemId && looksLikeBubbleId(itemId) ? itemId : "");
       if (!nome) return;
       const seen = notaItemSeenByNotaKey.get(notaKey) ?? new Set<string>();
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
