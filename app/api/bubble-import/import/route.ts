@@ -960,6 +960,63 @@ export async function POST(req: NextRequest) {
     const notaItemSeenByNotaKey = new Map<string, Set<string>>();
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
+      const sanitizeText = (value: unknown) => String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+      const normalizeNameCandidate = (value: unknown) => {
+        const raw = sanitizeText(value);
+        if (!raw) return "";
+        const k = raw.toLowerCase();
+        if (k === "false" || k === "true" || k === "null" || k === "undefined" || k === "-") return "";
+        if (raw === "[object Object]") return "";
+        return raw;
+      };
+      const extractNameFromValue = (value: unknown, depth = 0): string => {
+        if (depth > 4 || value == null) return "";
+        if (Array.isArray(value)) return extractNameFromValue(value[0], depth + 1);
+        if (typeof value === "object") {
+          const obj = value as any;
+          const direct = normalizeNameCandidate(obj?.nome ?? obj?.name ?? obj?.descricao ?? obj?.description ?? obj?.title ?? obj?.label ?? "");
+          if (direct) return direct;
+          const nestedKeys = ["item", "produto", "cadastro_item", "insumo", "ingrediente", "ref"];
+          for (const k of nestedKeys) {
+            const nested = extractNameFromValue(obj?.[k], depth + 1);
+            if (nested) return nested;
+          }
+          return "";
+        }
+        const raw = normalizeNameCandidate(value);
+        if (!raw) return "";
+        const looksJsonArray = raw.startsWith("[") && raw.endsWith("]");
+        if (looksJsonArray) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            const nested = extractNameFromValue(parsed, depth + 1);
+            if (nested) return nested;
+          } catch {}
+        }
+        if (raw.startsWith("{") && raw.endsWith("}")) {
+          try {
+            const parsed = JSON.parse(raw) as unknown;
+            const nested = extractNameFromValue(parsed, depth + 1);
+            if (nested) return nested;
+          } catch {}
+        }
+        const extracted = extractBubbleNameFromText(raw);
+        const extractedNorm = normalizeNameCandidate(extracted);
+        if (extractedNorm) return extractedNorm;
+        return raw;
+      };
+      const pickFirstValue = (keys: string[]) => {
+        for (const k of keys) {
+          const v = (row as any)[k];
+          if (v == null) continue;
+          if (typeof v === "string") {
+            if (!v.trim()) continue;
+            return v;
+          }
+          return v;
+        }
+        return null;
+      };
       const prefix = prefixForRow(row);
       const notaId =
         pickFirst(row, [
@@ -990,31 +1047,27 @@ export async function POST(req: NextRequest) {
       }
       notaKey = notaKey || notaIdStr.replace(/^[\[\("'\s]+|[\]\)"'\s]+$/g, "").trim();
       const itemIdRaw =
-        pickFirst(row, ["item_id", "id_item", "produto_id", "item", "produto"]) || pickKeyLike(row, ["item_id", "id_item", "produto_id"]);
+        pickFirst(row, ["item_id", "id_item", "produto_id", "item_ref", "produto_ref", "item", "produto"]) ||
+        pickKeyLike(row, ["item_id", "id_item", "produto_id", "item_ref", "produto_ref"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
-      const nomePicked = pickFirst(row, [
+      const nomeValue = pickFirstValue([
         "nome",
         "item_nome",
         "nome_item",
         "produto_nome",
         "nome_produto",
         "nome_na_nota",
-        "item",
-        "produto",
         "descricao",
         "descricao_item",
         "cadastro_item",
+        "item",
+        "produto",
       ]);
-      let nomeFromPicked = typeof nomePicked === "string" ? nomePicked.trim() : "";
-      if (nomeFromPicked === "[object Object]") nomeFromPicked = "";
-      if (nomeFromPicked && (nomeFromPicked.startsWith("{") || nomeFromPicked.includes("\"name\"") || nomeFromPicked.includes("\"nome\""))) {
-        const extracted = extractBubbleNameFromText(nomeFromPicked);
-        if (extracted) nomeFromPicked = extracted;
-      }
-      const nomeFromItem = itemId ? String(itemById.get(itemId.trim())?.nome ?? "").trim() : "";
-      const nomeFromGuess = String(guessItemLabel(row) ?? "").trim();
-      const nomeFromItemRef = !nomeFromPicked && itemIdRaw ? extractBubbleNameFromText(String(itemIdRaw)) : "";
-      const nome = nomeFromPicked || nomeFromItem || nomeFromItemRef || nomeFromGuess;
+      const nomeFromValue = extractNameFromValue(nomeValue);
+      const nomeFromItem = itemId ? extractNameFromValue(itemById.get(itemId.trim())?.nome ?? "") : "";
+      const nomeFromItemRef = itemIdRaw ? extractNameFromValue(itemIdRaw) : "";
+      const nomeFromGuess = extractNameFromValue(guessItemLabel(row) ?? "");
+      const nome = nomeFromValue || nomeFromItem || nomeFromItemRef || nomeFromGuess;
       if (!nome) return;
       const seen = notaItemSeenByNotaKey.get(notaKey) ?? new Set<string>();
       const qtd = pickFirst(row, ["quantidade_label", "quantidade", "qtd", "qtde"]) || pickKeyLike(row, ["quantidade", "qtd"]);
