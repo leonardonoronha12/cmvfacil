@@ -73,7 +73,9 @@ export function writeMeToStore(next: MeProfile | null) {
 
 export function subscribeMe(fn: () => void) {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
 let loading: Promise<MeProfile | null> | null = null;
@@ -106,4 +108,3 @@ export async function loadMeFromApi() {
   })();
   return loading;
 }
-
