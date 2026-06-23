@@ -921,6 +921,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     companyName.split("-")[0]?.trim() ||
     "—";
   const avatarUrl = String(me?.avatarUrl ?? "").trim();
+  const planLabel = String(me?.planType ?? "").trim() || "—";
 
   const sidebarBody = (includeBrand: boolean) => (
     <>
@@ -937,7 +938,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           </div>
           <div className={dash.companyMeta}>
             <p className={dash.companyName}>{companyName}</p>
-            <p className={dash.companyPlan}>PRO Mensal</p>
+            <p className={dash.companyPlan}>{planLabel}</p>
           </div>
         </div>
 

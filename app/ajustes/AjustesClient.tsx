@@ -78,6 +78,8 @@ export default function AjustesClient() {
 
   const [planType, setPlanType] = useState<"PRO Mensal" | "PRO Anual">("PRO Mensal");
   const [cardLast4, setCardLast4] = useState("8895");
+  const [planStatus, setPlanStatus] = useState("");
+  const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
 
   const [loggingOut, setLoggingOut] = useState(false);
 
@@ -101,6 +103,16 @@ export default function AjustesClient() {
       setWhatsapp((prev) => (prev.trim() ? prev : String(me.whatsapp ?? "").trim()));
       setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
       setAvatarUrl(String(me.avatarUrl ?? "").trim());
+      setMembers(Array.isArray(me.members) ? me.members : []);
+      const planRaw = String(me.planType ?? "").trim();
+      if (planRaw) {
+        const up = planRaw.toUpperCase();
+        if (up.includes("ANUAL")) setPlanType("PRO Anual");
+        else setPlanType("PRO Mensal");
+      }
+      setPlanStatus(String(me.planStatus ?? "").trim());
+      const last4 = String(me.cardLast4 ?? "").trim().replace(/[^\d]/g, "");
+      if (last4.length >= 4) setCardLast4(last4.slice(-4));
     };
     apply();
     const unsub = subscribeMe(() => apply());
@@ -352,38 +364,28 @@ export default function AjustesClient() {
                       <div>Data de Admissão</div>
                       <div>Permissão</div>
                     </div>
-                    <div className={styles.tr}>
-                      <div className={styles.memberCell}>
-                        <div className={styles.memberAvatar} aria-hidden>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" />
-                            <path d="M20 20c0-4-3.2-6-8-6s-8 2-8 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
+                    {members.map((m) => (
+                      <div key={`${m.email}:${m.name}`} className={styles.tr}>
+                        <div className={styles.memberCell}>
+                          <div className={styles.memberAvatar} aria-hidden>
+                            {m.avatarUrl ? (
+                              <img src={m.avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
+                            ) : (
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                                <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" />
+                                <path d="M20 20c0-4-3.2-6-8-6s-8 2-8 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+                              </svg>
+                            )}
+                          </div>
+                          <div className={styles.memberMeta}>
+                            <div className={styles.memberName}>{m.name}</div>
+                            <div className={styles.memberEmail}>{m.email}</div>
+                          </div>
                         </div>
-                        <div className={styles.memberMeta}>
-                          <div className={styles.memberName}>Lu Henrique (Proprietário)</div>
-                          <div className={styles.memberEmail}>goldburgervg@gmail.com</div>
-                        </div>
+                        <div>{m.joinedAt || "—"}</div>
+                        <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
                       </div>
-                      <div>26/06/25 às 21:24h</div>
-                      <div className={styles.badgeAdmin}>Administrador</div>
-                    </div>
-                    <div className={styles.tr}>
-                      <div className={styles.memberCell}>
-                        <div className={styles.memberAvatar} aria-hidden>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                            <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" />
-                            <path d="M20 20c0-4-3.2-6-8-6s-8 2-8 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-                          </svg>
-                        </div>
-                        <div className={styles.memberMeta}>
-                          <div className={styles.memberName}>Gold Burger São Vicente</div>
-                          <div className={styles.memberEmail}>goldburger02@gmail.com</div>
-                        </div>
-                      </div>
-                      <div>10/11/25 às 16:16h</div>
-                      <div className={styles.badgeCollab}>Colaborador</div>
-                    </div>
+                    ))}
                   </div>
                 </div>
               ) : null}
@@ -394,19 +396,19 @@ export default function AjustesClient() {
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Plano</div>
                       <div className={styles.planMiniValue}>{planType}</div>
-                      <button type="button" className={styles.planMiniLink} onClick={() => setPlanType((p) => (p === "PRO Mensal" ? "PRO Anual" : "PRO Mensal"))}>
+                      <button type="button" className={styles.planMiniLink} disabled>
                         Alterar
                       </button>
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Status</div>
-                      <div className={styles.planMiniValue}>Ativo</div>
+                      <div className={styles.planMiniValue}>{planStatus || "—"}</div>
                       <div className={styles.planMiniMuted}>Status da assinatura</div>
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Cartão</div>
-                      <div className={styles.planMiniValue}>{`**** **** **** ${cardLast4}`}</div>
-                      <button type="button" className={styles.planMiniLink} onClick={() => setCardLast4(String(Math.floor(1000 + Math.random() * 9000)))}>
+                      <div className={styles.planMiniValue}>{cardLast4 ? `**** **** **** ${cardLast4}` : "—"}</div>
+                      <button type="button" className={styles.planMiniLink} disabled>
                         Alterar
                       </button>
                     </div>
@@ -422,7 +424,7 @@ export default function AjustesClient() {
                         </div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
                       </div>
-                      <button type="button" className={styles.planSelectBtn} onClick={() => setPlanType("PRO Mensal")}>
+                      <button type="button" className={styles.planSelectBtn} disabled>
                         Selecionar Plano
                       </button>
                       <ul className={styles.planList}>
@@ -446,7 +448,7 @@ export default function AjustesClient() {
                         </div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
                       </div>
-                      <button type="button" className={styles.planSelectBtn} onClick={() => setPlanType("PRO Anual")}>
+                      <button type="button" className={styles.planSelectBtn} disabled>
                         Selecionar Plano
                       </button>
                       <ul className={styles.planList}>

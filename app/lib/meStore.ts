@@ -9,6 +9,10 @@ export type MeProfile = {
   whatsapp: string;
   avatarUrl: string;
   companyName: string;
+  planType: string;
+  planStatus: string;
+  cardLast4: string;
+  members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }>;
 };
 
 let state: MeProfile | null = null;
@@ -97,6 +101,18 @@ export async function loadMeFromApi() {
         whatsapp: String(j.whatsapp ?? "").trim(),
         avatarUrl: String(j.avatarUrl ?? "").trim(),
         companyName: String(j.companyName ?? "").trim(),
+        planType: String(j.plan?.type ?? j.planType ?? "").trim(),
+        planStatus: String(j.plan?.status ?? j.planStatus ?? "").trim(),
+        cardLast4: String(j.plan?.cardLast4 ?? j.cardLast4 ?? "").trim(),
+        members: Array.isArray(j.members)
+          ? (j.members as any[]).map((m) => ({
+              name: String(m?.name ?? "").trim(),
+              email: String(m?.email ?? "").trim(),
+              role: String(m?.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador",
+              joinedAt: String(m?.joinedAt ?? "").trim(),
+              avatarUrl: String(m?.avatarUrl ?? "").trim(),
+            }))
+          : [],
       };
       if (next.userId && next.email) writeMeToStore(next);
       return next;

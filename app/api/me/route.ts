@@ -262,6 +262,70 @@ function guessUserNameParts(rowNorm: CsvObjectRow) {
   return { first: parts[0] ?? base, last: parts.slice(1).join(" "), full: parts.join(" ") };
 }
 
+function extractBubbleIdFromText(raw: string) {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  const bubbleIdInJson = s.match(/"(?:unique_id|_id|id|bubble_id|company_id|empresa_id|restaurante_id|restaurant_id|account_id)"\s*:\s*"([^"]+)"/i);
+  if (bubbleIdInJson) {
+    const extracted = String(bubbleIdInJson[1] ?? "").trim();
+    if (extracted) return extracted;
+  }
+  const loose = s.match(/\b\d{6,}x\d+\b/);
+  if (loose) return String(loose[0] ?? "").trim();
+  return "";
+}
+
+function formatDateTimePt(input: string) {
+  const raw = String(input ?? "").trim();
+  if (!raw) return "";
+  const ts = Date.parse(raw);
+  if (!Number.isFinite(ts)) return raw;
+  const d = new Date(ts);
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const yy = String(d.getFullYear()).slice(-2);
+  const hh = String(d.getHours()).padStart(2, "0");
+  const mi = String(d.getMinutes()).padStart(2, "0");
+  return `${dd}/${mm}/${yy} às ${hh}:${mi}h`;
+}
+
+function guessJoinedAt(rowNorm: CsvObjectRow) {
+  const raw =
+    pickFirst(rowNorm, ["data_admissao", "admissao", "created_at", "created_date", "created", "signup_at", "data_criacao", "data"]) ||
+    pickKeyLike(rowNorm, ["admiss", "created", "signup", "data"], ["updated", "delete", "id", "uuid", "email", "whatsapp", "telefone"]);
+  return formatDateTimePt(raw);
+}
+
+function guessRole(rowNorm: CsvObjectRow) {
+  const raw =
+    pickFirst(rowNorm, ["permissao", "permission", "role", "nivel", "type", "user_type", "tipo"]) ||
+    pickKeyLike(rowNorm, ["permiss", "role", "admin", "owner", "nivel", "tipo"], ["email", "nome", "name", "company", "empresa"]);
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return "";
+  if (s.includes("admin") || s.includes("administrador") || s.includes("owner") || s.includes("propriet")) return "Administrador";
+  if (s.includes("colab")) return "Colaborador";
+  if (s === "true" || s === "1" || s === "sim") return "Administrador";
+  return "";
+}
+
+function guessPlanFromCompanyRow(rowNorm: CsvObjectRow) {
+  const planRaw =
+    pickFirst(rowNorm, ["plano", "plan", "plan_name", "assinatura_plano", "subscription_plan", "tipo_plano"]) ||
+    pickKeyLike(rowNorm, ["plano", "plan", "assinatura", "subscription"], ["id", "uuid", "email", "telefone", "whatsapp"]);
+  const statusRaw =
+    pickFirst(rowNorm, ["status", "assinatura_status", "subscription_status", "plano_status"]) ||
+    pickKeyLike(rowNorm, ["status", "ativo", "assinatura", "subscription"], ["id", "uuid", "email", "telefone", "whatsapp", "plano", "plan"]);
+  const cardRaw =
+    pickFirst(rowNorm, ["card_last4", "last4", "cartao_final", "final_cartao", "card", "cartao"]) ||
+    pickKeyLike(rowNorm, ["last4", "cartao", "card"], ["id", "uuid", "email"]);
+
+  const type = String(planRaw ?? "").trim();
+  const status = String(statusRaw ?? "").trim();
+  const digits = String(cardRaw ?? "").replace(/[^\d]/g, "");
+  const cardLast4 = digits.length >= 4 ? digits.slice(-4) : "";
+  return { type, status, cardLast4 };
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -303,10 +367,11 @@ export async function GET(req: NextRequest) {
 
     let bubbleRow: CsvObjectRow | null = null;
     let bubbleRowNorm: CsvObjectRow | null = null;
+    let usersAllRows: CsvObjectRow[] = [];
 
     if (usersFile) {
-      const rawRows = await loadRowsForPath(supabase, bucket, usersFile.path, usersFile.name);
-      for (const rr of rawRows) {
+      usersAllRows = await loadRowsForPath(supabase, bucket, usersFile.path, usersFile.name);
+      for (const rr of usersAllRows) {
         const row = normalizeRowKeys(rr);
         const emailRaw =
           pickFirst(row, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) ||
@@ -333,26 +398,125 @@ export async function GET(req: NextRequest) {
     const whatsapp = whatsappRaw ? normalizePhone(whatsappRaw) : "";
     const avatarUrl = bubbleRowNorm ? guessUserAvatar(bubbleRowNorm) : "";
 
-    let companies: Array<{ id: string; name: string }> = [];
+    const companyIdToName = new Map<string, string>();
+    const companyOwnerEmailsById = new Map<string, Set<string>>();
+    const companyRowNormById = new Map<string, CsvObjectRow>();
+    const myCompanyIds = new Set<string>();
+
     if (empresasFile) {
       const rawRows = await loadRowsForPath(supabase, bucket, empresasFile.path, empresasFile.name);
-      const byId = new Map<string, string>();
+      let idx = 0;
       for (const rr of rawRows) {
+        idx++;
         const row = normalizeRowKeys(rr);
-        const ownerEmail = resolveOwnerEmailFromCompanyRow(row);
-        if (!ownerEmail || ownerEmail !== email) continue;
-        const companyId = pickBubbleId(row) || pickFirst(row, ["empresa_id", "company_id", "restaurante_id", "restaurant_id", "id", "_id", "unique_id", "bubble_id"]);
+        const companyIdRaw = pickBubbleId(row) || pickFirst(row, ["empresa_id", "company_id", "restaurante_id", "restaurant_id", "id", "_id", "unique_id", "bubble_id"]);
         const name = guessCompanyName(row);
-        if (!name || name === "—") continue;
-        const id = String(companyId || `${empresasFile.path}:${companies.length + 1}`).trim();
-        if (!id) continue;
-        if (!byId.has(id)) byId.set(id, name);
+        const companyId = String(companyIdRaw || "").trim() || (name && name !== "—" ? `${empresasFile.path}:${idx}` : "");
+        if (companyId && name && name !== "—") {
+          if (!companyIdToName.has(companyId)) companyIdToName.set(companyId, name);
+          if (!companyRowNormById.has(companyId)) companyRowNormById.set(companyId, row);
+        }
+        const ownerEmail = resolveOwnerEmailFromCompanyRow(row);
+        if (companyId && ownerEmail) {
+          const set = companyOwnerEmailsById.get(companyId) ?? new Set<string>();
+          set.add(ownerEmail);
+          companyOwnerEmailsById.set(companyId, set);
+        }
+        if (companyId && ownerEmail && ownerEmail === email) myCompanyIds.add(companyId);
       }
-      companies = Array.from(byId.entries()).map(([id, name]) => ({ id, name }));
-      companies.sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
     }
 
+    if (bubbleRowNorm && companyIdToName.size) {
+      const knownIds = new Set(Array.from(companyIdToName.keys()).map((x) => String(x ?? "").trim()).filter(Boolean));
+      const candidates: string[] = [];
+      for (const k of Object.keys(bubbleRowNorm)) {
+        const kk = k.toLowerCase();
+        if (kk.includes("empresa") || kk.includes("company") || kk.includes("restaurante") || kk.includes("restaurant") || kk.includes("account")) {
+          candidates.push(String((bubbleRowNorm as any)[k] ?? ""));
+        }
+      }
+      for (const v of Object.values(bubbleRowNorm)) candidates.push(String(v ?? ""));
+      for (const raw of candidates) {
+        const s = String(raw ?? "").trim();
+        if (!s || s.includes("@")) continue;
+        const direct = knownIds.has(s) ? s : "";
+        const extracted = direct || extractBubbleIdFromText(s);
+        if (extracted && knownIds.has(extracted)) myCompanyIds.add(extracted);
+      }
+    }
+
+    const companies = Array.from(myCompanyIds)
+      .map((id) => ({ id, name: String(companyIdToName.get(id) ?? "").trim() || "—" }))
+      .filter((c) => c.name && c.name !== "—")
+      .sort((a, b) => a.name.localeCompare(b.name, "pt-BR", { sensitivity: "base" }));
+
+    const primaryCompanyId = companies[0]?.id ?? "";
     const companyName = companies[0]?.name ?? "";
+    const plan = primaryCompanyId ? guessPlanFromCompanyRow(companyRowNormById.get(primaryCompanyId) ?? {}) : { type: "", status: "", cardLast4: "" };
+
+    const members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }> = [];
+    if (usersAllRows.length) {
+      const knownIds = new Set(companies.map((c) => String(c.id ?? "").trim()).filter(Boolean));
+      for (const rr of usersAllRows) {
+        const rowNorm = normalizeRowKeys(rr);
+        const emailRaw =
+          pickFirst(rowNorm, ["email", "user_email", "usuario_email", "e_mail", "mail", "login", "username"]) ||
+          pickKeyLike(rowNorm, ["email", "mail", "login", "username"], ["id", "uuid"]);
+        let memberEmail = emailRaw ? extractEmail(emailRaw) : null;
+        if (!memberEmail) {
+          for (const v of Object.values(rowNorm)) {
+            memberEmail = extractEmail(String(v ?? ""));
+            if (memberEmail) break;
+          }
+        }
+        if (!memberEmail) continue;
+
+        let inCompany = false;
+        if (knownIds.size) {
+          const candidates: string[] = [];
+          for (const k of Object.keys(rowNorm)) {
+            const kk = k.toLowerCase();
+            if (kk.includes("empresa") || kk.includes("company") || kk.includes("restaurante") || kk.includes("restaurant") || kk.includes("account")) {
+              candidates.push(String((rowNorm as any)[k] ?? ""));
+            }
+          }
+          for (const v of Object.values(rowNorm)) candidates.push(String(v ?? ""));
+          for (const raw of candidates) {
+            const s = String(raw ?? "").trim();
+            if (!s || s.includes("@")) continue;
+            const direct = knownIds.has(s) ? s : "";
+            const extracted = direct || extractBubbleIdFromText(s);
+            if (extracted && knownIds.has(extracted)) {
+              inCompany = true;
+              break;
+            }
+          }
+        } else {
+          inCompany = memberEmail === email;
+        }
+        if (!inCompany) continue;
+
+        const parts = guessUserNameParts(rowNorm);
+        const ownerEmails = primaryCompanyId ? companyOwnerEmailsById.get(primaryCompanyId) ?? new Set<string>() : new Set<string>();
+        const roleFromRow = guessRole(rowNorm);
+        const role = ownerEmails.has(memberEmail) || roleFromRow === "Administrador" ? "Administrador" : "Colaborador";
+        const joinedAt = guessJoinedAt(rowNorm);
+        const avatar = guessUserAvatar(rowNorm);
+        const displayName = String(parts.full ?? "").trim() || memberEmail;
+        members.push({
+          name: ownerEmails.has(memberEmail) ? `${displayName} (Proprietário)` : displayName,
+          email: memberEmail,
+          role,
+          joinedAt,
+          avatarUrl: avatar,
+        });
+      }
+    }
+
+    if (!members.length) {
+      const displayName = String(nameParts.full ?? "").trim() || email;
+      members.push({ name: displayName, email, role: "Administrador", joinedAt: "", avatarUrl });
+    }
 
     return json({
       ok: true,
@@ -365,6 +529,8 @@ export async function GET(req: NextRequest) {
       avatarUrl: avatarUrl || "",
       companyName,
       companies,
+      plan,
+      members,
       source: {
         usersFile: usersFile ? { path: usersFile.path, name: usersFile.name } : null,
         empresasFile: empresasFile ? { path: empresasFile.path, name: empresasFile.name } : null,
@@ -375,4 +541,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-
