@@ -44,6 +44,7 @@ type EntradaRow = {
 
 type NotaItem = {
   id: string;
+  itemId?: string;
   nome: string;
   quantidadeLabel: string;
   subtotalLabel: string;
@@ -83,6 +84,17 @@ function normalizeNotaItemName(value: unknown) {
   const k = raw.toLowerCase();
   if (k === "false" || k === "true" || k === "null" || k === "undefined") return "";
   return raw;
+}
+
+function resolveNotaItemDisplayName(it: unknown, insumosById: Map<string, string>) {
+  const obj = it && typeof it === "object" ? (it as any) : null;
+  const nomeRaw = normalizeNotaItemName(obj?.nome);
+  const itemIdRaw = sanitizeUiLabel(String(obj?.itemId ?? obj?.item_id ?? obj?.insumoId ?? obj?.insumo_id ?? ""));
+  const id = itemIdRaw || (looksLikeBubbleId(nomeRaw) ? nomeRaw : "");
+  const resolved = id ? insumosById.get(id) ?? "" : "";
+  if (resolved) return resolved;
+  if (nomeRaw && !looksLikeBubbleId(nomeRaw)) return nomeRaw;
+  return nomeRaw || "-";
 }
 
 function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: FornecedorInfoMap) {
@@ -642,6 +654,12 @@ export default function EntradasClient() {
   const insumosByName = useMemo(() => {
     const map = new Map<string, InsumoStoreItem>();
     for (const i of insumosStore) map.set(i.item.toLowerCase(), i);
+    return map;
+  }, [insumosStore]);
+
+  const insumosById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const i of insumosStore) map.set(String(i.id ?? "").trim(), String(i.item ?? "").trim());
     return map;
   }, [insumosStore]);
 
@@ -2145,11 +2163,11 @@ export default function EntradasClient() {
                     {(detailsRow.itensNota ?? []).map((it) => (
                       <div key={it.id} className={styles.itemsRow}>
                         <div className={styles.itemsNameWrap}>
-                          <div className={styles.itemsName}>{normalizeNotaItemName((it as any).nome) || "-"}</div>
+                          <div className={styles.itemsName}>{resolveNotaItemDisplayName(it, insumosById)}</div>
                           <div className={styles.itemsEq}>
                             {(() => {
                               const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                              const nome = normalizeNotaItemName((it as any).nome);
+                              const nome = resolveNotaItemDisplayName(it, insumosById);
                               if (!nome) return "-";
                               const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
                               const eq = map?.insumoEquivalente ?? (insumosByName.get(nome.toLowerCase()) ? nome : "");
@@ -2160,7 +2178,7 @@ export default function EntradasClient() {
                         <div className={styles.itemsQty}>
                           {(() => {
                             const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                            const nome = normalizeNotaItemName((it as any).nome);
+                            const nome = resolveNotaItemDisplayName(it, insumosById);
                             if (!nome) return it.quantidadeLabel;
                             const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
                             const factor = map ? parsePtNumber(map.equivalenteQuantidade) : 0;
@@ -2182,7 +2200,7 @@ export default function EntradasClient() {
                           <div className={styles.itemsUnitCost}>
                             {(() => {
                               const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
-                              const nome = normalizeNotaItemName((it as any).nome);
+                              const nome = resolveNotaItemDisplayName(it, insumosById);
                               if (!nome) return it.custoUnitarioLabel;
                               const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
                               const factor = map ? parsePtNumber(map.equivalenteQuantidade) : 0;
