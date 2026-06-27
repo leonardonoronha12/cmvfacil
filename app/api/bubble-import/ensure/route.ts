@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../lib/bubbleGlobalConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -567,8 +568,11 @@ export async function POST(req: NextRequest) {
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(String(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? ""));
-    const token = safeToken(String(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? ""));
+    const globalDb = await readBubbleGlobalConfigFromDb();
+    const globalEnv = readBubbleGlobalConfigFromEnv();
+    const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+    const baseUrl = safeBaseUrl(String(body?.baseUrl ?? global?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? ""));
+    const token = safeToken(String(body?.token ?? global?.token ?? getEnv("BUBBLE_API_TOKEN") ?? ""));
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {

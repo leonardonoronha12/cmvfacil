@@ -109,7 +109,15 @@ async function loadRowsForPart(supabase: ReturnType<typeof getSupabaseAdmin>, bu
   }
   if (lower.endsWith(".json")) {
     const text = await downloadText(supabase, bucket, part.path);
-    const parsed = JSON.parse(text);
+    const trimmed = String(text ?? "").trimStart();
+    const looksMarkup = trimmed.startsWith("<") || trimmed.startsWith("<?xml") || /<\s*(html|body|doctype)\b/i.test(trimmed.slice(0, 2000));
+    if (looksMarkup) throw new Error(`invalid_json_file:${part.name}`);
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`invalid_json_file:${part.name}`);
+    }
     const toCell = (v: unknown) => {
       if (v == null) return "";
       if (typeof v === "string") return v.trim();
@@ -175,7 +183,7 @@ function classifyFile(name: string) {
   if (n.includes("invent")) return "inventario";
   if ((n.includes("pre") && n.includes("preparo")) && ((n.includes("itens") || n.includes("items") || n.includes("ingred") || /\bitem\b/.test(n)))) return "pre_preparo_ingredientes";
   if (n.includes("pre") && n.includes("preparo")) return "pre_preparo";
-  if (n.includes("etiqueta")) return "pre_preparo_etiquetas";
+  if (n.includes("etiqueta") && ((n.includes("pre") && n.includes("preparo")) || n.includes("pre_preparo") || n.includes("prepreparo"))) return "pre_preparo_etiquetas";
   if (n.includes("ficha") || n.includes("fichas") || (n.includes("receita") && !n.includes("itens"))) return "fichas_tecnicas";
   if ((n.includes("itens") || n.includes("items")) && n.includes("nota")) return "itens_notas";
   if (n.includes("itens-fornecedores") || n.includes("items_fornecedores") || n.includes("itens_fornecedores")) return "itens_fornecedores";
@@ -335,11 +343,23 @@ function normalizeFornecedorKey(value: string) {
 
 function normalizeItemName(value: string) {
   return String(value ?? "")
+    .replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
     .trim()
     .toLowerCase();
+}
+
+function stableKeyFromParts(parts: Array<unknown>) {
+  const raw = parts
+    .map((p) => String(p ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim())
+    .filter(Boolean)
+    .join("|");
+  if (!raw) return "";
+  return normalizeItemName(raw)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function pickKeyLike(row: CsvObjectRow, parts: string[], opts?: { excludeParts?: string[] }) {
@@ -420,6 +440,80 @@ async function upsertInBatches<T extends Record<string, unknown>>(supabase: Retu
     inserted += uniqueChunk.length;
   }
   return inserted;
+}
+
+async function dedupeEntradasForUser(supabase: ReturnType<typeof getSupabaseAdmin>, uid: string) {
+  const prefix = `user:${uid}:entrada:`;
+  const { data, error } = await supabase.from("entradas").select("id,numero,data_lancamento,fornecedor,valor_nota,created_at").like("id", `${prefix}%`);
+  if (error || !data) return 0;
+  const keepBySig = new Map<string, { id: string; createdAt: string }>();
+  const deleteIds: string[] = [];
+  for (const r of data as any[]) {
+    const id = String(r?.id ?? "").trim();
+    if (!id) continue;
+    const sig =
+      stableKeyFromParts([r?.numero, r?.data_lancamento, r?.fornecedor, r?.valor_nota]) ||
+      stableKeyFromParts([id]) ||
+      id;
+    const createdAt = String(r?.created_at ?? "").trim();
+    const prev = keepBySig.get(sig);
+    if (!prev) {
+      keepBySig.set(sig, { id, createdAt });
+      continue;
+    }
+    const prevTs = prev.createdAt ? Date.parse(prev.createdAt) : 0;
+    const curTs = createdAt ? Date.parse(createdAt) : 0;
+    if (curTs >= prevTs) {
+      deleteIds.push(prev.id);
+      keepBySig.set(sig, { id, createdAt });
+    } else {
+      deleteIds.push(id);
+    }
+  }
+  let deleted = 0;
+  for (let i = 0; i < deleteIds.length; i += 200) {
+    const chunk = deleteIds.slice(i, i + 200);
+    const del = await supabase.from("entradas").delete().in("id", chunk);
+    if (!del.error) deleted += chunk.length;
+  }
+  return deleted;
+}
+
+async function dedupeDesperdiciosForUser(supabase: ReturnType<typeof getSupabaseAdmin>, uid: string) {
+  const prefix = `user:${uid}:desperdicio:`;
+  const { data, error } = await supabase.from("desperdicios").select("id,data,item,quantidade,custo,motivo,created_at").like("id", `${prefix}%`);
+  if (error || !data) return 0;
+  const keepBySig = new Map<string, { id: string; createdAt: string }>();
+  const deleteIds: string[] = [];
+  for (const r of data as any[]) {
+    const id = String(r?.id ?? "").trim();
+    if (!id) continue;
+    const sig =
+      stableKeyFromParts([r?.data, r?.item, r?.quantidade, r?.custo, r?.motivo]) ||
+      stableKeyFromParts([id]) ||
+      id;
+    const createdAt = String(r?.created_at ?? "").trim();
+    const prev = keepBySig.get(sig);
+    if (!prev) {
+      keepBySig.set(sig, { id, createdAt });
+      continue;
+    }
+    const prevTs = prev.createdAt ? Date.parse(prev.createdAt) : 0;
+    const curTs = createdAt ? Date.parse(createdAt) : 0;
+    if (curTs >= prevTs) {
+      deleteIds.push(prev.id);
+      keepBySig.set(sig, { id, createdAt });
+    } else {
+      deleteIds.push(id);
+    }
+  }
+  let deleted = 0;
+  for (let i = 0; i < deleteIds.length; i += 200) {
+    const chunk = deleteIds.slice(i, i + 200);
+    const del = await supabase.from("desperdicios").delete().in("id", chunk);
+    if (!del.error) deleted += chunk.length;
+  }
+  return deleted;
 }
 
 async function downloadJsonFromStorage(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string) {
@@ -696,7 +790,14 @@ export async function POST(req: NextRequest) {
       const s = String(name ?? "")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase();
+        .toLowerCase()
+        .replace(/\s+/g, " ")
+        .trim();
+      if (!s) return false;
+      if (s.includes("prepreparo")) return true;
+      if (s.includes("pre-preparo")) return true;
+      if (s.includes("pre preparo")) return true;
+      if (s.includes("preparad")) return true;
       return s.includes("pre") && s.includes("preparo");
     }
 
@@ -750,6 +851,14 @@ export async function POST(req: NextRequest) {
       }
 
       if (!enableInsumos) return;
+      const tipoRaw =
+        pickFirst(row, ["tipo", "tipo_item", "tipo_de_item", "type"]) || pickKeyLike(row, ["tipo"], { excludeParts: ["unidade", "medida", "categoria"] });
+      const tipoNorm = normalizeItemName(String(tipoRaw ?? ""));
+      const isPrePreparoItem =
+        catNameLooksLikePrePreparo(String(categoria ?? "")) ||
+        (tipoNorm.includes("pre") && tipoNorm.includes("preparo")) ||
+        Boolean(pickFirst(row, ["pre_preparo_id", "prepreparo_id", "receita_id", "recipe_id"]) || pickKeyLike(row, ["pre_preparo", "prepreparo", "receita", "recipe"]));
+      if (isPrePreparoItem) return;
       const insumosByKey = getInsumosMap(uid);
       const custoByItemKey = getCustoMap(uid);
       const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]) || pickKeyLike(row, ["especific", "descr", "obs"]);
@@ -882,13 +991,13 @@ export async function POST(req: NextRequest) {
       if (!enableFornecedores) return;
       const uid = resolveTargetUserId(row);
       const st = getFornecedoresState(uid);
-    const fornecedor =
+      const fornecedor =
         pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
         pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
       const key = normalizeFornecedorKey(fornecedor);
       if (!key) return;
       const fornId = pickBubbleId(row) || pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
-      const fornIdResolved = fornId ? extractBubbleRefId(String(fornId)) : "";
+      const fornIdResolved = fornId ? extractBubbleRefId(String(fornId)) || extractBubbleIdFromText(String(fornId)) || "" : "";
       if (fornIdResolved) st.fornecedorNameById.set(fornIdResolved, fornecedor.trim());
       const info = {
         fornecedor: fornecedor.trim() || fornecedor,
@@ -897,10 +1006,6 @@ export async function POST(req: NextRequest) {
         endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
       };
       st.infoMap[key] = info;
-      if (fornIdResolved) {
-        const idKey = fornIdResolved.trim().toUpperCase();
-        if (!st.infoMap[idKey]) st.infoMap[idKey] = info;
-      }
     }
 
     function handleFornecedorProduto(row: CsvObjectRow) {
@@ -908,9 +1013,10 @@ export async function POST(req: NextRequest) {
       const uid = resolveTargetUserId(row);
       const st = getFornecedoresState(uid);
       const fornecedorId = pickFirst(row, ["fornecedor_id"]) || pickKeyLike(row, ["fornecedor_id"]);
+      const fornecedorIdResolved = fornecedorId ? extractBubbleRefId(fornecedorId.trim()) || extractBubbleIdFromText(fornecedorId.trim()) || fornecedorId.trim() : "";
       const fornecedor =
         pickFirst(row, ["fornecedor", "fornecedor_nome", "nome_fornecedor", "razao_social", "nome"]) ||
-        (fornecedorId ? st.fornecedorNameById.get(fornecedorId.trim()) ?? "" : "") ||
+        (fornecedorIdResolved ? st.fornecedorNameById.get(fornecedorIdResolved) ?? "" : "") ||
         pickKeyLike(row, ["fornecedor"], { excludeParts: ["empresa", "restaurante", "company"] });
 
       const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
@@ -943,8 +1049,15 @@ export async function POST(req: NextRequest) {
       const unidadeNaNota = pickFirst(row, ["unidade_na_nota", "unidadeNaNota", "unidade", "medida"]) || pickKeyLike(row, ["unidade", "medida"]) || "Und";
       const equivalenteQuantidade = pickFirst(row, ["equivalente_quantidade", "equivalenteQuantidade", "quantidade", "qtd"]) || pickKeyLike(row, ["quantidade", "qtd"]);
       const equivalenteUnidade = pickFirst(row, ["equivalente_unidade", "equivalenteUnidade", "unidade_equivalente", "unidade"]) || "";
-      const bubbleId = pickBubbleId(row) || String(Date.now());
+      const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+      const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+      const bubbleId =
+        bubbleIdResolved ||
+        stableKeyFromParts([key, nomeNaNota, unidadeNaNota, insumoEquivalente, equivalenteQuantidade, equivalenteUnidade]) ||
+        stableKeyFromParts([JSON.stringify(row)]) ||
+        String(Date.now());
       const list = st.equivalenciasMap[key] ?? [];
+      if (list.some((x) => String((x as any)?.id ?? "").trim() === bubbleId)) return;
       list.push({
         id: bubbleId,
         nomeNaNota: nomeNaNota.trim(),
@@ -958,6 +1071,13 @@ export async function POST(req: NextRequest) {
 
     const notaItemsByNotaKey = new Map<string, any[]>();
     const notaItemSeenByNotaKey = new Map<string, Set<string>>();
+    const notaItemsByNumero = new Map<string, any[]>();
+    const notaItemSeenByNumero = new Map<string, Set<string>>();
+    const normalizeNotaNumero = (value: unknown) => {
+      const raw = String(value ?? "").replace(/[^\d]+/g, "").trim();
+      if (!raw) return "";
+      return raw.replace(/^0+/, "") || "0";
+    };
     function handleNotaItem(row: CsvObjectRow) {
       if (!enableEntradas) return;
       const sanitizeText = (value: unknown) => String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
@@ -1058,6 +1178,8 @@ export async function POST(req: NextRequest) {
         pickFirst(row, ["item_id", "id_item", "produto_id", "item_ref", "produto_ref", "item", "produto"]) ||
         pickKeyLike(row, ["item_id", "id_item", "produto_id", "item_ref", "produto_ref"]);
       const itemId = itemIdRaw ? extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
+      const numeroRaw = pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
+      const numeroKey = normalizeNotaNumero(numeroRaw);
       const nomeValue = pickFirstValue([
         "nome",
         "item_nome",
@@ -1100,6 +1222,17 @@ export async function POST(req: NextRequest) {
         custoUnitarioLabel: unit ? (parsePtNumber(unit) ? formatMoneyBRL(parsePtNumber(unit)) : unit.trim()) : "",
       });
       notaItemsByNotaKey.set(notaKey, list);
+
+      if (numeroKey) {
+        const seenN = notaItemSeenByNumero.get(numeroKey) ?? new Set<string>();
+        const listN = notaItemsByNumero.get(numeroKey) ?? [];
+        if (!seenN.has(bubbleKey)) {
+          seenN.add(bubbleKey);
+          notaItemSeenByNumero.set(numeroKey, seenN);
+          listN.push(list[list.length - 1]);
+          notaItemsByNumero.set(numeroKey, listN);
+        }
+      }
     }
 
     const entradasRows: any[] = [];
@@ -1128,9 +1261,8 @@ export async function POST(req: NextRequest) {
     const fornecedorFinal = fornecedorSanitized || (fornecedorId ? fornecedorId : "-");
     const numero =
       pickFirst(row, ["numero", "numero_nf", "numero_nota", "nota_numero", "n_nf", "nf", "num", "num_nf"]) || pickKeyLike(row, ["numero", "nf"]);
+    const numeroKey = normalizeNotaNumero(numero);
     const dataLanc = buildDateLabel(pickFirst(row, ["data_lancamento", "data_nota", "data_recebimento", "data", "date", "created_at", "created_date"]) || pickKeyLike(row, ["data", "date"]));
-    const bubbleId = pickBubbleId(row) || `${numero || "nf"}_${entradasRows.length + 1}`;
-    const numeroFinal = numero.trim() || `NF-${String(bubbleId).slice(0, 8)}`;
     const valor = pickFirst(row, ["valor_nota", "valor_total", "valor", "total", "subtotal"]) || pickKeyLike(row, ["valor", "total", "subtotal"]);
     const valorNum = parsePtNumber(valor);
     let responsavel = pickFirst(row, ["responsavel", "usuario", "user", "nome_usuario", "criado_por"]) || pickKeyLike(row, ["responsavel", "usuario"]) || "-";
@@ -1141,16 +1273,36 @@ export async function POST(req: NextRequest) {
       if (email) responsavel = email;
     }
     const dataCriacao = buildDateLabel(pickFirst(row, ["data_criacao", "created_date", "created_at", "created"]) || "");
+    const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+    const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+    const bubbleId =
+      bubbleIdResolved ||
+      stableKeyFromParts([String(numero ?? "").trim(), dataLanc, fornecedorFinal, valorNum ? formatMoneyBRL(valorNum) : String(valor ?? "").trim(), dataCriacao]) ||
+      stableKeyFromParts([JSON.stringify(row)]) ||
+      `${numero || "nf"}_${entradasRows.length + 1}`;
+    const numeroFinal = String(numero ?? "").trim() || `NF-${String(bubbleId).slice(0, 8)}`;
     const notaKey = extractBubbleRefId(String(bubbleId)).trim() || String(bubbleId).trim();
-    const itensList = notaItemsByNotaKey.get(notaKey) ?? notaItemsByNotaKey.get(numero) ?? notaItemsByNotaKey.get(numeroFinal) ?? [];
+    const itensList =
+      notaItemsByNotaKey.get(notaKey) ??
+      notaItemsByNotaKey.get(String(numero ?? "").trim()) ??
+      notaItemsByNotaKey.get(numeroFinal) ??
+      (numeroKey ? notaItemsByNumero.get(numeroKey) : null) ??
+      [];
     const itensCount = itensList.length;
+    const computedValorNum = !valorNum
+      ? itensList.reduce((sum, it) => {
+          const n = parsePtNumber((it as any)?.subtotalLabel ?? "");
+          return sum + (n && Number.isFinite(n) ? n : 0);
+        }, 0)
+      : 0;
+    const finalValorNum = valorNum || (computedValorNum > 0 ? computedValorNum : 0);
     entradasRows.push({
       id: `${prefix}entrada:${bubbleId}`,
       user_id: uid,
       numero: numeroFinal,
       data_lancamento: dataLanc || "-",
       fornecedor: fornecedorFinal,
-      valor_nota: valorNum ? formatMoneyBRL(valorNum) : String(valor ?? "").trim() || "R$0,00",
+      valor_nota: finalValorNum ? formatMoneyBRL(finalValorNum) : String(valor ?? "").trim() || "R$0,00",
       itens: `${itensCount || parsePtNumber(pickFirst(row, ["itens", "qtd_itens", "quantidade_itens"]) || pickKeyLike(row, ["itens", "qtd"])) || 0} Itens`,
       responsavel: responsavel.trim(),
       data_criacao: dataCriacao || dataLanc || "-",
@@ -1177,7 +1329,6 @@ export async function POST(req: NextRequest) {
     const itemId = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
     const item = guessItemLabel(row) || (itemId ? itemById.get(itemId.trim())?.nome ?? "" : "");
     if (!item) return;
-    const bubbleId = pickBubbleId(row) || String(desperdiciosRows.length + 1);
     const data = buildDateLabel(pickFirst(row, ["data", "date", "data_desperdicio", "created_date", "created_at"]) || pickKeyLike(row, ["data", "date"]));
     const quantidade = pickFirst(row, ["quantidade", "qtd", "qtde", "quantidade_label"]) || pickKeyLike(row, ["quantidade", "qtd"]);
     const custo = pickFirst(row, ["custo", "valor", "total", "subtotal"]) || pickKeyLike(row, ["custo", "valor", "total", "subtotal"]);
@@ -1197,6 +1348,13 @@ export async function POST(req: NextRequest) {
       else if (!looksLikeId(motivoRawSan) && !looksLikeJsonArray) motivo = motivoRawSan;
     }
     const custoNum = parsePtNumber(custo);
+    const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+    const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+    const bubbleId =
+      bubbleIdResolved ||
+      stableKeyFromParts([data || "-", item.trim(), String(quantidade ?? "").trim(), custoNum ? formatMoneyBRL(custoNum) : String(custo ?? "").trim(), motivo.trim()]) ||
+      stableKeyFromParts([JSON.stringify(row)]) ||
+      String(desperdiciosRows.length + 1);
     desperdiciosRows.push({
       id: `${prefix}desperdicio:${bubbleId}`,
       data: data || "-",
@@ -1403,11 +1561,17 @@ export async function POST(req: NextRequest) {
         pickKeyLike(row, ["receita", "pre", "preparo", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
         pickTextValue(row);
       if (!receita) return;
-      const bubbleId = pickBubbleId(row) || String(prePreparoRows.length + 1);
+      const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+      const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
       const categoria = pickFirst(row, ["categoria", "category", "grupo"]) || pickKeyLike(row, ["categoria", "grupo"]) || "-";
       const rendimento = pickFirst(row, ["rendimento", "yield"]) || pickKeyLike(row, ["rendimento", "yield"]) || "-";
       const validade = pickFirst(row, ["validade_dias", "validadeDias", "validade"]) || pickKeyLike(row, ["validade"]);
       const validadeDiasNum = validade ? Math.max(0, Math.floor(parsePtNumber(validade))) : undefined;
+      const bubbleId =
+        bubbleIdResolved ||
+        stableKeyFromParts([receita, categoria, rendimento, typeof validadeDiasNum === "number" ? String(validadeDiasNum) : ""]) ||
+        stableKeyFromParts([JSON.stringify(row)]) ||
+        String(prePreparoRows.length + 1);
       const ingredientesRaw =
         pickFirst(row, ["ingredientes", "ingredientes_json", "ingredientRows", "ingredient_rows", "itens", "items"]) || pickKeyLike(row, ["ingred", "ingredient", "itens"]);
       let ingredientesParsed: any[] | undefined;
@@ -1536,8 +1700,9 @@ export async function POST(req: NextRequest) {
 
       const receita = guessItemLabel(row);
       if (!receita) return;
-      const bubbleId = pickBubbleId(row) || pickFirst(row, ["item_id"]) || String(prePreparoRows.length + 1);
-      const id = String(bubbleId);
+      const bubbleIdRaw = String(pickBubbleId(row) ?? pickFirst(row, ["item_id"]) ?? "").trim();
+      const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+      const id = bubbleIdResolved || stableKeyFromParts([receita, catLabel, yieldRaw, validadeDiasNumValue]) || String(prePreparoRows.length + 1);
       if (prePreparoIds.has(id)) return;
 
       const custoTotalRaw =
@@ -1584,8 +1749,9 @@ export async function POST(req: NextRequest) {
 
       const receita = guessItemLabel(row);
       if (!receita) return;
-      const bubbleId = pickBubbleId(row) || pickFirst(row, ["item_id"]) || String(fichasRows.length + 1);
-      const id = String(bubbleId).trim();
+      const bubbleIdRaw = String(pickBubbleId(row) ?? pickFirst(row, ["item_id"]) ?? "").trim();
+      const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+      const id = bubbleIdResolved || stableKeyFromParts([receita]) || String(fichasRows.length + 1);
       if (!id) return;
       if (fichasIds.has(id)) return;
 
@@ -1699,17 +1865,23 @@ export async function POST(req: NextRequest) {
       pickKeyLike(row, ["receita", "recipe", "nome"], { excludeParts: ["fornecedor", "empresa"] }) ||
       pickTextValue(row);
     if (!receita) return;
-    const bubbleId = pickBubbleId(row) || String(fichasRows.length + 1);
-    const rowId = String(bubbleId).trim();
-    if (rowId) {
-      if (fichasIds.has(rowId)) return;
-      fichasIds.add(rowId);
-    }
+    const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+    const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
     const precoVenda = pickFirst(row, ["preco_venda", "precoVenda", "preco", "valor_venda"]) || pickKeyLike(row, ["preco", "venda", "valor"]);
     const custoUnitario = pickFirst(row, ["custo_unitario", "custoUnitario", "custo"]) || pickKeyLike(row, ["custo", "unitario"]);
     const cmvMeta = pickFirst(row, ["cmv_meta", "cmvMeta", "meta_cmv"]) || pickKeyLike(row, ["cmv", "meta"]);
     const cmvAtual = pickFirst(row, ["cmv_atual", "cmvAtual"]) || pickKeyLike(row, ["cmv", "atual"]);
     const cmvDelta = pickFirst(row, ["cmv_delta", "cmvDelta"]) || pickKeyLike(row, ["cmv", "delta"]);
+    const bubbleId =
+      bubbleIdResolved ||
+      stableKeyFromParts([receita, precoVenda, custoUnitario, cmvMeta, cmvAtual, cmvDelta]) ||
+      stableKeyFromParts([JSON.stringify(row)]) ||
+      String(fichasRows.length + 1);
+    const rowId = String(bubbleId).trim();
+    if (rowId) {
+      if (fichasIds.has(rowId)) return;
+      fichasIds.add(rowId);
+    }
     const bcgRaw = pickFirst(row, ["bcg", "matriz_bcg", "matriz"]) || pickKeyLike(row, ["bcg", "matriz"]) || "quebra-cabeca";
     const bcg = bcgRaw === "estrela" || bcgRaw === "cavalo" || bcgRaw === "quebra-cabeca" || bcgRaw === "abacaxi" ? bcgRaw : "quebra-cabeca";
     const thumbRaw = pickFirst(row, ["thumb", "tipo", "burger"]) || pickKeyLike(row, ["thumb", "tipo"]) || "burger";
@@ -1788,7 +1960,8 @@ export async function POST(req: NextRequest) {
 
     function handleInventarioApiHeader(row: CsvObjectRow) {
       if (!enableInventario) return;
-      const invId = pickBubbleId(row);
+      const invIdRaw = String(pickBubbleId(row) ?? "").trim();
+      const invId = invIdRaw ? extractBubbleRefId(invIdRaw) || extractBubbleIdFromText(invIdRaw) || invIdRaw : "";
       if (!invId) return;
       const dateRaw =
         pickFirst(row, ["data", "date", "data_inventario", "data_contagem", "data_criacao", "created_date", "created_at", "creation_date"]) ||
@@ -1803,10 +1976,12 @@ export async function POST(req: NextRequest) {
       const invRef = pickFirst(row, ["inventario_id", "inventarios_id", "inventario"]) || pickKeyLike(row, ["inventario_id", "inventario"]);
       const itemRef = pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]);
       if (!invRef || !itemRef) return false;
-      const dataLabel = inventarioDateById.get(invRef.trim()) ?? "";
-      const item = itemById.get(itemRef.trim())?.nome ?? "";
-      const unidade = itemById.get(itemRef.trim())?.unidade ?? "";
-      const categoria = itemById.get(itemRef.trim())?.categoria ?? "";
+      const invId = extractBubbleRefId(invRef.trim()) || extractBubbleIdFromText(invRef.trim()) || invRef.trim();
+      const itemId = extractBubbleRefId(itemRef.trim()) || extractBubbleIdFromText(itemRef.trim()) || itemRef.trim();
+      const dataLabel = inventarioDateById.get(invId.trim()) ?? "";
+      const item = itemById.get(itemId.trim())?.nome ?? "";
+      const unidade = itemById.get(itemId.trim())?.unidade ?? "";
+      const categoria = itemById.get(itemId.trim())?.categoria ?? "";
       const estoqueFinal =
         pickFirst(row, ["estoque_final", "estoqueFinal", "quantidade", "qtd", "qtde", "estoque", "inventario_final"]) ||
         pickKeyLike(row, ["estoque", "quantidade", "qtd", "final"]);
@@ -1818,7 +1993,7 @@ export async function POST(req: NextRequest) {
         item: item || "",
         unidade: unidade || "Und",
         estoque_final: String(estoqueFinal ?? "").trim(),
-        id: `${invRef}:${itemRef}`,
+        id: `${invId}:${itemId}`,
       };
       if (!fake.data || !fake.item) return false;
       handleInventarioFlat(fake);
@@ -2017,14 +2192,24 @@ export async function POST(req: NextRequest) {
     if (enableInventario) {
       const pendingInvItems: CsvObjectRow[] = [];
       await processCsvGroups("inventario", (row) => {
+        const invIdRaw = String(pickBubbleId(row) ?? "").trim();
+        const invId = invIdRaw ? extractBubbleRefId(invIdRaw) || extractBubbleIdFromText(invIdRaw) || invIdRaw : "";
+        const hasInvRef = Boolean(pickFirst(row, ["inventario_id", "inventarios_id", "inventario"]) || pickKeyLike(row, ["inventario_id", "inventario"]));
+        const hasItemRef = Boolean(pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]));
+        const dateLabel =
+          buildDateLabel(
+            pickFirst(row, ["data", "date", "data_inventario", "data_contagem", "data_criacao", "created_date", "created_at"]) ||
+              pickKeyLike(row, ["data", "date", "created", "criacao"]),
+          ) || "";
+        const isPlainHeader = Boolean(invId && dateLabel && !hasInvRef && !hasItemRef);
         const hasInvItemsList = Boolean(pickFirst(row, ["lista_itens_inventarios", "itens_inventarios"]) || pickKeyLike(row, ["itens_inventarios", "lista_itens"]));
-        const looksHeader = hasInvItemsList && !pickFirst(row, ["inventario_id", "inventarios_id"]) && !pickKeyLike(row, ["inventario_id"]);
+        const looksHeader = (hasInvItemsList && !hasInvRef) || isPlainHeader;
         if (looksHeader) {
           handleInventarioApiHeader(row);
           return;
         }
 
-        const lookedApiItem = Boolean(pickFirst(row, ["inventario_id", "inventarios_id"]) || pickKeyLike(row, ["inventario_id"])) && Boolean(pickFirst(row, ["item_id"]) || pickKeyLike(row, ["item_id"]));
+        const lookedApiItem = hasInvRef && hasItemRef;
         if (lookedApiItem) {
           const ok = handleInventarioApiItem(row);
           if (!ok) pendingInvItems.push(row);
@@ -2032,8 +2217,11 @@ export async function POST(req: NextRequest) {
         }
 
         const dataLabel = buildDateLabel(pickFirst(row, ["data", "date", "data_inventario"]));
-        const bubbleId = pickBubbleId(row) || String(inventarioRows.length + 1);
         const categoriasRaw = pickFirst(row, ["categorias", "categories", "payload"]);
+        const bubbleIdRaw = String(pickBubbleId(row) ?? "").trim();
+        const bubbleIdResolved = bubbleIdRaw ? extractBubbleRefId(bubbleIdRaw) || extractBubbleIdFromText(bubbleIdRaw) || bubbleIdRaw : "";
+        const bubbleId =
+          bubbleIdResolved || stableKeyFromParts([dataLabel, categoriasRaw]) || stableKeyFromParts([JSON.stringify(row)]) || String(inventarioRows.length + 1);
         let categorias: any[] = [];
         if (categoriasRaw && (categoriasRaw.trim().startsWith("[") || categoriasRaw.trim().startsWith("{"))) {
           try {
@@ -2071,10 +2259,28 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("motivos_desperdicios", (row) => handleMotivoDesperdicio(row));
     await processCsvGroups("desperdicios", (row) => handleDesperdicio(row));
     const desperdiciosInserted = enableDesperdicios && desperdiciosRows.length ? await upsertInBatches(supabase, "desperdicios", desperdiciosRows, 500) : 0;
+    if (enableDesperdicios && desperdiciosRows.length) {
+      const uids = Array.from(
+        new Set(
+          desperdiciosRows
+            .map((r) => {
+              const id = String((r as any)?.id ?? "").trim();
+              const m = id.match(/^user:([^:]+):/i);
+              return String(m?.[1] ?? "").trim();
+            })
+            .filter(Boolean),
+        ),
+      );
+      for (const uid of uids) await dedupeDesperdiciosForUser(supabase, uid);
+    }
 
     await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
     await processCsvGroups("notas_fiscais", (row) => handleNotaFiscal(row));
     const entradasInserted = enableEntradas && entradasRows.length ? await upsertInBatches(supabase, "entradas", entradasRows, 300) : 0;
+    if (enableEntradas && entradasRows.length) {
+      const uids = Array.from(new Set(entradasRows.map((r) => String((r as any)?.user_id ?? "").trim()).filter(Boolean)));
+      for (const uid of uids) await dedupeEntradasForUser(supabase, uid);
+    }
 
     return json(
       {

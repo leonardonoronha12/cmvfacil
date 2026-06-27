@@ -130,7 +130,9 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/api/auth/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version" ||
-    pathname === "/api/health/supabase-config"
+    pathname === "/api/health/supabase-config" ||
+    pathname === "/api/health/bubble-config" ||
+    pathname === "/api/health/bubble-ping"
   ) {
     return NextResponse.next();
   }
@@ -174,6 +176,10 @@ export async function middleware(req: NextRequest) {
     } catch {
       // ignore
     }
+  }
+
+  if (pathname === "/api/bubble-obj/stage/start") {
+    return NextResponse.next();
   }
 
   if (pathname.startsWith("/api/")) {

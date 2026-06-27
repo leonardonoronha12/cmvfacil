@@ -52,6 +52,12 @@ function parseAdminSessionEmail(req: NextRequest) {
 }
 
 export function getUserIdFromRequest(req: NextRequest) {
+  const auth = (req.headers.get("authorization") ?? "").trim();
+  if (auth.toLowerCase().startsWith("bearer ")) {
+    const bearer = auth.slice(7).trim();
+    const bearerSub = bearer ? parseSupabaseJwtSub(bearer) : null;
+    if (bearerSub) return { accessToken: bearer, userId: bearerSub };
+  }
   const accessToken = (req.cookies.get(SUPABASE_AT_COOKIE)?.value ?? "").trim();
   const supabaseUserId = accessToken ? parseSupabaseJwtSub(accessToken) : null;
   if (supabaseUserId) return { accessToken, userId: supabaseUserId };
@@ -59,4 +65,3 @@ export function getUserIdFromRequest(req: NextRequest) {
   if (adminEmail) return { accessToken, userId: adminEmail };
   return { accessToken, userId: null as string | null };
 }
-

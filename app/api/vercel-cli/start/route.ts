@@ -99,6 +99,21 @@ function upsertEnvFile(filePath: string, vars: Record<string, string | undefined
   writeFileSync(filePath, out.endsWith("\n") ? out : `${out}\n`, "utf8");
 }
 
+function readTokenFromLocalFile() {
+  try {
+    const raw = readFileSync(".vercel-token.local", "utf8");
+    const token = String(raw ?? "")
+      .replace(/[\r\n]+/g, "\n")
+      .split("\n")[0]
+      ?.trim();
+    if (!token) return "";
+    if (token === "PASTE_VERCEL_TOKEN_HERE") return "";
+    return token;
+  } catch {
+    return "";
+  }
+}
+
 type Body = {
   token?: string;
   mode?: "deployLinked" | "linkAndDeploy" | "alias" | "setEnvAndDeploy" | "setBubbleEnvAndDeploy" | "deployAndAlias" | "envLs";
@@ -125,7 +140,7 @@ export async function POST(req: NextRequest) {
   }
 
   const last = getLastSecrets();
-  const token = String(body?.token ?? last?.token ?? "").trim();
+  const token = String(body?.token ?? last?.token ?? getLocalEnv("VERCEL_TOKEN") ?? readTokenFromLocalFile() ?? "").trim();
   if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
 
   const mode =
@@ -142,8 +157,8 @@ export async function POST(req: NextRequest) {
         : body?.mode === "linkAndDeploy"
           ? "linkAndDeploy"
           : "deployLinked";
-  const project = safeSlug(body?.project);
-  const scope = safeSlug(body?.scope);
+  const project = safeSlug(body?.project) || safeSlug(last?.project) || safeSlug(getLocalEnv("VERCEL_PROJECT") ?? "") || "cmvfacilrepo";
+  const scope = safeSlug(body?.scope) || safeSlug(last?.scope) || safeSlug(getLocalEnv("VERCEL_SCOPE") ?? "") || "leonardonoronha12-2214s-projects";
   if (!scope) return json({ ok: false, error: "missing_scope" }, { status: 400 });
 
   const rawDeploymentUrl = String(body?.deploymentUrl ?? "").trim();

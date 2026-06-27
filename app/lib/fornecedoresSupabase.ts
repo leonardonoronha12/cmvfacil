@@ -23,6 +23,8 @@ function normName(value: string) {
 function normalizeInfoMap(input: unknown): FornecedorInfoMap {
   const obj = safeObj(input);
   const out: FornecedorInfoMap = {};
+  const score = (row: { fornecedor: string; vendedor: string; whatsapp: string; endereco: string }) =>
+    (row.fornecedor ? 2 : 0) + (row.vendedor ? 1 : 0) + (row.whatsapp ? 1 : 0) + (row.endereco ? 1 : 0);
   for (const k of Object.keys(obj)) {
     const v = obj[k];
     if (!v || typeof v !== "object") continue;
@@ -37,9 +39,8 @@ function normalizeInfoMap(input: unknown): FornecedorInfoMap {
       endereco: String(row.endereco ?? "").trim(),
     };
     const fornecedorKey = fornecedorLabel.toUpperCase();
-    out[fornecedorKey] = normalizedRow;
-    const idKey = normName(String(k ?? "")).toUpperCase();
-    if (idKey && idKey !== fornecedorKey) out[idKey] = normalizedRow;
+    const prev = out[fornecedorKey];
+    if (!prev || score(normalizedRow) >= score(prev)) out[fornecedorKey] = normalizedRow;
   }
   return out;
 }
@@ -86,7 +87,7 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
 }
 
 export async function loadFornecedoresStateFromSupabase() {
-  const res = await fetch("/api/fornecedores", { method: "GET" });
+  const res = await fetch(`/api/fornecedores?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { row?: FornecedoresStateDbRow | null; error?: string } | null;
   if (!res.ok || !json) throw new Error(json?.error || "failed_to_load");
   const row = json.row;

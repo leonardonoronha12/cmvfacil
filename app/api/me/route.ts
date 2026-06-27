@@ -173,6 +173,13 @@ function scoreFile(path: StoredPath, kind: "users" | "empresas") {
   const p = path.path.toLowerCase();
   let s = 0;
   const isBubbleApi = name.includes("bubble-api-") || p.includes("/bootstrap/") || p.includes("/sync-");
+  const isImportArtifact =
+    name.startsWith("import-") ||
+    name.includes("import_") ||
+    p.includes("/import-") ||
+    p.includes("/import_") ||
+    name.endsWith("-acc.json") ||
+    name.endsWith("_acc.json");
   const isExport = name.includes("export_") || name.includes("export-") || name.includes("exportall") || name.includes("export_all") || name.includes("export");
   const isCsv = name.endsWith(".csv");
   const isXlsx = name.endsWith(".xlsx") || name.endsWith(".xls");
@@ -184,12 +191,27 @@ function scoreFile(path: StoredPath, kind: "users" | "empresas") {
     if (isCsv || isXlsx) s += 20;
     if (isBubbleApi) s -= 120;
   } else {
+    if (isImportArtifact) s -= 250;
+    if (name.includes("fornecedor") || name.includes("fornecedores") || p.includes("/fornecedor") || p.includes("/fornecedores")) s -= 200;
+    if (name.includes("insumo") || name.includes("insumos") || p.includes("/insumo") || p.includes("/insumos")) s -= 200;
+    if (name.includes("entrada") || name.includes("entradas") || p.includes("/entrada") || p.includes("/entradas")) s -= 200;
+    if (name.includes("inventario") || name.includes("inventários") || p.includes("/inventario") || p.includes("/inventario")) s -= 200;
+    if (name.includes("desperdicio") || name.includes("desperdícios") || p.includes("/desperdicio") || p.includes("/desperdicio")) s -= 200;
+    if (name.includes("pre_preparo") || name.includes("pre-preparo") || p.includes("/pre-preparo") || p.includes("/pre_preparo")) s -= 200;
+    if (name.includes("ficha") || name.includes("fichas") || p.includes("/fichas")) s -= 120;
+    if (name.includes("nota") || name.includes("notas") || p.includes("/notas")) s -= 120;
+    if (name.includes("categoria") || name.includes("categorias") || p.includes("/categorias")) s -= 80;
+    if (name.includes("etiqueta") || name.includes("etiquetas") || p.includes("/etiquetas")) s -= 80;
+    if (name.includes("custo_medio") || name.includes("custo-medio") || p.includes("/custo")) s -= 80;
+    if (name.includes("motivo") || name.includes("motivos") || p.includes("/motivos")) s -= 80;
     if (name.includes("empresa") || name.includes("company") || name.includes("restaurante")) s += 50;
     if (p.includes("/empresas") || p.includes("/empresa") || p.includes("/companies") || p.includes("/company") || p.includes("/restaurante")) s += 50;
     if (name === "empresas.csv" || name === "companies.csv") s += 50;
     if (isExport) s += 20;
     if (isCsv || isXlsx) s += 10;
-    if (isBubbleApi) s -= 40;
+    const bubbleCompanyLike = isBubbleApi && (name.includes("empresa") || name.includes("company") || p.includes("/empresas") || p.includes("/companies"));
+    if (isBubbleApi && !bubbleCompanyLike) s -= 120;
+    else if (isBubbleApi) s += 10;
   }
   return s;
 }
@@ -202,12 +224,71 @@ function guessCompanyName(rowNorm: CsvObjectRow) {
   return v || "—";
 }
 
+function guessCompanyLogo(rowNorm: CsvObjectRow) {
+  const raw =
+    pickFirst(rowNorm, ["logo", "logotipo", "logo_url", "logo_empresa", "logo_da_empresa", "company_logo", "company_logo_url", "empresa_logo", "imagem_logo"]) ||
+    pickKeyLike(rowNorm, ["logo", "logotipo"], ["id", "uuid", "email", "telefone", "whatsapp", "cnpj", "nome", "name"]);
+  const v = String(raw ?? "").trim();
+  if (!v) return "";
+  const direct = extractUrlFromText(v);
+  if (direct) return direct;
+  if (v.startsWith("{") || v.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(v) as any;
+      const scan = (x: any): string => {
+        if (!x) return "";
+        if (typeof x === "string") return extractUrlFromText(x);
+        if (Array.isArray(x)) {
+          for (const it of x) {
+            const got = scan(it);
+            if (got) return got;
+          }
+          return "";
+        }
+        if (typeof x === "object") {
+          const direct = scan(x.url) || scan(x.image) || scan(x.photo) || scan(x.src) || scan(x.href);
+          if (direct) return direct;
+          for (const vv of Object.values(x)) {
+            const got = scan(vv);
+            if (got) return got;
+          }
+        }
+        return "";
+      };
+      const candidate = scan(parsed);
+      if (candidate) return candidate;
+    } catch {}
+  }
+  for (const [k, vv] of Object.entries(rowNorm)) {
+    const kk = String(k ?? "").toLowerCase();
+    if (!kk) continue;
+    if (!kk.includes("logo") && !kk.includes("logotipo")) continue;
+    const cand = extractUrlFromText(String(vv ?? ""));
+    if (cand) return cand;
+  }
+  return "";
+}
+
 function extractUrlFromText(value: string) {
   const s = String(value ?? "").trim();
   if (!s) return "";
-  const url = s.match(/https?:\/\/[^\s"')]+/i);
-  if (url) return String(url[0] ?? "").trim();
-  return "";
+  const url = s.match(/(https?:\/\/[^\s"'`)\]>]+|\/\/[^\s"'`)\]>]+)/i);
+  const rawMatch = url ? String(url[0] ?? "").trim() : "";
+  const raw =
+    rawMatch ||
+    String(
+      (s.match(/(cdn\.bubble\.io\/[^\s"'`)\]>]+|s3\.amazonaws\.com\/[^\s"'`)\]>]+|storage\.googleapis\.com\/[^\s"'`)\]>]+|appforest_uf\/[^\s"'`)\]>]+)/i)?.[0] ??
+        ""),
+    ).trim();
+  let cleaned = raw;
+  cleaned = cleaned.replace(/^[`"'(<\[]+/, "").replace(/[`"')>\],.]+$/, "");
+  if (!cleaned) return "";
+  if (cleaned.startsWith("//")) return `https:${cleaned}`;
+  if (cleaned.startsWith("www.")) return `https://${cleaned}`;
+  if (!cleaned.startsWith("http") && cleaned.startsWith("appforest_uf/")) return `https://s3.amazonaws.com/${cleaned}`;
+  if (!cleaned.startsWith("http") && (cleaned.startsWith("cdn.bubble.io/") || cleaned.startsWith("s3.amazonaws.com/") || cleaned.startsWith("storage.googleapis.com/")))
+    return `https://${cleaned}`;
+  return cleaned;
 }
 
 function resolveOwnerEmailFromCompanyRow(row: CsvObjectRow, bubbleIdToEmail?: Map<string, string>) {
@@ -296,9 +377,66 @@ function guessUserAvatar(rowNorm: CsvObjectRow) {
   if (v.startsWith("{") || v.startsWith("[")) {
     try {
       const parsed = JSON.parse(v) as any;
-      const candidate = extractUrlFromText(String(parsed?.url ?? parsed?.image ?? parsed?.photo ?? parsed?.src ?? ""));
+      const scan = (x: any): string => {
+        if (!x) return "";
+        if (typeof x === "string") return extractUrlFromText(x);
+        if (Array.isArray(x)) {
+          for (const it of x) {
+            const got = scan(it);
+            if (got) return got;
+          }
+          return "";
+        }
+        if (typeof x === "object") {
+          const direct = scan(x.url) || scan(x.image) || scan(x.photo) || scan(x.src) || scan(x.href);
+          if (direct) return direct;
+          for (const vv of Object.values(x)) {
+            const got = scan(vv);
+            if (got) return got;
+          }
+        }
+        return "";
+      };
+      const candidate = scan(parsed);
       if (candidate) return candidate;
     } catch {}
+  }
+  for (const [k, vv] of Object.entries(rowNorm)) {
+    const kk = String(k ?? "").toLowerCase();
+    if (!kk) continue;
+    if (kk.includes("logo") || kk.includes("logotipo") || kk.includes("banner") || kk.includes("capa") || kk.includes("background")) continue;
+    const looksImageKey = kk.includes("avatar") || kk.includes("foto") || kk.includes("imagem") || kk.includes("photo") || kk.includes("image") || kk.includes("perfil");
+    if (!looksImageKey) continue;
+    const cand = extractUrlFromText(String(vv ?? ""));
+    if (cand) return cand;
+    const s = String(vv ?? "").trim();
+    if (s && (s.startsWith("{") || s.startsWith("["))) {
+      try {
+        const parsed = JSON.parse(s) as any;
+        const scan = (x: any): string => {
+          if (!x) return "";
+          if (typeof x === "string") return extractUrlFromText(x);
+          if (Array.isArray(x)) {
+            for (const it of x) {
+              const got = scan(it);
+              if (got) return got;
+            }
+            return "";
+          }
+          if (typeof x === "object") {
+            const direct = scan(x.url) || scan(x.image) || scan(x.photo) || scan(x.src) || scan(x.href);
+            if (direct) return direct;
+            for (const vv of Object.values(x)) {
+              const got = scan(vv);
+              if (got) return got;
+            }
+          }
+          return "";
+        };
+        const candidate = scan(parsed);
+        if (candidate) return candidate;
+      } catch {}
+    }
   }
   return "";
 }
@@ -392,6 +530,7 @@ function guessCurrentCompanyId(rowNorm: CsvObjectRow) {
 
 function isDataFile(name: string) {
   const n = name.toLowerCase();
+  if (n.endsWith("sync-state.json") || n.endsWith("state.json") || n.endsWith("mapping.json")) return false;
   return n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls") || n.endsWith(".json");
 }
 
@@ -462,12 +601,20 @@ async function loadContextForPrefix(args: {
   bucket: string;
   prefix: string;
   email: string;
+  bubbleUserIdHint?: string;
 }) {
-  const { supabase, bucket, prefix, email } = args;
+  const { supabase, bucket, prefix, email, bubbleUserIdHint } = args;
   const paths = await listAllPathsDeep(supabase, bucket, prefix);
   const fileCandidates = paths.filter((p) => isDataFile(p.name)).slice().sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name));
-  const pickBest = (kind: "users" | "empresas") =>
-    fileCandidates.slice().sort((a, b) => scoreFile(b, kind) - scoreFile(a, kind) || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))[0] ?? null;
+  const pickBest = (kind: "users" | "empresas") => {
+    const best =
+      fileCandidates.slice().sort((a, b) => scoreFile(b, kind) - scoreFile(a, kind) || (b.updated_at ?? "").localeCompare(a.updated_at ?? "") || b.name.localeCompare(a.name))[0] ??
+      null;
+    if (!best) return null;
+    const minScore = kind === "empresas" ? 40 : -999;
+    if (scoreFile(best, kind) < minScore) return null;
+    return best;
+  };
   const usersFile = pickBest("users");
   const empresasFile = pickBest("empresas");
 
@@ -491,7 +638,11 @@ async function loadContextForPrefix(args: {
           if (found) break;
         }
       }
-      if (found && found === email) {
+      const bubbleId = pickBubbleId(row) || pickFirst(row, ["user_id", "usuario_id", "id_usuario"]);
+      const id = String(bubbleId ?? "").trim();
+      const hint = String(bubbleUserIdHint ?? "").trim();
+      const matchesHint = Boolean(hint && id && id === hint);
+      if ((found && found === email) || matchesHint) {
         bubbleRow = rr;
         bubbleRowNorm = row;
         break;
@@ -523,10 +674,17 @@ export async function GET(req: NextRequest) {
 
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
+    let bubbleUserIdHint = "";
+    try {
+      const stateText = await downloadText(supabase, bucket, `user:${uid}/bootstrap/sync-state.json`);
+      const state = JSON.parse(stateText) as any;
+      const hint = String(state?.filter?.bubbleUserId ?? "").trim();
+      if (hint) bubbleUserIdHint = hint;
+    } catch {}
     const candidatePrefixes = Array.from(new Set([`user:${uid}`, `user:${email}`]));
     let ctx: LoadedContext | null = null;
     for (const prefix of candidatePrefixes) {
-      const loaded = await loadContextForPrefix({ supabase, bucket, prefix, email });
+      const loaded = await loadContextForPrefix({ supabase, bucket, prefix, email, bubbleUserIdHint });
       if (loaded.bubbleRowNorm) {
         ctx = loaded;
         break;
@@ -671,6 +829,7 @@ export async function GET(req: NextRequest) {
     const currentCompanyId = bubbleRowNorm && knownCompanyIds.size ? guessCurrentCompanyId(bubbleRowNorm) : "";
     const primaryCompanyId = currentCompanyId && knownCompanyIds.has(currentCompanyId) ? currentCompanyId : companies[0]?.id ?? "";
     const companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
+    const companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
     const plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
 
     const members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }> = [];
@@ -755,6 +914,7 @@ export async function GET(req: NextRequest) {
       whatsapp: whatsapp || "",
       avatarUrl: avatarUrl || "",
       companyName,
+      companyLogoUrl,
       companies,
       plan,
       members,

@@ -1,0 +1,418 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  buildDesperdicioId,
+  buildEntradaId,
+  buildInsumoId,
+  buildInventarioId,
+  mapCategoriaName,
+  mapCustoMedioItem,
+  mapDesperdicio,
+  mapFornecedor,
+  mapInventario,
+  mapItemFornecedor,
+  mapItemInventario,
+  mapItemNota,
+  mapItemToInsumo,
+  mapMotivoDesperdicio,
+  mapNotaFiscal,
+  parseObjectType,
+  userScopedId,
+} from "../../../../lib/bubbleObjRealMapping";
+import { formatMoneyBRL, parsePtNumber } from "../../../../lib/bubbleCsv";
+import { getUserIdFromRequest } from "../../../../lib/requestUserId";
+import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+
+function json(data: unknown, init: ResponseInit = {}) {
+  const headers = new Headers(init.headers);
+  headers.set("content-type", "application/json; charset=utf-8");
+  return NextResponse.json(data, { ...init, headers });
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function uniqueStrings(input: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of input) {
+    const v = String(s ?? "").trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+function bubbleIdFromInsumoId(id: string) {
+  const s = String(id ?? "");
+  return s.includes("insumo:") ? s.split("insumo:", 2)[1] : "";
+}
+
+function mergeUniqueSortedStrings(input: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of input) {
+    const s = String(v ?? "").trim();
+    if (!s) continue;
+    const k = s.toLowerCase();
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(s);
+  }
+  out.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+  return out;
+}
+
+function scopeObjectType(userId: string, objectType: string) {
+  const base = String(objectType ?? "").trim();
+  if (!base) return "";
+  return base.includes("#") ? base : `${base}#${userId}`;
+}
+
+async function loadControlRows(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string, objectType: string) {
+  const out: any[] = [];
+  const pageSize = 1000;
+  for (let from = 0; from < 50_000; from += pageSize) {
+    const { data, error } = await supabase
+      .from("bubble_obj_import_control")
+      .select("id,bubble_unique_id,raw_payload_json,status")
+      .eq("supabase_user_id", userId)
+      .eq("bubble_object_type", objectType)
+      .in("status", ["staged", "processed", "staged_only"])
+      .order("id", { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw new Error(error.message);
+    const rows = (data ?? []) as any[];
+    for (const r of rows) out.push(r);
+    if (rows.length < pageSize) break;
+  }
+  return out;
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+
+    const supabase = getSupabaseAdmin();
+    const { data: mig, error: migErr } = await supabase
+      .from("bubble_obj_user_migration")
+      .select("supabase_user_id,last_run_id,email")
+      .eq("supabase_user_id", userId)
+      .maybeSingle();
+    if (migErr) return json({ ok: false, error: migErr.message }, { status: 500 });
+    if (!mig) return json({ ok: false, error: "migration_not_found" }, { status: 404 });
+    const runId = String((mig as any)?.last_run_id ?? "").trim();
+    if (!runId) return json({ ok: false, error: "missing_run_id" }, { status: 400 });
+
+    const { data: runItems, error: runItemsErr } = await supabase
+      .from("bubble_obj_import_run_item")
+      .select("object_type")
+      .eq("supabase_user_id", userId)
+      .eq("run_id", runId);
+    if (runItemsErr) return json({ ok: false, error: runItemsErr.message }, { status: 500 });
+    const objectTypes = (runItems ?? []).map((x: any) => String(x?.object_type ?? "").trim()).filter(Boolean);
+    const companyId =
+      objectTypes.map((ot: string) => parseObjectType(ot).companyId).find((x: any) => typeof x === "string" && String(x).trim()) ?? null;
+    if (!companyId) return json({ ok: false, error: "missing_company_id" }, { status: 400 });
+
+    const stId = userScopedId(userId).slice(0, -1);
+
+    const categoriasKey = scopeObjectType(userId, `categorias@${companyId}`);
+    const itemKey = scopeObjectType(userId, `item@${companyId}`);
+    const custoKey = scopeObjectType(userId, `custo_medio_item@${companyId}`);
+    const fornecedoresKey = scopeObjectType(userId, `fornecedores@${companyId}`);
+    const inventariosKey = scopeObjectType(userId, `inventarios@${companyId}`);
+    const itensInventariosKey = scopeObjectType(userId, `itens_inventarios@${companyId}`);
+    const notasKey = scopeObjectType(userId, `notas_fiscais@${companyId}`);
+    const itensNotasKey = scopeObjectType(userId, `itens_notas@${companyId}`);
+    const itensFornecedoresKey = scopeObjectType(userId, `itens_fornecedores@${companyId}`);
+    const motivosKey = scopeObjectType(userId, `motivos_desperdicios@${companyId}`);
+    const desperdicioKey = scopeObjectType(userId, `desperdicio@${companyId}`);
+
+    const [
+      categoriasRows,
+      itemRows,
+      custoRows,
+      fornecedoresRows,
+      itensFornecedoresRows,
+      inventariosRows,
+      itensInvRows,
+      notasRows,
+      itensNotasRows,
+      motivosRows,
+      desperdicioRows,
+    ] = await Promise.all([
+      loadControlRows(supabase, userId, categoriasKey),
+      loadControlRows(supabase, userId, itemKey),
+      loadControlRows(supabase, userId, custoKey),
+      loadControlRows(supabase, userId, fornecedoresKey),
+      loadControlRows(supabase, userId, itensFornecedoresKey),
+      loadControlRows(supabase, userId, inventariosKey),
+      loadControlRows(supabase, userId, itensInventariosKey),
+      loadControlRows(supabase, userId, notasKey),
+      loadControlRows(supabase, userId, itensNotasKey),
+      loadControlRows(supabase, userId, motivosKey),
+      loadControlRows(supabase, userId, desperdicioKey),
+    ]);
+
+    const categoriaNameById: Record<string, string> = {};
+    for (const r of categoriasRows) {
+      const id = String(r?.bubble_unique_id ?? "").trim();
+      if (!id) continue;
+      const nome = mapCategoriaName(r?.raw_payload_json ?? {});
+      if (nome) categoriaNameById[id] = nome;
+    }
+
+    const insumosById = new Map<string, any>();
+    for (const r of itemRows) {
+      const raw = r?.raw_payload_json ?? {};
+      const mapped = mapItemToInsumo(raw, { userId, categoriaNameById });
+      if (!mapped.ok || !mapped.bubbleItemId) continue;
+      insumosById.set(mapped.insumo.id, mapped.insumo);
+    }
+
+    const latestCostByBubbleItemId = new Map<string, { custoMedio: string; createdAt: string }>();
+    for (const r of custoRows) {
+      const cm = mapCustoMedioItem(r?.raw_payload_json ?? {});
+      if (!cm.bubbleItemId || !cm.custoMedio) continue;
+      const prev = latestCostByBubbleItemId.get(cm.bubbleItemId) ?? null;
+      const prevParsed = prev?.createdAt ? Date.parse(prev.createdAt) : 0;
+      const nextParsed = cm.createdAt ? Date.parse(cm.createdAt) : 0;
+      const prevT = Number.isFinite(prevParsed) ? prevParsed : 0;
+      const nextT = Number.isFinite(nextParsed) ? nextParsed : 0;
+      if (!prev || nextT >= prevT) latestCostByBubbleItemId.set(cm.bubbleItemId, { custoMedio: cm.custoMedio, createdAt: cm.createdAt });
+    }
+
+    for (const [id, row] of insumosById.entries()) {
+      const bubbleItemId = bubbleIdFromInsumoId(id);
+      if (!bubbleItemId) continue;
+      const fromCostType = latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio ?? "";
+      if (fromCostType) insumosById.set(id, { ...(row as any), custoMedio: fromCostType });
+    }
+
+    for (const r of itensNotasRows) {
+      const it = mapItemNota(r?.raw_payload_json ?? {});
+      if (!it.bubbleItemId || !it.custoUnitario) continue;
+      const insumoId = buildInsumoId(userId, it.bubbleItemId);
+      const prev = insumosById.get(insumoId) ?? null;
+      if (!prev) continue;
+      const prevCost = String((prev as any)?.custoMedio ?? "").trim();
+      if (!prevCost || prevCost === "-" || prevCost === "R$0,00") insumosById.set(insumoId, { ...(prev as any), custoMedio: it.custoUnitario });
+    }
+
+    const insumosRows = Array.from(insumosById.values()).filter((x) => x && typeof x === "object" && String((x as any)?.id ?? ""));
+    const categories = uniqueStrings(
+      insumosRows
+        .map((r: any) => String(r?.categoria ?? "").trim())
+        .filter(Boolean)
+        .concat(Object.values(categoriaNameById)),
+    );
+    await supabase.from("insumos_state").upsert({ id: stId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+
+    const insumoByBubbleId = new Map<string, any>();
+    for (const r of insumosRows as any[]) {
+      const bubbleId = bubbleIdFromInsumoId(String((r as any)?.id ?? ""));
+      if (bubbleId) insumoByBubbleId.set(bubbleId, r);
+    }
+
+    const fornecedorNameById: Record<string, string> = {};
+    const fornecedoresInfo: Record<string, any> = {};
+    for (const r of fornecedoresRows) {
+      const f = mapFornecedor(r?.raw_payload_json ?? {});
+      if (!f.bubbleFornecedorId) continue;
+      if (f.nome) fornecedorNameById[f.bubbleFornecedorId] = f.nome;
+      const nome = String(f.nome ?? "").trim();
+      if (!nome) continue;
+      const k = nome.toUpperCase();
+      fornecedoresInfo[k] = {
+        fornecedor: nome,
+        vendedor: String((f as any)?.vendedor ?? "").trim(),
+        whatsapp: String((f as any)?.whatsapp ?? "").trim(),
+        endereco: String((f as any)?.endereco ?? "").trim(),
+      };
+    }
+
+    const fornecedoresProdutos: Record<string, string[]> = {};
+    for (const r of itensFornecedoresRows) {
+      const it = mapItemFornecedor(r?.raw_payload_json ?? {});
+      const fornNome = String(fornecedorNameById[it.bubbleFornecedorId] ?? "").trim();
+      const key = fornNome ? fornNome.toUpperCase() : "";
+      if (!key) continue;
+      const insumoNome = it.bubbleItemId ? String((insumoByBubbleId.get(it.bubbleItemId) as any)?.item ?? "").trim() : "";
+      const nomeItem = String(it.nomeItem || insumoNome || "").trim();
+      if (!nomeItem) continue;
+      fornecedoresProdutos[key] = mergeUniqueSortedStrings([...(fornecedoresProdutos[key] ?? []), nomeItem]);
+    }
+
+    await supabase
+      .from("fornecedores_state")
+      .upsert({ id: stId, info: fornecedoresInfo, produtos: fornecedoresProdutos, equivalencias: {} } as any, { onConflict: "id" });
+
+    const inventariosById = new Map<string, { id: string; data: string; categorias: any[] }>();
+    for (const r of inventariosRows) {
+      const inv = mapInventario(r?.raw_payload_json ?? {});
+      if (!inv.bubbleInventarioId) continue;
+      const id = buildInventarioId(userId, inv.bubbleInventarioId);
+      inventariosById.set(id, { id, data: inv.data, categorias: [] });
+    }
+
+    const invCatsByInvId = new Map<string, Map<string, any>>();
+    for (const r of itensInvRows) {
+      const it = mapItemInventario(r?.raw_payload_json ?? {});
+      if (!it.bubbleInventarioId || !it.bubbleItemId) continue;
+      const invId = buildInventarioId(userId, it.bubbleInventarioId);
+      if (!inventariosById.has(invId)) continue;
+      const insumoId = buildInsumoId(userId, it.bubbleItemId);
+      const insumo = insumoByBubbleId.get(it.bubbleItemId) ?? null;
+      const itemName = String((insumo as any)?.item ?? "").trim() || "Item";
+      const unidade = String((insumo as any)?.medida ?? it.unidade ?? "Und").trim() || "Und";
+      const catName = String((insumo as any)?.categoria ?? "").trim() || "Sem categoria";
+      const catKey = catName.toLowerCase();
+      const cats = invCatsByInvId.get(invId) ?? new Map<string, any>();
+      const catObj = cats.get(catKey) ?? { id: `cat:${catKey}`, nome: catName, status: "pendente", itens: [] };
+      const itensArr = Array.isArray(catObj.itens) ? (catObj.itens as any[]) : [];
+      if (!itensArr.find((x) => String((x as any)?.id ?? "") === insumoId)) itensArr.push({ id: insumoId, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "" });
+      catObj.itens = itensArr;
+      cats.set(catKey, catObj);
+      invCatsByInvId.set(invId, cats);
+    }
+
+    const inventarioUpserts = Array.from(inventariosById.values()).map((inv) => {
+      const cats = invCatsByInvId.get(inv.id);
+      const finalCats = cats ? Array.from(cats.values()) : [];
+      return { id: inv.id, data: inv.data, categorias: finalCats } as any;
+    });
+    if (inventarioUpserts.length) await supabase.from("inventario").upsert(inventarioUpserts as any, { onConflict: "id" });
+
+    const notaItemsByNotaId = new Map<string, any[]>();
+    for (const r of itensNotasRows) {
+      const it = mapItemNota(r?.raw_payload_json ?? {});
+      if (!it.bubbleNotaId || !it.bubbleItemId) continue;
+      const insumo = insumoByBubbleId.get(it.bubbleItemId) ?? null;
+      const nomeNaNota = String((insumo as any)?.item ?? it.nomeItem ?? "").trim();
+      const insumoEquivalente = nomeNaNota || "";
+      const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
+      const stableItemId = `${userScopedId(userId)}nota_item:${it.bubbleNotaId}:${it.bubbleItemId}`;
+      const arr = notaItemsByNotaId.get(it.bubbleNotaId) ?? [];
+      arr.push({
+        id: stableItemId,
+        nomeNaNota,
+        unidadeNaNota: "",
+        insumoEquivalente,
+        equivalenteQuantidade: String(it.quantidade ?? "").trim(),
+        equivalenteUnidade,
+        subtotal: it.subtotal || "",
+        custoUnitario: it.custoUnitario || "",
+      });
+      notaItemsByNotaId.set(it.bubbleNotaId, arr);
+    }
+
+    const entradasUpserts: any[] = [];
+    for (const r of notasRows) {
+      const nf = mapNotaFiscal(r?.raw_payload_json ?? {});
+      if (!nf.bubbleNotaId) continue;
+      const fornecedorFromId = nf.fornecedorId ? String(fornecedorNameById[nf.fornecedorId] ?? "").trim() : "";
+      const fornecedor = fornecedorFromId || nf.fornecedorNome || String(nf.fornecedorId || "").trim() || "Sem fornecedor";
+      const numero = nf.numero || `NF-${String(nf.bubbleNotaId).slice(0, 8)}`;
+      const dataLancamento = nf.dataLancamento || nf.dataCriacao || "-";
+      const dataCriacao = nf.dataCriacao || dataLancamento || "-";
+      const baseItensNota = (nf as any).listaItens
+        ? (nf as any).listaItens
+            .map((bubbleItemId: any) => {
+              const id = String(bubbleItemId ?? "").trim();
+              if (!id) return null;
+              const insumo = insumoByBubbleId.get(id) ?? null;
+              const nomeNaNota = String((insumo as any)?.item ?? "").trim();
+              const insumoEquivalente = nomeNaNota || "";
+              const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
+              return {
+                id: `${userScopedId(userId)}nota_item:${nf.bubbleNotaId}:${id}`,
+                nomeNaNota,
+                unidadeNaNota: "",
+                insumoEquivalente,
+                equivalenteQuantidade: "",
+                equivalenteUnidade,
+                subtotal: "",
+                custoUnitario: "",
+              };
+            })
+            .filter(Boolean)
+        : [];
+      const extras = notaItemsByNotaId.get(nf.bubbleNotaId) ?? [];
+      const itemsById = new Map<string, any>();
+      for (const it of baseItensNota) itemsById.set(String((it as any)?.id ?? ""), it);
+      for (const it of extras) {
+        const id = String((it as any)?.id ?? "");
+        if (!id) continue;
+        itemsById.set(id, { ...(itemsById.get(id) ?? {}), ...(it as any) });
+      }
+      const itensNota = Array.from(itemsById.values());
+      const itensLabel = `${itensNota.length} ${itensNota.length === 1 ? "Item" : "Itens"}`;
+
+      const valorNota = (() => {
+        const raw = String(nf.valorNota ?? "").trim();
+        const parsed = parsePtNumber(raw);
+        if (parsed && parsed > 0) return formatMoneyBRL(parsed);
+        let sum = 0;
+        for (const it of itensNota) {
+          const sub = parsePtNumber(String((it as any)?.subtotal ?? ""));
+          if (sub) sum += sub;
+        }
+        return sum > 0 ? formatMoneyBRL(sum) : "R$0,00";
+      })();
+
+      entradasUpserts.push({
+        id: buildEntradaId(userId, nf.bubbleNotaId),
+        user_id: userId,
+        numero,
+        data_lancamento: dataLancamento,
+        fornecedor,
+        valor_nota: valorNota,
+        itens: itensLabel,
+        responsavel: nf.responsavel || "",
+        data_criacao: dataCriacao,
+        itens_nota: itensNota,
+      } as any);
+    }
+    if (entradasUpserts.length) await supabase.from("entradas").upsert(entradasUpserts as any, { onConflict: "id" });
+
+    const motivoNameById: Record<string, string> = {};
+    for (const r of motivosRows) {
+      const m = mapMotivoDesperdicio(r?.raw_payload_json ?? {});
+      if (m.bubbleMotivoId && m.nome) motivoNameById[m.bubbleMotivoId] = m.nome;
+    }
+
+    const desperdicioUpserts: any[] = [];
+    for (const r of desperdicioRows) {
+      const d = mapDesperdicio(r?.raw_payload_json ?? {});
+      if (!d.bubbleDesperdicioId) continue;
+      const insumoId = d.bubbleItemId ? buildInsumoId(userId, d.bubbleItemId) : "";
+      const item = insumoId || d.itemNome || "";
+      const motivo = d.motivoNome || (d.bubbleMotivoId ? String(motivoNameById[d.bubbleMotivoId] ?? "").trim() : "") || "";
+      desperdicioUpserts.push({ id: buildDesperdicioId(userId, d.bubbleDesperdicioId), data: d.data, item, quantidade: d.quantidade || "", custo: d.custo || "", motivo } as any);
+    }
+    if (desperdicioUpserts.length) await supabase.from("desperdicios").upsert(desperdicioUpserts as any, { onConflict: "id" });
+
+    return json(
+      {
+        ok: true,
+        repairedAt: nowIso(),
+        userId,
+        runId,
+        companyId,
+        counts: {
+          insumos: insumosRows.length,
+          fornecedores: Object.keys(fornecedoresInfo).length,
+          inventario: inventarioUpserts.length,
+          entradas: entradasUpserts.length,
+          desperdicios: desperdicioUpserts.length,
+        },
+      },
+      { status: 200 },
+    );
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}

@@ -55,7 +55,7 @@ export async function loadInsumosFromSupabase() {
 }
 
 export async function loadInsumosStateFromSupabase(): Promise<InsumosStatePayload> {
-  const res = await fetch("/api/insumos", { method: "GET" });
+  const res = await fetch(`/api/insumos?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: unknown[]; categories?: unknown[]; error?: string } | null;
   if (!res.ok || !json) throw new Error(json?.error || `failed_to_load_${res.status}`);
   return { rows: normalizeRows(json.rows), categories: normalizeCategories(json.categories) };

@@ -17,12 +17,13 @@ type EntradaDbRow = {
 };
 
 function toStoreRow(r: EntradaDbRow): EntradaStoreRow {
+  const fallbackValor = String((r as any)?.valorNota ?? (r as any)?.valor ?? "").trim();
   return {
     id: r.id,
     numero: r.numero,
     dataLancamento: r.data_lancamento,
     fornecedor: r.fornecedor,
-    valorNota: r.valor_nota,
+    valorNota: r.valor_nota || fallbackValor,
     itens: r.itens,
     responsavel: r.responsavel,
     dataCriacao: r.data_criacao,
@@ -45,7 +46,7 @@ function toDbRow(r: EntradaStoreRow) {
 }
 
 export async function loadEntradasFromSupabase() {
-  const res = await fetch("/api/entradas", { method: "GET" });
+  const res = await fetch(`/api/entradas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: EntradaDbRow[]; error?: string } | null;
   if (!res.ok || !json?.rows) throw new Error(json?.error || "failed_to_load");
   return (json.rows ?? []).map(toStoreRow);

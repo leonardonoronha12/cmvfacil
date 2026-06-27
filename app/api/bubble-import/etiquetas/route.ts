@@ -144,7 +144,8 @@ export async function GET(req: NextRequest) {
         if (!lower.includes("bubble-api-")) return false;
         if (!lower.endsWith(".json")) return false;
         if (lower.endsWith("state.json")) return false;
-        return lower.includes("etiqueta");
+        if (!lower.includes("etiqueta")) return false;
+        return lower.includes("pre_preparo") || lower.includes("prepreparo") || (lower.includes("pre") && lower.includes("preparo"));
       })
       .sort((a, b) => b.localeCompare(a));
 

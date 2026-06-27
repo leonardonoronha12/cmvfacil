@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../lib/bubbleGlobalConfig";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -77,8 +78,11 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
-    const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
+    const globalDb = await readBubbleGlobalConfigFromDb();
+    const globalEnv = readBubbleGlobalConfigFromEnv();
+    const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+    const baseUrl = safeBaseUrl(body?.baseUrl ?? global?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
+    const token = safeToken(body?.token ?? global?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const typesRaw = Array.isArray(body?.types) ? (body.types as unknown[]) : [];
     const types = typesRaw.map((t) => safeName(String(t ?? ""))).filter(Boolean);
     const limit = typeof body?.limit === "number" && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(200, Math.floor(body.limit)) : 100;

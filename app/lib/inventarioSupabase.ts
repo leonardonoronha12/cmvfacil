@@ -11,7 +11,7 @@ type InventarioDbRow = {
 };
 
 export async function loadInventarioFromSupabase() {
-  const res = await fetch("/api/inventario", { method: "GET" });
+  const res = await fetch(`/api/inventario?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: InventarioDbRow[]; error?: string } | null;
   if (!res.ok || !json?.rows) throw new Error(json?.error || "failed_to_load");
   return (json.rows ?? []).map((r) => ({ id: r.id, data: r.data, categorias: Array.isArray(r.categorias) ? (r.categorias as any) : [] })) as InventarioContagem[];
@@ -32,4 +32,3 @@ export async function deleteInventarioFromSupabase(id: string) {
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_delete");
 }
-

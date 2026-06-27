@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
 import { formatDateLabelDDMMYYYY, formatMoneyBRL, normalizeKey, parseDateLoose, parsePtNumber, pickFirst } from "../../../../lib/bubbleCsv";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../../lib/bubbleGlobalConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -247,6 +248,16 @@ function normalizeItemName(value: string) {
     .toLowerCase();
 }
 
+function catLooksLikePrePreparo(value: string) {
+  const s = normalizeItemName(value).replace(/\s+/g, " ").trim();
+  if (!s) return false;
+  if (s.includes("prepreparo")) return true;
+  if (s.includes("pre-preparo")) return true;
+  if (s.includes("pre preparo")) return true;
+  if (s.includes("preparad")) return true;
+  return s.includes("pre") && s.includes("preparo");
+}
+
 function normalizeFornecedorKey(value: string) {
   return String(value ?? "").trim().toUpperCase();
 }
@@ -264,8 +275,24 @@ function pickKeyLike(row: Record<string, string>, parts: string[], opts?: { excl
 }
 
 function guessItemLabel(row: Record<string, string>) {
-  const direct = pickFirst(row, ["item", "item_completo", "nome_item", "nome_do_item", "nome", "produto", "descricao", "ingrediente", "insumo", "titulo", "title", "name"]);
+  const direct = pickFirst(row, [
+    "item",
+    "item_completo",
+    "nome_item",
+    "nome_do_item",
+    "nome",
+    "produto",
+    "descricao",
+    "ingrediente",
+    "insumo",
+    "receita",
+    "titulo",
+    "title",
+    "name",
+  ]);
   if (direct) return direct;
+  const like = pickKeyLike(row, ["item", "ingred", "insumo", "produto", "nome"], { excludeParts: ["fornecedor", "empresa"] });
+  if (like) return like;
   let best = "";
   for (const [k, v] of Object.entries(row)) {
     const kk = k.toLowerCase();
@@ -457,8 +484,11 @@ export async function POST(req: NextRequest) {
     const creds = state && typeof state === "object" ? ((state as any).credentials && typeof (state as any).credentials === "object" ? (state as any).credentials : null) : null;
     const credsBaseUrl = creds ? String(creds.baseUrl ?? "").trim() : "";
     const credsToken = creds ? String(creds.token ?? "").trim() : "";
-    const baseUrl = safeBaseUrl(bodyBaseUrlRaw || credsBaseUrl || getEnv("BUBBLE_BASE_URL") || "");
-    const token = safeToken(bodyTokenRaw || credsToken || getEnv("BUBBLE_API_TOKEN") || "");
+    const globalDb = await readBubbleGlobalConfigFromDb();
+    const globalEnv = readBubbleGlobalConfigFromEnv();
+    const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+    const baseUrl = safeBaseUrl(bodyBaseUrlRaw || credsBaseUrl || global?.baseUrl || getEnv("BUBBLE_BASE_URL") || "");
+    const token = safeToken(bodyTokenRaw || credsToken || global?.token || getEnv("BUBBLE_API_TOKEN") || "");
 
     const startMs = Date.now();
     const hardMs = 22_000;
@@ -1066,7 +1096,14 @@ export async function POST(req: NextRequest) {
                 .filter((p) => p.name.toLowerCase().endsWith(".json"))
                 .filter((p) => {
                   const n = p.name.toLowerCase();
-                  if (domain === "insumos") return n.includes("-bubble-api-categorias_") || n.includes("-bubble-api-custo_medio_item_") || n.includes("-bubble-api-item_") || n.includes("-bubble-api-ingredientes_");
+                  if (domain === "insumos")
+                    return (
+                      n.includes("-bubble-api-categorias_") ||
+                      n.includes("-bubble-api-custo_medio_item_") ||
+                      n.includes("-bubble-api-item_") ||
+                      n.includes("-bubble-api-itens_") ||
+                      n.includes("-bubble-api-ingredientes_")
+                    );
                   if (domain === "fornecedores") return n.includes("-bubble-api-fornecedores_") || n.includes("-bubble-api-itens_fornecedores_") || n.includes("-bubble-api-equivalencias_");
                   return n.includes("-bubble-api-inventarios_");
                 })
@@ -1179,7 +1216,7 @@ export async function POST(req: NextRequest) {
                     if (!num) continue;
                     uacc.custoByItemKey[itemKey] = formatMoneyBRL(num);
                   }
-                } else if (typeName === "item" || typeName.includes("ingred")) {
+                } else if (typeName === "item" || typeName === "itens" || typeName.includes("ingred")) {
                   for (const r of rows) {
                     const row = normalizeRowObject(r);
                     if (!row) continue;
@@ -1192,6 +1229,14 @@ export async function POST(req: NextRequest) {
                     const medida = pickFirst(row, ["medida", "unidade", "unidade_medida", "unidade_de_medida", "unidade_de_compra", "unidade_base"]) || "Und";
                     const catId = pickFirst(row, ["categoria_id", "categoria", "categoria_slug"]);
                     const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || (catId ? categoriasById[catId.trim()] ?? "" : "");
+                    const tipoRaw = pickFirst(row, ["tipo", "tipo_item", "tipo_de_item", "type"]) || pickKeyLike(row, ["tipo"], { excludeParts: ["unidade", "medida", "categoria"] });
+                    const tipoNorm = normalizeItemName(String(tipoRaw ?? ""));
+                    const isPrePreparoItem =
+                      catLooksLikePrePreparo(String(categoria ?? "")) ||
+                      (tipoNorm.includes("pre") && tipoNorm.includes("preparo")) ||
+                      tipoNorm.includes("preparad") ||
+                      Boolean(pickFirst(row, ["pre_preparo_id", "prepreparo_id", "receita_id", "recipe_id"]) || pickKeyLike(row, ["pre_preparo", "prepreparo", "receita", "recipe"]));
+                    if (isPrePreparoItem) continue;
                     const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]);
                     const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]);
                     const custoNum = parsePtNumber(custo);
@@ -1313,10 +1358,6 @@ export async function POST(req: NextRequest) {
                   endereco: pickFirst(row, ["endereco", "endereco_completo", "rua", "address"]) || pickKeyLike(row, ["endereco", "rua", "address"]),
                 };
                 uacc.infoMap[key] = info;
-                if (fornId) {
-                  const idKey = fornId.trim().toUpperCase();
-                  if (!uacc.infoMap[idKey]) uacc.infoMap[idKey] = info;
-                }
               };
 
               const handleFornecedorProduto = (row: Record<string, string>) => {
@@ -1401,8 +1442,45 @@ export async function POST(req: NextRequest) {
               }
 
               if (work.cursor >= files.length) {
+                const isFornecedorIdKey = (k: string) => /\d{8,}[xX]\d{6,}/.test(String(k ?? "").trim());
+                const scoreInfo = (x: any) => {
+                  if (!x || typeof x !== "object") return 0;
+                  const fornecedor = String((x as any)?.fornecedor ?? "").trim();
+                  const vendedor = String((x as any)?.vendedor ?? "").trim();
+                  const whatsapp = String((x as any)?.whatsapp ?? "").trim();
+                  const endereco = String((x as any)?.endereco ?? "").trim();
+                  return (fornecedor ? 2 : 0) + (vendedor ? 1 : 0) + (whatsapp ? 1 : 0) + (endereco ? 1 : 0);
+                };
                 for (const [uid, uacc] of Object.entries(users)) {
                   if (!isUuid(uid)) continue;
+                  const cleanedInfo: Record<string, any> = {};
+                  for (const [k, info] of Object.entries((uacc.infoMap ?? {}) as Record<string, any>)) {
+                    if (isFornecedorIdKey(k)) continue;
+                    const fornecedorLabel = String((info as any)?.fornecedor ?? k).trim();
+                    const nk = normalizeFornecedorKey(fornecedorLabel || k);
+                    if (!nk) continue;
+                    const prev = cleanedInfo[nk];
+                    if (!prev || scoreInfo(info) >= scoreInfo(prev)) cleanedInfo[nk] = info;
+                  }
+
+                  const cleanedProdutos: Record<string, string[]> = {};
+                  for (const [k, list] of Object.entries((uacc.produtosMap ?? {}) as Record<string, any>)) {
+                    if (isFornecedorIdKey(k)) continue;
+                    const nk = normalizeFornecedorKey(k);
+                    if (!nk) continue;
+                    const cur = cleanedProdutos[nk] ?? [];
+                    const add = Array.isArray(list) ? (list as any[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+                    cleanedProdutos[nk] = cur.concat(add);
+                  }
+
+                  const cleanedEq: Record<string, any[]> = {};
+                  for (const [k, list] of Object.entries((uacc.equivalenciasMap ?? {}) as Record<string, any>)) {
+                    if (isFornecedorIdKey(k)) continue;
+                    const nk = normalizeFornecedorKey(k);
+                    if (!nk) continue;
+                    cleanedEq[nk] = Array.isArray(list) ? (list as any[]) : [];
+                  }
+
                   for (const k of Object.keys(uacc.produtosMap ?? {})) {
                     uacc.produtosMap[k] = Array.from(new Set((uacc.produtosMap[k] ?? []).filter(Boolean))).sort((a, b) =>
                       String(a).localeCompare(String(b), "pt-BR", { sensitivity: "base", numeric: true }),
@@ -1411,7 +1489,22 @@ export async function POST(req: NextRequest) {
                   const stateId = `user:${uid}`;
                   const { error } = await supabase
                     .from("fornecedores_state")
-                    .upsert({ id: stateId, info: uacc.infoMap ?? {}, produtos: uacc.produtosMap ?? {}, equivalencias: uacc.equivalenciasMap ?? {} } as any, { onConflict: "id" });
+                    .upsert(
+                      {
+                        id: stateId,
+                        info: cleanedInfo,
+                        produtos: Object.fromEntries(
+                          Object.entries(cleanedProdutos).map(([k, v]) => [
+                            k,
+                            Array.from(new Set((v ?? []).map((x) => String(x ?? "").trim()).filter(Boolean))).sort((a, b) =>
+                              String(a).localeCompare(String(b), "pt-BR", { sensitivity: "base", numeric: true }),
+                            ),
+                          ]),
+                        ),
+                        equivalencias: cleanedEq,
+                      } as any,
+                      { onConflict: "id" },
+                    );
                   if (error) throw new Error(`fornecedores_state:${error.message}`);
                 }
                 state.import.index = idx + 1;

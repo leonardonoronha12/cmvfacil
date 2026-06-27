@@ -1107,42 +1107,52 @@ export default function DashboardClient() {
       const uid = String(m?.[1] ?? "").trim();
       if (!uid) throw new Error("missing_user_scope");
 
-      let baseUrl = "";
-      let token = "";
-      try {
-        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
-      if (!baseUrl || !token) throw new Error("missing_bubble_credentials");
-
-      const restartRes = await fetch("/api/bubble-import/sync/restart", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: false, baseUrl, token }),
-        cache: "no-store",
-      });
-      const restartJson = (await restartRes.json().catch(() => null)) as any;
-      if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
-
       const statePath = `user:${uid}/bootstrap/sync-state.json`;
-      let state: any = null;
-      for (let i = 0; i < 24; i++) {
-        const tickRes = await fetch("/api/bubble-import/sync/tick", {
+      const run = async (hard: boolean) => {
+        const restartRes = await fetch("/api/bubble-import/sync/restart", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ statePath, baseUrl, token, resume: true, maxOps: 50 }),
+          body: JSON.stringify({ hard }),
           cache: "no-store",
         });
-        const tickJson = (await tickRes.json().catch(() => null)) as any;
-        if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
-        state = tickJson?.state ?? null;
-        const phase = String(state?.phase ?? "").trim();
-        if (phase === "done") break;
-        if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
-        if (phase === "paused") throw new Error("paused_by_user");
-        await new Promise((r) => window.setTimeout(r, 400));
+        const restartJson = (await restartRes.json().catch(() => null)) as any;
+        if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
+
+        let state: any = null;
+        for (let i = 0; i < 24; i++) {
+          const tickRes = await fetch("/api/bubble-import/sync/tick", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ statePath, resume: true, maxOps: 50 }),
+            cache: "no-store",
+          });
+          const tickJson = (await tickRes.json().catch(() => null)) as any;
+          if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
+          state = tickJson?.state ?? null;
+          const phase = String(state?.phase ?? "").trim();
+          if (phase === "done") break;
+          if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
+          if (phase === "paused") throw new Error("paused_by_user");
+          await new Promise((r) => window.setTimeout(r, 400));
+        }
+        if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
+      };
+
+      try {
+        await run(false);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        const m2 = msg.toLowerCase();
+        if (m2.includes("missing_base_url") || m2.includes("missing_token")) throw new Error("Configurar Bubble em Ajustes → Bubble API Global.");
+        const shouldHard =
+          m2.includes("invalid_json_file:") ||
+          m2.includes("invalid_json_from_storage:") ||
+          m2.includes("unexpected token") ||
+          m2.includes("<html") ||
+          m2.includes("bubble retornou html");
+        if (!shouldHard) throw err;
+        await run(true);
       }
-      if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
 
       const [dbInsumos, dbEntradas, dbFornecedores, dbInv, dbDesp, dbPre, dbEtiquetas, dbFichas] = await Promise.all([
         loadInsumosFromSupabase().catch(() => [] as InsumoStoreItem[]),
@@ -1188,16 +1198,10 @@ export default function DashboardClient() {
   async function hardRestartSyncAndReload() {
     setIsLoadingTables(true);
     try {
-      let baseUrl = "";
-      let token = "";
-      try {
-        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
       const res = await fetch("/api/bubble-import/sync/restart", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: true, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
+        body: JSON.stringify({ hard: true }),
         cache: "no-store",
       });
       const j = (await res.json().catch(() => null)) as any;
@@ -1548,10 +1552,6 @@ export default function DashboardClient() {
   const inventoryOptions = useMemo(() => {
     const out: Array<{ iso: string; label: string; t: number }> = [];
     for (const c of contagens) {
-      const hasAnyCountedItem = (c.categorias ?? []).some((cat) =>
-        (cat.itens ?? []).some((it) => !Boolean((it as any).removido) && Boolean(String((it as any).estoqueFinal ?? "").trim())),
-      );
-      if (!hasAnyCountedItem) continue;
       const d = parseDateDDMMYYYY(c.data);
       if (!d) continue;
       const iso = toIsoDate(d);
@@ -1707,10 +1707,18 @@ export default function DashboardClient() {
       };
     });
 
-    const list = [
-      ...insumos.filter((i) => !i.ocultar).map((i) => ({ kind: "insumo" as const, id: i.id, item: i.item, categoria: i.categoria ?? "-", medida: i.medida || "Und", custoInicial: String(i.custoMedio ?? "") })),
-      ...prePreparoItems.map((p) => ({ kind: "prepreparo" as const, id: p.id, item: p.item, categoria: p.categoria, medida: p.medida, custoUnitCents: p.custoUnitCents })),
-    ].sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
+    const byName = new Map<string, any>();
+    for (const i of insumos.filter((x) => !x.ocultar)) {
+      const key = normalizeKey(String(i.item ?? ""));
+      if (!key) continue;
+      byName.set(key, { kind: "insumo" as const, id: i.id, item: i.item, categoria: i.categoria ?? "-", medida: i.medida || "Und", custoInicial: String(i.custoMedio ?? "") });
+    }
+    for (const p of prePreparoItems) {
+      const key = normalizeKey(String(p.item ?? ""));
+      if (!key) continue;
+      byName.set(key, { kind: "prepreparo" as const, id: p.id, item: p.item, categoria: p.categoria, medida: p.medida, custoUnitCents: p.custoUnitCents });
+    }
+    const list = Array.from(byName.values()).sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base" }));
 
     const computedRows: Row[] = [];
     let initialCents = 0;
@@ -2094,7 +2102,18 @@ export default function DashboardClient() {
   }, [prePreparo]);
 
   const cmvItems = useMemo(() => {
-    return [...insumos, ...prePreparoAsInsumos];
+    const byName = new Map<string, InsumoStoreItem>();
+    for (const i of insumos) {
+      const key = normalizeKey(String(i.item ?? ""));
+      if (!key) continue;
+      byName.set(key, i);
+    }
+    for (const p of prePreparoAsInsumos) {
+      const key = normalizeKey(String(p.item ?? ""));
+      if (!key) continue;
+      byName.set(key, p);
+    }
+    return Array.from(byName.values());
   }, [insumos, prePreparoAsInsumos]);
 
   const baseRows = useMemo(() => {

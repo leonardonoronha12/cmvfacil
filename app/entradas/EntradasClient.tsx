@@ -748,7 +748,7 @@ export default function EntradasClient() {
     const seen = new Set<string>();
     const out: string[] = [];
     for (const r of rows) {
-      const v = r.fornecedor.trim();
+      const v = String((r as any)?.fornecedor ?? "").trim();
       if (!v) continue;
       const k = v.toLowerCase();
       if (seen.has(k)) continue;
@@ -952,8 +952,8 @@ export default function EntradasClient() {
     const current = readFornecedorInfoMap();
     const next: FornecedorInfoMap = { ...current };
     let changed = false;
-    const addIfMissing = (raw: string) => {
-      const fornecedor = raw.trim();
+    const addIfMissing = (raw: unknown) => {
+      const fornecedor = String(raw ?? "").trim();
       if (!fornecedor) return;
       const key = fornecedor.toUpperCase();
       if (next[key]) return;
@@ -961,7 +961,7 @@ export default function EntradasClient() {
       next[key] = info;
       changed = true;
     };
-    for (const r of rows) addIfMissing(r.fornecedor);
+    for (const r of rows) addIfMissing((r as any)?.fornecedor);
     for (const f of customFornecedores) addIfMissing(f);
     if (changed) writeFornecedorInfoMap(next);
   }, [customFornecedores, rows]);
@@ -970,14 +970,14 @@ export default function EntradasClient() {
     const next: FornecedorProdutos = { ...fornecedorProdutosMap };
     let changed = false;
     for (const r of rows) {
-      const fornecedor = r.fornecedor.trim().toUpperCase();
+      const fornecedor = String((r as any)?.fornecedor ?? "").trim().toUpperCase();
       if (!fornecedor) continue;
       const itens = r.itensNota ?? [];
       if (!itens.length) continue;
       const cur = next[fornecedor] ? [...next[fornecedor]] : [];
       let curChanged = false;
       for (const it of itens) {
-        const name = it.nome.trim();
+        const name = String((it as any)?.nome ?? "").trim();
         if (!name) continue;
         const has = cur.some((x) => x.toLowerCase() === name.toLowerCase());
         if (has) continue;

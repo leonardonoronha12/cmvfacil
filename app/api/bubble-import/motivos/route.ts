@@ -98,7 +98,12 @@ export async function GET(req: NextRequest) {
       .map((p) => p.path)
       .filter((p) => {
         const lower = p.toLowerCase();
-        return lower.includes("bubble-api-motivo") || lower.includes("bubble-api-motivos");
+        if (!lower.includes("bubble-api-")) return false;
+        if (!lower.endsWith(".json")) return false;
+        if (lower.endsWith("state.json")) return false;
+        if (!lower.includes("motivo")) return false;
+        if (lower.includes("desperd") || lower.includes("waste") || lower.includes("loss") || lower.includes("perda")) return true;
+        return lower.includes("motivos_de_desperdicio") || lower.includes("motivos_desperdicio") || lower.includes("motivos_desperdicios");
       })
       .sort((a, b) => b.localeCompare(a));
 
@@ -142,4 +147,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

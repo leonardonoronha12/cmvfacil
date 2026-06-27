@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
@@ -292,6 +293,8 @@ const SUPPORT_WA_URL =
 const HELP_CENTER_URL = "https://cmv-facil.gitbook.io/cmv-facil";
 
 export default function AppSidebar({ active }: { active: SidebarKey }) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>(() => readPrePreparoEtiquetasFromStore());
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
@@ -303,6 +306,43 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const bootstrapSkipUntilRef = useRef(0);
   const bootstrapControlRef = useRef<{ tickUrl: string; statePath: string } | null>(null);
   const bootstrapStopRef = useRef(false);
+  const bubbleObjOverlayKey = "cmvfacil:bubbleObjMigrationOverlayHidden:v1";
+  const bubbleObjEnsureKey = "cmvfacil:bubbleObjEnsureStarted:v1";
+  const [bubbleObjOverlayVisible, setBubbleObjOverlayVisible] = useState(true);
+  const [bubbleObj, setBubbleObj] = useState<{
+    loadedAt: number;
+    status: "not_started" | "running" | "completed" | "failed" | "pending_review";
+    lastRunId: string | null;
+    lastAttemptAt: string | null;
+    completedAt: string | null;
+    lastError: string;
+    totals: { received: number; savedStaging: number; duplicateIgnored: number; pendingReview: number; error: number; processed: number };
+    perTypeLive: Array<{
+      objectType: string;
+      status: string;
+      expected: number;
+      received: number;
+      savedStaging: number;
+      duplicateIgnored: number;
+      pendingReview: number;
+      error: number;
+      processed: number;
+      lastCursor: number;
+      lastError: string;
+      updatedAt: string | null;
+    }>;
+    validation: { status: string; validatedAt: string | null; report: any };
+  }>({
+    loadedAt: 0,
+    status: "not_started",
+    lastRunId: null,
+    lastAttemptAt: null,
+    completedAt: null,
+    lastError: "",
+    totals: { received: 0, savedStaging: 0, duplicateIgnored: 0, pendingReview: 0, error: 0, processed: 0 },
+    perTypeLive: [],
+    validation: { status: "not_started", validatedAt: null, report: null },
+  });
   const [bootstrap, setBootstrap] = useState<{
     status: "idle" | "running" | "done" | "error";
     message: string;
@@ -316,6 +356,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const bootstrapDoneKey = "cmvfacil:bootstrapDone:v5";
   const bootstrapRunningKey = "cmvfacil:bootstrapRunning:v5";
   const bootstrapDoneTtlMs = 10 * 60_000;
+
+  useEffect(() => {
+    try {
+      const hidden = window.sessionStorage.getItem(bubbleObjOverlayKey) === "1";
+      if (hidden) setBubbleObjOverlayVisible(false);
+    } catch {}
+  }, []);
 
   const shouldSkipBootstrap = () => {
     const localUntil = bootstrapSkipUntilRef.current;
@@ -362,6 +409,101 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (msg.includes("no_import_files")) return "Não encontrei arquivos válidos do Bubble para importar. Vá em Ajustes → Importar Bubble e envie os arquivos, ou configure a importação via API.";
     if (msg.includes("timeout")) return "A atualização está demorando mais que o esperado. Tente novamente em instantes.";
     return "Não foi possível finalizar a atualização. Tente novamente em instantes.";
+  };
+
+  const formatBubbleObjErrorLabel = (raw: string) => {
+    const msg = String(raw ?? "").trim().toLowerCase();
+    if (!msg) return "Não foi possível migrar seus dados automaticamente. Tente novamente em instantes.";
+    if (msg.includes("unauthorized") || msg.includes("401") || msg.includes("jwt")) return "Sessão expirada. Faça login novamente.";
+    if (msg.includes("supabase_not_configured")) return "Supabase não está configurado no servidor. Configure as envs (SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY).";
+    if (msg.includes("missing_base_url") || msg.includes("missing_token")) return "Falta configurar o Bubble (URL/token) para a migração.";
+    if (msg.includes("bubble_user_not_found_for_email")) return "Não encontrei esse email no Bubble. Verifique se o email da conta no Bubble é o mesmo do login.";
+    if (msg.includes("unable_to_scope_query_for_type")) return "Não consegui filtrar seus dados no Bubble com segurança. Entre em contato com o suporte.";
+    if (msg.includes("type_not_found")) return "Alguns tipos não existem no Bubble e foram ignorados. Se faltar algum dado, entre em contato com o suporte.";
+    return "Não foi possível migrar seus dados automaticamente. Tente novamente em instantes.";
+  };
+
+  const computeBubbleObjProgress = () => {
+    const list = Array.isArray(bubbleObj.perTypeLive) ? bubbleObj.perTypeLive : [];
+    const total = list.length || 0;
+    if (!total) return { progress: 0.08, detail: "" };
+    const done = list.filter((x) => String(x.status ?? "") === "done").length;
+    const running = list.find((x) => String(x.status ?? "") === "running" || String(x.status ?? "") === "pending") ?? null;
+    const base = Math.min(1, done / total);
+    const frac = (() => {
+      if (!running) return 0;
+      const expected = Number.isFinite(running.expected) && running.expected > 0 ? running.expected : 0;
+      const received = Number.isFinite(running.received) && running.received >= 0 ? running.received : 0;
+      if (expected > 0) return Math.max(0, Math.min(1, received / expected));
+      return 0.35;
+    })();
+    const progress = Math.max(0.02, Math.min(0.99, (done + frac) / total));
+    const detail = (() => {
+      if (!running) return `${done}/${total} tipos`;
+      const a: string[] = [];
+      a.push(`Tipo: ${String(running.objectType ?? "—")}`);
+      a.push(`${done}/${total} tipos`);
+      if (Number.isFinite(running.received)) a.push(`recebidos ${formatIntPT(Math.max(0, running.received))}`);
+      if (Number.isFinite(running.savedStaging)) a.push(`staging ${formatIntPT(Math.max(0, running.savedStaging))}`);
+      if (Number.isFinite(running.processed)) a.push(`processados ${formatIntPT(Math.max(0, running.processed))}`);
+      return a.join(" • ");
+    })();
+    return { progress, detail };
+  };
+
+  const bubbleObjShouldBlockPath = () => {
+    const p = String(pathname ?? "").trim() || "/";
+    if (p === "/" || p.startsWith("/login") || p.startsWith("/cadastro") || p.startsWith("/resetar-senha") || p.startsWith("/restaurar-senha")) return false;
+    if (p.startsWith("/ajustes") || p.startsWith("/suporte") || p.startsWith("/debug")) return false;
+    return true;
+  };
+
+  const refreshBubbleObjStatus = async () => {
+    try {
+      const res = await fetch(`/api/bubble-obj/migration/status?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) return;
+      const m = j.migration ?? {};
+      const statusRaw = String(m.status ?? "not_started");
+      const status =
+        statusRaw === "not_started" || statusRaw === "running" || statusRaw === "completed" || statusRaw === "failed" || statusRaw === "pending_review"
+          ? statusRaw
+          : "not_started";
+      setBubbleObj({
+        loadedAt: Date.now(),
+        status,
+        lastRunId: m.lastRunId ? String(m.lastRunId) : null,
+        lastAttemptAt: m.lastAttemptAt ? String(m.lastAttemptAt) : null,
+        completedAt: m.completedAt ? String(m.completedAt) : null,
+        lastError: String(m.lastError ?? ""),
+        totals: {
+          received: Number(m?.totals?.received ?? 0),
+          savedStaging: Number(m?.totals?.savedStaging ?? 0),
+          duplicateIgnored: Number(m?.totals?.duplicateIgnored ?? 0),
+          pendingReview: Number(m?.totals?.pendingReview ?? 0),
+          error: Number(m?.totals?.error ?? 0),
+          processed: Number(m?.totals?.processed ?? 0),
+        },
+        perTypeLive: Array.isArray(m?.perTypeLive) ? (m.perTypeLive as any[]) : [],
+        validation: {
+          status: String(m?.validation?.status ?? "not_started"),
+          validatedAt: m?.validation?.validatedAt ? String(m.validation.validatedAt) : null,
+          report: m?.validation?.report ?? null,
+        },
+      });
+    } catch {}
+  };
+
+  const fireEnsureBubbleObj = async () => {
+    try {
+      await fetch("/api/bubble-obj/migration/ensure", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
+    } catch {}
+  };
+
+  const fireValidateBubbleObj = async () => {
+    try {
+      await fetch("/api/bubble-obj/migration/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
+    } catch {}
   };
 
   const requestStopBootstrap = async () => {
@@ -636,6 +778,51 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (bootstrap.status === "running") return;
     void bootstrapUserDataOnce();
   }, [bootstrap.status]);
+
+  useEffect(() => {
+    void refreshBubbleObjStatus();
+  }, []);
+
+  useEffect(() => {
+    const st = String(bubbleObj.status ?? "not_started");
+    if (st === "completed" || st === "running" || st === "pending_review") return;
+    try {
+      if (window.sessionStorage.getItem(bubbleObjEnsureKey) === "1") return;
+      window.sessionStorage.setItem(bubbleObjEnsureKey, "1");
+    } catch {}
+    setBubbleObjOverlayVisible(true);
+    void fireEnsureBubbleObj().finally(() => {
+      void refreshBubbleObjStatus();
+    });
+  }, [bubbleObj.status]);
+
+  useEffect(() => {
+    const st = String(bubbleObj.status ?? "");
+    const v = String(bubbleObj.validation?.status ?? "");
+    const isActive = st === "running" || v === "running";
+    if (!isActive) return;
+    const id = window.setInterval(() => {
+      void refreshBubbleObjStatus();
+    }, 2500);
+    return () => window.clearInterval(id);
+  }, [bubbleObj.status, bubbleObj.validation?.status]);
+
+  useEffect(() => {
+    const st = String(bubbleObj.status ?? "");
+    if (st !== "completed") return;
+    const v = String(bubbleObj.validation?.status ?? "not_started");
+    if (v === "validated" || v === "divergent" || v === "running") return;
+    const runId = String(bubbleObj.lastRunId ?? "").trim();
+    if (!runId) return;
+    const validateKey = `cmvfacil:bubbleObjValidateStarted:v1:${runId}`;
+    try {
+      if (window.sessionStorage.getItem(validateKey) === "1") return;
+      window.sessionStorage.setItem(validateKey, "1");
+    } catch {}
+    void fireValidateBubbleObj().finally(() => {
+      void refreshBubbleObjStatus();
+    });
+  }, [bubbleObj.status, bubbleObj.validation?.status, bubbleObj.lastRunId]);
 
   useEffect(() => {
     const mq = window.matchMedia("(max-width: 720px)");
@@ -921,6 +1108,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     companyName.split("-")[0]?.trim() ||
     "—";
   const avatarUrl = String(me?.avatarUrl ?? "").trim();
+  const companyLogoUrl = String(me?.companyLogoUrl ?? "").trim();
+  const companyAvatarUrl = companyLogoUrl || avatarUrl;
+  const userAvatarUrl = avatarUrl || companyLogoUrl;
   const planLabel = String(me?.planType ?? "").trim() || "—";
 
   const sidebarBody = (includeBrand: boolean) => (
@@ -934,7 +1124,11 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.companyCard}>
           <div className={dash.companyAvatar} aria-hidden>
-            {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
+            {companyAvatarUrl ? (
+              <img src={companyAvatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
+            ) : (
+              <IconBurgerBadge />
+            )}
           </div>
           <div className={dash.companyMeta}>
             <p className={dash.companyName}>{companyName}</p>
@@ -1016,7 +1210,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         <a className={dash.userDropdown} href="/ajustes?tab=minha-conta" onClick={closeDrawer}>
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>
-              {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
+              {userAvatarUrl ? <img src={userAvatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
             </div>
             <p className={dash.userHello}>Olá, {userLabel}</p>
           </div>
@@ -1030,8 +1224,271 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
   return (
     <>
+      {(() => {
+        const st = String(bubbleObj.status ?? "not_started");
+        const shouldShow = st === "running" || st === "not_started";
+        if (!shouldShow) return null;
+        const blocked = bubbleObjShouldBlockPath();
+        const meta = computeBubbleObjProgress();
+        const pct = Math.round(Math.max(0, Math.min(1, meta.progress)) * 100);
+        if (blocked) {
+          if (typeof document === "undefined") return null;
+          return createPortal(
+            <div
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.18)",
+                zIndex: 92,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                padding: 16,
+              }}
+            >
+              <div
+                style={{
+                  background: "#ffffff",
+                  border: "1px solid #e4e8e7",
+                  borderRadius: 14,
+                  padding: "12px 14px",
+                  maxWidth: 560,
+                  width: "100%",
+                  boxShadow: "0 18px 50px rgba(0,0,0,0.16)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", columnGap: 10, marginBottom: 8 }}>
+                  <div style={{ width: 18, height: 18 }}>
+                    <LoadingSpinner />
+                  </div>
+                  <div style={{ fontSize: 14, fontWeight: 800, color: "#01040e" }}>Migrando seus dados</div>
+                </div>
+
+                <div style={{ fontSize: 13, color: "#292d2d", lineHeight: "18px", marginBottom: 12 }}>
+                  Estamos migrando seus dados do Bubble para sua conta. Algumas telas ficam indisponíveis até concluir.
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                  <div style={{ fontSize: 12, color: "#111111", fontWeight: 700 }}>Progresso</div>
+                  <div style={{ fontSize: 12, color: "#292d2d" }}>
+                    {pct}% • {formatIntPT(Math.max(0, bubbleObj.totals.savedStaging))} em staging • {formatIntPT(Math.max(0, bubbleObj.totals.processed))} processados
+                  </div>
+                </div>
+
+                {meta.detail ? <div style={{ fontSize: 12, color: "#292d2d", marginBottom: 10, wordBreak: "break-word" }}>{meta.detail}</div> : null}
+
+                <div style={{ width: "100%", height: 10, borderRadius: 999, background: "#e9eeed", overflow: "hidden" }}>
+                  <div
+                    style={{
+                      width: `${pct}%`,
+                      height: "100%",
+                      borderRadius: 999,
+                      background: "linear-gradient(90deg, #0ab86d, #22c55e)",
+                      transition: "width 350ms ease",
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12, gap: 10 }}>
+                  <button
+                    type="button"
+                    className="cmv-button"
+                    style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db" }}
+                    onClick={() => {
+                      try {
+                        window.sessionStorage.setItem(bubbleObjOverlayKey, "1");
+                      } catch {}
+                      setBubbleObjOverlayVisible(false);
+                      router.push("/ajustes");
+                    }}
+                  >
+                    Ir para Ajustes
+                  </button>
+                </div>
+              </div>
+            </div>,
+            document.body,
+          );
+        }
+
+        if (!bubbleObjOverlayVisible) return null;
+        return (
+          <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93 }}>
+            <div
+              style={{
+                background: "#eef6ff",
+                border: "1px solid #bfe0ff",
+                borderRadius: 12,
+                padding: "10px 12px",
+                color: "#0b3b70",
+                fontSize: 13,
+                boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>Migrando seus dados… {pct}%</div>
+              <button
+                type="button"
+                className="cmv-button"
+                style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db", flexShrink: 0 }}
+                onClick={() => {
+                  try {
+                    window.sessionStorage.setItem(bubbleObjOverlayKey, "1");
+                  } catch {}
+                  setBubbleObjOverlayVisible(false);
+                }}
+              >
+                Esconder
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {(() => {
+        const st = String(bubbleObj.status ?? "");
+        if (st !== "running" || bubbleObjShouldBlockPath() || bubbleObjOverlayVisible) return null;
+        const meta = computeBubbleObjProgress();
+        const pct = Math.round(Math.max(0, Math.min(1, meta.progress)) * 100);
+        return (
+          <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93, display: "flex", justifyContent: "flex-end" }}>
+            <button
+              type="button"
+              className="cmv-button"
+              onClick={() => {
+                try {
+                  window.sessionStorage.removeItem(bubbleObjOverlayKey);
+                } catch {}
+                setBubbleObjOverlayVisible(true);
+              }}
+            >
+              Migrando… {pct}%
+            </button>
+          </div>
+        );
+      })()}
+
+      {bubbleObj.status === "failed" && bubbleObj.lastError ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93 }}>
+          <div
+            style={{
+              background: "#fff3f5",
+              border: "1px solid #ffd0d8",
+              borderRadius: 12,
+              padding: "10px 12px",
+              color: "#b1002c",
+              fontSize: 13,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>{formatBubbleObjErrorLabel(bubbleObj.lastError)}</div>
+            <button
+              type="button"
+              className="cmv-button"
+              style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db", flexShrink: 0 }}
+              onClick={() => {
+                try {
+                  window.sessionStorage.removeItem(bubbleObjEnsureKey);
+                } catch {}
+                setBubbleObjOverlayVisible(true);
+                void fireEnsureBubbleObj().finally(() => void refreshBubbleObjStatus());
+              }}
+            >
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {bubbleObj.status === "pending_review" ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93 }}>
+          <div
+            style={{
+              background: "#fff9e8",
+              border: "1px solid #ffe1a3",
+              borderRadius: 12,
+              padding: "10px 12px",
+              color: "#7a4b00",
+              fontSize: 13,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+            }}
+          >
+            Migração concluída com itens pendentes de revisão. Alguns dados podem estar incompletos.
+          </div>
+        </div>
+      ) : null}
+
+      {bubbleObj.status === "completed" && String(bubbleObj.validation?.status ?? "") === "running" ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93 }}>
+          <div
+            style={{
+              background: "#eef6ff",
+              border: "1px solid #bfe0ff",
+              borderRadius: 12,
+              padding: "10px 12px",
+              color: "#0b3b70",
+              fontSize: 13,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>Validando migração…</div>
+            <button
+              type="button"
+              className="cmv-button"
+              style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db", flexShrink: 0 }}
+              onClick={() => void refreshBubbleObjStatus()}
+            >
+              Atualizar
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {bubbleObj.status === "completed" && String(bubbleObj.validation?.status ?? "") === "divergent" ? (
+        <div style={{ position: "fixed", left: 210, right: 16, top: 52, zIndex: 93 }}>
+          <div
+            style={{
+              background: "#fff3f5",
+              border: "1px solid #ffd0d8",
+              borderRadius: 12,
+              padding: "10px 12px",
+              color: "#b1002c",
+              fontSize: 13,
+              boxShadow: "0 10px 28px rgba(0,0,0,0.10)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>Migração validada com divergências. Entre em contato com o suporte.</div>
+            <button
+              type="button"
+              className="cmv-button"
+              style={{ background: "#ffffff", color: "#0a1f16", border: "1px solid #cfe6db", flexShrink: 0 }}
+              onClick={() => setIsSupportOpen(true)}
+            >
+              Suporte
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {bootstrap.status === "running" && bootstrapOverlayVisible
-        ? createPortal(
+        ? typeof document === "undefined"
+          ? null
+          : createPortal(
             <div
               style={{
                 position: "fixed",
@@ -1155,7 +1612,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       {!isMobile ? <aside className={dash.menuLateral}>{sidebarBody(true)}</aside> : null}
 
       {isMobile && isDrawerOpen
-        ? createPortal(
+        ? typeof document === "undefined"
+          ? null
+          : createPortal(
             <div
               className={dash.mobileDrawerOverlay}
               role="presentation"
@@ -1181,7 +1640,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         : null}
 
       {isSupportOpen
-        ? createPortal(
+        ? typeof document === "undefined"
+          ? null
+          : createPortal(
             <div
               className={suporteStyles.modalOverlay}
               role="dialog"

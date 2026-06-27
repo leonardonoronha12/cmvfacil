@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../lib/bubbleGlobalConfig";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -97,8 +98,11 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? "");
-    const token = safeToken(body?.token ?? "");
+    const globalDb = await readBubbleGlobalConfigFromDb();
+    const globalEnv = readBubbleGlobalConfigFromEnv();
+    const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+    const baseUrl = safeBaseUrl(body?.baseUrl ?? global?.baseUrl ?? "");
+    const token = safeToken(body?.token ?? global?.token ?? "");
     const typeName = safeType(body?.type ?? "");
     const cursor = typeof body?.cursor === "number" && Number.isFinite(body.cursor) && body.cursor >= 0 ? Math.floor(body.cursor) : 0;
     const limit = typeof body?.limit === "number" && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(200, Math.floor(body.limit)) : 100;

@@ -14,7 +14,7 @@ type DesperdicioDbRow = {
 };
 
 export async function loadDesperdiciosFromSupabase() {
-  const res = await fetch("/api/desperdicios", { method: "GET" });
+  const res = await fetch(`/api/desperdicios?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: DesperdicioDbRow[]; error?: string } | null;
   if (!res.ok || !json?.rows) throw new Error(json?.error || "failed_to_load");
   return (json.rows ?? []).map((r) => ({ id: r.id, data: r.data, item: r.item, quantidade: r.quantidade, custo: r.custo, motivo: r.motivo })) as DesperdicioRow[];
@@ -35,4 +35,3 @@ export async function deleteDesperdicioFromSupabase(id: string) {
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_delete");
 }
-

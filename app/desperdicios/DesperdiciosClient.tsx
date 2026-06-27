@@ -145,11 +145,20 @@ function resolveItemLabel(itemRaw: unknown, insumos: InsumoStoreItem[], prePrepa
   if (!raw) return "-";
   const id = extractBubbleThingIdToken(raw);
   if (!id) return raw;
-  const ins = insumos.find((i) => String(i.id ?? "").trim() === id) ?? null;
+  const ins =
+    insumos.find((i) => extractBubbleThingIdToken(String(i.id ?? "").trim()) === id) ??
+    insumos.find((i) => String(i.id ?? "").trim() === raw) ??
+    null;
   if (ins?.item) return String(ins.item).trim() || raw;
-  const prep = prePreparo.find((r) => String(r.id ?? "").trim() === id) ?? null;
+  const prep =
+    prePreparo.find((r) => extractBubbleThingIdToken(String(r.id ?? "").trim()) === id) ??
+    prePreparo.find((r) => String(r.id ?? "").trim() === raw) ??
+    null;
   if (prep?.receita) return String(prep.receita).trim() || raw;
-  const ficha = fichas.find((r) => String((r as any)?.id ?? "").trim() === id) ?? null;
+  const ficha =
+    fichas.find((r) => extractBubbleThingIdToken(String((r as any)?.id ?? "").trim()) === id) ??
+    fichas.find((r) => String((r as any)?.id ?? "").trim() === raw) ??
+    null;
   if (ficha && typeof (ficha as any).receita === "string" && String((ficha as any).receita).trim()) return String((ficha as any).receita).trim();
   return raw;
 }

@@ -31,7 +31,7 @@ function normalizeRows(input: unknown): FichaTecnicaEtiquetaRow[] {
 }
 
 export async function loadFichasTecnicasEtiquetasFromSupabase() {
-  const res = await fetch("/api/fichas-tecnicas-etiquetas", { method: "GET" });
+  const res = await fetch(`/api/fichas-tecnicas-etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as { rows?: unknown[]; error?: string } | null;
   if (!res.ok || !json) throw new Error(json?.error || `failed_to_load_${res.status}`);
   return normalizeRows(json.rows);
@@ -46,4 +46,3 @@ export async function saveFichasTecnicasEtiquetasToSupabase(rows: FichaTecnicaEt
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_save_${res.status}`);
 }
-

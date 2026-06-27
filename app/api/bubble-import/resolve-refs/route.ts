@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../lib/bubbleGlobalConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -58,8 +59,11 @@ export async function POST(req: NextRequest) {
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const body = (await req.json().catch(() => null)) as any;
-    const baseUrl = safeBaseUrl(body?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
-    const token = safeToken(body?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
+    const globalDb = await readBubbleGlobalConfigFromDb();
+    const globalEnv = readBubbleGlobalConfigFromEnv();
+    const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+    const baseUrl = safeBaseUrl(body?.baseUrl ?? global?.baseUrl ?? getEnv("BUBBLE_BASE_URL") ?? "");
+    const token = safeToken(body?.token ?? global?.token ?? getEnv("BUBBLE_API_TOKEN") ?? "");
     const type = String(body?.type ?? "fornecedores").trim() || "fornecedores";
     const ids = Array.isArray(body?.ids) ? (body.ids as any[]).map((x) => String(x ?? "").trim()).filter(Boolean) : [];
     const unique = Array.from(new Set(ids)).slice(0, 60);

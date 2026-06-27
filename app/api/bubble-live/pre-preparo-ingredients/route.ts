@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { readBubbleGlobalConfigFromDb, readBubbleGlobalConfigFromEnv } from "../../../lib/bubbleGlobalConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -399,6 +400,13 @@ export async function POST(req: NextRequest) {
         if (!baseUrl) baseUrl = safeBaseUrl(String(creds?.baseUrl ?? ""));
         if (!token) token = safeToken(String(creds?.token ?? ""));
       }
+    }
+    if (!baseUrl || !token) {
+      const globalDb = await readBubbleGlobalConfigFromDb();
+      const globalEnv = readBubbleGlobalConfigFromEnv();
+      const global = (globalDb.ok ? globalDb.value : null) ?? globalEnv ?? null;
+      if (!baseUrl) baseUrl = safeBaseUrl(String(global?.baseUrl ?? ""));
+      if (!token) token = safeToken(String(global?.token ?? ""));
     }
     if (!baseUrl) baseUrl = safeBaseUrl(getEnv("BUBBLE_BASE_URL") || "");
     if (!token) token = safeToken(getEnv("BUBBLE_API_TOKEN") || "");

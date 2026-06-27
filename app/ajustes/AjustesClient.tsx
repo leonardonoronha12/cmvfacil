@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import styles from "./ajustes.module.css";
-import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
+import { clearMeStore, loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 
 function IconGearSmall() {
   return (
@@ -212,6 +212,7 @@ export default function AjustesClient() {
                         try {
                           await fetch("/api/auth/logout", { method: "POST" });
                         } finally {
+                          clearMeStore();
                           window.location.href = "/login";
                         }
                       }}

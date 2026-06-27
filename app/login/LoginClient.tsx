@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import LoadingSpinner from "../components/LoadingSpinner";
+import { clearMeStore } from "../lib/meStore";
 
 export default function LoginClient() {
   const router = useRouter();
@@ -21,6 +22,12 @@ export default function LoginClient() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      clearMeStore();
+    } catch {}
+  }, []);
 
   useEffect(() => {
     const hash = window.location.hash || "";
@@ -46,8 +53,10 @@ export default function LoginClient() {
       });
       const data = (await res.json()) as { ok?: boolean; error?: string; details?: string };
       if (!res.ok || !data.ok) throw new Error(data.details ?? data.error ?? "login_failed");
-      router.replace(nextPath);
-      router.refresh();
+      try {
+        clearMeStore();
+      } catch {}
+      window.location.replace(nextPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {

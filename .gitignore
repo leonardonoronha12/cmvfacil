@@ -5,6 +5,10 @@ node_modules
 .env
 .env.local
 .env.*.local
+.vercel-token.local
+.bubble*.local
+.bubble*.local.*
+*.local.sql
 .sbhome
 tsconfig.tsbuildinfo
 supabase/.temp
@@ -12,6 +16,10 @@ supabase/.temp
 .localappdata/
 AGENTS.md
 
+tools/bubble-obj/in/
+tools/bubble-obj/out/
+
 .vercel
 
 .vercel
+.env*
