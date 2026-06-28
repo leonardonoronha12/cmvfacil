@@ -211,6 +211,7 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const email = normalizeEmail(url.searchParams.get("email") ?? "");
+    const mode = String(url.searchParams.get("mode") ?? "").trim().toLowerCase();
     if (!email || !email.includes("@")) return json({ ok: false, error: "invalid_email" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
@@ -239,14 +240,8 @@ export async function GET(req: NextRequest) {
     if (!allowed) return json({ ok: false, error: "email_not_in_upload" }, { status: 403 });
 
     const redirectTo = `${url.origin}/dashboard`;
-    await supabase.auth.admin
-      .createUser({
-        email,
-        password: randomPassword(),
-        email_confirm: true,
-        user_metadata: { source: "bubble-import" },
-      } as any)
-      .catch(() => null);
+    const targetUserId = await findAuthUserIdByEmail(supabase, email);
+    if (!targetUserId) return json({ ok: false, error: "auth_user_not_found" }, { status: 404 });
 
     let data: any = null;
     let error: any = null;
@@ -262,6 +257,23 @@ export async function GET(req: NextRequest) {
 
     const actionLink = (data as any)?.properties?.action_link ? String((data as any).properties.action_link) : "";
     if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
+
+    if (mode === "redirect") {
+      const verifyRes = await fetch(actionLink, { method: "GET", redirect: "manual", cache: "no-store" });
+      const location = String(verifyRes.headers.get("location") ?? "").trim();
+      const hash = location.includes("#") ? location.slice(location.indexOf("#") + 1) : "";
+      const params = new URLSearchParams(hash);
+      const accessToken = String(params.get("access_token") ?? "").trim();
+      const refreshToken = String(params.get("refresh_token") ?? "").trim();
+      if (!accessToken) return json({ ok: false, error: "missing_access_token_from_verify_redirect" }, { status: 500 });
+
+      const res = NextResponse.redirect(new URL("/dashboard", url.origin), { status: 302 });
+      const secure = process.env.NODE_ENV === "production";
+      const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/" };
+      res.cookies.set({ name: "cmv_at", value: accessToken, ...cookieBase, maxAge: 60 * 20 });
+      if (refreshToken) res.cookies.set({ name: "cmv_rt", value: refreshToken, ...cookieBase, maxAge: 60 * 60 * 24 * 2 });
+      return res;
+    }
 
     return json({ ok: true, email, redirectTo, actionLink }, { status: 200 });
   } catch (err) {
