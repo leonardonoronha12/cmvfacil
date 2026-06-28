@@ -53,6 +53,17 @@ type LatestItemInfo = {
   timestamp: number;
 };
 
+type BubbleListaComprasRow = {
+  bubbleListaId: string;
+  bubbleItemId: string;
+  empresaId: string;
+  itemNome: string;
+  itemMedida: string;
+  qtdSugestao: number;
+  qtdCompra: number;
+  tipo: string;
+};
+
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -344,6 +355,7 @@ export default function ListaDeComprasClient() {
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>([]);
+  const [bubbleListaRows, setBubbleListaRows] = useState<BubbleListaComprasRow[]>([]);
   const [mode, setMode] = useState<"categoria" | "fornecedor">("categoria");
   const [categoriaFilter, setCategoriaFilter] = useState("Categoria");
   const [fornecedorFilter, setFornecedorFilter] = useState("Fornecedor");
@@ -382,8 +394,9 @@ export default function ListaDeComprasClient() {
     setContagens(readInventarioFromStore([]));
     let doneInsumos = false;
     let doneFornecedores = false;
+    let doneLista = false;
     const finalize = () => {
-      if (doneInsumos && doneFornecedores) setIsLoadingTable(false);
+      if (doneInsumos && doneFornecedores && doneLista) setIsLoadingTable(false);
     };
     void (async () => {
       try {
@@ -392,6 +405,17 @@ export default function ListaDeComprasClient() {
         setInsumoCategorias(state.categories ?? []);
       } catch {}
       doneInsumos = true;
+      finalize();
+    })();
+
+    void (async () => {
+      try {
+        const res = await fetch(`/api/lista-de-compras?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+        const json = (await res.json().catch(() => null)) as { ok?: boolean; rows?: unknown[]; error?: string } | null;
+        const rows = (res.ok && json?.ok && Array.isArray(json.rows) ? (json.rows as any[]) : []) as BubbleListaComprasRow[];
+        setBubbleListaRows(rows);
+      } catch {}
+      doneLista = true;
       finalize();
     })();
 
@@ -508,187 +532,44 @@ export default function ListaDeComprasClient() {
   }, [entradas, fornecedorEquivalenciasMap, insumos]);
 
   const baseRows = useMemo(() => {
-    const latestIndex = buildLatestEntriesIndex(entradas, fornecedorInfoMap, fornecedorEquivalenciasMap, fornecedorProdutosMap);
-    const fornecedorFallback = buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
-    const contagemOptions = contagens
-      .map((contagem) => {
-        const t = parseDateLoose(contagem.data);
-        if (!t) return null;
-        const date = new Date(t);
-        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-        return { iso, label: contagem.data, t, contagem };
-      })
-      .filter((value): value is { iso: string; label: string; t: number; contagem: InventarioContagem } => Boolean(value))
-      .sort((a, b) => b.t - a.t);
-    const startIso = startDate || contagemOptions[0]?.iso || "";
-    const endIso = endDate || contagemOptions[contagemOptions.length - 1]?.iso || "";
-    const startOpt = contagemOptions.find((option) => option.iso === startIso) ?? null;
-    const endOpt = contagemOptions.find((option) => option.iso === endIso) ?? null;
-    const minT = startOpt && endOpt ? Math.min(startOpt.t, endOpt.t) : 0;
-    const maxT = startOpt && endOpt ? Math.max(startOpt.t, endOpt.t) : 0;
-    const periodDays = startOpt && endOpt ? Math.max(Math.round((maxT - minT) / (1000 * 60 * 60 * 24)), 1) : 1;
-
-    const contagemStart = startOpt?.contagem ?? null;
-    const contagemEnd = endOpt?.contagem ?? null;
-
-    const initialById = new Map<string, number>();
-    const finalById = new Map<string, number>();
-    for (const cat of contagemStart?.categorias ?? []) {
-      for (const item of cat.itens ?? []) {
-        if (Boolean((item as any).removido)) continue;
-        initialById.set(item.id, parsePtNumber((item as any).estoqueFinal || "0"));
-      }
-    }
-    for (const cat of contagemEnd?.categorias ?? []) {
-      for (const item of cat.itens ?? []) {
-        if (Boolean((item as any).removido)) continue;
-        finalById.set(item.id, parsePtNumber((item as any).estoqueFinal || "0"));
-      }
+    const insumoByBubbleId = new Map<string, InsumoStoreItem>();
+    for (const r of insumos) {
+      const id = String(r.id ?? "");
+      const bubbleId = id.includes("insumo:") ? id.split("insumo:", 2)[1] : "";
+      if (!bubbleId || insumoByBubbleId.has(bubbleId)) continue;
+      insumoByBubbleId.set(bubbleId, r);
     }
 
-    const insumoIdByKey = new Map<string, string>();
-    const insumoById = new Map<string, InsumoStoreItem>();
-    for (const item of insumos) {
-      const key = normalizeText(item.item);
-      if (!key || insumoIdByKey.has(key)) continue;
-      insumoIdByKey.set(key, item.id);
-      insumoById.set(item.id, item);
-    }
-
-    const entradasQtyById = new Map<string, number>();
-    const entradasCentsById = new Map<string, number>();
-    const fornecedorKeyLookup = new Map<string, string>();
-    for (const key of Object.keys(fornecedorEquivalenciasMap)) {
-      const nk = normalizeText(key);
-      if (!nk || fornecedorKeyLookup.has(nk)) continue;
-      fornecedorKeyLookup.set(nk, key);
-    }
-    for (const entrada of entradas) {
-      const t = parseDateLoose(entrada.dataLancamento);
-      if (!t || t < minT || t > maxT) continue;
-      const fornecedorKey = fornecedorKeyLookup.get(normalizeText(entrada.fornecedor)) ?? entrada.fornecedor.trim().toUpperCase();
-      const equivalencias = fornecedorEquivalenciasMap[fornecedorKey] ?? [];
-      for (const item of entrada.itensNota ?? []) {
-        const rawKey = normalizeText(item.nome);
-        let mappedKey = rawKey;
-        let fator = 1;
-        const eq = equivalencias.find((m) => normalizeText(m.nomeNaNota) === rawKey) ?? null;
-        if (eq) {
-          mappedKey = normalizeText(eq.insumoEquivalente);
-          const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
-          if (Number.isFinite(f) && f > 0) fator = f;
-        }
-        const id = insumoIdByKey.get(mappedKey);
-        if (!id) continue;
-        const insumoUnit = insumoById.get(id)?.medida ?? "";
-        const parsed = parseQtyLabel(item.quantidadeLabel ?? "");
-        const qtyNota = parsed.qty;
-        const qtyEq = eq
-          ? qtyNota * fator
-          : convertUnitQty(qtyNota, parsed.unit || insumoUnit, insumoUnit);
-        entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
-        let sub = Math.round(parseMoney(item.subtotalLabel ?? "") * 100);
-        if (!sub) {
-          const unitCents = Math.round(parseMoney(item.custoUnitarioLabel ?? "") * 100);
-          if (unitCents && qtyNota > 0) sub = Math.round(unitCents * qtyNota);
-        }
-        if (sub) entradasCentsById.set(id, (entradasCentsById.get(id) ?? 0) + sub);
-      }
-    }
-
-    const fornecedorKeyByLabel = new Map<string, string>();
-    for (const [key, info] of Object.entries(fornecedorInfoMap)) {
-      const label = info.fornecedor.trim();
-      if (!label || fornecedorKeyByLabel.has(label)) continue;
-      fornecedorKeyByLabel.set(label, key);
-    }
-    const selectedFornecedorKey = fornecedorKeyByLabel.get(fornecedorFilter) ?? fornecedorFilter.trim().toUpperCase();
-    const selectedEquivalencias = fornecedorEquivalenciasMap[selectedFornecedorKey] ?? [];
-    const selectedProdutos = fornecedorProdutosMap[selectedFornecedorKey] ?? [];
-    const supplierMetaByItemKey = new Map<string, { name: string; unit: string; factor: number }>();
-    const supplierItemKeys = new Set<string>();
-
-    for (const row of selectedEquivalencias) {
-      const insumoKey = normalizeText(row.insumoEquivalente);
-      const nomeFornecedor = row.nomeNaNota.trim();
-      if (!insumoKey || !nomeFornecedor) continue;
-      supplierItemKeys.add(insumoKey);
-      if (!supplierMetaByItemKey.has(insumoKey)) {
-        supplierMetaByItemKey.set(insumoKey, {
-          name: nomeFornecedor,
-          unit: row.unidadeNaNota.trim() || "Und",
-          factor: Math.max(parsePtNumber(row.equivalenteQuantidade), 1),
-        });
-      }
-    }
-
-    for (const produto of selectedProdutos) {
-      const produtoKey = normalizeText(produto);
-      if (!produtoKey) continue;
-      supplierItemKeys.add(produtoKey);
-      if (!supplierMetaByItemKey.has(produtoKey)) {
-        supplierMetaByItemKey.set(produtoKey, {
-          name: produto.trim(),
-          unit: "",
-          factor: 1,
-        });
-      }
-    }
-
-    return insumos
-      .filter((row) => !row.ocultar)
-      .filter((row) => {
-        if (mode !== "fornecedor" || fornecedorFilter === "Fornecedor") return true;
-        return supplierItemKeys.has(normalizeText(row.item));
-      })
-      .map<CompraRow>((row) => {
-        const itemKey = normalizeText(row.item);
-        const latest = latestIndex.get(itemKey);
-        const fornecedor = latest?.fornecedor || fornecedorFallback.get(itemKey) || "-";
-        const supplierMeta = supplierMetaByItemKey.get(itemKey);
-        const displayItem = mode === "fornecedor" && fornecedorFilter !== "Fornecedor" ? supplierMeta?.name ?? row.item : row.item;
-        const itemMetaLabel = mode === "fornecedor" ? row.item : row.categoria?.trim() || "-";
-        const initialQty = initialById.get(row.id) ?? 0;
-        const finalQty = finalById.get(row.id) ?? 0;
-        const entradasQty = entradasQtyById.get(row.id) ?? 0;
-        const saidasQty = initialQty + entradasQty - finalQty;
-        const consumoDiario = saidasQty / periodDays;
-        const comprar = Math.max(consumoDiario * (parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1)) - finalQty, 0);
-        const avgCents = avgUnitCostCentsById.get(row.id) ?? 0;
-        const custoMedioCents = avgCents > 0 ? avgCents : Math.round(parseMoney(row.custoMedio ?? "") * 100);
-        const custoMedioValue = custoMedioCents / 100;
-        return {
-          id: row.id,
-          item: row.item,
-          displayItem,
-          itemMetaLabel,
-          categoria: row.categoria?.trim() || "-",
-          medida: row.medida?.trim() || "Und",
-          custoMedio: custoMedioValue,
-          custoMedioLabel: formatMoney(custoMedioValue),
-          fornecedor,
-          fornecedorMedida: supplierMeta?.unit || row.medida?.trim() || "Und",
-          fornecedorFator: supplierMeta?.factor && supplierMeta.factor > 0 ? supplierMeta.factor : 1,
-          consumoDiario,
-          estoqueFinal: finalQty,
-          comprar,
-        };
+    const rows: CompraRow[] = [];
+    for (const r of bubbleListaRows) {
+      if (String(r.tipo ?? "").trim() && String(r.tipo).trim() !== "itens") continue;
+      const ins = r.bubbleItemId ? insumoByBubbleId.get(r.bubbleItemId) ?? null : null;
+      const itemName = String(ins?.item ?? r.itemNome ?? "").trim() || "Item";
+      const medida = String(ins?.medida ?? r.itemMedida ?? "").trim() || "Und";
+      const categoria = String(ins?.categoria ?? "").trim() || "-";
+      const custoMedioValue = ins ? parseMoney(String(ins.custoMedio ?? "")) : 0;
+      const qtdCompra = Number(r.qtdCompra ?? 0) || 0;
+      const qtdSugestao = Number(r.qtdSugestao ?? 0) || 0;
+      const comprarValue = Math.max(qtdCompra > 0 ? qtdCompra : qtdSugestao, 0);
+      rows.push({
+        id: String(r.bubbleListaId),
+        item: itemName,
+        displayItem: itemName,
+        itemMetaLabel: categoria,
+        categoria,
+        medida,
+        custoMedio: custoMedioValue,
+        custoMedioLabel: formatMoney(custoMedioValue),
+        fornecedor: "-",
+        fornecedorMedida: medida,
+        fornecedorFator: 1,
+        consumoDiario: 0,
+        estoqueFinal: 0,
+        comprar: comprarValue,
       });
-  }, [
-    avgUnitCostCentsById,
-    contagens,
-    diasEntrega,
-    diasEstoque,
-    endDate,
-    entradas,
-    fornecedorFilter,
-    fornecedorEquivalenciasMap,
-    fornecedorInfoMap,
-    fornecedorProdutosMap,
-    insumos,
-    mode,
-    startDate,
-  ]);
+    }
+    return rows;
+  }, [bubbleListaRows, insumos]);
 
   const categorias = useMemo(() => {
     const seen = new Set<string>();
@@ -785,11 +666,10 @@ export default function ListaDeComprasClient() {
             break;
           }
           case "comprar": {
-            const coberturaDias = parsePositiveInt(diasEstoque, 7) + parsePositiveInt(diasEntrega, 1);
-            const aEstoqueFinal = parseDecimalInput(estoqueFinalMap[a.row.id] ?? formatDecimal3(a.row.estoqueFinal));
-            const bEstoqueFinal = parseDecimalInput(estoqueFinalMap[b.row.id] ?? formatDecimal3(b.row.estoqueFinal));
-            const aValue = Math.max(a.row.consumoDiario * coberturaDias - aEstoqueFinal, 0) / (mode === "fornecedor" ? a.row.fornecedorFator : 1);
-            const bValue = Math.max(b.row.consumoDiario * coberturaDias - bEstoqueFinal, 0) / (mode === "fornecedor" ? b.row.fornecedorFator : 1);
+            const aFactor = mode === "fornecedor" ? (a.row.fornecedorFator > 0 ? a.row.fornecedorFator : 1) : 1;
+            const bFactor = mode === "fornecedor" ? (b.row.fornecedorFator > 0 ? b.row.fornecedorFator : 1) : 1;
+            const aValue = a.row.comprar / aFactor;
+            const bValue = b.row.comprar / bFactor;
             cmp = aValue - bValue;
             break;
           }
@@ -838,14 +718,11 @@ export default function ListaDeComprasClient() {
   const exportDisabled = !canExport || isExportingPdf || isExportingXlsx;
 
   function computeCompra(row: CompraRow) {
-    const estoqueFinalValue = estoqueFinalMap[row.id] ?? "0,000";
-    const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
-    const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
-    const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
     const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+    const comprarCalculado = Math.max(row.comprar, 0);
     const compraFornecedor = comprarCalculado / fornecedorFactor;
     return {
-      estoqueFinalNum,
+      estoqueFinalNum: 0,
       comprarCalculado,
       compraFornecedor,
       unidadeComprar: mode === "fornecedor" ? row.fornecedorMedida : row.medida,
