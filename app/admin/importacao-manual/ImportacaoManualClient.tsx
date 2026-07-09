@@ -3764,6 +3764,42 @@ export default function ImportacaoManualClient() {
     setWipeError("");
   }
 
+  function resetCsvFlow() {
+    setCsvFiles([]);
+    setCsvStep(1);
+    setAnalysisCsv(null);
+    setAnalysisCsvError("");
+    setCsvRelationOverrides({});
+    setApplyCsvResult(null);
+    setApplyCsvError("");
+    setCsvAudit(null);
+    setCsvAuditError("");
+    setCsvProgressKey("");
+    setCsvProgress(null);
+    setCsvReportDownloadedKey("");
+  }
+
+  function switchMode(next: SourceMode) {
+    if (next === mode) return;
+    cancel();
+    resetCsvFlow();
+    setNetworkTab("preview");
+    setNetworkAck(false);
+    setMode(next);
+  }
+
+  const modeLabel = useMemo(() => {
+    if (mode === "bubble_csv") return "CSVs do Bubble";
+    if (mode === "bubble_network_json") return "JSON de rede do Bubble";
+    return "Texto colado manualmente";
+  }, [mode]);
+
+  const modeDescription = useMemo(() => {
+    if (mode === "bubble_csv") return "Envie os CSVs exportados do Bubble, valide e importe para o banco compatível.";
+    if (mode === "bubble_network_json") return "Cole ou faça upload do export de rede (JSON) capturado do Bubble.";
+    return "Cole dados copiados do Bubble (tabela/texto), organize e grave no banco compatível.";
+  }, [mode]);
+
   const categoriesSummary = useMemo(() => {
     if (!analysis?.ok) return [];
     return analysis.categoryCounts;
@@ -3777,7 +3813,7 @@ export default function ImportacaoManualClient() {
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div>
               <h1 style={{ margin: 0, fontSize: 20 }}>Importação manual assistida</h1>
-              <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>Cole dados copiados do Bubble, organize e grave no banco compatível.</div>
+              <div style={{ color: "#666", fontSize: 13, marginTop: 4 }}>{modeDescription}</div>
             </div>
           </div>
 
@@ -3848,99 +3884,252 @@ export default function ImportacaoManualClient() {
           <section style={{ marginTop: 12, padding: 14, border: "1px solid #e7e7e7", borderRadius: 12, background: "#fff" }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
               <div style={{ fontSize: 13, color: "#333" }}>
-                <strong>Modo:</strong> Importar CSV do Bubble
+                <strong>Fonte:</strong> {modeLabel}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
-                  onClick={() => void analyzeBubbleCsv()}
-                  disabled={!canAnalyzeCsv}
+                  type="button"
+                  onClick={() => switchMode("bubble_csv")}
                   style={{
-                    border: "1px solid #111",
-                    background: canAnalyzeCsv ? "#111" : "#f4f4f4",
-                    color: canAnalyzeCsv ? "#fff" : "#777",
-                    borderRadius: 10,
-                    padding: "9px 12px",
-                    cursor: canAnalyzeCsv ? "pointer" : "default",
-                    display: csvStep === 1 ? "inline-block" : "none",
+                    border: "1px solid #d7d7d7",
+                    background: mode === "bubble_csv" ? "#111" : "#fff",
+                    color: mode === "bubble_csv" ? "#fff" : "#333",
+                    borderRadius: 999,
+                    padding: "8px 10px",
+                    cursor: "pointer",
                   }}
                 >
-                  {isAnalyzingCsv ? "Analisando..." : "Analisar CSVs"}
+                  CSVs do Bubble
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCsvStep((s) => (s > 1 ? ((s - 1) as any) : s))}
-                  disabled={csvStep === 1}
+                  onClick={() => switchMode("bubble_network_json")}
                   style={{
                     border: "1px solid #d7d7d7",
-                    background: "#fff",
-                    color: "#333",
-                    borderRadius: 10,
-                    padding: "9px 12px",
-                    cursor: csvStep === 1 ? "default" : "pointer",
-                    opacity: csvStep === 1 ? 0.6 : 1,
+                    background: mode === "bubble_network_json" ? "#111" : "#fff",
+                    color: mode === "bubble_network_json" ? "#fff" : "#333",
+                    borderRadius: 999,
+                    padding: "8px 10px",
+                    cursor: "pointer",
                   }}
                 >
-                  Etapa anterior
+                  Rede (JSON)
                 </button>
                 <button
                   type="button"
-                  onClick={() => setCsvStep((s) => (s < 4 ? ((s + 1) as any) : s))}
-                  disabled={csvStep >= 4 || !analysisCsv?.ok}
+                  onClick={() => switchMode("pasted_text")}
                   style={{
                     border: "1px solid #d7d7d7",
-                    background: "#fff",
-                    color: "#333",
-                    borderRadius: 10,
-                    padding: "9px 12px",
-                    cursor: csvStep >= 4 || !analysisCsv?.ok ? "default" : "pointer",
-                    opacity: csvStep >= 4 || !analysisCsv?.ok ? 0.6 : 1,
+                    background: mode === "pasted_text" ? "#111" : "#fff",
+                    color: mode === "pasted_text" ? "#fff" : "#333",
+                    borderRadius: 999,
+                    padding: "8px 10px",
+                    cursor: "pointer",
                   }}
                 >
-                  Próxima etapa
-                </button>
-                <button
-                  onClick={() => void applyBubbleCsv()}
-                  disabled={!canApplyCsv}
-                  style={{
-                    border: "1px solid #1a7f37",
-                    background: canApplyCsv ? "#1a7f37" : "#f4f4f4",
-                    color: canApplyCsv ? "#fff" : "#777",
-                    borderRadius: 10,
-                    padding: "9px 12px",
-                    cursor: canApplyCsv ? "pointer" : "default",
-                    display: csvStep === 4 ? "inline-block" : "none",
-                  }}
-                >
-                  {isApplyingCsv ? "Aplicando..." : "Cadastrar/Atualizar"}
-                </button>
-                <button
-                  onClick={() => cancel()}
-                  style={{ border: "1px solid #d7d7d7", background: "#fff", color: "#333", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}
-                >
-                  Cancelar
+                  Texto colado
                 </button>
               </div>
             </div>
 
-            <div style={{ marginTop: 12, display: "grid", gap: 6, fontSize: 13 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                <div>
-                    <strong>Assistente:</strong> Etapa {csvStep}/4
-                </div>
-                <div style={{ color: "#666" }}>
-                  {csvStep === 1
-                      ? "Upload dos CSVs"
-                      : csvStep === 2
-                        ? "Validação automática"
-                        : csvStep === 3
-                          ? "Revisar pendências"
-                          : "Importar"}
-                </div>
-              </div>
-              <div style={{ background: "#f4f4f4", borderRadius: 999, height: 8, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.round((csvStep / 4) * 100)}%`, height: 8, background: "#0b57d0" }} />
-              </div>
+            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              {mode === "pasted_text" ? (
+                <>
+                  <button
+                    onClick={() => void analyze()}
+                    disabled={!canAnalyze}
+                    style={{
+                      border: "1px solid #111",
+                      background: canAnalyze ? "#111" : "#f4f4f4",
+                      color: canAnalyze ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canAnalyze ? "pointer" : "default",
+                    }}
+                  >
+                    {isAnalyzing ? "Analisando..." : "Analisar e organizar"}
+                  </button>
+                  <button
+                    onClick={() => void applyImport()}
+                    disabled={!canApply}
+                    style={{
+                      border: "1px solid #1a7f37",
+                      background: canApply ? "#1a7f37" : "#f4f4f4",
+                      color: canApply ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canApply ? "pointer" : "default",
+                    }}
+                  >
+                    {isApplying ? "Aplicando..." : "Cadastrar/Atualizar dados"}
+                  </button>
+                  <button
+                    onClick={() => void clearModule()}
+                    disabled={!resolved?.companyId || isClearingModule}
+                    style={{
+                      border: "1px solid #d93025",
+                      background: !resolved?.companyId || isClearingModule ? "#f4f4f4" : "#fff",
+                      color: !resolved?.companyId || isClearingModule ? "#777" : "#d93025",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: !resolved?.companyId || isClearingModule ? "default" : "pointer",
+                    }}
+                  >
+                    {isClearingModule ? "Limpando..." : "Limpar dados antigos deste módulo"}
+                  </button>
+                </>
+              ) : mode === "bubble_network_json" ? (
+                <>
+                  <button
+                    onClick={() => void analyzeNetworkJson()}
+                    disabled={!canAnalyzeNetwork}
+                    style={{
+                      border: "1px solid #111",
+                      background: canAnalyzeNetwork ? "#111" : "#f4f4f4",
+                      color: canAnalyzeNetwork ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canAnalyzeNetwork ? "pointer" : "default",
+                    }}
+                  >
+                    {isAnalyzingNetwork ? "Analisando..." : "Analisar JSONs"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void validateNetworkIntegrity()}
+                    disabled={!resolved?.companyId || isAnalyzingNetwork}
+                    style={{
+                      border: "1px solid #d7d7d7",
+                      background: "#fff",
+                      color: "#333",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: !resolved?.companyId || isAnalyzingNetwork ? "default" : "pointer",
+                      opacity: !resolved?.companyId || isAnalyzingNetwork ? 0.6 : 1,
+                    }}
+                  >
+                    Validar integridade
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void resetNetworkSession()}
+                    disabled={!resolved?.companyId || isAnalyzingNetwork}
+                    style={{
+                      border: "1px solid #d93025",
+                      background: "#fff",
+                      color: "#d93025",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: !resolved?.companyId || isAnalyzingNetwork ? "default" : "pointer",
+                      opacity: !resolved?.companyId || isAnalyzingNetwork ? 0.6 : 1,
+                    }}
+                  >
+                    Reiniciar sessão
+                  </button>
+                  <button
+                    onClick={() => void applyNetworkJson()}
+                    disabled={!canApplyNetwork}
+                    style={{
+                      border: "1px solid #1a7f37",
+                      background: canApplyNetwork ? "#1a7f37" : "#f4f4f4",
+                      color: canApplyNetwork ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canApplyNetwork ? "pointer" : "default",
+                    }}
+                  >
+                    {isApplyingNetwork ? "Aplicando..." : "Cadastrar/Atualizar"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => void analyzeBubbleCsv()}
+                    disabled={!canAnalyzeCsv}
+                    style={{
+                      border: "1px solid #111",
+                      background: canAnalyzeCsv ? "#111" : "#f4f4f4",
+                      color: canAnalyzeCsv ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canAnalyzeCsv ? "pointer" : "default",
+                      display: csvStep === 1 ? "inline-block" : "none",
+                    }}
+                  >
+                    {isAnalyzingCsv ? "Analisando..." : "Analisar CSVs"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCsvStep((s) => (s > 1 ? ((s - 1) as any) : s))}
+                    disabled={csvStep === 1}
+                    style={{
+                      border: "1px solid #d7d7d7",
+                      background: "#fff",
+                      color: "#333",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: csvStep === 1 ? "default" : "pointer",
+                      opacity: csvStep === 1 ? 0.6 : 1,
+                    }}
+                  >
+                    Etapa anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCsvStep((s) => (s < 4 ? ((s + 1) as any) : s))}
+                    disabled={csvStep >= 4 || !analysisCsv?.ok}
+                    style={{
+                      border: "1px solid #d7d7d7",
+                      background: "#fff",
+                      color: "#333",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: csvStep >= 4 || !analysisCsv?.ok ? "default" : "pointer",
+                      opacity: csvStep >= 4 || !analysisCsv?.ok ? 0.6 : 1,
+                    }}
+                  >
+                    Próxima etapa
+                  </button>
+                  <button
+                    onClick={() => void applyBubbleCsv()}
+                    disabled={!canApplyCsv}
+                    style={{
+                      border: "1px solid #1a7f37",
+                      background: canApplyCsv ? "#1a7f37" : "#f4f4f4",
+                      color: canApplyCsv ? "#fff" : "#777",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: canApplyCsv ? "pointer" : "default",
+                      display: csvStep === 4 ? "inline-block" : "none",
+                    }}
+                  >
+                    {isApplyingCsv ? "Aplicando..." : "Cadastrar/Atualizar"}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={() => cancel()}
+                style={{ border: "1px solid #d7d7d7", background: "#fff", color: "#333", borderRadius: 10, padding: "9px 12px", cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
             </div>
+
+            {mode === "bubble_csv" ? (
+              <div style={{ marginTop: 12, display: "grid", gap: 6, fontSize: 13 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <div>
+                    <strong>Assistente:</strong> Etapa {csvStep}/4
+                  </div>
+                  <div style={{ color: "#666" }}>
+                    {csvStep === 1 ? "Upload dos CSVs" : csvStep === 2 ? "Validação automática" : csvStep === 3 ? "Revisar pendências" : "Importar"}
+                  </div>
+                </div>
+                <div style={{ background: "#f4f4f4", borderRadius: 999, height: 8, overflow: "hidden" }}>
+                  <div style={{ width: `${Math.round((csvStep / 4) * 100)}%`, height: 8, background: "#0b57d0" }} />
+                </div>
+              </div>
+            ) : null}
 
             {mode === "pasted_text" && analysis?.ok && analysis.module !== "insumos" ? (
               <div style={{ marginTop: 10, color: "#7a4b00", fontSize: 13 }}>
