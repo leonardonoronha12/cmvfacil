@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE } from "./app/lib/supabaseAuthCookies";
 import { getSupabaseAuthConfig } from "./app/lib/supabaseAuthConfig";
+import { shouldUseSecureCookies } from "./app/lib/cookieSecurity";
 
 const COOKIE_NAME = "cmv_admin_session";
 
@@ -106,7 +107,10 @@ export async function middleware(req: NextRequest) {
       pathname === "/api/vercel/alias" ||
       pathname === "/debug-supabase" ||
       pathname.startsWith("/debug-supabase/") ||
-      pathname.startsWith("/api/debug/"))
+      pathname.startsWith("/api/debug/") ||
+      pathname === "/admin/importacao-manual" ||
+      pathname.startsWith("/admin/importacao-manual/") ||
+      pathname.startsWith("/api/admin/importacao-manual/"))
   ) {
     return NextResponse.next();
   }
@@ -131,8 +135,10 @@ export async function middleware(req: NextRequest) {
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version" ||
     pathname === "/api/health/supabase-config" ||
+    pathname === "/api/health/auth-debug" ||
     pathname === "/api/health/bubble-config" ||
-    pathname === "/api/health/bubble-ping"
+    pathname === "/api/health/bubble-ping" ||
+    pathname.startsWith("/api/bubble-compat/")
   ) {
     return NextResponse.next();
   }
@@ -158,7 +164,7 @@ export async function middleware(req: NextRequest) {
         | null;
       if (res.ok && data?.access_token) {
         const out = NextResponse.next();
-        const secure = process.env.NODE_ENV === "production";
+        const secure = shouldUseSecureCookies(req);
         out.cookies.set({ name: SUPABASE_AT_COOKIE, value: data.access_token, httpOnly: true, sameSite: "lax", secure, path: "/" });
         if (data.refresh_token) {
           out.cookies.set({

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE, parseJwtExpMs } from "../../../lib/supabaseAuthCookies";
+import { shouldUseSecureCookies } from "../../../lib/cookieSecurity";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -47,7 +48,7 @@ export async function POST(req: NextRequest) {
   const expMs = parseJwtExpMs(accessToken);
 
   const res = json({ ok: true });
-  const secure = process.env.NODE_ENV === "production";
+  const secure = shouldUseSecureCookies(req);
   const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/" };
 
   res.cookies.set({

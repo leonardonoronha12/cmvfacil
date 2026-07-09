@@ -54,6 +54,18 @@ export default function LoginClient() {
       const data = (await res.json()) as { ok?: boolean; error?: string; details?: string };
       if (!res.ok || !data.ok) throw new Error(data.details ?? data.error ?? "login_failed");
       try {
+        const meRes = await fetch("/api/auth/me", { method: "GET", cache: "no-store" });
+        const meJson = (await meRes.json().catch(() => null)) as any;
+        const uid = String(meJson?.userId ?? "").trim();
+        if (!uid) {
+          const dbg = "/api/health/auth-debug";
+          throw new Error(`login_cookie_not_set. Abra ${dbg} para diagnóstico.`);
+        }
+      } catch (err) {
+        if (err instanceof Error) throw err;
+        throw new Error(String(err));
+      }
+      try {
         clearMeStore();
       } catch {}
       window.location.replace(nextPath);

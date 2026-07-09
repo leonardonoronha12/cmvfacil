@@ -18,6 +18,18 @@ AGENTS.md
 
 tools/bubble-obj/in/
 tools/bubble-obj/out/
+tools/qa/out/
+tools/qa/browser-profile/
+tools/qa/userdata/
+
+apply-*.json
+audit-*.json
+dry-run-*.json
+qa-*.json
+staging-dryrun-*.json
+debug_relacionamentos_csv.json
+insumos-*.json
+cmvfacil-*.md
 
 .vercel
 
