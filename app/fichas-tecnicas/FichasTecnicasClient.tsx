@@ -14,9 +14,10 @@ import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
-import { loadFichasTecnicasFromSupabase, saveFichasTecnicasToSupabase } from "../lib/fichasTecnicasSupabase";
+import { loadFichasTecnicasFromSupabase, loadFichasTecnicasStateFromSupabase, saveFichasTecnicasToSupabase, type FichaTecnicaCompatRecipe } from "../lib/fichasTecnicasSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./fichas-tecnicas.module.css";
 
 function isMissingTableError(err: unknown, table: string) {
@@ -845,7 +846,11 @@ function badgeClass(type: BcgType) {
   }
 }
 
-export default function FichasTecnicasClient() {
+export default function FichasTecnicasClient({
+  initialSourceMeta,
+}: {
+  initialSourceMeta?: { source: "legacy" | "compat"; readOnly: boolean };
+}) {
   const searchParams = useSearchParams();
   const openedFromQueryRef = useRef(false);
   const bcgNormalizedRef = useRef(false);
@@ -858,6 +863,13 @@ export default function FichasTecnicasClient() {
   const missingTablesShownRef = useRef(false);
   const [isSupabaseFichasEnabled, setIsSupabaseFichasEnabled] = useState(true);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
+    return initialSourceMeta ?? { source: "legacy", readOnly: false };
+  });
+  const [compatRecipes, setCompatRecipes] = useState<FichaTecnicaCompatRecipe[]>([]);
+  const [selectedCompatRecipeId, setSelectedCompatRecipeId] = useState<string | null>(null);
+  const isCompatSource = sourceMeta.source === "compat";
+  const isReadOnly = Boolean(sourceMeta.readOnly);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>(() => readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
   const [query, setQuery] = useState("");
@@ -926,6 +938,20 @@ export default function FichasTecnicasClient() {
   }, []);
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const src = String(params.get("source") ?? "").trim().toLowerCase();
+      if (src === "compat") {
+        setSourceMeta({ source: "compat", readOnly: true });
+        return;
+      }
+      if (src === "legacy") {
+        setSourceMeta({ source: "legacy", readOnly: false });
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     if (!actionMenuRowId) return;
     function onDown(e: MouseEvent) {
       const el = actionMenuRef.current;
@@ -948,6 +974,7 @@ export default function FichasTecnicasClient() {
   }, [actionMenuRowId]);
 
   useEffect(() => {
+    if (isCompatSource) return;
     setInsumos(readInsumosFromStore());
     void (async () => {
       try {
@@ -956,9 +983,10 @@ export default function FichasTecnicasClient() {
       } catch {}
     })();
     return subscribeInsumos(setInsumos);
-  }, []);
+  }, [isCompatSource]);
 
   useEffect(() => {
+    if (isCompatSource) return;
     setEntradas(readEntradasFromStore([]));
     void (async () => {
       try {
@@ -968,9 +996,10 @@ export default function FichasTecnicasClient() {
       setEntradas(readEntradasFromStore([]));
     })();
     return subscribeEntradas(setEntradas);
-  }, []);
+  }, [isCompatSource]);
 
   useEffect(() => {
+    if (isCompatSource) return;
     setPrePreparoRows(readPrePreparoFromStore([]));
     void (async () => {
       try {
@@ -980,9 +1009,10 @@ export default function FichasTecnicasClient() {
       setPrePreparoRows(readPrePreparoFromStore([]));
     })();
     return subscribePrePreparo(setPrePreparoRows);
-  }, []);
+  }, [isCompatSource]);
 
   useEffect(() => {
+    if (isCompatSource) return;
     setFornecedorEquivalenciasMap(readFornecedorEquivalenciasMap());
     void (async () => {
       let nextEq: FornecedorEquivalenciasMap = {};
@@ -995,16 +1025,27 @@ export default function FichasTecnicasClient() {
       setFornecedorEquivalenciasMap(nextEq);
     })();
     return subscribeFornecedorEquivalencias(setFornecedorEquivalenciasMap);
-  }, []);
+  }, [isCompatSource]);
 
   useEffect(() => {
     void (async () => {
       try {
-        const rows = await loadFichasTecnicasFromSupabase();
+        const st = await loadFichasTecnicasStateFromSupabase();
+        if (st.meta) setSourceMeta(st.meta);
+        if (st.meta?.source === "compat") {
+          const recipes = (st.compat as any)?.recipes ?? [];
+          const list = Array.isArray(recipes) ? (recipes as FichaTecnicaCompatRecipe[]) : [];
+          setCompatRecipes(list);
+          setSelectedCompatRecipeId(list[0]?.id ?? null);
+          setTableRows(st.rows as unknown as RecipeRow[]);
+          setIsSupabaseFichasEnabled(true);
+          return;
+        }
+        const rows = st.rows as unknown as RecipeRow[];
         const stored = readFichasTecnicasFromStore([]) as unknown as RecipeRow[];
-        const effective = (rows as unknown as RecipeRow[]).length ? (rows as unknown as RecipeRow[]) : stored;
+        const effective = rows.length ? rows : stored;
         setTableRows(effective);
-        if ((rows as unknown as RecipeRow[]).length) writeFichasTecnicasToStore(rows as any);
+        if (rows.length) writeFichasTecnicasToStore(rows as any);
         setIsSupabaseFichasEnabled(true);
       } catch (err) {
         setTableRows(readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
@@ -1027,6 +1068,7 @@ export default function FichasTecnicasClient() {
   }, []);
 
   useEffect(() => {
+    if (isCompatSource) return;
     if (openedFromQueryRef.current) return;
     const produto = (searchParams.get("produto") || searchParams.get("id") || "").trim();
     if (!produto) return;
@@ -1042,11 +1084,13 @@ export default function FichasTecnicasClient() {
     setIsEditingPrep(false);
     setPrepDraft("");
     setActionMenuRowId(null);
-  }, [searchParams, tableRows]);
+  }, [isCompatSource, searchParams, tableRows]);
 
   function setAndPersistTableRows(updater: (prev: RecipeRow[]) => RecipeRow[]) {
     setTableRows((prev) => {
+      if (isReadOnly) return prev;
       const next = updater(prev);
+      if (isCompatSource) return next;
       writeFichasTecnicasToStore(next);
       if (saveTimeoutRef.current) window.clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = window.setTimeout(() => {
@@ -1063,6 +1107,7 @@ export default function FichasTecnicasClient() {
   }
 
   useEffect(() => {
+    if (isCompatSource) return;
     if (bcgNormalizedRef.current) return;
     if (!tableRows.length) return;
     bcgNormalizedRef.current = true;
@@ -1076,7 +1121,7 @@ export default function FichasTecnicasClient() {
         return { ...row, bcg, popularidade: pop };
       }),
     );
-  }, [tableRows]);
+  }, [isCompatSource, tableRows]);
 
   function formatPercent1(value: number) {
     return value.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -1221,6 +1266,73 @@ export default function FichasTecnicasClient() {
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  const selectedCompatRecipe = useMemo(
+    () =>
+      selectedCompatRecipeId
+        ? compatRecipes.find((r) => r.id === selectedCompatRecipeId) ?? null
+        : compatRecipes[0]
+          ? compatRecipes[0]
+          : null,
+    [compatRecipes, selectedCompatRecipeId],
+  );
+
+  const qaUi = useMemo(() => {
+    if (isCompatSource) {
+      return {
+        meta: sourceMeta,
+        rendered: {
+          recipesCount: compatRecipes.length,
+          recipes: compatRecipes.map((r) => ({
+            id: r.id,
+            bubble_id: r.bubble_id,
+            receita: r.receita,
+            categoria: r.categoria,
+            unidade: r.unidade,
+            rendimento: r.rendimento,
+            validade: r.validade,
+            precoVenda: r.precoVenda,
+            custoTotal: r.custoTotal,
+            custoUnitario: r.custoUnitario,
+            cmvMeta: r.cmvMeta,
+            cmvAtual: r.cmvAtual,
+            quadrante: r.quadrante,
+            ingredientesCount: Array.isArray(r.ingredientes) ? r.ingredientes.length : 0,
+          })),
+        },
+        details: compatRecipes.map((r) => ({
+          id: r.id,
+          receita: r.receita,
+          ingredientes: (r.ingredientes ?? []).map((it) => ({
+            id: it.id,
+            ingredientId: it.ingredientId,
+            item: it.item,
+            quantidade: it.quantidade,
+            unidade: it.unidade,
+            custo: it.custo,
+          })),
+        })),
+      };
+    }
+    return {
+      meta: sourceMeta,
+      filters: { query, quadrante },
+      sort: { sortKey, sortDir, columnOrder },
+      pagination: { page, currentPage, pageSize, totalPages, filteredCount: filteredRows.length, pageRowsCount: pageRows.length },
+      rendered: {
+        rows: pageRows.map((r) => ({
+          id: r.id,
+          receita: r.receita,
+          precoVenda: r.precoVenda,
+          custoUnitario: r.custoUnitario,
+          cmvMeta: r.cmvMeta,
+          cmvAtual: r.cmvAtual,
+          cmvDelta: r.cmvDelta,
+          bcg: r.bcg,
+          popularidade: r.popularidade ?? null,
+        })),
+      },
+    };
+  }, [columnOrder, compatRecipes, currentPage, filteredRows.length, isCompatSource, page, pageRows, quadrante, query, sortDir, sortKey, sourceMeta, totalPages]);
 
   function toggleSort(key: FichaTableColumn) {
     if (sortKey !== key) {
@@ -1500,6 +1612,7 @@ export default function FichasTecnicasClient() {
   }
 
   function openCreateModal() {
+    if (isReadOnly) return;
     resetCreateModal();
     setIsCreateOpen(true);
   }
@@ -1738,6 +1851,7 @@ export default function FichasTecnicasClient() {
   }
 
   function openEditModal(row: RecipeRow) {
+    if (isReadOnly) return;
     const pop = row.popularidade ? normalizePopularidade(row.popularidade) : row.bcg === "estrela" || row.bcg === "cavalo" ? "alta" : "baixa";
     setEditDraft({
       rowId: row.id,
@@ -1762,6 +1876,7 @@ export default function FichasTecnicasClient() {
   }
 
   function openDeleteModal(row: RecipeRow) {
+    if (isReadOnly) return;
     setDeleteRow(row);
     setActionMenuRowId(null);
   }
@@ -1771,11 +1886,13 @@ export default function FichasTecnicasClient() {
   }
 
   function removeTableRow(rowId: string) {
+    if (isReadOnly) return;
     setAndPersistTableRows((prev) => prev.filter((row) => row.id !== rowId));
     setActionMenuRowId(null);
   }
 
   function saveEditedRow() {
+    if (isReadOnly) return;
     if (!editDraft) return;
     const precoVendaValue = parseDecimalInput(editDraft.precoVenda);
     const cmvMetaValue = parseDecimalInput(editDraft.cmvMeta);
@@ -1948,9 +2065,145 @@ export default function FichasTecnicasClient() {
       <div className={dash.dashboard}>
         <AppSidebar active="fichas-tecnicas" />
         {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
-        <main className={dash.content}>
-          <div className={styles.pageFrameWide}>
-          {detailsRecipe ? (
+        {isCompatSource ? (
+          <main className={dash.content}>
+            <div className={styles.pageFrameWide}>
+              <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
+              <div
+                style={{
+                  marginTop: 10,
+                  marginBottom: 14,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  background: "#eef6ff",
+                  border: "1px solid #cfe6ff",
+                  color: "#1b3a57",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <span>Fonte: Banco compatível Bubble</span>
+                <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 14, alignItems: "start" }}>
+                <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, color: "#01040e", marginBottom: 10 }}>{`Fichas (${compatRecipes.length})`}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto", maxHeight: "calc(100vh - 260px)" }} data-qa-grid="fichas-tecnicas">
+                    {compatRecipes.map((r) => (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => setSelectedCompatRecipeId(r.id)}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          border: "1px solid #eef1f1",
+                          background: r.id === (selectedCompatRecipe?.id ?? "") ? "#00282d" : "#f1f3f3",
+                          color: r.id === (selectedCompatRecipe?.id ?? "") ? "#ffffff" : "#01040e",
+                          borderRadius: 12,
+                          padding: "10px 10px",
+                          fontWeight: 900,
+                          fontSize: 11,
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: 4,
+                        }}
+                        data-qa-grid-row
+                        data-qa-row-id={r.id}
+                      >
+                        <span>{r.receita}</span>
+                        <span style={{ fontWeight: 700, opacity: r.id === (selectedCompatRecipe?.id ?? "") ? 0.75 : 0.7 }}>{`${r.categoria} · ${r.quadrante}`}</span>
+                      </button>
+                    ))}
+                    {compatRecipes[0] ? null : (
+                      <div style={{ padding: 14, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>Sem fichas</div>
+                    )}
+                  </div>
+                </section>
+
+                <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 14, fontWeight: 900, color: "#01040e" }}>{selectedCompatRecipe?.receita ?? "Ficha Técnica"}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#95a8a6" }}>
+                      {selectedCompatRecipe ? `${selectedCompatRecipe.categoria} · ${selectedCompatRecipe.validade}` : "Selecione uma ficha para ver os detalhes."}
+                    </div>
+                  </div>
+
+                  {selectedCompatRecipe ? (
+                    <>
+                      <div style={{ marginTop: 12, overflow: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <tbody>
+                            {[
+                              ["Unidade", selectedCompatRecipe.unidade],
+                              ["Rendimento", selectedCompatRecipe.rendimento],
+                              ["Preço de venda", selectedCompatRecipe.precoVenda],
+                              ["Preço sugerido", selectedCompatRecipe.precoSugerido],
+                              ["Custo total", selectedCompatRecipe.custoTotal],
+                              ["Custo unitário", selectedCompatRecipe.custoUnitario],
+                              ["CMV meta", selectedCompatRecipe.cmvMeta],
+                              ["CMV atual", selectedCompatRecipe.cmvAtual],
+                              ["Quadrante", selectedCompatRecipe.quadrante],
+                            ].map(([k, v]) => (
+                              <tr key={k}>
+                                <td style={{ padding: "8px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900, whiteSpace: "nowrap" }}>{k}</td>
+                                <td style={{ padding: "8px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{v}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div style={{ marginTop: 14, fontSize: 12, fontWeight: 900, color: "#01040e" }}>{`Ingredientes (${selectedCompatRecipe.ingredientes.length})`}</div>
+                      <div style={{ marginTop: 10, overflow: "auto" }} data-qa-grid="fichas-tecnicas:ingredientes">
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Item</th>
+                              <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Qtd</th>
+                              <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Unid</th>
+                              <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Custo</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedCompatRecipe.ingredientes.map((it) => (
+                              <tr key={it.id} data-qa-grid-row data-qa-row-id={it.id}>
+                                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 800 }}>{it.item}</td>
+                                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{it.quantidade}</td>
+                                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{it.unidade}</td>
+                                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900 }}>{it.custo}</td>
+                              </tr>
+                            ))}
+                            {selectedCompatRecipe.ingredientes[0] ? null : (
+                              <tr>
+                                <td colSpan={4} style={{ padding: 18, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>
+                                  Sem ingredientes
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+
+                      <div style={{ marginTop: 14, fontSize: 12, fontWeight: 900, color: "#01040e" }}>Modo de preparo</div>
+                      <div style={{ marginTop: 10, padding: 12, borderRadius: 12, border: "1px solid #eef1f1", background: "#fbfbfb", fontSize: 12, fontWeight: 700, whiteSpace: "pre-wrap" }}>
+                        {selectedCompatRecipe.modoPreparo || "-"}
+                      </div>
+                    </>
+                  ) : null}
+                </section>
+              </div>
+            </div>
+          </main>
+        ) : (
+          <main className={dash.content}>
+            <div className={styles.pageFrameWide}>
+            {detailsRecipe ? (
             <section className={`${dash.itemDetails} ${styles.detailsPage}`}>
               <div className={`${dash.itemDetailsTop} ${styles.detailsHeader}`}>
                 <button type="button" className={`${dash.itemBack} ${styles.detailsBackBtn}`} onClick={() => setDetailsRecipe(null)}>
@@ -2372,6 +2625,8 @@ export default function FichasTecnicasClient() {
             </button>
           </section>
 
+          <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
+
           <section className={styles.filtersRow}>
             <label className={styles.searchField}>
               <span className={styles.searchIcon}>
@@ -2456,7 +2711,7 @@ export default function FichasTecnicasClient() {
                 </div>
               </section>
 
-              <section className={styles.tableCard} style={{ position: "relative" }}>
+              <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="fichas-tecnicas">
                 {isLoadingTable ? (
                   <div className={dash.loadingOverlay}>
                     <LoadingSpinner />
@@ -2499,7 +2754,7 @@ export default function FichasTecnicasClient() {
                   <div className={styles.tableActionsHead}>Ações</div>
                 </div>
 
-                <div className={styles.tableBody}>
+                <div className={styles.tableBody} data-qa-grid="fichas-tecnicas:rows">
                   {pageRows.map((row) => (
                     <div
                       key={row.id}
@@ -2514,6 +2769,8 @@ export default function FichasTecnicasClient() {
                         }
                       }}
                       style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                      data-qa-grid-row
+                      data-qa-row-id={row.id}
                     >
                       {columnOrder.map((column) => (
                         <div key={column} className={styles.tableCellWrap}>
@@ -2624,10 +2881,11 @@ export default function FichasTecnicasClient() {
             </>
           )}
           </div>
-        </main>
+          </main>
+        )}
       </div>
 
-      {mounted && isCreateOpen ? (
+      {mounted && isCreateOpen && !isReadOnly ? (
         createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="nova-ficha-title">
@@ -2985,7 +3243,7 @@ export default function FichasTecnicasClient() {
         )
       ) : null}
 
-      {mounted && editDraft ? (
+      {mounted && editDraft && !isReadOnly ? (
         createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.modalCard} role="dialog" aria-modal="true" aria-labelledby="editar-ficha-title">
@@ -3106,7 +3364,7 @@ export default function FichasTecnicasClient() {
         )
       ) : null}
 
-      {mounted && deleteRow ? (
+      {mounted && deleteRow && !isReadOnly ? (
         createPortal(
         <div className={styles.modalOverlay} role="presentation">
           <div className={styles.deleteModalCard} role="dialog" aria-modal="true" aria-labelledby="excluir-receita-title">

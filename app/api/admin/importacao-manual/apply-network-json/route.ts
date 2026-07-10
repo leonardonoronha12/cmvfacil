@@ -1069,7 +1069,8 @@ export async function POST(req: NextRequest) {
     await updateProgress("applying", "items");
     await applyCompanyScopedByUpsertKey("items", "item", (raw, key) => {
       const catRaw = pickRefPreferBubbleId(raw, ["categoria_id_custom_categorias", "categoria_id", "category_id_custom_categorias", "categoria", "category"]);
-      const catText = normalizeText(catRaw);
+      const catTextRaw = normalizeText(catRaw);
+      const catText = catTextRaw === "-" || catTextRaw === "—" ? "" : catTextRaw;
       const categoriaBubbleId = looksLikeBubbleId(catText) ? extractBubbleId(catRaw) : "";
       const catNameKey = catText ? normalizeNameKey(catText) : "";
       const categoryId = (() => {
