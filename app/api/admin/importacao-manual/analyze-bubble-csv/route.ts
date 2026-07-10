@@ -17,6 +17,18 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
+  const got = await supabase.storage.getBucket(bucket);
+  if (!got.error) return;
+  await supabase.storage.createBucket(bucket, { public: false }).catch(() => {});
+}
+
+async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, filePath: string, value: any) {
+  const bytes = new TextEncoder().encode(JSON.stringify(value, null, 2));
+  const { error } = await supabase.storage.from(bucket).upload(filePath, bytes, { contentType: "application/json", upsert: true } as any);
+  if (error) throw new Error(error.message);
+}
+
 function normalizeText(v: unknown) {
   return String(v ?? "").replace(/\s+/g, " ").trim();
 }
@@ -2928,6 +2940,31 @@ export async function POST(req: NextRequest) {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     }));
+
+    try {
+      const bucket = "admin-importacao-manual";
+      await ensureBucket(supabase, bucket);
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      const basePath = `sessions/csv/${normalizeNameKey(email)}/${companyId}/staging`;
+      const groups = new Map<string, any[]>();
+      for (const rec of allRecords as any[]) {
+        const t = String(rec?.base_type ?? "").trim() || "unknown";
+        const list = groups.get(t) ?? [];
+        list.push(rec);
+        groups.set(t, list);
+      }
+      for (const [baseType, group] of groups.entries()) {
+        const key = normalizeKey(baseType).replace(/\./g, "_") || "unknown";
+        await uploadJson(supabase, bucket, `${basePath}/${key}_latest.json`, {
+          meta: { email, companyId, requesterId, baseType, capturedAt: new Date().toISOString(), records: group.length },
+          records: group,
+        });
+        await uploadJson(supabase, bucket, `${basePath}/${key}_${stamp}.json`, {
+          meta: { email, companyId, requesterId, baseType, capturedAt: new Date().toISOString(), records: group.length },
+          records: group,
+        });
+      }
+    } catch {}
 
     return json(
       {

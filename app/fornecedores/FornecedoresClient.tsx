@@ -22,6 +22,7 @@ import {
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./fornecedores.module.css";
 
 type FornecedorRow = {
@@ -257,10 +258,13 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 
 export default function FornecedoresClient() {
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const toastTimerRef = useRef<number | null>(null);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [rows, setRows] = useState<FornecedorRow[]>([]);
   const [query, setQuery] = useState("");
+  const isReadOnly = Boolean(sourceMeta.readOnly);
+  const isCompatSource = sourceMeta.source === "compat";
 
   const [sortKey, setSortKey] = useState<null | ColumnKey>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -373,6 +377,7 @@ export default function FornecedoresClient() {
       let nextEq: FornecedorEquivalenciasMap = {};
       try {
         const db = await loadFornecedoresStateFromSupabase();
+        if ((db as any)?.meta) setSourceMeta((db as any).meta);
         const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
         if (hasDb) {
           nextInfo = db.info;
@@ -408,6 +413,7 @@ export default function FornecedoresClient() {
 
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
+    if (isReadOnly) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
       void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {
@@ -416,44 +422,23 @@ export default function FornecedoresClient() {
         window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
       });
     }, 450);
-  }, [equivalenciasMap, infoMap, produtosMap]);
+  }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
 
   useEffect(() => {
-    setRows((prev) => {
-      const byKey = new Map(prev.map((r) => [r.fornecedor.trim().toUpperCase(), r]));
-      const nextList: FornecedorRow[] = [];
-      for (const [key, info] of Object.entries(infoMap)) {
-        const fornecedorLabel = info.fornecedor || key;
-        const existing = byKey.get(key);
-        const itens = (produtosMap[key]?.length ?? existing?.itens ?? 0) || 0;
-        if (existing) {
-          nextList.push({
-            ...existing,
-            fornecedor: fornecedorLabel,
-            vendedorNome: info.vendedor || existing.vendedorNome || "-",
-            whatsapp: info.whatsapp || existing.whatsapp || "-",
-            endereco: info.endereco || existing.endereco || "-",
-            itens,
-          });
-        } else {
-          nextList.push({
-            id: String(prev.length + nextList.length + 1),
-            fornecedor: fornecedorLabel,
-            itens,
-            vendedorNome: info.vendedor || "-",
-            whatsapp: info.whatsapp || "-",
-            endereco: info.endereco || "-",
-          });
-        }
-      }
-      if (!nextList.length) return [];
-      for (const r of prev) {
-        const key = r.fornecedor.trim().toUpperCase();
-        if (infoMap[key]) continue;
-        nextList.push({ ...r, itens: produtosMap[key]?.length ?? r.itens });
-      }
-      return nextList;
-    });
+    const nextList: FornecedorRow[] = [];
+    for (const [key, info] of Object.entries(infoMap)) {
+      const fornecedorLabel = info.fornecedor || key;
+      const itens = (produtosMap[key]?.length ?? 0) || 0;
+      nextList.push({
+        id: key,
+        fornecedor: fornecedorLabel,
+        itens,
+        vendedorNome: info.vendedor || "-",
+        whatsapp: info.whatsapp || "-",
+        endereco: info.endereco || "-",
+      });
+    }
+    setRows(nextList);
   }, [infoMap, produtosMap]);
 
   useEffect(() => {
@@ -544,7 +529,7 @@ export default function FornecedoresClient() {
   }, [isProdutoMenuOpen, isProdutosOpen]);
 
   const produtosFornecedor = useMemo(() => {
-    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    const key = (prodFornecedorKey ?? "").trim();
     if (!key) return [];
     return produtosMap[key] ?? [];
   }, [prodFornecedorKey, produtosMap]);
@@ -563,7 +548,11 @@ export default function FornecedoresClient() {
   }, [insumosStore, produtoQuery]);
 
   function openVinculacao(name: string) {
-    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    const key = (prodFornecedorKey ?? "").trim();
     const existing = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
     setVincNomeOriginal(name);
     setVincNomeNota(name);
@@ -574,7 +563,11 @@ export default function FornecedoresClient() {
   }
 
   function saveVinculacao() {
-    const fornecedorKey = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    const fornecedorKey = (prodFornecedorKey ?? "").trim();
     if (!fornecedorKey) return;
     const nomeNaNota = vincNomeNota.trim();
     const unidadeNaNota = vincUnidadeNota.trim() || "Und";
@@ -602,7 +595,6 @@ export default function FornecedoresClient() {
       nextProdutos = { ...produtosMap, [fornecedorKey]: nextList };
       writeFornecedorProdutosMap(nextProdutos);
       setProdutosMap(nextProdutos);
-      setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === fornecedorKey ? { ...r, itens: r.itens + 1 } : r)));
     } else if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
       const replaced = curProdutos.map((x) => (x.toLowerCase() === oldName.toLowerCase() ? nomeNaNota : x));
       const dedup: string[] = [];
@@ -630,7 +622,7 @@ export default function FornecedoresClient() {
   }
 
   function openProdutos(row: FornecedorRow) {
-    const key = row.fornecedor.trim().toUpperCase();
+    const key = String(row.id ?? "").trim();
     if (!key) return;
     setProdFornecedorKey(key);
     setProdFornecedorLabel(row.fornecedor);
@@ -644,7 +636,11 @@ export default function FornecedoresClient() {
   }
 
   function addProduto() {
-    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    const key = (prodFornecedorKey ?? "").trim();
     const item = (produtoDraft || produtoQuery).trim();
     if (!key) return;
     if (!item) {
@@ -667,7 +663,6 @@ export default function FornecedoresClient() {
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
       showToast("Erro ao salvar no banco de dados.", "error"),
     );
-    setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: r.itens + 1 } : r)));
     setProdutoDraft("");
     setProdutoQuery("");
     setIsProdutoMenuOpen(false);
@@ -676,7 +671,11 @@ export default function FornecedoresClient() {
   }
 
   function removeProduto(item: string) {
-    const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    const key = (prodFornecedorKey ?? "").trim();
     if (!key) return;
     const cur = produtosMap[key] ?? [];
     const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
@@ -686,7 +685,6 @@ export default function FornecedoresClient() {
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
       showToast("Erro ao salvar no banco de dados.", "error"),
     );
-    setRows((prev) => prev.map((r) => (r.fornecedor.trim().toUpperCase() === key ? { ...r, itens: Math.max(0, r.itens - 1) } : r)));
   }
 
   const visibleRows = useMemo(() => {
@@ -714,7 +712,29 @@ export default function FornecedoresClient() {
     return decorated.map((d) => d.r);
   }, [query, rows, sortDir, sortKey]);
 
+  const qaUi = useMemo(() => {
+    return {
+      filters: { query },
+      sort: { sortKey, sortDir, columnOrder },
+      rendered: {
+        rowsCount: visibleRows.length,
+        rows: visibleRows.map((r) => ({
+          id: r.id,
+          fornecedor: r.fornecedor,
+          itens: r.itens,
+          vendedorNome: r.vendedorNome,
+          whatsapp: r.whatsapp,
+          endereco: r.endereco,
+        })),
+      },
+    };
+  }, [columnOrder, query, sortDir, sortKey, visibleRows]);
+
   function openNew() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setEditingId(null);
     setEditingKey(null);
     setDraftFornecedor("");
@@ -725,8 +745,12 @@ export default function FornecedoresClient() {
   }
 
   function openEdit(row: FornecedorRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setEditingId(row.id);
-    setEditingKey(row.fornecedor.trim().toUpperCase());
+    setEditingKey(String(row.id ?? "").trim());
     setDraftFornecedor(row.fornecedor);
     setDraftVendedorNome(row.vendedorNome === "-" ? "" : row.vendedorNome);
     setDraftWhatsapp(row.whatsapp === "-" ? "" : row.whatsapp);
@@ -735,6 +759,10 @@ export default function FornecedoresClient() {
   }
 
   function saveForm() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedor = draftFornecedor.trim();
     if (!fornecedor) return;
     const vendedorNome = draftVendedorNome.trim() || "-";
@@ -752,7 +780,6 @@ export default function FornecedoresClient() {
       const nextInfo = { ...infoMap, [key]: infoPayload };
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
-      setRows((prev) => [{ id: String(prev.length + 1), fornecedor, itens: 0, vendedorNome, whatsapp, endereco }, ...prev]);
       setQuery("");
       setSortKey(null);
       setSortDir("asc");
@@ -760,7 +787,7 @@ export default function FornecedoresClient() {
       return;
     }
 
-    const prevKey = (editingKey ?? "").trim().toUpperCase();
+    const prevKey = (editingKey ?? "").trim();
     if (prevKey && prevKey !== key) {
       const nextInfo = { ...infoMap };
       delete nextInfo[prevKey];
@@ -802,7 +829,6 @@ export default function FornecedoresClient() {
       writeFornecedorInfoMap(nextInfo);
     }
 
-    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, fornecedor, vendedorNome, whatsapp, endereco } : r)));
     setQuery("");
     setIsFormOpen(false);
     setEditingId(null);
@@ -810,16 +836,23 @@ export default function FornecedoresClient() {
   }
 
   function openDelete(row: FornecedorRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setDeleteId(row.id);
     setDeleteName(row.fornecedor);
     setIsDeleteOpen(true);
   }
 
   function confirmDelete() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const id = deleteId;
     if (!id) return;
-    const key = deleteName.trim().toUpperCase();
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    const key = String(id).trim();
     if (key) {
       setInfoMap((prev) => {
         if (!prev[key]) return prev;
@@ -936,6 +969,7 @@ export default function FornecedoresClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
+        <QaModePanel screen="fornecedores" ui={qaUi} />
         <section className={styles.header}>
           <div className={styles.headerIcon}>
             <IconBox />
@@ -945,6 +979,29 @@ export default function FornecedoresClient() {
             <p className={styles.subtitle}>Consulte e cadastre fornecedores, além dos produtos que cada um vende.</p>
           </div>
         </section>
+
+        {isCompatSource ? (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 14,
+              padding: "10px 12px",
+              borderRadius: 12,
+              background: "#eef6ff",
+              border: "1px solid #cfe6ff",
+              color: "#1b3a57",
+              fontSize: 13,
+              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>Fonte: Banco compatível Bubble</span>
+            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+          </div>
+        ) : null}
 
         <section className={styles.toolbar}>
           <div className={styles.search}>
@@ -963,7 +1020,12 @@ export default function FornecedoresClient() {
             <button
               type="button"
               className={styles.importBtn}
+              disabled={isReadOnly}
               onClick={() => {
+                if (isReadOnly) {
+                  showToast("Modo somente leitura.", "error");
+                  return;
+                }
                 setImportError(null);
                 setIsImportOpen(true);
               }}
@@ -971,7 +1033,7 @@ export default function FornecedoresClient() {
               <IconUpload />
               Importar
             </button>
-            <button type="button" className={styles.newBtn} onClick={openNew}>
+            <button type="button" className={styles.newBtn} onClick={openNew} disabled={isReadOnly}>
               <IconPlus />
               Novo Fornecedor
             </button>
@@ -979,7 +1041,7 @@ export default function FornecedoresClient() {
         </section>
 
         <div className={styles.tableWrap}>
-          <section className={styles.table} style={{ position: "relative" }}>
+          <section className={styles.table} style={{ position: "relative" }} data-qa-grid="fornecedores">
             {isLoadingTable ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
@@ -1018,11 +1080,11 @@ export default function FornecedoresClient() {
               </div>
             ) : (
               visibleRows.map((r) => (
-                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
+                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   {columnOrder.map((col) => {
                     if (col === "fornecedor") {
                       return (
-                        <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)}>
+                        <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)} data-qa-grid-cell>
                           <span className={styles.supplierIcon} aria-hidden>
                             <IconBox />
                           </span>
@@ -1030,16 +1092,21 @@ export default function FornecedoresClient() {
                         </button>
                       );
                     }
-                    if (col === "itens") return <div key={col} className={styles.td}>{`${r.itens} item${r.itens === 1 ? "" : "s"}`}</div>;
+                    if (col === "itens")
+                      return (
+                        <div key={col} className={styles.td} data-qa-grid-cell>
+                          {`${r.itens} item${r.itens === 1 ? "" : "s"}`}
+                        </div>
+                      );
                     if (col === "whatsapp")
                       return (
-                        <div key={col} className={styles.td}>
+                        <div key={col} className={styles.td} data-qa-grid-cell>
                           {r.whatsapp && r.whatsapp !== "-" ? <span className={styles.vendorLink}>{r.whatsapp}</span> : <span className={styles.tdMuted}>-</span>}
                           {r.vendedorNome && r.vendedorNome !== "-" ? <div className={styles.vendorMuted}>{r.vendedorNome}</div> : null}
                         </div>
                       );
                     return (
-                      <div key={col} className={styles.tdMuted}>
+                      <div key={col} className={styles.tdMuted} data-qa-grid-cell>
                         {r.endereco || "-"}
                       </div>
                     );
@@ -1050,7 +1117,12 @@ export default function FornecedoresClient() {
                       type="button"
                       className={styles.iconBtn}
                       aria-label="Editar"
+                      disabled={isReadOnly}
                       onClick={(e) => {
+                        if (isReadOnly) {
+                          showToast("Modo somente leitura.", "error");
+                          return;
+                        }
                         e.stopPropagation();
                         openEdit(r);
                       }}
@@ -1061,7 +1133,12 @@ export default function FornecedoresClient() {
                       type="button"
                       className={styles.iconBtn}
                       aria-label="Excluir"
+                      disabled={isReadOnly}
                       onClick={(e) => {
+                        if (isReadOnly) {
+                          showToast("Modo somente leitura.", "error");
+                          return;
+                        }
                         e.stopPropagation();
                         openDelete(r);
                       }}
@@ -1421,7 +1498,7 @@ export default function FornecedoresClient() {
                         <div className={styles.produtosName}>{name}</div>
                         {(() => {
                           const eqLabel = (() => {
-                            const key = (prodFornecedorKey ?? "").trim().toUpperCase();
+                            const key = (prodFornecedorKey ?? "").trim();
                             const map = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
                             const eq = map?.insumoEquivalente ?? (insumosByName.get(name.toLowerCase()) ? name : "");
                             if (!eq) return "";
@@ -1437,7 +1514,12 @@ export default function FornecedoresClient() {
                         type="button"
                         className={styles.produtosTrash}
                         aria-label="Remover"
+                        disabled={isReadOnly}
                         onClick={(e) => {
+                          if (isReadOnly) {
+                            showToast("Modo somente leitura.", "error");
+                            return;
+                          }
                           e.stopPropagation();
                           removeProduto(name);
                         }}

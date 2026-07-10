@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { isLocalDevRequest } from "../../../../lib/localDevRequest";
+import { SUPABASE_AT_COOKIE } from "../../../../lib/supabaseAuthCookies";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +49,29 @@ function safeEmail(input: unknown) {
   return v;
 }
 
+function base64UrlDecodeJson(value: string) {
+  const padded = value.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (value.length % 4)) % 4);
+  const buf = Buffer.from(padded, "base64");
+  const text = buf.toString("utf8");
+  return JSON.parse(text);
+}
+
+function getEmailFromSupabaseAccessToken(req: NextRequest) {
+  const token = String(req.cookies.get(SUPABASE_AT_COOKIE)?.value ?? "").trim();
+  if (!token) return null;
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  const payloadB64 = parts[1] ?? "";
+  if (!payloadB64) return null;
+  try {
+    const payload = base64UrlDecodeJson(payloadB64) as { email?: string };
+    const email = String(payload?.email ?? "").trim().toLowerCase();
+    return email && email.includes("@") ? email : null;
+  } catch {
+    return null;
+  }
+}
+
 function extractUuidFromRpcData(data: unknown) {
   if (typeof data === "string") {
     const v = data.trim();
@@ -80,17 +104,16 @@ async function probeSupabaseRestHealth() {
     getEnv("SUPABASE_SERVICE_ROLE_KEY") ?? getEnv("SUPABASE_SERVICE_ROLE") ?? getEnv("SERVICE_ROLE_KEY") ?? getEnv("SUPABASE_SERVICE_KEY");
   if (!url || !key) return;
 
+  const endpoint = `${url.replace(/\/+$/, "")}/rest/v1/companies?select=id&limit=1`;
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), 1200);
+  const t = setTimeout(() => controller.abort(), 2000);
   try {
-    const endpoint = `${url.replace(/\/+$/, "")}/rest/v1/companies?select=id&limit=1`;
     const res = await fetch(endpoint, { headers: { apikey: key, authorization: `Bearer ${key}` }, signal: controller.signal });
     const text = await res.text().catch(() => "");
     if (res.status === 503 && (text.includes("PGRST002") || text.toLowerCase().includes("schema cache"))) {
       throw new Error("supabase_rest_unhealthy");
     }
   } catch (err) {
-    if (err instanceof Error && err.name === "AbortError") throw new Error("supabase_rest_timeout");
     if (err instanceof Error && err.message === "supabase_rest_unhealthy") throw err;
   } finally {
     clearTimeout(t);
@@ -118,7 +141,7 @@ async function findBubbleObjUserMapByEmail(supabase: ReturnType<typeof getSupaba
   try {
     const { data, error } = await withTimeout(
       supabase.from("bubble_obj_user_map").select("bubble_user_id,email,supabase_user_id").eq("email", target).limit(1).maybeSingle(),
-      2500,
+      3000,
       "bubble_obj_user_map_timeout",
     );
     if (error) {
@@ -137,7 +160,7 @@ async function findBubbleObjUserMapByEmail(supabase: ReturnType<typeof getSupaba
   try {
     const { data, error } = await withTimeout(
       supabase.from("bubble_obj_user_map").select("bubble_user_id,email,supabase_user_id").ilike("email", target).limit(1).maybeSingle(),
-      2500,
+      3000,
       "bubble_obj_user_map_timeout",
     );
     if (error) {
@@ -160,7 +183,7 @@ async function findAuthUserIdFromAuthSchema(supabase: ReturnType<typeof getSupab
   const target = email.trim().toLowerCase();
   if (!target || !target.includes("@")) return null;
   try {
-    const { data, error } = await withTimeout(supabase.rpc("get_auth_user_id_by_email", { p_email: target } as any), 2500, "auth_lookup_timeout");
+    const { data, error } = await withTimeout(supabase.rpc("get_auth_user_id_by_email", { p_email: target } as any), 3000, "auth_lookup_timeout");
     if (error) {
       throwIfRestUnhealthy(error);
       return null;
@@ -179,7 +202,7 @@ async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmi
   try {
     const { data: p1, error: e1 } = await withTimeout(
       supabase.from("user_profiles").select("user_id,email").eq("email", target).limit(1).maybeSingle(),
-      2500,
+      3000,
       "user_profiles_lookup_timeout",
     );
     if (e1) throwIfRestUnhealthy(e1);
@@ -235,15 +258,19 @@ function pickBestCompanyId(memberRows: unknown[]) {
 
 async function getUserEmailFromDb(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
   if (!isUuid(userId)) return null;
-  const { data, error } = await supabase.from("user_profiles").select("email").eq("user_id", userId).maybeSingle();
+  const { data, error } = await withTimeout(
+    supabase.from("user_profiles").select("email").eq("user_id", userId).maybeSingle(),
+    3000,
+    "requester_email_timeout",
+  );
   if (error) return null;
   const email = String((data as any)?.email ?? "").trim().toLowerCase();
   return email && email.includes("@") ? email : null;
 }
 
-async function isAdminRequester(supabase: ReturnType<typeof getSupabaseAdmin>, requesterUserId: string) {
+async function isAdminRequester(supabase: ReturnType<typeof getSupabaseAdmin>, requesterUserId: string, requesterEmailHint?: string | null) {
   if (isAdminUserId(requesterUserId)) return true;
-  const requesterEmail = await getUserEmailFromDb(supabase, requesterUserId);
+  const requesterEmail = (requesterEmailHint ?? "").trim().toLowerCase();
   if (!requesterEmail) return false;
   const allow = new Set(
     [...parseCsvEnv(process.env.ADMIN_USER_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS_LEGACY)].map((x) => x.toLowerCase()),
@@ -260,6 +287,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as any;
     const email = safeEmail(body?.email);
     if (!email) return json({ ok: false, error: "invalid_email" }, { status: 400 });
+    if (email.endsWith("@gmail.cor")) return json({ ok: false, error: "invalid_email" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -268,7 +296,13 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    await probeSupabaseRestHealth();
+    try {
+      await probeSupabaseRestHealth();
+    } catch (err) {
+      if (err instanceof Error && err.message === "supabase_rest_unhealthy") {
+        return json({ ok: false, error: "supabase_rest_unhealthy" }, { status: 503 });
+      }
+    }
 
     const requesterId = String(userId ?? "").trim();
     let selfOk = false;
@@ -276,9 +310,9 @@ export async function POST(req: NextRequest) {
     if (isLocalDev) {
       adminOk = true;
     } else {
-      const requesterEmail = requesterId ? await getUserEmailFromDb(supabase, requesterId) : null;
-      selfOk = isUuid(requesterId) && requesterEmail === email;
-      adminOk = await isAdminRequester(supabase, requesterId);
+      const requesterEmail = getEmailFromSupabaseAccessToken(req);
+      selfOk = Boolean(requesterEmail) && requesterEmail === email;
+      adminOk = await isAdminRequester(supabase, requesterId, requesterEmail);
       if (!selfOk && !adminOk) return json({ ok: false, error: "forbidden" }, { status: 403 });
     }
 
@@ -291,7 +325,7 @@ export async function POST(req: NextRequest) {
     if (resolvedUserId) {
       const res = await withTimeout(
         supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", resolvedUserId).limit(100),
-        4000,
+        15000,
         "company_members_timeout",
       );
       memberRows = (res as any)?.data ?? [];
@@ -301,7 +335,7 @@ export async function POST(req: NextRequest) {
       if (mapped?.bubbleUserId) {
         const res = await withTimeout(
           supabase.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", mapped.bubbleUserId).limit(100),
-          4000,
+          15000,
           "company_members_timeout",
         );
         memberRows = (res as any)?.data ?? [];
@@ -321,7 +355,7 @@ export async function POST(req: NextRequest) {
     if (uniqueCompanyIds.length) {
       const { data: companiesDb } = await withTimeout(
         supabase.from("companies").select("id,fantasy_name,legal_name").in("id", uniqueCompanyIds).limit(200),
-        4000,
+        15000,
         "companies_timeout",
       );
       for (const c of companiesDb ?? []) {

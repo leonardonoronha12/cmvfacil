@@ -1,4 +1,5 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { shouldUseSecureCookies } from "../../../lib/cookieSecurity";
 
 const COOKIE_NAME = "cmv_admin_session";
 
@@ -25,7 +26,7 @@ async function hmacSha256(secret: string, data: string) {
   return new Uint8Array(sig);
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   const secret = (process.env.ADMIN_SECRET ?? "").trim();
   const password = (process.env.ADMIN_LOGIN_PASSWORD ?? "").trim();
   const emailAllow = (process.env.ADMIN_LOGIN_EMAIL ?? "").trim().toLowerCase();
@@ -60,10 +61,9 @@ export async function POST(req: Request) {
     value: token,
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(req),
     path: "/",
     ...(remember ? { maxAge: 30 * 24 * 60 * 60 } : {}),
   });
   return res;
 }
-

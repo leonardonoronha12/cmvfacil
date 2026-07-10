@@ -6,7 +6,13 @@ import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
-import { loadDesperdiciosFromSupabase, deleteDesperdicioFromSupabase, upsertDesperdicioToSupabase } from "../lib/desperdiciosSupabase";
+import {
+  loadDesperdiciosStateFromSupabase,
+  loadDesperdiciosFromSupabase,
+  deleteDesperdicioFromSupabase,
+  upsertDesperdicioToSupabase,
+  type DesperdicioCompatRow,
+} from "../lib/desperdiciosSupabase";
 import { readDesperdiciosFromStore, writeDesperdiciosToStore, type DesperdicioRow } from "../lib/desperdiciosStore";
 import {
   readDesperdicioMotivosFromStore,
@@ -28,6 +34,7 @@ import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase 
 import { readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, type PrePreparoEtiquetaRow, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { getExpiredPrePreparoEtiquetaDesperdicioSync, getEtiquetaIdFromWasteId, isPrePreparoEtiquetaWasteId } from "../lib/prePreparoEtiquetasToDesperdicios";
 import { buildUserScopedId, requireUserScopePrefix } from "../lib/userScope";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./desperdicios.module.css";
 
 function formatDateNumericLoose(value: string) {
@@ -464,7 +471,11 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
   return <span>{dir === "asc" ? "^" : "v"}</span>;
 }
 
-export default function DesperdiciosClient() {
+export default function DesperdiciosClient({
+  initialSourceMeta,
+}: {
+  initialSourceMeta?: { source: "legacy" | "compat"; readOnly: boolean };
+}) {
   const toastTimerRef = useRef<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const loadErrorShownRef = useRef(false);
@@ -472,6 +483,10 @@ export default function DesperdiciosClient() {
   const deleteErrorShownRef = useRef(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [rows, setRows] = useState<DesperdicioRow[]>([]);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
+    return initialSourceMeta ?? { source: "legacy", readOnly: false };
+  });
+  const [compatRows, setCompatRows] = useState<DesperdicioCompatRow[]>([]);
   const rowsReadyRef = useRef(false);
   const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
@@ -482,6 +497,22 @@ export default function DesperdiciosClient() {
   const [draggingColumn, setDraggingColumn] = useState<DesperdicioTableColumn | null>(null);
   const [sortKey, setSortKey] = useState<DesperdicioTableColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const isReadOnly = Boolean(sourceMeta.readOnly);
+  const isCompatSource = sourceMeta.source === "compat";
+
+  useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const src = String(params.get("source") ?? "").trim().toLowerCase();
+      if (src === "compat") {
+        setSourceMeta({ source: "compat", readOnly: true });
+        return;
+      }
+      if (src === "legacy") {
+        setSourceMeta({ source: "legacy", readOnly: false });
+      }
+    } catch {}
+  }, []);
 
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [entradasRows, setEntradasRows] = useState<EntradaStoreRow[]>([]);
@@ -644,6 +675,49 @@ export default function DesperdiciosClient() {
     });
     return decorated.map(({ row }) => row);
   }, [fichasTecnicas, insumosStore, integratedRows, motivoFilter, motivosStore, periodo, prePreparoStore, query, sortDir, sortKey]);
+
+  const qaUi = useMemo(() => {
+    if (isCompatSource) {
+      return {
+        meta: sourceMeta,
+        rendered: {
+          rowsCount: compatRows.length,
+          rows: compatRows.map((r) => ({
+            id: r.id,
+            bubble_id: r.bubble_id,
+            data: r.data,
+            item: r.item,
+            itemId: r.itemId,
+            quantidade: r.quantidade,
+            unidade: r.unidade,
+            custoUnitario: r.custoUnitario,
+            custoTotal: r.custoTotal,
+            motivo: r.motivo,
+            motivoId: r.motivoId,
+            etiqueta: r.etiqueta,
+            etiquetaId: r.etiquetaId,
+          })),
+        },
+      };
+    }
+    return {
+      meta: sourceMeta,
+      filters: { query, motivoFilter, periodo },
+      sort: { sortKey, sortDir, columnOrder },
+      rendered: {
+        rowsCount: visible.length,
+        rows: visible.map((r) => ({
+          id: r.id,
+          data: r.data,
+          item: resolveItemLabel(r.item, insumosStore, prePreparoStore, fichasTecnicas),
+          quantidade: r.quantidade,
+          custo: r.custo,
+          motivo: resolveMotivoLabel(r.motivo, motivosStore),
+          isEtiquetaVencida: isPrePreparoEtiquetaWasteId(r.id),
+        })),
+      },
+    };
+  }, [columnOrder, compatRows, fichasTecnicas, insumosStore, isCompatSource, motivoFilter, motivosStore, periodo, prePreparoStore, query, sortDir, sortKey, sourceMeta, visible]);
 
   function toggleSort(key: DesperdicioTableColumn) {
     if (sortKey !== key) {
@@ -821,6 +895,7 @@ export default function DesperdiciosClient() {
   }, [fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setInsumosStore(readInsumosFromStore());
     void (async () => {
       try {
@@ -829,9 +904,10 @@ export default function DesperdiciosClient() {
       } catch {}
     })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setEntradasRows(readEntradasFromStore([]));
     void (async () => {
       try {
@@ -841,9 +917,10 @@ export default function DesperdiciosClient() {
       setEntradasRows(readEntradasFromStore([]));
     })();
     return subscribeEntradas((rows) => setEntradasRows(rows));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setEquivalenciasMap(readFornecedorEquivalenciasMap());
     void (async () => {
       let nextEq: FornecedorEquivalenciasMap = {};
@@ -856,9 +933,10 @@ export default function DesperdiciosClient() {
       setEquivalenciasMap(nextEq);
     })();
     return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setFichasTecnicas(readFichasTecnicasFromStore([]));
     void (async () => {
       try {
@@ -868,9 +946,10 @@ export default function DesperdiciosClient() {
       setFichasTecnicas(readFichasTecnicasFromStore([]));
     })();
     return subscribeFichasTecnicas((rows) => setFichasTecnicas(rows));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setPrePreparoStore(readPrePreparoFromStore());
     void (async () => {
       try {
@@ -880,64 +959,54 @@ export default function DesperdiciosClient() {
       setPrePreparoStore(readPrePreparoFromStore());
     })();
     return subscribePrePreparo((rows) => setPrePreparoStore(rows));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
     void (async () => {
       try {
         const db = await loadPrePreparoEtiquetasFromSupabase();
         if (db.length) writePrePreparoEtiquetasToStore(db);
       } catch {}
-      try {
-        const res = await fetch(`/api/bubble-import/etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as any;
-        const bubbleRows = Array.isArray(json?.rows) ? (json.rows as PrePreparoEtiquetaRow[]) : [];
-        if (bubbleRows.length) {
-          const byId = new Map<string, PrePreparoEtiquetaRow>();
-          for (const r of readPrePreparoEtiquetasFromStore()) byId.set(r.id, r);
-          for (const r of bubbleRows) {
-            const existing = byId.get(r.id) ?? null;
-            if (!existing) {
-              byId.set(r.id, r);
-              continue;
-            }
-            byId.set(r.id, { ...r, wasteStatus: existing.wasteStatus ?? r.wasteStatus });
-          }
-          const merged = Array.from(byId.values());
-          writePrePreparoEtiquetasToStore(merged);
-          void savePrePreparoEtiquetasToSupabase(merged).catch(() => {});
-        }
-      } catch {}
       setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
     })();
     return subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
     const stored = readDesperdicioMotivosFromStore();
     const cleaned = cleanMotivosRows(stored);
     setMotivosStore(cleaned);
     if (!motivosEquivalent(stored, cleaned)) writeDesperdicioMotivosToStore(cleaned);
-    void (async () => {
-      try {
-        const res = await fetch(`/api/bubble-import/motivos?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as any;
-        const rows = Array.isArray(json?.rows) ? (json.rows as DesperdicioMotivoRow[]) : [];
-        if (!rows.length) return;
-        setMotivosStore((prev) => {
-          const merged = cleanMotivosRows([...prev, ...rows]);
-          writeDesperdicioMotivosToStore(merged);
-          return merged;
-        });
-      } catch {}
-    })();
     return subscribeDesperdicioMotivos((rows) => {
       const next = cleanMotivosRows(rows);
       setMotivosStore(next);
       if (!motivosEquivalent(rows, next)) writeDesperdicioMotivosToStore(next);
     });
   }, []);
+
+  useEffect(() => {
+    if (!isCompatSource) return;
+    if (!compatRows.length) return;
+    const fromCompat: DesperdicioMotivoRow[] = [];
+    const seen = new Set<string>();
+    for (const r of compatRows) {
+      const id = String((r as any)?.motivoId ?? "").trim();
+      const nome = String((r as any)?.motivo ?? "").trim();
+      if (!nome) continue;
+      const key = normalizeKey(nome);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      fromCompat.push({ id: id || key, nome });
+    }
+    if (!fromCompat.length) return;
+    setMotivosStore((prev) => {
+      const merged = cleanMotivosRows([...(prev ?? []), ...fromCompat]);
+      writeDesperdicioMotivosToStore(merged);
+      return merged;
+    });
+  }, [compatRows, isCompatSource]);
 
   const avgUnitCostCentsByInsumoId = useMemo(() => {
     const normItemKey = (value: string) =>
@@ -1036,9 +1105,18 @@ export default function DesperdiciosClient() {
   useEffect(() => {
     (async () => {
       try {
-        const dbRows = await loadDesperdiciosFromSupabase();
-        if (dbRows[0]) {
-          setRows(dbRows);
+        const db = await loadDesperdiciosStateFromSupabase();
+        if (db.meta) setSourceMeta(db.meta);
+        if (db.meta?.source === "compat") {
+          const wastes = (db.compat as any)?.wastes ?? [];
+          setCompatRows(Array.isArray(wastes) ? (wastes as DesperdicioCompatRow[]) : []);
+          setRows(db.rows ?? []);
+          rowsReadyRef.current = true;
+          setIsLoadingTable(false);
+          return;
+        }
+        if ((db.rows ?? [])[0]) {
+          setRows(db.rows);
           rowsReadyRef.current = true;
           setIsLoadingTable(false);
           return;
@@ -1049,6 +1127,15 @@ export default function DesperdiciosClient() {
           showToast(supabaseErrorMessage(err, "carregar"), "error", 8000);
         }
       }
+      const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
+      if (forcedCompat) {
+        setSourceMeta({ source: "compat", readOnly: true });
+        setCompatRows([]);
+        setRows([]);
+        rowsReadyRef.current = true;
+        setIsLoadingTable(false);
+        return;
+      }
       setRows(readDesperdiciosFromStore([]));
       rowsReadyRef.current = true;
       setIsLoadingTable(false);
@@ -1057,6 +1144,7 @@ export default function DesperdiciosClient() {
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
+    if (isReadOnly) return;
     setMotivosStore((prev) => {
       const base = prev;
       const seen = new Set(base.map((m) => m.nome.toLowerCase()));
@@ -1072,15 +1160,17 @@ export default function DesperdiciosClient() {
       writeDesperdicioMotivosToStore(next);
       return next;
     });
-  }, [motivos, rows]);
+  }, [isReadOnly, motivos, rows]);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
+    if (isReadOnly) return;
     writeDesperdiciosToStore(rows);
-  }, [rows]);
+  }, [isReadOnly, rows]);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
+    if (isReadOnly) return;
     const wasteEtiquetaIds = new Set<string>();
     for (const r of rows) {
       if (!isPrePreparoEtiquetaWasteId(r.id)) continue;
@@ -1130,7 +1220,7 @@ export default function DesperdiciosClient() {
         }
       });
     }
-  }, [prePreparoEtiquetas, rows, userScopePrefix]);
+  }, [isCompatSource, prePreparoEtiquetas, rows, userScopePrefix]);
 
   useEffect(() => {
     if (!isDataCalOpen) return;
@@ -1499,6 +1589,7 @@ export default function DesperdiciosClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
+          <QaModePanel screen="desperdicios" ui={qaUi} />
         <section className={styles.header}>
           <div className={styles.headerLeft}>
             <div className={styles.headerIcon} aria-hidden>
@@ -1514,6 +1605,77 @@ export default function DesperdiciosClient() {
           </div>
         </section>
 
+        {isCompatSource ? (
+          <>
+            <div
+              style={{
+                marginTop: 10,
+                marginBottom: 14,
+                padding: "10px 12px",
+                borderRadius: 12,
+                background: "#eef6ff",
+                border: "1px solid #cfe6ff",
+                color: "#1b3a57",
+                fontSize: 13,
+                fontWeight: 700,
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>Fonte: Banco compatível Bubble</span>
+              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+            </div>
+
+            <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="desperdicios">
+              {isLoadingTable ? (
+                <div className={dash.loadingOverlay}>
+                  <LoadingSpinner />
+                </div>
+              ) : null}
+
+              <div style={{ overflow: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Data</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Item</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Quantidade</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Unidade</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Custo unitário</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Custo total</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Motivo</th>
+                      <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Etiqueta</th>
+                    </tr>
+                  </thead>
+                  <tbody data-qa-grid="desperdicios:rows">
+                    {compatRows.map((r) => (
+                      <tr key={r.id} data-qa-grid-row data-qa-row-id={r.id}>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.data}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 800 }}>{r.item}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.quantidadeNum}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.unidade}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.custoUnitario}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900 }}>{r.custoTotal}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.motivo}</td>
+                        <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{r.etiqueta ?? "-"}</td>
+                      </tr>
+                    ))}
+                    {compatRows[0] ? null : (
+                      <tr>
+                        <td colSpan={8} style={{ padding: 18, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>
+                          Sem desperdícios
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </>
+        ) : (
+          <>
         <section className={styles.toolbar}>
           <div className={styles.kpis}>
             <div className={styles.kpiCard}>
@@ -1794,7 +1956,7 @@ export default function DesperdiciosClient() {
           </section>
         ) : null}
 
-        <section className={styles.tableCard} style={{ position: "relative" }}>
+        <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="desperdicios">
           {isLoadingTable ? (
             <div className={dash.loadingOverlay}>
               <LoadingSpinner />
@@ -1844,7 +2006,13 @@ export default function DesperdiciosClient() {
             visible.map((r) => {
               const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
               return (
-                <div key={r.id} className={styles.row} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+                <div
+                  key={r.id}
+                  className={styles.row}
+                  style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                  data-qa-grid-row
+                  data-qa-row-id={r.id}
+                >
                   {columnOrder.map((column) => (
                     <div key={column} className={styles.tableCellWrap}>
                       {renderTableCell(r, column)}
@@ -2326,6 +2494,8 @@ export default function DesperdiciosClient() {
           document.body,
           )
         ) : null}
+          </>
+        )}
         </div>
       </main>
     </div>

@@ -35,6 +35,12 @@ function safeName(input: string) {
   return base.replace(/\s+/g, "_").slice(0, 90) || "type";
 }
 
+function safePrefix(input: unknown) {
+  const raw = String(input ?? "").trim().replace(/\\/g, "/");
+  const cleaned = raw.replace(/^\/+|\/+$/g, "");
+  return cleaned;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -43,7 +49,9 @@ async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucke
 
 async function fetchBubblePage(baseUrl: string, token: string, typeName: string, cursor: number, limit: number) {
   const url = `${baseUrl}/api/1.1/obj/${encodeURIComponent(typeName)}?cursor=${cursor}&limit=${limit}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store" });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` }, cache: "no-store", signal: controller.signal }).finally(() => clearTimeout(timer));
   const text = await res.text();
   let jsonBody: any = null;
   try {
@@ -62,7 +70,7 @@ async function fetchBubblePage(baseUrl: string, token: string, typeName: string,
 async function fetchAllBubble(baseUrl: string, token: string, typeName: string, limit = 100) {
   const out: unknown[] = [];
   let cursor = 0;
-  for (let page = 0; page < 10000; page++) {
+  for (let page = 0; page < 2000; page++) {
     const { results, remaining } = await fetchBubblePage(baseUrl, token, typeName, cursor, limit);
     if (!results.length) break;
     out.push(...results);
@@ -86,6 +94,7 @@ export async function POST(req: NextRequest) {
     const typesRaw = Array.isArray(body?.types) ? (body.types as unknown[]) : [];
     const types = typesRaw.map((t) => safeName(String(t ?? ""))).filter(Boolean);
     const limit = typeof body?.limit === "number" && Number.isFinite(body.limit) && body.limit > 0 ? Math.min(200, Math.floor(body.limit)) : 100;
+    const prefixRaw = safePrefix(body?.prefix ?? "");
 
     if (!baseUrl) return json({ ok: false, error: "missing_base_url" }, { status: 400 });
     if (!token) return json({ ok: false, error: "missing_token" }, { status: 400 });
@@ -105,11 +114,13 @@ export async function POST(req: NextRequest) {
     const day = now.toISOString().slice(0, 10);
     const stamp = now.toISOString().replace(/[:.]/g, "-");
 
+    const prefix = prefixRaw && prefixRaw.startsWith(`user:${userId}/`) ? prefixRaw : "";
+
     const uploaded: { type: string; rows: number; path: string }[] = [];
     for (const typeName of types) {
       const rows = await fetchAllBubble(baseUrl, token, typeName, limit);
       const safeType = safeName(typeName).toLowerCase();
-      const objectPath = `user:${userId}/${day}/${stamp}-bubble-api-${safeType}.json`;
+      const objectPath = prefix ? `${prefix}/${stamp}-bubble-api-${safeType}.json` : `user:${userId}/${day}/${stamp}-bubble-api-${safeType}.json`;
       const bodyJson = JSON.stringify({ source: "bubble-data-api", type: typeName, pulledAt: now.toISOString(), rows }, null, 0);
       const { error } = await supabase.storage.from(bucket).upload(objectPath, bodyJson, { contentType: "application/json", upsert: true });
       if (error) throw new Error(error.message);

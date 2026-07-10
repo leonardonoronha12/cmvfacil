@@ -412,11 +412,29 @@ function pickTextValue(row: CsvObjectRow) {
 }
 
 function guessItemLabel(row: CsvObjectRow) {
-  const direct = pickFirst(row, ["item", "item_completo", "nome_item", "nome_do_item", "nome", "produto", "descricao", "ingrediente", "insumo", "titulo", "title", "name"]);
+  const looksLikeBubbleId = (value: string) => {
+    const s = String(value ?? "").trim();
+    if (!s) return false;
+    if (s.length < 12) return false;
+    if (!/^\d/.test(s)) return false;
+    return /^[0-9]+x[0-9x]+$/i.test(s);
+  };
+  const sanitize = (value: unknown) => {
+    const s = String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+    if (!s) return "";
+    const k = s.toLowerCase();
+    if (k === "true" || k === "false" || k === "null" || k === "undefined" || k === "[object object]") return "";
+    if (looksLikeBubbleId(s)) return "";
+    return s;
+  };
+
+  const direct = sanitize(
+    pickFirst(row, ["item", "item_completo", "nome_item", "nome_do_item", "nome", "produto", "descricao", "ingrediente", "insumo", "titulo", "title", "name"]),
+  );
   if (direct) return direct;
-  const like = pickKeyLike(row, ["item", "ingred", "insumo", "produto", "nome"], { excludeParts: ["fornecedor", "empresa"] });
+  const like = sanitize(pickKeyLike(row, ["item", "ingred", "insumo", "produto", "nome"], { excludeParts: ["fornecedor", "empresa"] }));
   if (like) return like;
-  return pickTextValue(row);
+  return sanitize(pickTextValue(row));
 }
 
 function buildDateLabel(value: string) {
@@ -552,6 +570,7 @@ export async function POST(req: NextRequest) {
     let enablePrePreparo = enabled("pre_preparo");
     let enableFichas = enabled("fichas_tecnicas");
     let enableInventario = enabled("inventario");
+    const warnings: string[] = [];
 
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
@@ -987,6 +1006,40 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    function handleBubbleIngredientesRow(row: CsvObjectRow) {
+      const uid = resolveTargetUserId(row);
+      const ingredientIdRaw = pickBubbleId(row) || pickFirst(row, ["_id", "id", "unique_id", "ingredient_id", "ingrediente_id"]) || "";
+      const ingredientId = ingredientIdRaw ? String(ingredientIdRaw).trim() : "";
+      if (!ingredientId) return;
+
+      const itemIdRaw = pickFirst(row, ["item_id", "item", "insumo_id", "insumo", "ingrediente_id_ref"]) || pickKeyLike(row, ["item_id", "item", "insumo"]);
+      const itemBubbleId = itemIdRaw ? (extractBubbleRefId(String(itemIdRaw)) || extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim()) : "";
+      if (!itemBubbleId) return;
+
+      const qtyRaw = pickFirst(row, ["quantidade", "qtd", "qtde", "qty"]) || pickKeyLike(row, ["quantidade", "qtd", "qtde", "qty"]);
+      const quantidade = typeof qtyRaw === "number" && Number.isFinite(qtyRaw) ? qtyRaw : parsePtNumber(String(qtyRaw ?? ""));
+      const custoRaw = pickFirst(row, ["custo", "valor", "total"]) || pickKeyLike(row, ["custo", "valor", "total"]);
+      const custo = typeof custoRaw === "number" && Number.isFinite(custoRaw) ? custoRaw : parsePtNumber(String(custoRaw ?? ""));
+      const tempRaw = pickFirst(row, ["ingrediente_temporario", "temporario", "temp"]) || pickKeyLike(row, ["tempor", "temp"]);
+      const ingredienteTemporario = typeof tempRaw === "boolean" ? tempRaw : String(tempRaw ?? "").trim().toLowerCase() === "true" || String(tempRaw ?? "").trim() === "1" || String(tempRaw ?? "").trim().toLowerCase() === "sim";
+      const bubbleUserId = String(pickFirst(row, ["Created By", "created_by", "criador", "user_id", "usuario_id"]) ?? "").trim();
+
+      getIngredientesByUser(uid).set(ingredientId, {
+        ingredientId,
+        itemBubbleId,
+        quantidade: Number.isFinite(quantidade) ? quantidade : 0,
+        custo: Number.isFinite(custo) ? custo : 0,
+        ingredienteTemporario,
+        bubbleUserId,
+      });
+
+      const rowsById = getPrePreparoIngredientRowsById(uid);
+      const quantidadeLabel = formatQtyFixed3(Number.isFinite(quantidade) ? quantidade : 0);
+      const custoCents = Number.isFinite(custo) ? Math.max(0, Math.round(custo * 100)) : 0;
+      rowsById.set(ingredientId, { id: ingredientId, item: itemBubbleId, quantidade: quantidadeLabel, unidade: "Und", custoCents } as any);
+      (rowsById.get(ingredientId) as any).itemBubbleId = itemBubbleId;
+    }
+
     function handleFornecedorInfo(row: CsvObjectRow) {
       if (!enableFornecedores) return;
       const uid = resolveTargetUserId(row);
@@ -1373,6 +1426,20 @@ export async function POST(req: NextRequest) {
     const prePreparoIngredientRowByIdByUser = new Map<string, Map<string, { id: string; item: string; quantidade: string; unidade: string; custoCents: number }>>();
     const prePreparoIngredientIdsByRecipeByUser = new Map<string, Map<string, string[]>>();
     const prePreparoIngredientIdsByRecipeNameByUser = new Map<string, Map<string, string[]>>();
+    const ingredientesByUser = new Map<
+      string,
+      Map<
+        string,
+        {
+          ingredientId: string;
+          itemBubbleId: string;
+          quantidade: number;
+          custo: number;
+          ingredienteTemporario: boolean;
+          bubbleUserId: string;
+        }
+      >
+    >();
 
     const getPrePreparoRows = (uid: string) => {
       const got = prePreparoRowsByUser.get(uid);
@@ -1419,6 +1486,24 @@ export async function POST(req: NextRequest) {
       if (got) return got;
       const created = new Map<string, { id: string; item: string; quantidade: string; unidade: string; custoCents: number }>();
       prePreparoIngredientRowByIdByUser.set(uid, created);
+      return created;
+    };
+
+    const getIngredientesByUser = (uid: string) => {
+      const got = ingredientesByUser.get(uid);
+      if (got) return got;
+      const created = new Map<
+        string,
+        {
+          ingredientId: string;
+          itemBubbleId: string;
+          quantidade: number;
+          custo: number;
+          ingredienteTemporario: boolean;
+          bubbleUserId: string;
+        }
+      >();
+      ingredientesByUser.set(uid, created);
       return created;
     };
 
@@ -1488,6 +1573,17 @@ export async function POST(req: NextRequest) {
 
       const add = (ing: { id: string; item: string; quantidade: string; unidade: string; custoCents: number } | null) => {
         if (!ing || !String(ing.item ?? "").trim()) return;
+        const itemBubbleId = String((ing as any).itemBubbleId ?? "").trim() || (looksLikeId(String((ing as any).item ?? "").trim()) ? String((ing as any).item ?? "").trim() : "");
+        if (itemBubbleId) {
+          const info = itemById.get(itemBubbleId) ?? null;
+          if (info?.nome) (ing as any).item = info.nome;
+          const curUnit = String((ing as any).unidade ?? "").trim();
+          if (!curUnit || curUnit === "Und") {
+            if (info?.unidade) (ing as any).unidade = info.unidade;
+          }
+          (ing as any).itemBubbleId = itemBubbleId;
+          (ing as any).insumoId = `user:${uid}:insumo:${itemBubbleId}`;
+        }
         const key = String(ing.id || `${ing.item}|${ing.quantidade}|${ing.unidade}`).trim();
         if (seen.has(key)) return;
         seen.add(key);
@@ -1823,10 +1919,13 @@ export async function POST(req: NextRequest) {
 
       const ingredientRows = (ingredientes ?? []).map((ing) => ({
         id: String((ing as any).id ?? "").trim() || `${id}-ing-${Math.random().toString(36).slice(2)}`,
-        ingredientId: "",
+        ingredientId: String((ing as any).id ?? "").trim(),
+        itemBubbleId: String((ing as any).itemBubbleId ?? "").trim() || undefined,
+        insumoId: String((ing as any).insumoId ?? "").trim() || undefined,
         item: String((ing as any).item ?? "").trim(),
         quantidade: String((ing as any).quantidade ?? "").trim() || "0,000",
         unidade: String((ing as any).unidade ?? "").trim() || "Und",
+        custoCents: Math.max(0, Math.floor(Number((ing as any).custoCents ?? 0) || 0)),
         custoTotal: Math.max(0, (Number((ing as any).custoCents ?? 0) || 0) / 100),
       }));
 
@@ -2082,8 +2181,7 @@ export async function POST(req: NextRequest) {
     await processCsvGroups("categorias", (row) => handleCategoria(row));
     await processCsvGroups("custo_medio", (row) => handleCustoMedio(row));
     await processCsvGroups("ingredientes", (row) => {
-      handleInsumo(row);
-      handlePrePreparoIngredienteRow(row);
+      handleBubbleIngredientesRow(row);
     });
     await processCsvGroups("itens", (row) => {
       handleInsumo(row);
@@ -2118,6 +2216,36 @@ export async function POST(req: NextRequest) {
           .from("insumos_state")
           .upsert({ id: stateId, payload: { rows, categories } } as any, { onConflict: "id" });
         if (error) return json({ ok: false, error: `insumos_state:${error.message}`, stage }, { status: 500 });
+      }
+    }
+
+    if (enabledKinds.has("ingredientes")) {
+      for (const [uid, map] of ingredientesByUser.entries()) {
+        const rows = Array.from(map.values()).filter((r) => r && r.ingredientId && r.itemBubbleId);
+        if (!rows.length) continue;
+        const upserts = rows.map((r) => ({
+          supabase_user_id: uid,
+          ingredient_id: r.ingredientId,
+          item_bubble_id: r.itemBubbleId,
+          quantidade: r.quantidade,
+          custo: r.custo,
+          ingrediente_temporario: r.ingredienteTemporario,
+          bubble_user_id: r.bubbleUserId,
+        }));
+        const { error } = await supabase.from("ingredientes").upsert(upserts as any, { onConflict: "supabase_user_id,ingredient_id" });
+        if (error) {
+          const msg = String(error.message ?? "");
+          const m = msg.toLowerCase();
+          const missing =
+            m.includes("could not find the table") ||
+            (m.includes("schema cache") && m.includes("could not find the table")) ||
+            (m.includes("relation") && m.includes("does not exist"));
+          if (missing) {
+            warnings.push("missing_table:ingredientes");
+            break;
+          }
+          return json({ ok: false, error: `ingredientes:${error.message}`, stage }, { status: 500 });
+        }
       }
     }
 
@@ -2285,6 +2413,7 @@ export async function POST(req: NextRequest) {
     return json(
       {
         ok: true,
+        warnings: warnings.length ? Array.from(new Set(warnings)) : [],
         ran: {
           insumos: enableInsumos,
           fornecedores: enableFornecedores,

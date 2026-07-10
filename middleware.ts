@@ -91,6 +91,16 @@ async function isAuthenticated(req: NextRequest) {
   return false;
 }
 
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isPublicFile = /\.[^/]+$/.test(pathname);
@@ -154,11 +164,15 @@ export async function middleware(req: NextRequest) {
     try {
       const cfg = getSupabaseAuthConfig();
       const url = `${cfg.url.replace(/\/+$/, "")}/auth/v1/token?grant_type=refresh_token`;
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { apikey: cfg.anonKey, "content-type": "application/json" },
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
+      const res = await fetchWithTimeout(
+        url,
+        {
+          method: "POST",
+          headers: { apikey: cfg.anonKey, "content-type": "application/json" },
+          body: JSON.stringify({ refresh_token: refreshToken }),
+        },
+        2500,
+      );
       const data = (await res.json().catch(() => null)) as
         | { access_token?: string; refresh_token?: string; expires_in?: number }
         | null;

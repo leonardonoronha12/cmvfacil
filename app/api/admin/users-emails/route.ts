@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { isLocalDevRequest } from "../../../lib/localDevRequest";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -56,9 +57,10 @@ async function listAllAuthUsers(supabase: ReturnType<typeof getSupabaseAdmin>) {
 
 export async function GET(req: NextRequest) {
   try {
+    const isLocalDev = isLocalDevRequest(req);
     const { userId } = getUserIdFromRequest(req);
-    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
+    if (!userId && !isLocalDev) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isLocalDev && (!userId || !isAdminUserId(userId))) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -75,4 +77,3 @@ export async function GET(req: NextRequest) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

@@ -11,6 +11,31 @@ type FornecedoresStateDbRow = {
   updated_at: string;
 };
 
+export type FornecedoresStatePayload = {
+  info: FornecedorInfoMap;
+  produtos: FornecedorProdutos;
+  equivalencias: FornecedorEquivalenciasMap;
+  meta?: { source: "legacy" | "compat"; readOnly: boolean };
+};
+
+function getQaOverridesFromLocation() {
+  if (typeof window === "undefined") return { userId: "", source: "" };
+  const params = new URLSearchParams(window.location.search);
+  return {
+    userId: String(params.get("userId") ?? "").trim(),
+    source: String(params.get("source") ?? "").trim(),
+  };
+}
+
+function persistPageSource(source: "legacy" | "compat") {
+  if (typeof window === "undefined") return;
+  try {
+    const p = String(window.location.pathname ?? "").trim();
+    if (!p) return;
+    window.sessionStorage.setItem(`cmvfacil:pageSource:v1:${p}`, source);
+  } catch {}
+}
+
 function safeObj(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object") return {};
   return input as Record<string, unknown>;
@@ -18,6 +43,14 @@ function safeObj(input: unknown): Record<string, unknown> {
 
 function normName(value: string) {
   return value.trim();
+}
+
+function isStableSupplierKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return false;
+  if (s.toLowerCase().startsWith("db:")) return true;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/i.test(s);
 }
 
 function normalizeInfoMap(input: unknown): FornecedorInfoMap {
@@ -38,7 +71,8 @@ function normalizeInfoMap(input: unknown): FornecedorInfoMap {
       whatsapp: String(row.whatsapp ?? "").trim(),
       endereco: String(row.endereco ?? "").trim(),
     };
-    const fornecedorKey = fornecedorLabel.toUpperCase();
+    const inputKey = normName(String(k ?? ""));
+    const fornecedorKey = isStableSupplierKey(inputKey) ? inputKey : fornecedorLabel.toUpperCase();
     const prev = out[fornecedorKey];
     if (!prev || score(normalizedRow) >= score(prev)) out[fornecedorKey] = normalizedRow;
   }
@@ -53,7 +87,8 @@ function normalizeProdutosMap(input: unknown): FornecedorProdutos {
     if (!Array.isArray(arr)) continue;
     const items = arr.map((x) => String(x ?? "")).map(normName).filter(Boolean);
     if (!items.length) continue;
-    out[k.toUpperCase()] = Array.from(new Set(items));
+    const key = normName(String(k ?? ""));
+    out[isStableSupplierKey(key) ? key : key.toUpperCase()] = Array.from(new Set(items));
   }
   return out;
 }
@@ -81,21 +116,37 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
       });
     }
     if (!list.length) continue;
-    out[k.toUpperCase()] = list as any;
+    const key = normName(String(k ?? ""));
+    out[isStableSupplierKey(key) ? key : key.toUpperCase()] = list as any;
   }
   return out;
 }
 
-export async function loadFornecedoresStateFromSupabase() {
-  const res = await fetch(`/api/fornecedores?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-  const json = (await res.json().catch(() => null)) as { row?: FornecedoresStateDbRow | null; error?: string } | null;
+export async function loadFornecedoresStateFromSupabase(userId?: string) {
+  const override = getQaOverridesFromLocation();
+  const u = String(userId ?? "").trim() || override.userId;
+  const source = override.source;
+  const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
+  const res = await fetch(`/api/fornecedores?ts=${Date.now()}${qp}`, { method: "GET", cache: "no-store" });
+  const json = (await res.json().catch(() => null)) as
+    | { row?: FornecedoresStateDbRow | null; source?: string; readOnly?: boolean; error?: string }
+    | null;
   if (!res.ok || !json) throw new Error(json?.error || "failed_to_load");
   const row = json.row;
-  if (!row) return { info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap };
+  const sourceLabel = String(json.source ?? "").trim() === "compat" ? "compat" : "legacy";
+  persistPageSource(sourceLabel);
+  if (!row)
+    return {
+      info: {} as FornecedorInfoMap,
+      produtos: {} as FornecedorProdutos,
+      equivalencias: {} as FornecedorEquivalenciasMap,
+      meta: { source: sourceLabel, readOnly: Boolean(json.readOnly) },
+    };
   return {
     info: normalizeInfoMap(row.info),
     produtos: normalizeProdutosMap(row.produtos),
     equivalencias: normalizeEquivalenciasMap(row.equivalencias),
+    meta: { source: sourceLabel, readOnly: Boolean(json.readOnly) },
   };
 }
 

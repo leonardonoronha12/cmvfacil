@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import AppSidebar from "../components/AppSidebar";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -27,6 +28,7 @@ import { loadInventarioFromSupabase } from "../lib/inventarioSupabase";
 import { readInventarioFromStore, subscribeInventario, writeInventarioToStore, type InventarioContagem } from "../lib/inventarioStore";
 import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./lista-de-compras.module.css";
 
 type CompraRow = {
@@ -63,6 +65,57 @@ type BubbleListaComprasRow = {
   qtdCompra: number;
   tipo: string;
 };
+
+type CompatListaComprasRow = {
+  id: string;
+  bubble_id: string | null;
+  db_item_id: string;
+  itemNome: string;
+  categoria: string;
+  unidade: string;
+  fornecedor: string;
+  fornecedores: string[];
+  quantidadeSugerida: number;
+  quantidadeCompra: number;
+  quantidadeReal: number;
+  custoMedio: number;
+  custoPrevisto: number;
+  custoReal: number;
+  selected: boolean;
+  calc: {
+    startInventoryId: string | null;
+    endInventoryId: string | null;
+    startDate: string | null;
+    endDate: string | null;
+    diasCorridos: number;
+    diasEstoque: number;
+    prazoFornecedor: number;
+    estoqueInicial: number;
+    estoqueAtual: number;
+    entradas: number;
+    saidas: number;
+    consumoDiario: number;
+    consumoDiasManter: number;
+    consumoPrazoFornecedor: number;
+    sugestaoCalc: number;
+  };
+};
+
+type CompatListaComprasResponse = {
+  ok: boolean;
+  source: "compat";
+  readOnly: boolean;
+  banner?: string;
+  rows: CompatListaComprasRow[];
+  totals?: { itens: number; custoPrevisto: number; custoReal: number };
+  filters?: { startInventoryId: string | null; endInventoryId: string | null; diasEstoque: number; prazoFornecedor: number };
+  inventories?: Array<{ id: string; bubble_id: string | null; nome: string; data_contagem: string | null }>;
+  error?: string;
+};
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
 
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob);
@@ -345,8 +398,18 @@ function SortMark({ dir }: { dir: "asc" | "desc" }) {
 }
 
 export default function ListaDeComprasClient() {
+  const searchParams = useSearchParams();
+  const userIdOverride = (() => {
+    const raw = String(searchParams.get("userId") ?? "").trim();
+    return raw && isUuid(raw) ? raw : "";
+  })();
+  const sourceOverride = (() => {
+    const raw = String(searchParams.get("source") ?? "").trim().toLowerCase();
+    return raw === "compat" || raw === "legacy" ? raw : "";
+  })();
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const toastTimerRef = useRef<number | null>(null);
+  const compatFetchKeyRef = useRef<string>("");
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
@@ -356,6 +419,7 @@ export default function ListaDeComprasClient() {
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>([]);
   const [bubbleListaRows, setBubbleListaRows] = useState<BubbleListaComprasRow[]>([]);
+  const [compat, setCompat] = useState<CompatListaComprasResponse | null>(null);
   const [mode, setMode] = useState<"categoria" | "fornecedor">("categoria");
   const [categoriaFilter, setCategoriaFilter] = useState("Categoria");
   const [fornecedorFilter, setFornecedorFilter] = useState("Fornecedor");
@@ -364,11 +428,20 @@ export default function ListaDeComprasClient() {
   const [endDate, setEndDate] = useState("");
   const [diasEstoque, setDiasEstoque] = useState("7");
   const [diasEntrega, setDiasEntrega] = useState("1");
+
+  function parsePositiveInt(value: string, fallback: number) {
+    const num = Number(value.replace(/[^\d]/g, ""));
+    return Number.isFinite(num) && num > 0 ? num : fallback;
+  }
+
+  const diasEstoqueNum = parsePositiveInt(diasEstoque, 7);
+  const diasEntregaNum = parsePositiveInt(diasEntrega, 1);
   const [columnOrder, setColumnOrder] = useState<CompraTableColumn[]>(["item", "custoMedio", "consumoDiario", "estoqueFinal", "comprar"]);
   const [draggingColumn, setDraggingColumn] = useState<CompraTableColumn | null>(null);
   const [sortKey, setSortKey] = useState<CompraTableColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
@@ -389,89 +462,117 @@ export default function ListaDeComprasClient() {
   }, []);
 
   useEffect(() => {
-    setInsumos(readInsumosFromStore());
-    setEntradas(readEntradasFromStore([]));
-    setContagens(readInventarioFromStore([]));
-    let doneInsumos = false;
-    let doneFornecedores = false;
-    let doneLista = false;
-    const finalize = () => {
-      if (doneInsumos && doneFornecedores && doneLista) setIsLoadingTable(false);
-    };
-    void (async () => {
-      try {
-        const state = await loadInsumosStateFromSupabase();
-        if (state.rows.length) writeInsumosToStore(state.rows);
-        setInsumoCategorias(state.categories ?? []);
-      } catch {}
-      doneInsumos = true;
-      finalize();
-    })();
+    let cancelled = false;
+    const unsubs: Array<() => void> = [];
+
+    setIsLoadingTable(true);
+    setCompat(null);
+    setBubbleListaRows([]);
 
     void (async () => {
-      try {
-        const res = await fetch(`/api/lista-de-compras?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as { ok?: boolean; rows?: unknown[]; error?: string } | null;
-        const rows = (res.ok && json?.ok && Array.isArray(json.rows) ? (json.rows as any[]) : []) as BubbleListaComprasRow[];
+      const qp = userIdOverride ? `&userId=${encodeURIComponent(userIdOverride)}` : "";
+      const sp = sourceOverride ? `&source=${encodeURIComponent(sourceOverride)}` : "";
+      const res = await fetch(`/api/lista-de-compras?ts=${Date.now()}${qp}${sp}`, { method: "GET", cache: "no-store" }).catch(() => null);
+      const json = res ? ((await res.json().catch(() => null)) as any) : null;
+      if (cancelled) return;
+
+      const isCompat = Boolean(res?.ok && json?.ok && json?.source === "compat" && Array.isArray(json?.rows));
+      if (isCompat) {
+        setCompat(null);
+        const rows = ((json.rows as any[]) ?? [])
+          .map((r: any) => {
+            const bubbleListaId = String(r?.id ?? "").trim();
+            if (!bubbleListaId) return null;
+            return {
+              bubbleListaId,
+              bubbleItemId: String(r?.bubble_id ?? "").trim(),
+              empresaId: "",
+              itemNome: String(r?.itemNome ?? "").trim(),
+              itemMedida: String(r?.unidade ?? "").trim(),
+              qtdSugestao: typeof r?.quantidadeSugerida === "number" ? r.quantidadeSugerida : Number(r?.quantidadeSugerida ?? 0) || 0,
+              qtdCompra: typeof r?.quantidadeCompra === "number" ? r.quantidadeCompra : Number(r?.quantidadeCompra ?? 0) || 0,
+              tipo: "itens",
+            } satisfies BubbleListaComprasRow;
+          })
+          .filter(Boolean) as BubbleListaComprasRow[];
         setBubbleListaRows(rows);
-      } catch {}
-      doneLista = true;
+      }
+
+      const rows = (res?.ok && json?.ok && Array.isArray(json?.rows) ? (json.rows as any[]) : []) as BubbleListaComprasRow[];
+      if (!isCompat) setBubbleListaRows(rows);
+
+      setInsumos(readInsumosFromStore());
+      setEntradas(readEntradasFromStore([]));
+      setContagens(readInventarioFromStore([]));
+      let doneInsumos = false;
+      let doneFornecedores = false;
+      const doneLista = true;
+      const finalize = () => {
+        if (doneInsumos && doneFornecedores && doneLista) setIsLoadingTable(false);
+      };
+
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase(userIdOverride || undefined);
+          if (state.rows.length) writeInsumosToStore(state.rows);
+          setInsumoCategorias(state.categories ?? []);
+        } catch {}
+        doneInsumos = true;
+        finalize();
+      })();
+
+      void (async () => {
+        try {
+          const db = await loadEntradasFromSupabase(userIdOverride || undefined);
+          if (db.length) writeEntradasToStore(db);
+        } catch {}
+      })();
+
+      void (async () => {
+        try {
+          const db = await loadInventarioFromSupabase(userIdOverride || undefined);
+          if (db.length) writeInventarioToStore(db);
+        } catch {}
+      })();
+
+      void (async () => {
+        let nextInfo: FornecedorInfoMap = {};
+        let nextProdutos: FornecedorProdutos = {};
+        let nextEq: FornecedorEquivalenciasMap = {};
+        try {
+          const db = await loadFornecedoresStateFromSupabase(userIdOverride || undefined);
+          const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+          if (hasDb) {
+            nextInfo = db.info;
+            nextProdutos = db.produtos;
+            nextEq = db.equivalencias;
+          }
+        } catch {}
+        writeFornecedorInfoMap(nextInfo);
+        writeFornecedorProdutosMap(nextProdutos);
+        writeFornecedorEquivalenciasMap(nextEq);
+        setFornecedorInfoMap(nextInfo);
+        setFornecedorProdutosMap(nextProdutos);
+        setFornecedorEquivalenciasMap(nextEq);
+        doneFornecedores = true;
+        finalize();
+      })();
+
+      unsubs.push(subscribeInsumos((rows2) => setInsumos(rows2)));
+      unsubs.push(subscribeEntradas((rows2) => setEntradas(rows2)));
+      unsubs.push(subscribeInventario((rows2) => setContagens(rows2)));
+      unsubs.push(subscribeFornecedorInfo((rows2) => setFornecedorInfoMap(rows2)));
+      unsubs.push(subscribeFornecedorProdutos((rows2) => setFornecedorProdutosMap(rows2)));
+      unsubs.push(subscribeFornecedorEquivalencias((rows2) => setFornecedorEquivalenciasMap(rows2)));
+
       finalize();
     })();
-
-    void (async () => {
-      try {
-        const db = await loadEntradasFromSupabase();
-        if (db.length) writeEntradasToStore(db);
-      } catch {}
-    })();
-
-    void (async () => {
-      try {
-        const db = await loadInventarioFromSupabase();
-        if (db.length) writeInventarioToStore(db);
-      } catch {}
-    })();
-
-    (async () => {
-      let nextInfo: FornecedorInfoMap = {};
-      let nextProdutos: FornecedorProdutos = {};
-      let nextEq: FornecedorEquivalenciasMap = {};
-      try {
-        const db = await loadFornecedoresStateFromSupabase();
-        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
-        if (hasDb) {
-          nextInfo = db.info;
-          nextProdutos = db.produtos;
-          nextEq = db.equivalencias;
-        }
-      } catch {}
-      writeFornecedorInfoMap(nextInfo);
-      writeFornecedorProdutosMap(nextProdutos);
-      writeFornecedorEquivalenciasMap(nextEq);
-      setFornecedorInfoMap(nextInfo);
-      setFornecedorProdutosMap(nextProdutos);
-      setFornecedorEquivalenciasMap(nextEq);
-      doneFornecedores = true;
-      finalize();
-    })();
-
-    const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
-    const unsubEntradas = subscribeEntradas((rows) => setEntradas(rows));
-    const unsubInventario = subscribeInventario((rows) => setContagens(rows));
-    const unsubInfo = subscribeFornecedorInfo((rows) => setFornecedorInfoMap(rows));
-    const unsubProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
-    const unsubEquiv = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
 
     return () => {
-      unsubInsumos();
-      unsubEntradas();
-      unsubInventario();
-      unsubInfo();
-      unsubProdutos();
-      unsubEquiv();
+      cancelled = true;
+      for (const u of unsubs) u();
     };
-  }, []);
+  }, [userIdOverride]);
 
   const avgUnitCostCentsById = useMemo(() => {
     const idByKey = new Map<string, string>();
@@ -531,7 +632,41 @@ export default function ListaDeComprasClient() {
     return out;
   }, [entradas, fornecedorEquivalenciasMap, insumos]);
 
+  const latestEntriesIndex = useMemo(() => {
+    return buildLatestEntriesIndex(entradas, fornecedorInfoMap, fornecedorEquivalenciasMap, fornecedorProdutosMap);
+  }, [entradas, fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
+
+  const fornecedorFallbackIndex = useMemo(() => {
+    return buildFornecedorFallbackIndex(fornecedorInfoMap, fornecedorProdutosMap, fornecedorEquivalenciasMap);
+  }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
+
   const baseRows = useMemo(() => {
+    if (compat?.source === "compat" && Array.isArray(compat.rows)) {
+      return compat.rows.map((r) => {
+        const itemName = String(r.itemNome ?? "").trim() || "Item";
+        const categoria = String(r.categoria ?? "").trim() || "-";
+        const medida = String(r.unidade ?? "").trim() || "Und";
+        const custoMedioValue = Number(r.custoMedio ?? 0) || 0;
+        const fornecedorLabel = String(r.fornecedor ?? "-").trim() || "-";
+        return {
+          id: String(r.id),
+          item: itemName,
+          displayItem: itemName,
+          itemMetaLabel: `${categoria}${fornecedorLabel && fornecedorLabel !== "-" ? ` • ${fornecedorLabel}` : ""}`,
+          categoria,
+          medida,
+          custoMedio: custoMedioValue,
+          custoMedioLabel: formatMoney(custoMedioValue),
+          fornecedor: fornecedorLabel,
+          fornecedorMedida: medida,
+          fornecedorFator: 1,
+          consumoDiario: Number(r.calc?.consumoDiario ?? 0) || 0,
+          estoqueFinal: Number(r.calc?.estoqueAtual ?? 0) || 0,
+          comprar: Number(r.quantidadeCompra ?? 0) || 0,
+        } satisfies CompraRow;
+      });
+    }
+
     const insumoByBubbleId = new Map<string, InsumoStoreItem>();
     for (const r of insumos) {
       const id = String(r.id ?? "");
@@ -551,16 +686,21 @@ export default function ListaDeComprasClient() {
       const qtdCompra = Number(r.qtdCompra ?? 0) || 0;
       const qtdSugestao = Number(r.qtdSugestao ?? 0) || 0;
       const comprarValue = Math.max(qtdCompra > 0 ? qtdCompra : qtdSugestao, 0);
+      const itemKey = normalizeText(itemName);
+      const fornecedorFromLatest = itemKey ? latestEntriesIndex.get(itemKey)?.fornecedor ?? "" : "";
+      const fornecedorFromFallback = itemKey ? fornecedorFallbackIndex.get(itemKey) ?? "" : "";
+      const fornecedorCandidate = String(fornecedorFromLatest || fornecedorFromFallback || "-").trim() || "-";
+      const fornecedorLabel = normalizeText(fornecedorCandidate) === "sem fornecedor" ? "-" : fornecedorCandidate;
       rows.push({
         id: String(r.bubbleListaId),
         item: itemName,
         displayItem: itemName,
-        itemMetaLabel: categoria,
+        itemMetaLabel: `${categoria}${fornecedorLabel && fornecedorLabel !== "-" ? ` • ${fornecedorLabel}` : ""}`,
         categoria,
         medida,
         custoMedio: custoMedioValue,
         custoMedioLabel: formatMoney(custoMedioValue),
-        fornecedor: "-",
+        fornecedor: fornecedorLabel,
         fornecedorMedida: medida,
         fornecedorFator: 1,
         consumoDiario: 0,
@@ -569,7 +709,7 @@ export default function ListaDeComprasClient() {
       });
     }
     return rows;
-  }, [bubbleListaRows, insumos]);
+  }, [bubbleListaRows, compat, fornecedorFallbackIndex, insumos, latestEntriesIndex]);
 
   const categorias = useMemo(() => {
     const seen = new Set<string>();
@@ -582,32 +722,69 @@ export default function ListaDeComprasClient() {
       seen.add(key);
       out.push(name);
     };
-    for (const c of insumoCategorias) push(c);
-    for (const i of insumos) push(i.categoria ?? "");
+
+    if (compat?.source === "compat" && Array.isArray(compat.rows)) {
+      for (const r of compat.rows) push(String(r.categoria ?? ""));
+    } else {
+      for (const c of insumoCategorias) push(c);
+      for (const i of insumos) push(i.categoria ?? "");
+    }
+
     out.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
     return ["Categoria", ...out];
-  }, [insumoCategorias, insumos]);
+  }, [compat, insumoCategorias, insumos]);
 
   const fornecedores = useMemo(() => {
+    if (compat?.source === "compat" && Array.isArray(compat.rows)) {
+      const labels = new Set<string>();
+      for (const r of compat.rows) {
+        const primary = String(r.fornecedor ?? "").trim();
+        if (primary && primary !== "-") labels.add(primary);
+        for (const s of r.fornecedores ?? []) {
+          const v = String(s ?? "").trim();
+          if (v) labels.add(v);
+        }
+      }
+      const list = Array.from(labels).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+      return ["Fornecedor", ...list];
+    }
+
     const labels = new Set<string>();
     for (const [key, info] of Object.entries(fornecedorInfoMap)) {
-      if ((fornecedorProdutosMap[key]?.length ?? 0) > 0 || (fornecedorEquivalenciasMap[key]?.length ?? 0) > 0) {
-        const label = info.fornecedor.trim();
-        if (label) labels.add(label);
-      }
+      const label = info.fornecedor.trim();
+      if (!label) continue;
+      if (normalizeText(label) === "sem fornecedor") continue;
+      labels.add(label);
     }
     const list = Array.from(labels).sort((a, b) => a.localeCompare(b, "pt-BR"));
     return ["Fornecedor", ...list];
-  }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
+  }, [compat, fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
 
   const inventoryOptions = useMemo(() => {
-    const out: Array<{ iso: string; label: string; t: number }> = [];
+    const out: Array<{ value: string; iso: string; label: string; t: number }> = [];
+
+    if (compat?.source === "compat" && Array.isArray(compat.inventories)) {
+      for (const inv of compat.inventories) {
+        const id = String(inv?.id ?? "").trim();
+        const d = String(inv?.data_contagem ?? "").trim();
+        if (!id || !d) continue;
+        const t = Date.parse(d);
+        if (!Number.isFinite(t)) continue;
+        const date = new Date(t);
+        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+        const label = date.toLocaleDateString("pt-BR");
+        out.push({ value: id, iso, label, t });
+      }
+      out.sort((a, b) => b.t - a.t);
+      return out;
+    }
+
     for (const c of contagens) {
       const t = parseDateLoose(c.data);
       if (!t) continue;
       const date = new Date(t);
       const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-      out.push({ iso, label: c.data, t });
+      out.push({ value: iso, iso, label: c.data, t });
     }
     out.sort((a, b) => b.t - a.t);
     const seen = new Set<string>();
@@ -616,18 +793,82 @@ export default function ListaDeComprasClient() {
       seen.add(option.iso);
       return true;
     });
-  }, [contagens]);
+  }, [compat, contagens]);
 
   const periodOptions = useMemo(() => [...inventoryOptions].sort((a, b) => b.t - a.t), [inventoryOptions]);
 
-  const effectiveStartDate = startDate || periodOptions[periodOptions.length - 1]?.iso || "";
-  const effectiveEndDate = endDate || periodOptions[0]?.iso || "";
+  const selectedStartOption = periodOptions.find((o) => o.value === startDate) ?? periodOptions[periodOptions.length - 1] ?? null;
+  const selectedEndOption = periodOptions.find((o) => o.value === endDate) ?? periodOptions[0] ?? null;
+
+  const effectiveStartDate = selectedStartOption?.iso ?? "";
+  const effectiveEndDate = selectedEndOption?.iso ?? "";
 
   useEffect(() => {
     if (!periodOptions.length) return;
-    setStartDate((prev) => (periodOptions.some((option) => option.iso === prev) ? prev : periodOptions[periodOptions.length - 1]!.iso));
-    setEndDate((prev) => (periodOptions.some((option) => option.iso === prev) ? prev : periodOptions[0]!.iso));
-  }, [periodOptions]);
+    if (compat?.source === "compat") {
+      const filters = compat.filters;
+      if (filters) {
+        const fallbackStart =
+          filters.startInventoryId && periodOptions.some((o) => o.value === filters.startInventoryId)
+            ? filters.startInventoryId
+            : periodOptions[periodOptions.length - 1]!.value;
+        const fallbackEnd =
+          filters.endInventoryId && periodOptions.some((o) => o.value === filters.endInventoryId) ? filters.endInventoryId : periodOptions[0]!.value;
+      setStartDate((prev) => (periodOptions.some((o) => o.value === prev) ? prev : fallbackStart));
+      setEndDate((prev) => (periodOptions.some((o) => o.value === prev) ? prev : fallbackEnd));
+      return;
+      }
+    }
+    setStartDate((prev) => (periodOptions.some((o) => o.value === prev) ? prev : periodOptions[periodOptions.length - 1]!.value));
+    setEndDate((prev) => (periodOptions.some((o) => o.value === prev) ? prev : periodOptions[0]!.value));
+  }, [compat, periodOptions]);
+
+  useEffect(() => {
+    if (compat?.source !== "compat") return;
+    if (!startDate || !endDate) return;
+
+    const startInventoryId = startDate;
+    const endInventoryId = endDate;
+    const desiredKey = `start=${startInventoryId}&end=${endInventoryId}&dias=${diasEstoqueNum}&prazo=${diasEntregaNum}`;
+    if (compatFetchKeyRef.current === desiredKey) return;
+
+    const current = compat.filters;
+    if (
+      current &&
+      current.startInventoryId === startInventoryId &&
+      current.endInventoryId === endInventoryId &&
+      current.diasEstoque === diasEstoqueNum &&
+      current.prazoFornecedor === diasEntregaNum
+    ) {
+      compatFetchKeyRef.current = desiredKey;
+      return;
+    }
+
+    let cancelled = false;
+    compatFetchKeyRef.current = desiredKey;
+    setIsLoadingTable(true);
+
+    void (async () => {
+      const qp = userIdOverride ? `&userId=${encodeURIComponent(userIdOverride)}` : "";
+      const sp = sourceOverride ? `&source=${encodeURIComponent(sourceOverride)}` : "";
+      const url = `/api/lista-de-compras?ts=${Date.now()}${qp}${sp}&startInventoryId=${encodeURIComponent(startInventoryId)}&endInventoryId=${encodeURIComponent(
+        endInventoryId,
+      )}&diasEstoque=${encodeURIComponent(String(diasEstoqueNum))}&prazoFornecedor=${encodeURIComponent(String(diasEntregaNum))}`;
+      const res = await fetch(url, { method: "GET", cache: "no-store" }).catch(() => null);
+      const json = res ? ((await res.json().catch(() => null)) as any) : null;
+      if (cancelled) return;
+      if (res?.ok && json?.ok && json?.source === "compat" && Array.isArray(json?.rows)) {
+        setCompat(json as CompatListaComprasResponse);
+      } else if (json?.error) {
+        showToast(String(json.error), "error", 8000);
+      }
+      setIsLoadingTable(false);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [compat, diasEntregaNum, diasEstoqueNum, endDate, startDate, userIdOverride]);
 
   const rows = useMemo(() => {
     const search = query.trim().toLowerCase();
@@ -691,6 +932,24 @@ export default function ListaDeComprasClient() {
     return decorated.map((entry) => entry.row);
   }, [baseRows, categoriaFilter, diasEntrega, diasEstoque, estoqueFinalMap, fornecedorFilter, mode, query, sortDir, sortKey]);
 
+  const groupedRows = useMemo(() => {
+    const out: Array<{ key: string; rows: CompraRow[] }> = [];
+    const getKey = (row: CompraRow) => {
+      if (mode === "fornecedor") return String(row.fornecedor ?? "").trim() || "-";
+      return String(row.categoria ?? "").trim() || "Sem categoria";
+    };
+    for (const row of rows) {
+      const k = getKey(row);
+      const last = out[out.length - 1] ?? null;
+      if (!last || last.key !== k) {
+        out.push({ key: k, rows: [row] });
+      } else {
+        last.rows.push(row);
+      }
+    }
+    return out;
+  }, [mode, rows]);
+
   useEffect(() => {
     const next: Record<string, string> = {};
     for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
@@ -698,10 +957,7 @@ export default function ListaDeComprasClient() {
   }, [baseRows]);
 
   const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds[row.id]);
-  const isPeriodReady =
-    inventoryOptions.length > 0 &&
-    inventoryOptions.some((option) => option.iso === effectiveStartDate) &&
-    inventoryOptions.some((option) => option.iso === effectiveEndDate);
+  const isPeriodReady = inventoryOptions.length > 0 && Boolean(selectedStartOption) && Boolean(selectedEndOption);
 
   const hasAnySelected = useMemo(() => {
     for (const row of rows) {
@@ -943,6 +1199,7 @@ export default function ListaDeComprasClient() {
   }
 
   function toggleSelectAll() {
+    if (isReadOnly) return;
     setSelectedIds((prev) => {
       const next = { ...prev };
       if (allVisibleSelected) {
@@ -955,6 +1212,7 @@ export default function ListaDeComprasClient() {
   }
 
   function toggleRow(id: string) {
+    if (isReadOnly) return;
     setSelectedIds((prev) => ({ ...prev, [id]: !prev[id] }));
   }
 
@@ -1001,17 +1259,78 @@ export default function ListaDeComprasClient() {
   })].join(" ");
 
   function updateEstoqueFinal(id: string, value: string) {
+    if (isReadOnly) return;
     const cleaned = value.replace(/[^\d,]/g, "");
     setEstoqueFinalMap((prev) => ({ ...prev, [id]: cleaned }));
   }
+  const isCompatMode = compat?.source === "compat";
+  const isReadOnly = Boolean(isCompatMode && compat?.readOnly);
 
-  function parsePositiveInt(value: string, fallback: number) {
-    const num = Number(value.replace(/[^\d]/g, ""));
-    return Number.isFinite(num) && num > 0 ? num : fallback;
-  }
+  const qaUi = useMemo(() => {
+    const renderedRows = rows.map((row) => {
+      const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+      const consumoFornecedor = row.consumoDiario / fornecedorFactor;
+      const custoFornecedor = row.custoMedio * fornecedorFactor;
+      const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
+      const comprarValue = (() => {
+        if (isCompatMode) {
+          const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
+          return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
+        }
+        const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
+        const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
+        const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
+        const compraFornecedor = comprarCalculado / fornecedorFactor;
+        return formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
+      })();
+      const consumoValue = mode === "fornecedor" ? consumoFornecedor : row.consumoDiario;
+      const custoValue = mode === "fornecedor" ? custoFornecedor : row.custoMedio;
+      return {
+        id: row.id,
+        displayItem: row.displayItem,
+        itemMetaLabel: row.itemMetaLabel,
+        categoria: row.categoria,
+        fornecedor: row.fornecedor,
+        medida: row.medida,
+        custoMedio: row.custoMedio,
+        custoMedioLabel: `R$${(custoValue || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        consumoDiarioValue: Number.isFinite(consumoValue) ? consumoValue : 0,
+        estoqueFinalInput: estoqueFinalValue,
+        estoqueFinalValue: row.estoqueFinal,
+        comprarValue,
+        selected: Boolean(selectedIds[row.id]),
+        source: isCompatMode ? "compat" : "legacy",
+      };
+    });
 
-  const diasEstoqueNum = parsePositiveInt(diasEstoque, 7);
-  const diasEntregaNum = parsePositiveInt(diasEntrega, 1);
+    return {
+      source: { mode: isCompatMode ? "compat" : "legacy", bubbleListaRowsCount: bubbleListaRows.length, baseRowsCount: baseRows.length, compatRowsCount: compat?.rows?.length ?? 0 },
+      filters: { mode, categoriaFilter, fornecedorFilter, query, startDate: effectiveStartDate, endDate: effectiveEndDate, diasEstoque: diasEstoqueNum, diasEntrega: diasEntregaNum },
+      sort: { sortKey, sortDir, columnOrder },
+      selection: { selectedCount: Object.values(selectedIds).filter(Boolean).length, allVisibleSelected },
+      rendered: { rowCount: rows.length, rows: renderedRows },
+    };
+  }, [
+    allVisibleSelected,
+    baseRows.length,
+    bubbleListaRows.length,
+    categoriaFilter,
+    columnOrder,
+    diasEntregaNum,
+    diasEstoqueNum,
+    effectiveEndDate,
+    effectiveStartDate,
+    fornecedorFilter,
+    isCompatMode,
+    mode,
+    query,
+    rows,
+    selectedIds,
+    sortDir,
+    sortKey,
+    estoqueFinalMap,
+    compat?.rows?.length,
+  ]);
 
   return (
     <div className={dash.dashboard}>
@@ -1040,14 +1359,18 @@ export default function ListaDeComprasClient() {
             </div>
           </section>
 
+          <QaModePanel screen="lista-de-compras" ui={qaUi} />
+
           <section className={styles.infoBanner}>
             <span className={styles.infoIcon}>
               <InfoIcon />
             </span>
             <span>
-              {inventoryOptions.length
-                ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
-                : "Cadastre inventários para liberar o período e montar sua lista."}
+              {isCompatMode
+                ? compat?.banner || "Fonte: Banco compatível Bubble"
+                : inventoryOptions.length
+                  ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
+                  : "Cadastre inventários para liberar o período e montar sua lista."}
             </span>
           </section>
 
@@ -1091,10 +1414,10 @@ export default function ListaDeComprasClient() {
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <select className={styles.dateSelect} value={effectiveStartDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
+                    <select className={styles.dateSelect} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
                       {periodOptions.map((o) => (
-                        <option key={o.iso} value={o.iso}>
+                        <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
                       ))}
@@ -1107,10 +1430,10 @@ export default function ListaDeComprasClient() {
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <select className={styles.dateSelect} value={effectiveEndDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
+                    <select className={styles.dateSelect} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
                       {periodOptions.map((o) => (
-                        <option key={o.iso} value={o.iso}>
+                        <option key={o.value} value={o.value}>
                           {o.label}
                         </option>
                       ))}
@@ -1157,7 +1480,7 @@ export default function ListaDeComprasClient() {
             ) : null}
             <div className={styles.tableHeader} style={{ gridTemplateColumns }}>
               <label className={styles.checkCell}>
-                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} disabled={isReadOnly} />
               </label>
               {columnOrder.map((column) => {
                 const label =
@@ -1192,68 +1515,101 @@ export default function ListaDeComprasClient() {
               })}
             </div>
 
-            <div className={styles.tableBody}>
+            <div className={styles.tableBody} data-qa-grid="lista-de-compras">
               {rows.length ? (
-                rows.map((row) => {
-                  const estoqueFinalValue = estoqueFinalMap[row.id] ?? "0,000";
-                  const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
-                  const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
-                  const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
-                  const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
-                  const compraFornecedor = comprarCalculado / fornecedorFactor;
-                  const consumoFornecedor = row.consumoDiario / fornecedorFactor;
-                  const custoFornecedor = row.custoMedio * fornecedorFactor;
-                  const comprarValue = formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
+                groupedRows.map((group) => {
+                  const collapsed = Boolean(collapsedGroups[group.key]);
                   return (
-                    <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }}>
-                      <label className={styles.checkCell}>
-                        <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} />
-                      </label>
-                      {columnOrder.map((column) => {
-                        if (column === "item") {
-                          return (
-                            <div key={column} className={styles.itemCell}>
-                              <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                {row.displayItem}
-                              </Link>
-                              <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
-                            </div>
-                          );
-                        }
-                        if (column === "custoMedio") {
-                          return (
-                            <div key={column} className={styles.costCell}>
-                              <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
-                              {mode === "fornecedor" ? <div className={styles.costSub}>{row.custoMedioLabel}</div> : null}
-                            </div>
-                          );
-                        }
-                        if (column === "consumoDiario") {
-                          return (
-                            <div key={column} className={styles.measureStack}>
-                              <div className={styles.measureCell}>
-                                <span className={styles.valuePlain}>{formatDecimalUpTo3(mode === "fornecedor" ? consumoFornecedor : row.consumoDiario)}</span>
-                                <span className={styles.unitPlain}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
+                    <div key={group.key} className={styles.groupBlock} data-qa-group-key={group.key}>
+                      <button
+                        type="button"
+                        className={styles.groupHeaderBtn}
+                        onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                      >
+                        <span className={styles.groupTitle}>{group.key}</span>
+                        <span className={styles.groupMeta}>{collapsed ? "Expandir" : "Recolher"}</span>
+                      </button>
+                      {collapsed
+                        ? null
+                        : group.rows.map((row) => {
+                            const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+                            const consumoFornecedor = row.consumoDiario / fornecedorFactor;
+                            const custoFornecedor = row.custoMedio * fornecedorFactor;
+                            const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
+                            const comprarValue = (() => {
+                              if (isCompatMode) {
+                                const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
+                                return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
+                              }
+                              const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
+                              const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
+                              const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
+                              const compraFornecedor = comprarCalculado / fornecedorFactor;
+                              return formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
+                            })();
+                            return (
+                              <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={row.id}>
+                                <label className={styles.checkCell}>
+                                  <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} disabled={isReadOnly} />
+                                </label>
+                                {columnOrder.map((column) => {
+                                  if (column === "item") {
+                                    return (
+                                      <div key={column} className={styles.itemCell}>
+                                        {isCompatMode ? (
+                                          <div className={styles.itemName}>{row.displayItem}</div>
+                                        ) : (
+                                          <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
+                                            {row.displayItem}
+                                          </Link>
+                                        )}
+                                        <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                                      </div>
+                                    );
+                                  }
+                                  if (column === "custoMedio") {
+                                    return (
+                                      <div key={column} className={styles.costCell}>
+                                        <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
+                                        {mode === "fornecedor" ? <div className={styles.costSub}>{row.custoMedioLabel}</div> : null}
+                                      </div>
+                                    );
+                                  }
+                                  if (column === "consumoDiario") {
+                                    return (
+                                      <div key={column} className={styles.measureStack}>
+                                        <div className={styles.measureCell}>
+                                          <span className={styles.valuePlain}>{formatDecimalUpTo3(mode === "fornecedor" ? consumoFornecedor : row.consumoDiario)}</span>
+                                          <span className={styles.unitPlain}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
+                                        </div>
+                                        {mode === "fornecedor" ? <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div> : null}
+                                      </div>
+                                    );
+                                  }
+                                  if (column === "estoqueFinal") {
+                                    return (
+                                      <div key={column} className={styles.measureCell}>
+                                        <input
+                                          className={styles.stockInput}
+                                          value={estoqueFinalValue}
+                                          onChange={(e) => updateEstoqueFinal(row.id, e.target.value)}
+                                          inputMode="decimal"
+                                          readOnly={isCompatMode || isReadOnly}
+                                        />
+                                        <span className={styles.unitTag}>{row.medida}</span>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div key={column} className={styles.measureCell}>
+                                      <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
+                                      <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              {mode === "fornecedor" ? <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div> : null}
-                            </div>
-                          );
-                        }
-                        if (column === "estoqueFinal") {
-                          return (
-                            <div key={column} className={styles.measureCell}>
-                              <input className={styles.stockInput} value={estoqueFinalValue} onChange={(e) => updateEstoqueFinal(row.id, e.target.value)} inputMode="decimal" />
-                              <span className={styles.unitTag}>{row.medida}</span>
-                            </div>
-                          );
-                        }
-                        return (
-                          <div key={column} className={styles.measureCell}>
-                            <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
-                            <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
-                          </div>
-                        );
-                      })}
+                            );
+                          })}
                     </div>
                   );
                 })

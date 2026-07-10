@@ -24,10 +24,11 @@ import {
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
-import { deleteEntradaFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
+import { deleteEntradaFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./entradas.module.css";
 
 type EntradaRow = {
@@ -431,6 +432,7 @@ function IconPlusCircle() {
 
 export default function EntradasClient() {
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [query, setQuery] = useState("");
   const [dateStart, setDateStart] = useState("");
   const [dateEnd, setDateEnd] = useState("");
@@ -498,6 +500,8 @@ export default function EntradasClient() {
   const fornecedoresSaveErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const isReadOnly = Boolean(sourceMeta.readOnly);
+  const isCompatSource = sourceMeta.source === "compat";
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -573,6 +577,41 @@ export default function EntradasClient() {
     });
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+
+  const qaUi = useMemo(() => {
+    return {
+      meta: sourceMeta,
+      filters: { query, dateStart, dateEnd },
+      sort: { sortKey, sortDir, columnOrder },
+      rendered: {
+        rowsCount: visible.length,
+        rows: visible.map((r) => ({
+          id: r.id,
+          numero: r.numero,
+          dataLancamento: r.dataLancamento,
+          fornecedor: resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap),
+          valorNota: r.valorNota,
+          responsavel: resolveResponsavelDisplay(r.responsavel, currentUserEmail),
+          dataCriacao: r.dataCriacao,
+          itens: r.itens,
+        })),
+      },
+      details: visible.map((r) => ({
+        id: r.id,
+        numero: r.numero,
+        itensNota: (r.itensNota ?? []).map((it) => ({
+          id: it.id,
+          itemId: (it as any)?.itemId ?? undefined,
+          nome: it.nome,
+          quantidadeLabel: it.quantidadeLabel,
+          custoUnitarioLabel: it.custoUnitarioLabel,
+          subtotalLabel: it.subtotalLabel,
+          unidade: (it as any)?.unidade ?? undefined,
+          ocultarCmv: Boolean((it as any)?.ocultarCmv),
+        })),
+      })),
+    };
+  }, [columnOrder, currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, sortDir, sortKey, sourceMeta, visible]);
 
   function toggleSort(key: EntradaTableColumn) {
     if (sortKey !== key) {
@@ -775,6 +814,10 @@ export default function EntradasClient() {
   }, [customFornecedores, fornecedorInfoMap, rows]);
 
   function openNewModal() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setNewFornecedor("");
     setNewDataReceb(formatDateLabelPT(new Date()));
     setIsRecebCalendarOpen(false);
@@ -783,6 +826,10 @@ export default function EntradasClient() {
   }
 
   function confirmNew() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedor = newFornecedor.trim();
     const dataReceb = normalizeDateLabelPT(newDataReceb);
     if (!fornecedor || !dataReceb) {
@@ -877,9 +924,10 @@ export default function EntradasClient() {
   useEffect(() => {
     (async () => {
       try {
-        const dbRows = await loadEntradasFromSupabase();
-        if (dbRows[0]) {
-          setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
+        const db = await loadEntradasStateFromSupabase();
+        if ((db as any)?.meta) setSourceMeta((db as any).meta);
+        if (db.rows[0]) {
+          setRows(db.rows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
           rowsReadyRef.current = true;
           setIsLoadingTable(false);
           return;
@@ -938,6 +986,7 @@ export default function EntradasClient() {
 
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
+    if (isReadOnly) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
@@ -946,9 +995,10 @@ export default function EntradasClient() {
         window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
       });
     }, 450);
-  }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap]);
+  }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     const current = readFornecedorInfoMap();
     const next: FornecedorInfoMap = { ...current };
     let changed = false;
@@ -964,9 +1014,10 @@ export default function EntradasClient() {
     for (const r of rows) addIfMissing((r as any)?.fornecedor);
     for (const f of customFornecedores) addIfMissing(f);
     if (changed) writeFornecedorInfoMap(next);
-  }, [customFornecedores, rows]);
+  }, [customFornecedores, isReadOnly, rows]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     const next: FornecedorProdutos = { ...fornecedorProdutosMap };
     let changed = false;
     for (const r of rows) {
@@ -992,7 +1043,7 @@ export default function EntradasClient() {
     if (!changed) return;
     setFornecedorProdutosMap(next);
     writeFornecedorProdutosMap(next);
-  }, [fornecedorProdutosMap, rows]);
+  }, [fornecedorProdutosMap, isReadOnly, rows]);
 
   useEffect(() => {
     const qty = parsePtNumber(detailQty);
@@ -1019,6 +1070,10 @@ export default function EntradasClient() {
   }, [isItemMenuOpen]);
 
   function confirmAddFornecedor() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const name = addFornecedorName.trim();
     if (!name) {
       showToast("Informe o nome do fornecedor.", "error");
@@ -1053,6 +1108,10 @@ export default function EntradasClient() {
   }
 
   function openEditModal(row: EntradaRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setEditingId(row.id);
     setDraftFornecedor(row.fornecedor);
     setDraftDataLancamento(row.dataLancamento);
@@ -1063,6 +1122,10 @@ export default function EntradasClient() {
   }
 
   function confirmEdit() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const id = editingId;
     if (!id) return;
     const dataLancamento = normalizeDateLabelPT(draftDataLancamento);
@@ -1081,12 +1144,20 @@ export default function EntradasClient() {
   }
 
   function openDeleteModal(row: EntradaRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setDeletingId(row.id);
     setDeletingDate(formatDateNumericLoose(row.dataLancamento));
     setIsDeleteOpen(true);
   }
 
   function confirmDelete() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const id = deletingId;
     if (!id) return;
     setRows((prev) => prev.filter((r) => r.id !== id));
@@ -1108,6 +1179,10 @@ export default function EntradasClient() {
   }
 
   function openFornecedorProdutosModal() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
     if (!fornecedorRaw) return;
     setFornecedorModalKey(fornecedorRaw.toUpperCase());
@@ -1119,6 +1194,10 @@ export default function EntradasClient() {
   }
 
   function openConfigurarVinculacao(nomeNaNota: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedorKey = (fornecedorModalKey || (detailsRow?.fornecedor ?? "")).trim().toUpperCase();
     const name = nomeNaNota.trim();
     if (!fornecedorKey) return;
@@ -1131,6 +1210,10 @@ export default function EntradasClient() {
   }
 
   function addProdutoToFornecedor(nome: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedor = (fornecedorModalKey ?? "").trim().toUpperCase();
     const item = nome.trim();
     if (!fornecedor || !item) return;
@@ -1144,6 +1227,10 @@ export default function EntradasClient() {
   }
 
   function removeProdutoFromFornecedor(nome: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedor = (fornecedorModalKey ?? "").trim().toUpperCase();
     const item = nome.trim();
     if (!fornecedor || !item) return;
@@ -1164,6 +1251,10 @@ export default function EntradasClient() {
   }
 
   function openAddItemFornecedor() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setMapNomeNota("");
     setMapUnidadeNota("Und");
     setMapInsumoEq((insumosStore[0]?.item ?? "").trim());
@@ -1172,6 +1263,10 @@ export default function EntradasClient() {
   }
 
   function confirmAddItemFornecedor() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
     if (!fornecedor) return;
     const nomeNaNota = mapNomeNota.trim();
@@ -1211,6 +1306,10 @@ export default function EntradasClient() {
   }
 
   function confirmAddNotaItem() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const id = detailsId;
     if (!id) return;
     const nome = normalizeNotaItemName(detailItemName);
@@ -1268,6 +1367,10 @@ export default function EntradasClient() {
   }
 
   function deleteNotaItem(itemId: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const id = detailsId;
     if (!id) return;
     setRows((prev) =>
@@ -1300,6 +1403,7 @@ export default function EntradasClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
+        <QaModePanel screen="entradas" ui={qaUi} />
         <section className={styles.header}>
           <div className={styles.headerIcon}>
             <IconEntrada />
@@ -1311,6 +1415,29 @@ export default function EntradasClient() {
             </p>
           </div>
         </section>
+
+        {isCompatSource ? (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 14,
+              padding: "10px 12px",
+              borderRadius: 12,
+              background: "#eef6ff",
+              border: "1px solid #cfe6ff",
+              color: "#1b3a57",
+              fontSize: 13,
+              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>Fonte: Banco compatível Bubble</span>
+            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+          </div>
+        ) : null}
 
         <section className={styles.toolbar}>
           <div className={styles.search}>
@@ -1539,7 +1666,12 @@ export default function EntradasClient() {
           <button
             type="button"
             className={styles.primaryBtn}
+            disabled={isReadOnly}
             onClick={() => {
+              if (isReadOnly) {
+                showToast("Modo somente leitura.", "error");
+                return;
+              }
               openNewModal();
             }}
           >
@@ -1548,7 +1680,7 @@ export default function EntradasClient() {
           </button>
         </section>
 
-        <section className={styles.tableCard} style={{ position: "relative" }}>
+        <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="entradas">
           {isLoadingTable ? (
             <div className={dash.loadingOverlay}>
               <LoadingSpinner />
@@ -1589,7 +1721,7 @@ export default function EntradasClient() {
             <div className={styles.thActions}>Ações</div>
           </div>
 
-          <div className={styles.tableBody}>
+          <div className={styles.tableBody} data-qa-grid="entradas:rows">
             {!visible.length ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhuma nota cadastrada</div>
@@ -1607,6 +1739,8 @@ export default function EntradasClient() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter") openDetailsModal(r);
                   }}
+                  data-qa-grid-row
+                  data-qa-row-id={r.id}
                 >
                 {columnOrder.map((column) => (
                   <div key={column} className={styles.tableCellWrap}>
@@ -1623,8 +1757,13 @@ export default function EntradasClient() {
                     aria-label="Editar"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openEditModal(r);
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openEditModal(r);
                     }}
+                  disabled={isReadOnly}
                   >
                     <IconPencil />
                   </button>
@@ -1634,8 +1773,13 @@ export default function EntradasClient() {
                     aria-label="Excluir"
                     onClick={(e) => {
                       e.stopPropagation();
-                      openDeleteModal(r);
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openDeleteModal(r);
                     }}
+                  disabled={isReadOnly}
                   >
                     <IconTrash />
                   </button>
@@ -1862,7 +2006,7 @@ export default function EntradasClient() {
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={!draftDataLancamento.trim()} onClick={confirmEdit}>
+                <button type="button" className={styles.saveBtn} disabled={isReadOnly || !draftDataLancamento.trim()} onClick={confirmEdit}>
                   Salvar edição
                 </button>
               </div>
@@ -1890,7 +2034,7 @@ export default function EntradasClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDelete}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDelete} disabled={isReadOnly}>
                   Excluir
                 </button>
                 <button
@@ -1921,7 +2065,7 @@ export default function EntradasClient() {
 
               <div className={styles.detailsBody}>
                 <aside className={styles.detailsSide}>
-                  <button type="button" className={styles.sideRowBtn} onClick={openFornecedorProdutosModal}>
+                  <button type="button" className={styles.sideRowBtn} onClick={openFornecedorProdutosModal} disabled={isReadOnly}>
                     <div className={styles.sideIcon} aria-hidden>
                       <IconTruck />
                     </div>
@@ -2038,6 +2182,7 @@ export default function EntradasClient() {
                               <button
                                 type="button"
                                 className={styles.itemAddBtn}
+                                disabled={isReadOnly}
                                 onClick={() => {
                                   setIsItemMenuOpen(false);
                                   openAddItemFornecedor();
@@ -2048,6 +2193,7 @@ export default function EntradasClient() {
                               <button
                                 type="button"
                                 className={styles.itemManageBtn}
+                                disabled={isReadOnly}
                                 onClick={() => {
                                   setIsItemMenuOpen(false);
                                   openFornecedorProdutosModal();
@@ -2147,7 +2293,7 @@ export default function EntradasClient() {
                         type="button"
                         className={canAddNotaItem ? `${styles.plusBtn} ${styles.plusBtnOn}` : styles.plusBtn}
                         aria-label="Adicionar item"
-                        disabled={!canAddNotaItem}
+                        disabled={isReadOnly || !canAddNotaItem}
                         onClick={confirmAddNotaItem}
                       >
                         <IconPlusCircle />
@@ -2159,10 +2305,10 @@ export default function EntradasClient() {
                     <div className={styles.itemsDividerIcon}>⌄⌄</div>
                   </div>
 
-                  <div className={styles.itemsList}>
+                  <div className={styles.itemsList} data-qa-grid="entradas:itens">
                     {(detailsRow.itensNota ?? []).map((it) => (
-                      <div key={it.id} className={styles.itemsRow}>
-                        <div className={styles.itemsNameWrap}>
+                      <div key={it.id} className={styles.itemsRow} data-qa-grid-row data-qa-row-id={it.id}>
+                        <div className={styles.itemsNameWrap} data-qa-grid-cell>
                           <div className={styles.itemsName}>{resolveNotaItemDisplayName(it, insumosById)}</div>
                           <div className={styles.itemsEq}>
                             {(() => {
@@ -2175,7 +2321,7 @@ export default function EntradasClient() {
                             })()}
                           </div>
                         </div>
-                        <div className={styles.itemsQty}>
+                        <div className={styles.itemsQty} data-qa-grid-cell>
                           {(() => {
                             const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
                             const nome = resolveNotaItemDisplayName(it, insumosById);
@@ -2195,7 +2341,7 @@ export default function EntradasClient() {
                             );
                           })()}
                         </div>
-                        <div className={styles.itemsPrice}>
+                        <div className={styles.itemsPrice} data-qa-grid-cell>
                           <div className={styles.itemsSubtotal}>{it.subtotalLabel}</div>
                           <div className={styles.itemsUnitCost}>
                             {(() => {
@@ -2214,7 +2360,7 @@ export default function EntradasClient() {
                             })()}
                           </div>
                         </div>
-                        <button type="button" className={styles.itemsTrash} aria-label="Remover item" onClick={() => deleteNotaItem(it.id)}>
+                        <button type="button" className={styles.itemsTrash} aria-label="Remover item" onClick={() => deleteNotaItem(it.id)} disabled={isReadOnly}>
                           <IconTrash />
                         </button>
                       </div>
@@ -2433,7 +2579,7 @@ export default function EntradasClient() {
                 <button
                   type="button"
                   className={styles.saveBtn}
-                  disabled={isCreatingNota || !newFornecedor.trim() || !newDataReceb.trim()}
+                  disabled={isReadOnly || isCreatingNota || !newFornecedor.trim() || !newDataReceb.trim()}
                   onClick={confirmNew}
                 >
                   {isCreatingNota ? "Criando..." : "Criar nota"}
@@ -2496,7 +2642,7 @@ export default function EntradasClient() {
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={!addFornecedorName.trim()} onClick={confirmAddFornecedor}>
+                <button type="button" className={styles.saveBtn} disabled={isReadOnly || !addFornecedorName.trim()} onClick={confirmAddFornecedor}>
                   Cadastrar
                 </button>
               </div>
@@ -2555,7 +2701,12 @@ export default function EntradasClient() {
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsAddFornecedorItemOpen(false)}>
                   Cancelar
                 </button>
-                <button type="button" className={styles.confirmSave} disabled={!mapNomeNota.trim() || !mapInsumoEq.trim()} onClick={confirmAddItemFornecedor}>
+                <button
+                  type="button"
+                  className={styles.confirmSave}
+                  disabled={isReadOnly || !mapNomeNota.trim() || !mapInsumoEq.trim()}
+                  onClick={confirmAddItemFornecedor}
+                >
                   Salvar
                 </button>
               </div>

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
+import { QaModePanel } from "../lib/qaMode";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
@@ -13,7 +14,7 @@ import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { loadPrePreparoFromSupabase, savePrePreparoToSupabase } from "../lib/prePreparoSupabase";
+import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
@@ -651,6 +652,17 @@ export default function PrePreparoClient() {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>([]);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
+    if (typeof window === "undefined") return { source: "legacy", readOnly: false };
+    const params = new URLSearchParams(window.location.search);
+    const src = String(params.get("source") ?? "").trim().toLowerCase();
+    if (src === "compat") return { source: "compat", readOnly: true };
+    return { source: "legacy", readOnly: false };
+  });
+  const [compatRows, setCompatRows] = useState<PrePreparoCompatRow[]>([]);
+  const [selectedCompatId, setSelectedCompatId] = useState<string | null>(null);
+  const isCompatSource = sourceMeta.source === "compat";
+  const isReadOnly = Boolean(sourceMeta.readOnly);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
   const [detailsRecipeId, setDetailsRecipeId] = useState<string | null>(null);
@@ -675,9 +687,6 @@ export default function PrePreparoClient() {
   const [etiquetasResponsavelFilter, setEtiquetasResponsavelFilter] = useState("Responsável");
   const [etiquetasSortMode, setEtiquetasSortMode] = useState<"Mais Antigo (Validade)" | "Mais Novo (Validade)">("Mais Antigo (Validade)");
   const [isSyncingDetails, setIsSyncingDetails] = useState(false);
-  const [isBubbleCredsOpen, setIsBubbleCredsOpen] = useState(false);
-  const [bubbleBaseUrlDraft, setBubbleBaseUrlDraft] = useState("");
-  const [bubbleTokenDraft, setBubbleTokenDraft] = useState("");
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -726,141 +735,18 @@ export default function PrePreparoClient() {
     router.push("/pre-preparo");
   }
 
-  function openBubbleCredsModal() {
-    try {
-      const savedBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-      const savedToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      if (savedBaseUrl && !bubbleBaseUrlDraft) setBubbleBaseUrlDraft(savedBaseUrl);
-      if (savedToken && !bubbleTokenDraft) setBubbleTokenDraft(savedToken);
-    } catch {}
-    setIsBubbleCredsOpen(true);
-  }
-
-  function saveBubbleCredsAndSync() {
-    const baseUrl = bubbleBaseUrlDraft.trim();
-    const token = bubbleTokenDraft.trim();
-    try {
-      if (baseUrl) window.localStorage.setItem("cmvfacil:bubbleBaseUrl", baseUrl);
-      if (token) window.localStorage.setItem("cmvfacil:bubbleToken", token);
-    } catch {}
-    setIsBubbleCredsOpen(false);
-    if (detailsRecipeId) autoSyncDetailsRef.current.delete(detailsRecipeId);
-    void syncThisPrePreparoItems();
-  }
-
-  async function syncThisPrePreparoItems() {
+  async function refreshThisPrePreparoFromSupabase(silent = false) {
     if (!detailsRecipeId) return;
     if (isSyncingDetails) return;
     setIsSyncingDetails(true);
     try {
-      let baseUrl = "";
-      let token = "";
-      try {
-        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
-      const pullRes = await fetch("/api/bubble-live/pre-preparo-ingredients", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ itemId: detailsRecipeId, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
-        cache: "no-store",
-      });
-      const pullJson = (await pullRes.json().catch(() => null)) as any;
-      if (!pullRes.ok || !pullJson?.ok) {
-        const msg = String(pullJson?.error ?? `failed_${pullRes.status}`);
-        if (msg.includes("missing_token") || msg.includes("missing_base_url")) {
-          showToast("Configure a URL e o token do Bubble para puxar os ingredientes.", "error", 9000);
-          openBubbleCredsModal();
-          return;
-        }
-        throw new Error(msg);
-      }
-      const ingredientes = Array.isArray(pullJson?.ingredientes) ? (pullJson.ingredientes as any[]) : [];
-      const modoPreparo = typeof pullJson?.modoPreparo === "string" ? String(pullJson.modoPreparo).trim() : "";
-      const itemUnit = typeof pullJson?.itemUnit === "string" ? String(pullJson.itemUnit).trim() : "";
-      const etiquetasIncoming = Array.isArray(pullJson?.etiquetas) ? (pullJson.etiquetas as any[]) : [];
-      setRows((prev) => {
-        const next = prev.map((r) => {
-          if (String(r.id) !== String(detailsRecipeId)) return r;
-          const nextRow: any = { ...r, ingredientes: ingredientes.length ? (ingredientes as any) : undefined };
-          if (modoPreparo) nextRow.modoPreparo = modoPreparo;
-          if (itemUnit) {
-            const parsed = parseQtyLabel(String(r.rendimento ?? ""));
-            const curUnit = String(parsed.unit ?? "").trim() || "Und";
-            if (curUnit === "Und" && itemUnit !== "Und") {
-              const qtyLabel = formatDecimalFixedDraft(String(parsed.qty || 1), 3);
-              nextRow.rendimento = `${qtyLabel} ${itemUnit}`;
-            }
-          }
-          return nextRow;
-        });
-        return next;
-      });
-      if (etiquetasIncoming.length) {
-        setEtiquetasRows((prev) => {
-          const recipeIdKey = String(detailsRecipeId);
-          const others = prev.filter((e) => String(e.recipeId) !== recipeIdKey);
-          const existingSameRecipe = prev.filter((e) => String(e.recipeId) === recipeIdKey);
-
-          const incoming: any[] = [];
-          for (const raw of etiquetasIncoming) {
-            if (!raw || typeof raw !== "object") continue;
-            const id = String((raw as any).id ?? "").trim();
-            const recipeId = String((raw as any).recipeId ?? "").trim();
-            const receita = String((raw as any).receita ?? detailsRow?.receita ?? "").trim();
-            const quantidade = String((raw as any).quantidade ?? "").trim();
-            const unidade = String((raw as any).unidade ?? "").trim();
-            const dataValidade = String((raw as any).dataValidade ?? "").trim();
-            if (!id || !recipeId || !receita || !quantidade || !unidade || !dataValidade) continue;
-            incoming.push({
-              id,
-              recipeId,
-              receita,
-              responsavel: String((raw as any).responsavel ?? "").trim(),
-              quantidade,
-              unidade,
-              custo: String((raw as any).custo ?? "R$0,00").trim() || "R$0,00",
-              dataProducao: String((raw as any).dataProducao ?? "-").trim() || "-",
-              dataValidade,
-              code: String((raw as any).code ?? "").trim() || undefined,
-              createdAt: String((raw as any).createdAt ?? "").trim() || undefined,
-              wasteStatus: String((raw as any).wasteStatus ?? "pending").trim() || "pending",
-            });
-          }
-
-          const incomingById = new Map<string, any>();
-          for (const e of incoming) {
-            if (!String(e.id ?? "").trim()) continue;
-            incomingById.set(String(e.id), e);
-          }
-
-          const incomingSignatures = new Set<string>();
-          for (const e of incomingById.values()) {
-            const sig = `${String(e.recipeId)}|${String(e.dataProducao)}|${String(e.dataValidade)}|${String(e.quantidade)}|${String(e.unidade)}|${String(e.responsavel ?? "")}`;
-            incomingSignatures.add(sig);
-          }
-
-          const keepManualSameRecipe = existingSameRecipe.filter((e) => {
-            const id = String(e.id ?? "");
-            if (id.startsWith("bubble:")) return false;
-            const sig = `${String(e.recipeId)}|${String(e.dataProducao)}|${String(e.dataValidade)}|${String(e.quantidade)}|${String(e.unidade)}|${String(e.responsavel ?? "")}`;
-            return !incomingSignatures.has(sig);
-          });
-
-          return [...others, ...keepManualSameRecipe, ...Array.from(incomingById.values())];
-        });
-      }
-      if (!ingredientes.length) {
-        const source = pullJson?.source ? String(pullJson.source) : "";
-        const key = pullJson?.usedConstraintKey ? String(pullJson.usedConstraintKey) : "";
-        const field = pullJson?.usedItemField ? String(pullJson.usedItemField) : "";
-        showToast(`Bubble não retornou ingredientes (source=${source || "?"}${key ? `, key=${key}` : ""}${field ? `, field=${field}` : ""}).`, "error", 9000);
-      } else {
-        const etiquetasCount = etiquetasIncoming.length;
-        showToast(`Itens carregados do Bubble (${ingredientes.length} ingredientes${etiquetasCount ? `, ${etiquetasCount} etiquetas` : ""}).`, "success", 7000);
-      }
+      const dbRows = await loadPrePreparoFromSupabase();
+      setRows(dbRows as any);
+      prePreparoLoadErrorShownRef.current = false;
+      prePreparoLoadedRef.current = true;
+      if (!silent) showToast("Atualizado do Supabase.", "success");
     } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
+      if (!silent) showToast(supabaseLoadErrorMessage(err), "error", 9000);
     } finally {
       setIsSyncingDetails(false);
     }
@@ -1149,8 +1035,18 @@ export default function PrePreparoClient() {
   useEffect(() => {
     void (async () => {
       try {
-        const dbRows = await loadPrePreparoFromSupabase();
-        setRows(dbRows as any);
+        const st = await loadPrePreparoStateFromSupabase();
+        if (st.meta) setSourceMeta(st.meta);
+        if (st.meta?.source === "compat") {
+          const list = Array.isArray((st.compat as any)?.prePreparos) ? ((st.compat as any).prePreparos as PrePreparoCompatRow[]) : [];
+          setCompatRows(list);
+          setSelectedCompatId(list[0]?.id ?? null);
+          setRows(st.rows as any);
+          prePreparoLoadErrorShownRef.current = false;
+          prePreparoLoadedRef.current = true;
+          return;
+        }
+        setRows(st.rows as any);
         prePreparoLoadErrorShownRef.current = false;
         prePreparoLoadedRef.current = true;
       } catch (err) {
@@ -1177,32 +1073,11 @@ export default function PrePreparoClient() {
           showToast(supabaseLoadErrorMessage(err), "error");
         }
       }
-      try {
-        const res = await fetch(`/api/bubble-import/etiquetas?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-        const json = (await res.json().catch(() => null)) as any;
-        const bubbleRows = Array.isArray(json?.rows) ? (json.rows as any[]) : [];
-        if (bubbleRows.length) {
-          setEtiquetasRows((prev) => {
-            const byId = new Map<string, any>();
-            for (const r of prev) byId.set(String(r.id ?? "").trim(), r);
-            for (const r of bubbleRows) {
-              const rid = String((r as any)?.id ?? "").trim();
-              if (!rid) continue;
-              const existing = byId.get(rid) ?? null;
-              if (!existing) {
-                byId.set(rid, r);
-                continue;
-              }
-              byId.set(rid, { ...r, wasteStatus: existing.wasteStatus ?? (r as any).wasteStatus });
-            }
-            return Array.from(byId.values());
-          });
-        }
-      } catch {}
     })();
-  }, []);
+  }, [isReadOnly]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     if (!prePreparoLoadedRef.current) return;
     if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
     savePrePreparoTimeoutRef.current = window.setTimeout(() => {
@@ -1223,9 +1098,10 @@ export default function PrePreparoClient() {
           }
         });
     }, 700);
-  }, [rows]);
+  }, [isReadOnly, rows]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     if (!etiquetasLoadedRef.current) return;
     if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
     saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
@@ -1246,7 +1122,7 @@ export default function PrePreparoClient() {
           }
         });
     }, 700);
-  }, [etiquetasRows]);
+  }, [etiquetasRows, isReadOnly]);
 
   useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);
@@ -1274,7 +1150,7 @@ export default function PrePreparoClient() {
     if (hasIngredients) return;
     if (autoSyncDetailsRef.current.has(detailsRecipeId)) return;
     autoSyncDetailsRef.current.add(detailsRecipeId);
-    void syncThisPrePreparoItems();
+    void refreshThisPrePreparoFromSupabase(true);
   }, [detailsRecipeId, detailsTab, isSyncingDetails, rows]);
 
   useEffect(() => {
@@ -1463,6 +1339,7 @@ export default function PrePreparoClient() {
   }, [entradasRows, equivalenciasMap, insumosByKey, insumosByName]);
 
   useEffect(() => {
+    if (isReadOnly) return;
     if (!insumosStore.length) return;
     setRows((prev) => {
       let changed = false;
@@ -1505,7 +1382,7 @@ export default function PrePreparoClient() {
       });
       return changed ? next : prev;
     });
-  }, [averageCostByInsumo, insumosByKey, insumosByName, insumosStore.length]);
+  }, [averageCostByInsumo, insumosByKey, insumosByName, insumosStore.length, isReadOnly]);
 
   useEffect(() => {
     const resolved = resolveInsumoFromQuery(ingredientQuery);
@@ -2024,6 +1901,76 @@ export default function PrePreparoClient() {
     return filtered.filter((r) => `${r.categoria} ${r.receita}`.toLowerCase().includes(q));
   }, [query, rows, selectedCategory]);
 
+  const selectedCompat = useMemo(
+    () =>
+      selectedCompatId
+        ? compatRows.find((r) => r.id === selectedCompatId) ?? null
+        : compatRows[0]
+          ? compatRows[0]
+          : null,
+    [compatRows, selectedCompatId],
+  );
+
+  const qaUi = useMemo(() => {
+    if (isCompatSource) {
+      return {
+        meta: sourceMeta,
+        rendered: {
+          prePreparosCount: compatRows.length,
+          prePreparos: compatRows.map((r) => ({
+            id: r.id,
+            bubble_id: r.bubble_id,
+            nome: r.nome,
+            categoria: r.categoria,
+            unidade: r.unidade,
+            rendimento: r.rendimento,
+            validade: r.validade,
+            custoTotal: r.custoTotal,
+            custoUnitario: r.custoUnitario,
+            ingredientesCount: Array.isArray(r.ingredientes) ? r.ingredientes.length : 0,
+            etiquetasCount: Array.isArray(r.etiquetas) ? r.etiquetas.length : 0,
+          })),
+        },
+        details: compatRows.map((r) => ({
+          id: r.id,
+          nome: r.nome,
+          modoPreparo: r.modoPreparo,
+          ingredientes: (r.ingredientes ?? []).map((it) => ({
+            id: it.id,
+            ingredientId: it.ingredientId,
+            item: it.item,
+            quantidade: it.quantidade,
+            unidade: it.unidade,
+            custo: it.custo,
+          })),
+          etiquetas: (r.etiquetas ?? []).map((e) => ({
+            id: e.id,
+            bubble_id: e.bubble_id,
+            codigo: e.codigo,
+            dataProducao: e.dataProducao,
+            dataValidade: e.dataValidade,
+            quantidadeProduzida: e.quantidadeProduzida,
+          })),
+        })),
+      };
+    }
+    return {
+      meta: sourceMeta,
+      filters: { query, selectedCategory },
+      rendered: {
+        rowsCount: visible.length,
+        rows: visible.map((r) => ({
+          id: r.id,
+          categoria: r.categoria,
+          receita: r.receita,
+          custoTotal: r.custoTotal,
+          rendimento: r.rendimento,
+          custoUnitario: r.custoUnitario,
+        })),
+      },
+    };
+  }, [compatRows, isCompatSource, query, selectedCategory, sourceMeta, visible]);
+
   const detailsRow = useMemo(() => {
     if (!detailsRecipeId) return null;
     return rows.find((r) => r.id === detailsRecipeId) ?? null;
@@ -2079,6 +2026,20 @@ export default function PrePreparoClient() {
     });
     return next;
   }, [detailsEtiquetas, etiquetasResponsavelFilter, etiquetasSortMode]);
+
+  const detailsEtiquetasBuckets = useMemo(() => {
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const emUso: PrePreparoEtiquetaRow[] = [];
+    const vencidas: PrePreparoEtiquetaRow[] = [];
+    for (const e of detailsEtiquetasView) {
+      const d = parseDateLabelLoose(String(e.dataValidade ?? "")) ?? null;
+      const t = d ? new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() : null;
+      const isExpired = typeof t === "number" ? t < today : false;
+      (isExpired ? vencidas : emUso).push(e);
+    }
+    return { emUso, vencidas };
+  }, [detailsEtiquetasView]);
 
   const ingredientOptionGroups = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
@@ -2580,7 +2541,164 @@ export default function PrePreparoClient() {
         : null}
 
       <main className={dash.content}>
-        {detailsRow ? (
+        {isCompatSource ? (
+          <div className={ft.pageFrameWide}>
+            <QaModePanel screen="pre-preparo" ui={qaUi} />
+            <div
+              style={{
+                marginTop: 10,
+                marginBottom: 14,
+                padding: "10px 12px",
+                borderRadius: 12,
+                background: "#eef6ff",
+                border: "1px solid #cfe6ff",
+                color: "#1b3a57",
+                fontSize: 13,
+                fontWeight: 700,
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>Fonte: Banco compatível Bubble</span>
+              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 14, alignItems: "start" }}>
+              <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 900, color: "#01040e", marginBottom: 10 }}>{`Pré-preparos (${compatRows.length})`}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "auto", maxHeight: "calc(100vh - 260px)" }} data-qa-grid="pre-preparo">
+                  {compatRows.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => setSelectedCompatId(r.id)}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        border: "1px solid #eef1f1",
+                        background: r.id === (selectedCompat?.id ?? "") ? "#00282d" : "#f1f3f3",
+                        color: r.id === (selectedCompat?.id ?? "") ? "#ffffff" : "#01040e",
+                        borderRadius: 12,
+                        padding: "10px 10px",
+                        fontWeight: 900,
+                        fontSize: 11,
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                      data-qa-grid-row
+                      data-qa-row-id={r.id}
+                    >
+                      <span>{r.nome}</span>
+                      <span style={{ fontWeight: 700, opacity: r.id === (selectedCompat?.id ?? "") ? 0.75 : 0.7 }}>{`${r.categoria} · ${r.custoUnitario}`}</span>
+                    </button>
+                  ))}
+                  {compatRows[0] ? null : <div style={{ padding: 14, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>Sem pré-preparos</div>}
+                </div>
+              </section>
+
+              <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: "#01040e" }}>{selectedCompat?.nome ?? "Pré-preparo"}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#95a8a6" }}>
+                    {selectedCompat ? `${selectedCompat.categoria} · ${selectedCompat.validade}` : "Selecione um pré-preparo para ver os detalhes."}
+                  </div>
+                </div>
+
+                {selectedCompat ? (
+                  <>
+                    <div style={{ marginTop: 12, overflow: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <tbody>
+                          {[
+                            ["Unidade", selectedCompat.unidade],
+                            ["Rendimento", selectedCompat.rendimento],
+                            ["Custo total", selectedCompat.custoTotal],
+                            ["Custo unitário", selectedCompat.custoUnitario],
+                          ].map(([k, v]) => (
+                            <tr key={k}>
+                              <td style={{ padding: "8px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900, whiteSpace: "nowrap" }}>{k}</td>
+                              <td style={{ padding: "8px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{v}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ marginTop: 14, fontSize: 12, fontWeight: 900, color: "#01040e" }}>Modo de preparo</div>
+                    <div style={{ marginTop: 8, padding: 12, borderRadius: 12, background: "#f6f8f8", border: "1px solid #eef1f1", fontSize: 12, fontWeight: 700, whiteSpace: "pre-wrap" }}>
+                      {selectedCompat.modoPreparo || "-"}
+                    </div>
+
+                    <div style={{ marginTop: 14, fontSize: 12, fontWeight: 900, color: "#01040e" }}>{`Ingredientes (${selectedCompat.ingredientes.length})`}</div>
+                    <div style={{ marginTop: 10, overflow: "auto" }} data-qa-grid="pre-preparo:ingredientes">
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Item</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Qtd</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Unid</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Custo</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCompat.ingredientes.map((it) => (
+                            <tr key={it.id} data-qa-grid-row data-qa-row-id={it.id}>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 800 }}>{it.item}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{it.quantidade}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{it.unidade}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900 }}>{it.custo}</td>
+                            </tr>
+                          ))}
+                          {selectedCompat.ingredientes[0] ? null : (
+                            <tr>
+                              <td colSpan={4} style={{ padding: 18, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>
+                                Sem ingredientes
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div style={{ marginTop: 14, fontSize: 12, fontWeight: 900, color: "#01040e" }}>{`Etiquetas (${selectedCompat.etiquetas.length})`}</div>
+                    <div style={{ marginTop: 10, overflow: "auto" }} data-qa-grid="pre-preparo:etiquetas">
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                        <thead>
+                          <tr>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Código</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Produção</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Validade</th>
+                            <th style={{ textAlign: "left", padding: "10px 8px", borderBottom: "1px solid #eef1f1", fontWeight: 900 }}>Quantidade</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCompat.etiquetas.map((e) => (
+                            <tr key={e.id} data-qa-grid-row data-qa-row-id={e.id}>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 800 }}>{e.codigo}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{e.dataProducao}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 700 }}>{e.dataValidade}</td>
+                              <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f3f3", fontWeight: 900 }}>{e.quantidadeProduzida}</td>
+                            </tr>
+                          ))}
+                          {selectedCompat.etiquetas[0] ? null : (
+                            <tr>
+                              <td colSpan={4} style={{ padding: 18, textAlign: "center", color: "#95a8a6", fontWeight: 800 }}>
+                                Sem etiquetas
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                ) : null}
+              </section>
+            </div>
+          </div>
+        ) : detailsRow ? (
           <div className={ft.pageFrameWide}>
             <section className={`${dash.itemDetails} ${ft.detailsPage}`}>
               <div className={`${dash.itemDetailsTop} ${ft.detailsHeader}`}>
@@ -2641,8 +2759,8 @@ export default function PrePreparoClient() {
                     <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
                       <div className={ft.detailsPrepHeader}>
                         <div className={ft.detailsSectionTitle}>Lista de Ingredientes</div>
-                        <button type="button" className={ft.detailsEditBtn} onClick={() => void syncThisPrePreparoItems()} disabled={isSyncingDetails}>
-                          {isSyncingDetails ? "sincronizando..." : "sincronizar"}
+                        <button type="button" className={ft.detailsEditBtn} onClick={() => void refreshThisPrePreparoFromSupabase()} disabled={isSyncingDetails}>
+                          {isSyncingDetails ? "carregando..." : "recarregar"}
                         </button>
                       </div>
 
@@ -2902,7 +3020,7 @@ export default function PrePreparoClient() {
                   ) : (
                     <div className={`${dash.itemDetailsBody} ${ft.detailsPanel}`}>
                       <div className={styles.etiquetasHeader}>
-                        <div className={styles.etiquetasHeaderTitle}>{`Etiquetas em Uso (${detailsEtiquetasView.length})`}</div>
+                        <div className={styles.etiquetasHeaderTitle}>{`Etiquetas em Uso (${detailsEtiquetasBuckets.emUso.length})`}</div>
                         <div className={styles.etiquetasHeaderControls}>
                           <select className={styles.etiquetasHeaderSelect} value={etiquetasResponsavelFilter} onChange={(e) => setEtiquetasResponsavelFilter(e.target.value)}>
                             <option value="Responsável">Responsável</option>
@@ -2926,7 +3044,7 @@ export default function PrePreparoClient() {
                       </div>
 
                       <div className={styles.etiquetasCards}>
-                        {detailsEtiquetasView.map((e) => (
+                        {detailsEtiquetasBuckets.emUso.map((e) => (
                           <div key={e.id} className={styles.etiquetaCard}>
                             <div className={styles.etiquetaCardTop}>
                               <div className={styles.etiquetaCardQty}>{formatEtiquetaQtyNoSpace(e.quantidade, e.unidade)}</div>
@@ -2934,6 +3052,10 @@ export default function PrePreparoClient() {
                             </div>
 
                             <div className={styles.etiquetaCardLines}>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Status:</div>
+                                <div className={styles.etiquetaCardValue}>Em uso</div>
+                              </div>
                               <div className={styles.etiquetaCardLine}>
                                 <div className={styles.etiquetaCardLabel}>Responsável:</div>
                                 <div className={styles.etiquetaCardValue}>{e.responsavel || "-"}</div>
@@ -2958,7 +3080,51 @@ export default function PrePreparoClient() {
                             </div>
                           </div>
                         ))}
-                        {!detailsEtiquetasView.length ? <div className={styles.etiquetasEmpty}>Nenhuma etiqueta cadastrada.</div> : null}
+                        {!detailsEtiquetasBuckets.emUso.length ? <div className={styles.etiquetasEmpty}>Nenhuma etiqueta em uso.</div> : null}
+                      </div>
+
+                      <div className={styles.etiquetasHeader} style={{ marginTop: 18 }}>
+                        <div className={styles.etiquetasHeaderTitle}>{`Etiquetas Vencidas (${detailsEtiquetasBuckets.vencidas.length})`}</div>
+                      </div>
+
+                      <div className={styles.etiquetasCards}>
+                        {detailsEtiquetasBuckets.vencidas.map((e) => (
+                          <div key={e.id} className={styles.etiquetaCard} style={{ opacity: 0.7 }}>
+                            <div className={styles.etiquetaCardTop}>
+                              <div className={styles.etiquetaCardQty}>{formatEtiquetaQtyNoSpace(e.quantidade, e.unidade)}</div>
+                              <div className={styles.etiquetaCardMeta}>{formatEtiquetaCreatedMeta(e)}</div>
+                            </div>
+
+                            <div className={styles.etiquetaCardLines}>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Status:</div>
+                                <div className={styles.etiquetaCardValue}>Vencida</div>
+                              </div>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Responsável:</div>
+                                <div className={styles.etiquetaCardValue}>{e.responsavel || "-"}</div>
+                              </div>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Data Produção:</div>
+                                <div className={styles.etiquetaCardValue}>{e.dataProducao || "-"}</div>
+                              </div>
+                              <div className={styles.etiquetaCardLine}>
+                                <div className={styles.etiquetaCardLabel}>Data de Validade:</div>
+                                <div className={styles.etiquetaCardValue}>{e.dataValidade || "-"}</div>
+                              </div>
+                            </div>
+
+                            <div className={styles.etiquetaCardActions}>
+                              <button type="button" className={styles.etiquetaCardIconBtn} aria-label="Excluir etiqueta" onClick={() => deleteEtiquetaRow(e.id)}>
+                                <DetailsTrashIcon />
+                              </button>
+                              <button type="button" className={styles.etiquetaCardPrintBtn} onClick={() => void downloadEtiquetaPdf(e)}>
+                                Imprimir
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                        {!detailsEtiquetasBuckets.vencidas.length ? <div className={styles.etiquetasEmpty}>Nenhuma etiqueta vencida.</div> : null}
                       </div>
                     </div>
                   )}
@@ -2990,9 +3156,9 @@ export default function PrePreparoClient() {
                       Baixar Ficha Técnica
                     </button>
 
-                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void syncThisPrePreparoItems()} disabled={isSyncingDetails}>
+                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void refreshThisPrePreparoFromSupabase()} disabled={isSyncingDetails}>
                       <IconSync />
-                      {isSyncingDetails ? "Sincronizando..." : "Sincronizar itens"}
+                      {isSyncingDetails ? "Carregando..." : "Recarregar itens"}
                     </button>
 
                     <div className={dash.itemAsideKpis}>
@@ -3077,7 +3243,9 @@ export default function PrePreparoClient() {
               </div>
             </section>
 
-            <section className={styles.board}>
+            <QaModePanel screen="pre-preparo" ui={qaUi} />
+
+            <section className={styles.board} data-qa-grid="pre-preparo">
               {isLoadingPrePreparo ? (
                 Array.from({ length: 6 }).map((_, idx) => (
                   <div key={`sk-${idx}`} className={styles.skeletonCard} aria-hidden>
@@ -3113,6 +3281,8 @@ export default function PrePreparoClient() {
                     className={styles.recipeCard}
                     role="button"
                     tabIndex={0}
+                    data-qa-grid-row
+                    data-qa-row-id={r.id}
                     onClick={() => {
                       setOpenMenuId(null);
                       setDetailsTab("ingredientes");
@@ -4053,38 +4223,6 @@ export default function PrePreparoClient() {
           </div>
         ) : null}
 
-        {isBubbleCredsOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBubbleCredsOpen(false)} style={{ zIndex: 10000 }}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-              <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>Conectar Bubble</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsBubbleCredsOpen(false)}>
-                  ×
-                </button>
-              </div>
-
-              <div className={styles.modalBody}>
-                <div className={styles.formField}>
-                  <div className={styles.formLabel}>Bubble URL</div>
-                  <input className={styles.formInput} value={bubbleBaseUrlDraft} onChange={(e) => setBubbleBaseUrlDraft(e.target.value)} placeholder="ex: https://seuapp.bubbleapps.io" />
-                </div>
-                <div className={styles.formField}>
-                  <div className={styles.formLabel}>Bubble API Token</div>
-                  <input className={styles.formInput} value={bubbleTokenDraft} onChange={(e) => setBubbleTokenDraft(e.target.value)} placeholder="Bearer ..." />
-                </div>
-              </div>
-
-              <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmCancel} onClick={() => setIsBubbleCredsOpen(false)}>
-                  Cancelar
-                </button>
-                <button type="button" className={styles.saveBtn} onClick={saveBubbleCredsAndSync} disabled={!bubbleBaseUrlDraft.trim() || !bubbleTokenDraft.trim()}>
-                  Salvar e Sincronizar
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : null}
       </main>
     </div>
   );

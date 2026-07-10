@@ -9,14 +9,74 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
-function getUserScopedId(req: NextRequest) {
+function resolveUserScopedId(req: NextRequest) {
   const { accessToken, userId } = getUserIdFromRequest(req);
-  if (!userId) return { accessToken, userId: null as string | null, id: null as string | null };
-  return { accessToken, userId, id: `user:${userId}` };
+  if (!userId) return { accessToken, rawUserId: null as string | null, userId: null as string | null, id: null as string | null };
+  const raw = String(userId).trim();
+  if (isUuid(raw)) return { accessToken, rawUserId: raw, userId: raw, id: `user:${raw}` };
+  const url = new URL(req.url);
+  const override = String(url.searchParams.get("userId") ?? "").trim();
+  const allowAdminOverride = raw.includes("@") && Boolean((process.env.ADMIN_SECRET ?? "").trim());
+  if (allowAdminOverride && override && isUuid(override)) return { accessToken, rawUserId: raw, userId: override, id: `user:${override}` };
+  return { accessToken, rawUserId: raw, userId: null as string | null, id: null as string | null };
 }
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function parsePermissionLevel(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function scoreRole(role: unknown) {
+  const r = String(role ?? "").trim().toLowerCase();
+  if (!r) return 0;
+  if (r.includes("owner") || r.includes("propriet")) return 30;
+  if (r.includes("admin")) return 20;
+  if (r.includes("manager") || r.includes("gerente")) return 10;
+  return 0;
+}
+
+function pickBestCompanyId(memberRows: unknown[]) {
+  let bestCompanyId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const companyId = String(r?.company_id ?? "").trim();
+    if (!companyId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCompanyId = companyId;
+    }
+  }
+  return bestCompanyId;
+}
+
+function formatQty3(value: number) {
+  if (!Number.isFinite(value)) return "0,000";
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
+function formatMoney(value: number) {
+  return formatMoneyBRL(Number.isFinite(value) ? value : 0);
+}
+
+function formatDateOnlyPT(value: unknown) {
+  const s = sanitize(value);
+  if (!s) return "-";
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
+  const dt = new Date(s);
+  if (!Number.isFinite(dt.getTime())) return s;
+  const day = String(dt.getDate()).padStart(2, "0");
+  const month = String(dt.getMonth() + 1).padStart(2, "0");
+  const year = dt.getFullYear();
+  return `${day}/${month}/${year}`;
 }
 
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
@@ -176,54 +236,72 @@ function extractEtiquetasFromBubbleRows(rowsRaw: any[], userId: string) {
 
 export async function GET(req: NextRequest) {
   try {
-    const { accessToken, userId, id } = getUserScopedId(req);
-    if (!id) return json({ rows: [] }, { status: 200 });
-    const supabase = getSupabaseServerClient(accessToken);
-    const { data, error } = await supabase.from("pre_preparo_etiquetas_state").select("*").eq("id", id).maybeSingle();
-    if (error) return json({ error: error.message }, { status: 500 });
-    const payload = (data as any)?.payload;
-    const rows = Array.isArray(payload) ? payload : [];
-    if (rows.length) return json({ rows }, { status: 200 });
-
+    const { accessToken, userId } = resolveUserScopedId(req);
     const uid = String(userId ?? "").trim();
-    if (!uid || !isUuid(uid)) return json({ rows: [] }, { status: 200 });
+    if (!uid) return json({ rows: [] }, { status: 200 });
 
-    let admin: ReturnType<typeof getSupabaseAdmin>;
-    try {
-      admin = getSupabaseAdmin();
-    } catch {
-      return json({ rows: [] }, { status: 200 });
-    }
+    const supabase = getSupabaseServerClient(accessToken);
+    const { data: memberRows, error: memberErr } = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).limit(50);
+    if (memberErr) return json({ error: memberErr.message }, { status: 500 });
 
-    const bucket = "bubble-imports";
-    await ensureBucket(admin, bucket);
-    const statePath = `user:${uid}/bootstrap/sync-state.json`;
-    const state = await downloadJsonFromStorage(admin, bucket, statePath);
-    const runPrefix = state && typeof state === "object" ? String((state as any)?.runPrefix ?? "").trim().replace(/^\/+|\/+$/g, "") : "";
-    if (!runPrefix) return json({ rows: [] }, { status: 200 });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return json({ rows: [] }, { status: 200 });
 
-    const all = await listAllPaths(admin, bucket, runPrefix);
-    const candidates = all
-      .map((p) => p.path)
-      .filter((p) => {
-        const lower = p.toLowerCase();
-        if (!lower.includes("bubble-api-")) return false;
-        if (!lower.endsWith(".json")) return false;
-        if (lower.endsWith("state.json")) return false;
-        return lower.includes("etiqueta");
+    const { data: labels, error: lErr } = await supabase
+      .from("labels")
+      .select("id,bubble_id,codigo,item_nome,data_criacao_log,data_producao,data_validade,responsavel_nome_completo,boolean_desperdicado,quantidade_produzida,item_id,created_at")
+      .eq("company_id", companyId)
+      .order("data_validade", { ascending: true })
+      .order("created_at", { ascending: true });
+    if (lErr) return json({ error: lErr.message }, { status: 500 });
+
+    const itemIds = Array.from(new Set((labels ?? []).map((l: any) => String(l?.item_id ?? "").trim()).filter(Boolean)));
+    const { data: items, error: iErr } = itemIds.length
+      ? await supabase.from("items").select("id,bubble_id,name,unidade_medida,custo_medio").eq("company_id", companyId).in("id", itemIds)
+      : ({ data: [], error: null } as any);
+    if (iErr) return json({ error: iErr.message }, { status: 500 });
+
+    const itemById = new Map<string, any>((items ?? []).map((it: any) => [String(it?.id ?? "").trim(), it]));
+
+    const rows = (labels ?? [])
+      .map((lb: any) => {
+        if (lb?.boolean_desperdicado) return null;
+        const itemId = String(lb?.item_id ?? "").trim();
+        const item = itemId ? itemById.get(itemId) ?? null : null;
+        const recipeId = String(item?.bubble_id ?? "").trim() || (itemId ? `db:${itemId}` : "");
+        const receita = sanitize(item?.name ?? lb?.item_nome ?? "") || "Etiqueta";
+        const responsavel = sanitize(lb?.responsavel_nome_completo ?? "") || "-";
+        const qtyNum = typeof lb?.quantidade_produzida === "number" ? lb.quantidade_produzida : 0;
+        const quantidade = qtyNum > 0 ? formatQty3(qtyNum) : "1,000";
+        const unidade = sanitize(item?.unidade_medida ?? "") || "Und";
+        const custoUnitNum = typeof item?.custo_medio === "number" ? item.custo_medio : 0;
+        const custo = custoUnitNum > 0 && qtyNum > 0 ? formatMoney(custoUnitNum * qtyNum) : formatMoney(0);
+        const dataProducao = formatDateOnlyPT(lb?.data_producao);
+        const dataValidade = formatDateOnlyPT(lb?.data_validade);
+        if (!recipeId || !dataValidade || dataValidade === "-") return null;
+        const bubbleId = String(lb?.bubble_id ?? "").trim();
+        const id = bubbleId || (String(lb?.id ?? "").trim() ? `db:${String(lb.id).trim()}` : "");
+        if (!id) return null;
+        const code = sanitize(lb?.codigo ?? "") || undefined;
+        const createdAt = sanitize(lb?.data_criacao_log ?? lb?.created_at ?? "") || undefined;
+        return {
+          id,
+          recipeId,
+          receita,
+          responsavel,
+          quantidade,
+          unidade,
+          custo,
+          dataProducao,
+          dataValidade,
+          code,
+          createdAt,
+          wasteStatus: "pending",
+        };
       })
-      .sort((a, b) => b.localeCompare(a));
-    const latest = candidates[0] ?? "";
-    if (!latest) return json({ rows: [] }, { status: 200 });
+      .filter(Boolean);
 
-    const bubble = await downloadJsonFromStorage(admin, bucket, latest);
-    const list = bubble && typeof bubble === "object" ? (bubble as any).rows : null;
-    const rowsRaw = Array.isArray(list) ? (list as any[]) : [];
-    const extracted = extractEtiquetasFromBubbleRows(rowsRaw, uid);
-    if (extracted.length) {
-      await supabase.from("pre_preparo_etiquetas_state").upsert({ id, payload: extracted } as any, { onConflict: "id" });
-    }
-    return json({ rows: extracted }, { status: 200 });
+    return json({ source: "compat", readOnly: true, rows }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -231,16 +309,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json().catch(() => null)) as unknown;
-    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
-    const rows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : null;
-    if (!rows) return json({ error: "missing_rows" }, { status: 400 });
-    const { accessToken, id } = getUserScopedId(req);
-    if (!id) return json({ error: "unauthorized" }, { status: 401 });
-    const supabase = getSupabaseServerClient(accessToken);
-    const { error } = await supabase.from("pre_preparo_etiquetas_state").upsert({ id, payload: rows } as any, { onConflict: "id" });
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    return json({ error: "read_only" }, { status: 403 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

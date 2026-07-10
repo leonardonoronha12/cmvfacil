@@ -120,6 +120,34 @@ function safeToken(input: string) {
   return t.toLowerCase().startsWith("bearer ") ? t.slice(7).trim() : t;
 }
 
+async function getCompanyBubbleIdFromSupabaseByUserId(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
+  const uid = String(userId ?? "").trim();
+  if (!isUuid(uid)) return null;
+  const { data: memberships, error: mErr } = await supabase
+    .from("company_members")
+    .select("company_id,permission_level,created_at")
+    .eq("user_id", uid)
+    .order("permission_level", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if (mErr) return null;
+  const companyIds = Array.from(
+    new Set(
+      (memberships ?? [])
+        .map((m: any) => String(m?.company_id ?? "").trim())
+        .filter((x) => isUuid(x)),
+    ),
+  );
+  if (!companyIds.length) return null;
+  const { data: companies, error: cErr } = await supabase.from("companies").select("id,bubble_id,updated_at").in("id", companyIds).limit(50);
+  if (cErr) return null;
+  const sorted = (companies ?? [])
+    .map((c: any) => ({ id: String(c?.id ?? ""), bubble_id: String(c?.bubble_id ?? "").trim(), updated_at: String(c?.updated_at ?? "") }))
+    .filter((c: any) => isUuid(c.id) && c.bubble_id)
+    .sort((a: any, b: any) => (b.updated_at || "").localeCompare(a.updated_at || ""));
+  return sorted[0]?.bubble_id ?? null;
+}
+
 type BubbleConstraint = { key: string; constraint_type: string; value: unknown };
 
 class BubbleApiError extends Error {
@@ -131,6 +159,20 @@ class BubbleApiError extends Error {
     this.bubbleStatus = bubbleStatus;
     this.bubbleBody = bubbleBody;
   }
+}
+
+function isFieldNotFoundError(err: unknown) {
+  if (!(err instanceof BubbleApiError)) return false;
+  const msg = String(err.message ?? "").toLowerCase();
+  const body = String(err.bubbleBody ?? "").toLowerCase();
+  return msg.includes("field not found") || body.includes("field not found");
+}
+
+function isIngredientesTypeName(typeName: string) {
+  const t = String(typeName ?? "").trim().toLowerCase();
+  if (!t) return false;
+  if (t === "ingredientes" || t === "ingrediente") return true;
+  return t.includes("ingred");
 }
 
 async function fetchBubblePage(args: {
@@ -254,7 +296,6 @@ function catLooksLikePrePreparo(value: string) {
   if (s.includes("prepreparo")) return true;
   if (s.includes("pre-preparo")) return true;
   if (s.includes("pre preparo")) return true;
-  if (s.includes("preparad")) return true;
   return s.includes("pre") && s.includes("preparo");
 }
 
@@ -275,6 +316,22 @@ function pickKeyLike(row: Record<string, string>, parts: string[], opts?: { excl
 }
 
 function guessItemLabel(row: Record<string, string>) {
+  const looksLikeBubbleId = (value: string) => {
+    const s = String(value ?? "").trim();
+    if (!s) return false;
+    if (s.length < 12) return false;
+    if (!/^\d/.test(s)) return false;
+    return /^[0-9]+x[0-9x]+$/i.test(s);
+  };
+  const sanitize = (value: unknown) => {
+    const s = String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
+    if (!s) return "";
+    const k = s.toLowerCase();
+    if (k === "true" || k === "false" || k === "null" || k === "undefined" || k === "[object object]") return "";
+    if (looksLikeBubbleId(s)) return "";
+    return s;
+  };
+
   const direct = pickFirst(row, [
     "item",
     "item_completo",
@@ -290,8 +347,9 @@ function guessItemLabel(row: Record<string, string>) {
     "title",
     "name",
   ]);
-  if (direct) return direct;
-  const like = pickKeyLike(row, ["item", "ingred", "insumo", "produto", "nome"], { excludeParts: ["fornecedor", "empresa"] });
+  const directClean = sanitize(direct);
+  if (directClean) return directClean;
+  const like = sanitize(pickKeyLike(row, ["item", "ingred", "insumo", "produto", "nome"], { excludeParts: ["fornecedor", "empresa"] }));
   if (like) return like;
   let best = "";
   for (const [k, v] of Object.entries(row)) {
@@ -319,7 +377,7 @@ function guessItemLabel(row: Record<string, string>) {
     ) {
       continue;
     }
-    const s = String(v ?? "").trim();
+    const s = sanitize(v);
     if (!s) continue;
     if (parsePtNumber(s) !== 0) continue;
     if (!/[A-Za-zÀ-ÿ]/.test(s)) continue;
@@ -463,8 +521,13 @@ export async function POST(req: NextRequest) {
     const bodyTokenRaw = typeof body?.token === "string" ? String(body.token) : "";
     const resume = Boolean(body?.resume);
     const stop = Boolean(body?.stop);
+    const noDelete = typeof body?.noDelete === "boolean" ? Boolean(body.noDelete) : false;
     const importAsUserIdRaw = typeof body?.importAsUserId === "string" ? String(body.importAsUserId).trim() : "";
     const overrideImportUserId = importAsUserIdRaw && isUuid(importAsUserIdRaw) && importAsUserIdRaw !== userId ? importAsUserIdRaw : "";
+    const filterEmailRaw = typeof body?.filterEmail === "string" ? String(body.filterEmail).trim().toLowerCase() : "";
+    const filterBubbleUserIdRaw = typeof body?.filterBubbleUserId === "string" ? String(body.filterBubbleUserId).trim() : "";
+    const filterCompanyIdRaw = typeof body?.filterCompanyId === "string" ? String(body.filterCompanyId).trim() : "";
+    const filterUserTypeRaw = typeof body?.filterUserType === "string" ? String(body.filterUserType).trim() : "";
     const maxOps = typeof body?.maxOps === "number" && Number.isFinite(body.maxOps) && body.maxOps > 0 ? Math.min(50, Math.floor(body.maxOps)) : 10;
     if (!statePath) return json({ ok: false, error: "missing_statePath" }, { status: 400 });
     if (!statePath.startsWith(`user:${userId}/`)) return json({ ok: false, error: "forbidden" }, { status: 403 });
@@ -512,7 +575,6 @@ export async function POST(req: NextRequest) {
     }
 
     const ensureEmailFilter = async () => {
-      if (overrideImportUserId) return;
       const enabled = Boolean((state as any)?.filter?.mode === "email_only");
       const bubbleUserIdExisting = String((state as any)?.filter?.bubbleUserId ?? "").trim();
       const emailExisting = String((state as any)?.filter?.email ?? "").trim().toLowerCase();
@@ -525,14 +587,17 @@ export async function POST(req: NextRequest) {
       if (!baseUrl) throw new Error("missing_base_url");
       if (!token) throw new Error("missing_token");
 
-      const email = (await getSupabaseEmailForUserId(supabase, userId)) ?? "";
+      const targetUserIdForEmail = overrideImportUserId || userId;
+      const email = filterEmailRaw || ((await getSupabaseEmailForUserId(supabase, targetUserIdForEmail)) ?? "");
       if (!email) throw new Error("missing_supabase_email");
 
-      const userType =
+      const userTypeFromState =
         (Array.isArray(state.types) ? (state.types as any[]) : [])
           .map((t) => String(t ?? "").trim())
           .find((t) => t.toLowerCase() === "user" || t.toLowerCase() === "usuario" || t.toLowerCase() === "usuarios") ?? "User";
+      const userType = filterUserTypeRaw || userTypeFromState;
 
+      const providedBubbleUserId = filterBubbleUserIdRaw || bubbleUserIdExisting;
       const page = await fetchBubblePage({
         baseUrl,
         token,
@@ -541,15 +606,16 @@ export async function POST(req: NextRequest) {
         limit: 10,
         constraints: [{ key: "email", constraint_type: "equals", value: email }],
       });
-      const first = (page.results ?? [])[0] as any;
-      const bubbleUserId = String(first?.["unique_id"] ?? first?._id ?? first?.id ?? first?.["Created By"] ?? "").trim();
-      if (!bubbleUserId) throw new Error("bubble_user_not_found_for_email");
+      const userFirst = (page.results ?? [])[0] as any;
+      const bubbleUserIdFromEmail = String(userFirst?.["unique_id"] ?? userFirst?._id ?? userFirst?.id ?? userFirst?.["Created By"] ?? "").trim();
+      if (!bubbleUserIdFromEmail) throw new Error("bubble_user_not_found_for_email");
+      const bubbleUserId = bubbleUserIdFromEmail;
 
-      const firstRow = normalizeRowObject(first) ?? {};
+      const firstRow = normalizeRowObject(userFirst) ?? {};
       const companyCandidate =
         pickFirst(firstRow, ["empresa_id", "empresa", "company_id", "company", "restaurante_id", "restaurante"]) ||
         pickKeyLike(firstRow, ["empresa", "company", "restaurante"], { excludeParts: ["nome", "name", "email", "telefone", "whatsapp", "cnpj", "endereco", "address"] });
-      let companyId = companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "";
+      let companyId = filterCompanyIdRaw || (companyCandidate ? extractBubbleIdLoose(companyCandidate) || (looksLikeBubbleId(companyCandidate) ? companyCandidate : "") : "");
 
       const companyCandidateIds = new Set<string>();
       for (const [k, v] of Object.entries(firstRow)) {
@@ -559,6 +625,15 @@ export async function POST(req: NextRequest) {
       }
       if (companyId) companyCandidateIds.add(companyId);
       if (companyIdExisting) companyCandidateIds.add(companyIdExisting);
+      if (filterCompanyIdRaw) companyCandidateIds.add(filterCompanyIdRaw);
+
+      if (!companyId) {
+        const fromDb = await getCompanyBubbleIdFromSupabaseByUserId(supabase, targetUserIdForEmail);
+        if (fromDb) {
+          companyId = fromDb;
+          companyCandidateIds.add(fromDb);
+        }
+      }
 
       const probeEmpresaId = async (candidateId: string) => {
         const types: string[] = Array.isArray(state.types) ? state.types : [];
@@ -645,6 +720,7 @@ export async function POST(req: NextRequest) {
         userType,
         companyId: companyId || undefined,
         companyCandidates: Array.from(companyCandidateIds),
+        providedBubbleUserId: providedBubbleUserId && providedBubbleUserId !== bubbleUserId ? providedBubbleUserId : undefined,
       };
       if (needsReset) {
         const runId = crypto.randomUUID();
@@ -899,8 +975,9 @@ export async function POST(req: NextRequest) {
               const preferCompany = forced === "empresa" || forced === "empresa_id" || forced === "company" || forced === "company_id";
               const preferCreatedBy = forced === "created_by";
               const preferNone = forced === "none";
+              const forceCreatedBy = isIngredientesTypeName(t);
 
-              if (!preferNone && filterCompanyId && (preferCompany || !preferCreatedBy)) {
+              if (!preferNone && filterCompanyId && !forceCreatedBy && (preferCompany || !preferCreatedBy)) {
                 baseConstraints.push({ key: companyKeys[companyKeyIndex]!, constraint_type: "equals", value: filterCompanyId });
                 (p as any).constraintStrategy = "company";
                 (p as any).companyKeyIndex = companyKeyIndex;
@@ -926,7 +1003,7 @@ export async function POST(req: NextRequest) {
               break;
             } catch (err) {
               const bubbleStatus = err instanceof BubbleApiError ? err.bubbleStatus : null;
-              if (bubbleStatus === 404) {
+              if (bubbleStatus === 404 && !isFieldNotFoundError(err)) {
                 p.status = "done";
                 p.remaining = 0;
                 p.lastError = "type_not_found";
@@ -938,7 +1015,7 @@ export async function POST(req: NextRequest) {
                 break;
               }
 
-              if (bubbleStatus === 400 && filterMode === "email_only" && filterCompanyId && usedCompanyKey) {
+              if ((bubbleStatus === 400 || (bubbleStatus === 404 && isFieldNotFoundError(err))) && filterMode === "email_only" && filterCompanyId && usedCompanyKey) {
                 const companyKeys = ["empresa_id", "empresa", "restaurante_id", "restaurante"];
                 const currentIdx = companyKeys.findIndex((k) => k === usedCompanyKey);
                 const nextIdx = currentIdx >= 0 ? currentIdx + 1 : 0;
@@ -1170,13 +1247,53 @@ export async function POST(req: NextRequest) {
                 if (totalItems <= lastItems) return;
 
                 if (!isUuid(mainUid)) return;
-                const insumosRowsAll = Object.values(map).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
-                const insumosRows = insumosRowsAll.slice(0, 6000);
-                const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
-                  a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
-                );
                 const stateId = `user:${mainUid}`;
-                const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+                const prefix = `user:${mainUid}:`;
+                const insumosRowsAll = Object.values(map).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
+                const insumosRows = insumosRowsAll
+                  .slice(0, 6000)
+                  .map((r: any) => {
+                    const rawId = String(r?.id ?? "").trim();
+                    const seg = rawId.includes("insumo:") ? rawId.split("insumo:", 2)[1] : rawId;
+                    const safeSeg = safeIdSegment(seg) || crypto.randomUUID();
+                    const id = rawId.startsWith(prefix) && rawId.includes("insumo:") ? rawId : `${prefix}insumo:${safeSeg}`;
+                    return { ...r, id };
+                  })
+                  .filter((r: any) => r && typeof r === "object" && String((r as any).id ?? "").trim());
+
+                let existingRows: any[] = [];
+                let existingCats: string[] = [];
+                try {
+                  const { data, error: loadErr } = await supabase.from("insumos_state").select("payload").eq("id", stateId).maybeSingle();
+                  if (!loadErr) {
+                    const payload = (data as any)?.payload ?? {};
+                    existingRows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+                    existingCats = Array.isArray(payload?.categories) ? (payload.categories as any[]) : [];
+                  }
+                } catch {}
+
+                const byId = new Map<string, any>();
+                for (const r of existingRows) {
+                  const id = String((r as any)?.id ?? "").trim();
+                  if (id) byId.set(id, r);
+                }
+                for (const r of insumosRows) {
+                  const id = String((r as any)?.id ?? "").trim();
+                  if (!id) continue;
+                  const prev = byId.get(id) ?? null;
+                  byId.set(id, prev ? { ...(prev as any), ...(r as any) } : r);
+                }
+                const mergedRows = Array.from(byId.values()).filter((r) => r && typeof r === "object" && String((r as any).id ?? "").trim());
+                const categories = Array.from(
+                  new Set(
+                    existingCats
+                      .map((c) => String(c ?? "").trim())
+                      .filter(Boolean)
+                      .concat(mergedRows.map((r: any) => String(r?.categoria ?? "").trim()).filter(Boolean)),
+                  ),
+                ).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+
+                const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: mergedRows, categories } } as any, { onConflict: "id" });
                 if (error && !isMissingTableError(error)) throw new Error(`insumos_state:${error.message}`);
 
                 work.publishedAt = now;
@@ -1231,13 +1348,20 @@ export async function POST(req: NextRequest) {
                     const categoria = pickFirst(row, ["categoria", "category", "grupo", "grupo_categoria"]) || (catId ? categoriasById[catId.trim()] ?? "" : "");
                     const tipoRaw = pickFirst(row, ["tipo", "tipo_item", "tipo_de_item", "type"]) || pickKeyLike(row, ["tipo"], { excludeParts: ["unidade", "medida", "categoria"] });
                     const tipoNorm = normalizeItemName(String(tipoRaw ?? ""));
+                    const flagRaw =
+                      pickFirst(row, ["boolean_item_receita", "item_receita", "is_receita", "is_receita_bool", "isrecipe"]) ||
+                      pickKeyLike(row, ["boolean_item_receita", "item_receita", "is_receita"], { excludeParts: ["url", "nome", "name"] });
+                    const flag = String(flagRaw ?? "").trim().toLowerCase();
+                    const isRecipeFlag = flag === "true" || flag === "sim" || flag === "1" || flag === "yes";
                     const isPrePreparoItem =
                       catLooksLikePrePreparo(String(categoria ?? "")) ||
                       (tipoNorm.includes("pre") && tipoNorm.includes("preparo")) ||
-                      tipoNorm.includes("preparad") ||
-                      Boolean(pickFirst(row, ["pre_preparo_id", "prepreparo_id", "receita_id", "recipe_id"]) || pickKeyLike(row, ["pre_preparo", "prepreparo", "receita", "recipe"]));
+                      isRecipeFlag ||
+                      Boolean(pickFirst(row, ["pre_preparo_id", "prepreparo_id", "receita_id", "recipe_id"]));
                     if (isPrePreparoItem) continue;
                     const especificacao = pickFirst(row, ["especificacao", "especificacao_do_item", "descricao", "observacao", "obs", "detalhe"]);
+                    const ocultarRaw = pickFirst(row, ["boolean_ocultar_cmv", "ocultar", "hidden", "removido", "apagado"]);
+                    const ocultar = ocultarRaw ? ["1", "true", "sim", "yes"].includes(ocultarRaw.trim().toLowerCase()) : undefined;
                     const custo = pickFirst(row, ["custo_medio", "custo_medio_label", "custo", "valor", "preco", "custo_unitario", "preco_unitario", "valor_unitario"]);
                     const custoNum = parsePtNumber(custo);
                     const custoMedio = custoNum ? formatMoneyBRL(custoNum) : uacc.custoByItemKey[itemKey] ?? "";
@@ -1249,6 +1373,7 @@ export async function POST(req: NextRequest) {
                       custoMedio: custoMedio || prev.custoMedio || undefined,
                       categoria: categoria.trim() || prev.categoria || undefined,
                       especificacao: especificacao.trim() || prev.especificacao || undefined,
+                      ocultar,
                     };
                   }
                 }
@@ -1279,20 +1404,61 @@ export async function POST(req: NextRequest) {
               if (work.cursor >= files.length) {
                 for (const [uid, uacc] of Object.entries(users)) {
                   if (!isUuid(uid)) continue;
-                  const insumosRows = Object.values(uacc?.insumosByKey ?? {}).filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim());
-                  const categories = Array.from(new Set(insumosRows.map((r: any) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
-                    a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
-                  );
+                  const prefix = `user:${uid}:`;
+                  const insumosRows = Object.values(uacc?.insumosByKey ?? {})
+                    .filter((r) => r && typeof r === "object" && String((r as any).item ?? "").trim())
+                    .map((r: any) => {
+                      const rawId = String(r?.id ?? "").trim();
+                      const seg = rawId.includes("insumo:") ? rawId.split("insumo:", 2)[1] : rawId;
+                      const safeSeg = safeIdSegment(seg) || crypto.randomUUID();
+                      const id = rawId.startsWith(prefix) && rawId.includes("insumo:") ? rawId : `${prefix}insumo:${safeSeg}`;
+                      return { ...r, id };
+                    })
+                    .filter((r: any) => r && typeof r === "object" && String((r as any).id ?? "").trim());
+
                   const stateId = `user:${uid}`;
-                  const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
+                  let existingRows: any[] = [];
+                  let existingCats: string[] = [];
+                  try {
+                    const { data, error: loadErr } = await supabase.from("insumos_state").select("payload").eq("id", stateId).maybeSingle();
+                    if (!loadErr) {
+                      const payload = (data as any)?.payload ?? {};
+                      existingRows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+                      existingCats = Array.isArray(payload?.categories) ? (payload.categories as any[]) : [];
+                    }
+                  } catch {}
+
+                  const byId = new Map<string, any>();
+                  for (const r of existingRows) {
+                    const id = String((r as any)?.id ?? "").trim();
+                    if (id) byId.set(id, r);
+                  }
+                  for (const r of insumosRows) {
+                    const id = String((r as any)?.id ?? "").trim();
+                    if (!id) continue;
+                    const prev = byId.get(id) ?? null;
+                    byId.set(id, prev ? { ...(prev as any), ...(r as any) } : r);
+                  }
+                  const mergedRows = Array.from(byId.values()).filter((r) => r && typeof r === "object" && String((r as any).id ?? "").trim());
+                  const categories = Array.from(
+                    new Set(
+                      existingCats
+                        .map((c) => String(c ?? "").trim())
+                        .filter(Boolean)
+                        .concat(mergedRows.map((r: any) => String(r?.categoria ?? "").trim()).filter(Boolean)),
+                    ),
+                  ).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+
+                  const { error } = await supabase.from("insumos_state").upsert({ id: stateId, payload: { rows: mergedRows, categories } } as any, { onConflict: "id" });
                   if (error) {
                     if (!isMissingTableError(error)) throw new Error(`insumos_state:${error.message}`);
                     const prefix = `user:${uid}:`;
-                    const desired = insumosRows.map((r: any) => {
+                    const desired = mergedRows.map((r: any) => {
                       const raw = String(r?.id ?? "").trim();
-                      const seg = safeIdSegment(raw) || crypto.randomUUID();
+                      const seg = raw.includes("insumo:") ? raw.split("insumo:", 2)[1] : raw;
+                      const safeSeg = safeIdSegment(seg) || crypto.randomUUID();
                       return {
-                        id: `${prefix}insumo:${seg}`,
+                        id: `${prefix}insumo:${safeSeg}`,
                         item: String(r?.item ?? "").trim(),
                         medida: String(r?.medida ?? "").trim() || "Und",
                         custo_medio: String(r?.custoMedio ?? "").trim(),
@@ -1305,7 +1471,7 @@ export async function POST(req: NextRequest) {
                     if (listErr) throw new Error(`insumos_list:${listErr.message}`);
                     const keep = new Set(desired.map((d) => d.id));
                     const toDelete = (existing ?? []).map((x: any) => String(x?.id ?? "").trim()).filter((x: string) => x && !keep.has(x));
-                    if (toDelete.length) {
+                    if (!noDelete && toDelete.length) {
                       const { error: delErr } = await supabase.from("insumos").delete().in("id", toDelete);
                       if (delErr) throw new Error(`insumos_delete:${delErr.message}`);
                     }

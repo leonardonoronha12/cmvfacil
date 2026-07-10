@@ -25,6 +25,7 @@ import { readFichasTecnicasFromStore, subscribeFichasTecnicas, type FichaTecnica
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
 import { requireUserScopePrefix } from "../lib/userScope";
+import { QaModePanel } from "../lib/qaMode";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -943,11 +944,20 @@ function extractFichaTecnicaIdFromInventoryId(value: string) {
   return raw.startsWith("ficha:") ? raw.slice("ficha:".length).trim() : "";
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export default function DashboardClient() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const debugMode = searchParams.get("debug_mode") === "true" || searchParams.get("debug") === "true" || searchParams.get("debug") === "1";
+  const userIdOverride = (() => {
+    const raw = String(searchParams.get("userId") ?? "").trim();
+    return raw && isUuid(raw) ? raw : "";
+  })();
+  const readOnly = Boolean(userIdOverride);
   const toastTimerRef = useRef<number | null>(null);
   const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [mounted, setMounted] = useState(false);
@@ -1010,6 +1020,7 @@ export default function DashboardClient() {
   const [isFornecedorProdutoMenuOpen, setIsFornecedorProdutoMenuOpen] = useState(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const reimportFornecedoresTriedRef = useRef(false);
+  const autoEntradasSyncKeyRef = useRef("");
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const fornecedoresSaveErrorShownRef = useRef(false);
@@ -1055,23 +1066,18 @@ export default function DashboardClient() {
     }, durationMs);
   }
 
-  async function reimportEntradasAndReload() {
+  async function loadEntradasLegacyFallback() {
+    return [];
+  }
+
+  async function reimportEntradasAndReload(opts?: { silent?: boolean }) {
     setIsLoadingTables(true);
     try {
-      const re = await fetch("/api/bubble-import/reimport-entradas", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
-      const rj = (await re.json().catch(() => null)) as any;
-      if (!re.ok || !rj?.ok) throw new Error(String(rj?.error ?? `failed_${re.status}`));
-      const dbEntradas = await loadEntradasFromSupabase();
+      const fromDefault = await loadEntradasFromSupabase(userIdOverride || undefined);
+      const dbEntradas = fromDefault;
       writeEntradasToStore(dbEntradas);
       setEntradas(dbEntradas);
-      const inserted = typeof rj?.entradasInserted === "number" ? rj.entradasInserted : null;
-      const msg =
-        inserted === 0
-          ? "Sincronização concluída, mas 0 entradas foram importadas. Verifique se os tipos do Bubble (itens_notas/notas_fiscais) existem e se estão acessíveis pela Data API."
-          : inserted != null
-            ? `Entradas sincronizadas (${inserted}). Reabra o item para ver o histórico.`
-            : "Entradas sincronizadas. Reabra o item para ver o histórico.";
-      showToast(msg, inserted === 0 ? "error" : "success", inserted === 0 ? 10000 : 5000);
+      if (!opts?.silent) showToast("Entradas recarregadas.", "success", 5000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
@@ -1082,10 +1088,7 @@ export default function DashboardClient() {
   async function reimportFornecedoresAndReload() {
     setIsLoadingTables(true);
     try {
-      const res = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
-      const j = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
-      const db = await loadFornecedoresStateFromSupabase();
+      const db = await loadFornecedoresStateFromSupabase(userIdOverride || undefined);
       writeFornecedorInfoMap(db.info);
       writeFornecedorProdutosMap(db.produtos);
       writeFornecedorEquivalenciasMap(db.equivalencias);
@@ -1103,66 +1106,15 @@ export default function DashboardClient() {
   async function syncAllAndReload() {
     setIsLoadingTables(true);
     try {
-      const m = userScopePrefix.match(/^user:([^:]+):/i);
-      const uid = String(m?.[1] ?? "").trim();
-      if (!uid) throw new Error("missing_user_scope");
-
-      const statePath = `user:${uid}/bootstrap/sync-state.json`;
-      const run = async (hard: boolean) => {
-        const restartRes = await fetch("/api/bubble-import/sync/restart", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ hard }),
-          cache: "no-store",
-        });
-        const restartJson = (await restartRes.json().catch(() => null)) as any;
-        if (!restartRes.ok || !restartJson?.ok) throw new Error(String(restartJson?.error ?? `failed_${restartRes.status}`));
-
-        let state: any = null;
-        for (let i = 0; i < 24; i++) {
-          const tickRes = await fetch("/api/bubble-import/sync/tick", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ statePath, resume: true, maxOps: 50 }),
-            cache: "no-store",
-          });
-          const tickJson = (await tickRes.json().catch(() => null)) as any;
-          if (!tickRes.ok || !tickJson?.ok) throw new Error(String(tickJson?.error ?? `failed_${tickRes.status}`));
-          state = tickJson?.state ?? null;
-          const phase = String(state?.phase ?? "").trim();
-          if (phase === "done") break;
-          if (phase === "error") throw new Error(String(state?.lastError ?? "sync_error"));
-          if (phase === "paused") throw new Error("paused_by_user");
-          await new Promise((r) => window.setTimeout(r, 400));
-        }
-        if (String(state?.phase ?? "") !== "done") throw new Error("sync_timeout");
-      };
-
-      try {
-        await run(false);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        const m2 = msg.toLowerCase();
-        if (m2.includes("missing_base_url") || m2.includes("missing_token")) throw new Error("Configurar Bubble em Ajustes → Bubble API Global.");
-        const shouldHard =
-          m2.includes("invalid_json_file:") ||
-          m2.includes("invalid_json_from_storage:") ||
-          m2.includes("unexpected token") ||
-          m2.includes("<html") ||
-          m2.includes("bubble retornou html");
-        if (!shouldHard) throw err;
-        await run(true);
-      }
-
       const [dbInsumos, dbEntradas, dbFornecedores, dbInv, dbDesp, dbPre, dbEtiquetas, dbFichas] = await Promise.all([
-        loadInsumosFromSupabase().catch(() => [] as InsumoStoreItem[]),
-        loadEntradasFromSupabase().catch(() => [] as EntradaStoreRow[]),
-        loadFornecedoresStateFromSupabase().catch(() => ({ info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap })),
-        loadInventarioFromSupabase().catch(() => [] as InventarioContagem[]),
-        loadDesperdiciosFromSupabase().catch(() => [] as DesperdicioRow[]),
-        loadPrePreparoFromSupabase().catch(() => [] as PrePreparoStoreRow[]),
+        loadInsumosFromSupabase(userIdOverride || undefined).catch(() => [] as InsumoStoreItem[]),
+        loadEntradasFromSupabase(userIdOverride || undefined).catch(() => [] as EntradaStoreRow[]),
+        loadFornecedoresStateFromSupabase(userIdOverride || undefined).catch(() => ({ info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap })),
+        loadInventarioFromSupabase(userIdOverride || undefined).catch(() => [] as InventarioContagem[]),
+        loadDesperdiciosFromSupabase(userIdOverride || undefined).catch(() => [] as DesperdicioRow[]),
+        loadPrePreparoFromSupabase(userIdOverride || undefined).catch(() => [] as PrePreparoStoreRow[]),
         loadPrePreparoEtiquetasFromSupabase().catch(() => [] as PrePreparoEtiquetaRow[]),
-        loadFichasTecnicasFromSupabase().catch(() => [] as FichaTecnicaRow[]),
+        loadFichasTecnicasFromSupabase(userIdOverride || undefined).catch(() => [] as FichaTecnicaRow[]),
       ]);
 
       writeInsumosToStore(dbInsumos);
@@ -1187,7 +1139,7 @@ export default function DashboardClient() {
       setPrePreparoEtiquetas(dbEtiquetas);
       setFichasTecnicas(dbFichas);
 
-      showToast("Sincronização concluída.", "success", 5000);
+      showToast("Dados recarregados.", "success", 5000);
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 9000);
     } finally {
@@ -1196,25 +1148,7 @@ export default function DashboardClient() {
   }
 
   async function hardRestartSyncAndReload() {
-    setIsLoadingTables(true);
-    try {
-      const res = await fetch("/api/bubble-import/sync/restart", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: true }),
-        cache: "no-store",
-      });
-      const j = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
-      try {
-        window.sessionStorage.removeItem("cmvfacil:bootstrapRunning:v5");
-        window.sessionStorage.removeItem("cmvfacil:bootstrapDone:v5");
-      } catch {}
-      window.location.reload();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : String(err), "error", 9000);
-      setIsLoadingTables(false);
-    }
+    showToast("Reinício Bubble desativado (modo CSV-only).", "error", 7000);
   }
 
   useEffect(() => {
@@ -1228,6 +1162,10 @@ export default function DashboardClient() {
   }, []);
 
   useEffect(() => {
+    if (readOnly) {
+      setUserScopePrefix(`user:${userIdOverride}:`);
+      return;
+    }
     void requireUserScopePrefix()
       .then((prefix) => setUserScopePrefix(prefix))
       .catch(() => setUserScopePrefix(""));
@@ -1259,9 +1197,7 @@ export default function DashboardClient() {
         if (dep) setDebugDeployUrl(dep);
       } catch {}
       try {
-        const statsRes = await fetch("/api/bubble-import/stats", { cache: "no-store" });
-        const stats = (await statsRes.json().catch(() => null)) as any;
-        if (statsRes.ok && stats?.ok) setDebugStats(stats);
+        setDebugStats(null);
       } catch {}
     })();
   }, [debugMode]);
@@ -1270,7 +1206,7 @@ export default function DashboardClient() {
     (async () => {
       let insumosRows: InsumoStoreItem[] = [];
       try {
-        const dbRows = await loadInsumosFromSupabase();
+        const dbRows = await loadInsumosFromSupabase(userIdOverride || undefined);
         if (dbRows.length) {
           insumosRows = dbRows;
           writeInsumosToStore(dbRows);
@@ -1283,7 +1219,7 @@ export default function DashboardClient() {
       let produtosRows: FornecedorProdutos = {};
       let equivalenciasRows: FornecedorEquivalenciasMap = {};
       try {
-        const db = await loadFornecedoresStateFromSupabase();
+        const db = await loadFornecedoresStateFromSupabase(userIdOverride || undefined);
         const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
         if (hasDb) {
           infoRows = db.info;
@@ -1298,23 +1234,23 @@ export default function DashboardClient() {
 
       let contagensRows: InventarioContagem[] = [];
       try {
-        contagensRows = await loadInventarioFromSupabase();
+      contagensRows = await loadInventarioFromSupabase(userIdOverride || undefined);
       } catch {}
       writeInventarioToStore(contagensRows);
       let entradasRows: EntradaStoreRow[] = [];
       try {
-        const dbEntradas = await loadEntradasFromSupabase();
+        const dbEntradas = await loadEntradasFromSupabase(userIdOverride || undefined);
         if (dbEntradas.length) entradasRows = dbEntradas;
       } catch {}
       writeEntradasToStore(entradasRows);
       let desperdiciosRows: DesperdicioRow[] = [];
       try {
-        desperdiciosRows = await loadDesperdiciosFromSupabase();
+        desperdiciosRows = await loadDesperdiciosFromSupabase(userIdOverride || undefined);
       } catch {}
       writeDesperdiciosToStore(desperdiciosRows);
       let prePreparoRows: PrePreparoStoreRow[] = [];
       try {
-        prePreparoRows = await loadPrePreparoFromSupabase();
+        prePreparoRows = await loadPrePreparoFromSupabase(userIdOverride || undefined);
       } catch {}
       writePrePreparoToStore(prePreparoRows);
       let etiquetasRows: PrePreparoEtiquetaRow[] = [];
@@ -1325,7 +1261,7 @@ export default function DashboardClient() {
 
       let fichasRows: FichaTecnicaRow[] = [];
       try {
-        fichasRows = await loadFichasTecnicasFromSupabase();
+        fichasRows = await loadFichasTecnicasFromSupabase(userIdOverride || undefined);
       } catch {}
       if (fichasRows.length) writeFichasTecnicasToStore(fichasRows);
       if (!fichasRows.length) fichasRows = readFichasTecnicasFromStore([]);
@@ -1347,7 +1283,7 @@ export default function DashboardClient() {
     const refreshTimeout = window.setTimeout(() => {
       void (async () => {
         try {
-          const rows = await loadInsumosFromSupabase();
+          const rows = await loadInsumosFromSupabase(userIdOverride || undefined);
           writeInsumosToStore(rows);
           setInsumos(rows);
         } catch {}
@@ -1415,6 +1351,7 @@ export default function DashboardClient() {
   }, [fornecedorProdutosMap, insumos]);
 
   useEffect(() => {
+    if (readOnly) return;
     if (!fornecedoresReadyRef.current) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
@@ -2532,6 +2469,23 @@ export default function DashboardClient() {
       insumos.find((i) => i.id === historyItem.insumoId) ??
       (key ? insumos.find((i) => normalizeKey(i.item) === key) ?? null : null);
     const baseUnit = formatUnitLabelForUI((String(insumo?.medida ?? "") || "Und").trim());
+    const isLooseKeyMatch = (candidateKey: string, targetKey: string) => {
+      const c = String(candidateKey ?? "").trim();
+      const t2 = String(targetKey ?? "").trim();
+      if (!c || !t2) return false;
+      if (c === t2) return true;
+      const ct = c.split("_").filter(Boolean);
+      const tt = t2.split("_").filter(Boolean);
+      const tLen = tt.join("").length;
+      const cLen = ct.join("").length;
+      if (tLen < 4 || cLen < 4) return false;
+      if (c.includes(t2) || t2.includes(c)) return true;
+      const cSet = new Set(ct);
+      if (tt.length && tt.every((x) => cSet.has(x))) return true;
+      const tSet = new Set(tt);
+      if (ct.length && ct.every((x) => tSet.has(x))) return true;
+      return false;
+    };
     const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       const id = String(i.id ?? "").trim();
@@ -2578,7 +2532,7 @@ export default function DashboardClient() {
         const rawKey = normalizeKey(resolvedNome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
-        if (mappedKey !== key) continue;
+        if (!isLooseKeyMatch(mappedKey, key)) continue;
 
         const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
         if (!Number.isFinite(qty) || qty <= 0) continue;
@@ -2622,6 +2576,19 @@ export default function DashboardClient() {
 
   useEffect(() => {
     if (!historyItem) return;
+    if (detailsTab !== "entradas") return;
+    if (isLoadingTables) return;
+    if (entradas.length) return;
+    if (historicoEntradas.length) return;
+    const key = String(historyItem.insumoId ?? "").trim();
+    if (!key) return;
+    if (autoEntradasSyncKeyRef.current === key) return;
+    autoEntradasSyncKeyRef.current = key;
+    void reimportEntradasAndReload({ silent: true });
+  }, [detailsTab, entradas.length, historicoEntradas.length, historyItem, isLoadingTables]);
+
+  useEffect(() => {
+    if (!historyItem) return;
     if (reimportFornecedoresTriedRef.current) return;
     const needs = historicoEntradas
       .map((h) => sanitizeFornecedorLabelForUI(h.fornecedor))
@@ -2640,10 +2607,7 @@ export default function DashboardClient() {
     void (async () => {
       setIsLoadingTables(true);
       try {
-        const res = await fetch("/api/bubble-import/reimport-fornecedores", { method: "POST", headers: { "content-type": "application/json" }, cache: "no-store" });
-        const j = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? `failed_${res.status}`));
-        const db = await loadFornecedoresStateFromSupabase();
+        const db = await loadFornecedoresStateFromSupabase(userIdOverride || undefined);
         writeFornecedorInfoMap(db.info);
         writeFornecedorProdutosMap(db.produtos);
         writeFornecedorEquivalenciasMap(db.equivalencias);
@@ -2751,7 +2715,7 @@ export default function DashboardClient() {
     const nextRows = insumos.map((i) => (i.id === selectedInsumo.id ? { ...i, ocultar: nextOcultar } : i));
     setInsumos(nextRows);
     writeInsumosToStore(nextRows);
-    void saveInsumosStateToSupabase({ rows: nextRows }).catch(() => {});
+    if (!readOnly) void saveInsumosStateToSupabase({ rows: nextRows }).catch(() => {});
     setHideAlert({ item: selectedInsumo.item, tone: nextOcultar ? "hide" : "show" });
     if (nextOcultar) {
       setHistoryItem(null);
@@ -2985,6 +2949,67 @@ export default function DashboardClient() {
     return () => window.removeEventListener("mousedown", onPointerDown);
   }, [isItemMenuOpen]);
 
+  const qaUi = useMemo(() => {
+    const renderedRows = visibleRows.map((r) => ({
+      insumoId: r.insumoId,
+      item: r.item,
+      categoria: r.categoria,
+      initial: r.initial,
+      entradas: r.entradas,
+      final: r.final,
+      saidas: r.saidas,
+      custo: r.custo,
+      cmv: r.cmv,
+      cmvTone: r.cmvTone,
+    }));
+
+    return {
+      period: { startDate, endDate, revenue, targetCmv },
+      table: { tableQuery, tableCategoria, tableColumnOrder, tableSortKey, tableSortDir },
+      state: { isLoadingTables, historyOpen: Boolean(historyItem), calcComputedAt },
+      calc: calc
+        ? {
+            cmvPercent: calc.cmvPercent,
+            deltaPp: calc.deltaPp,
+            initialCents: calc.initialCents,
+            comprasCents: calc.comprasCents,
+            finalCents: calc.finalCents,
+            saidasCents: calc.saidasCents,
+            revenueCents: calc.revenueCents,
+            desperdiciosCents: calc.desperdiciosCents,
+            rowsCount: calc.rows.length,
+          }
+        : null,
+      periodFlow: periodFlow
+        ? {
+            initialCents: periodFlow.initialCents,
+            comprasCents: periodFlow.comprasCents,
+            finalCents: periodFlow.finalCents,
+            saidasCents: periodFlow.saidasCents,
+            rowsCount: periodFlow.rows.length,
+          }
+        : null,
+      rendered: { baseRowsCount: baseRows.length, visibleRowsCount: visibleRows.length, rows: renderedRows },
+    };
+  }, [
+    baseRows.length,
+    calc,
+    calcComputedAt,
+    endDate,
+    historyItem,
+    isLoadingTables,
+    periodFlow,
+    revenue,
+    startDate,
+    tableCategoria,
+    tableColumnOrder,
+    tableQuery,
+    tableSortDir,
+    tableSortKey,
+    targetCmv,
+    visibleRows,
+  ]);
+
   return (
     <div className={styles.dashboard}>
       <AppSidebar active={historyItem ? "insumos" : "dashboard"} />
@@ -3091,6 +3116,7 @@ export default function DashboardClient() {
           </div>
         ) : null}
         <div className={styles.pageFrame}>
+          <QaModePanel screen="dashboard-cmv-real" ui={qaUi} />
         <section className={styles.topSection} style={historyItem ? { display: "none" } : undefined}>
           <div className={styles.topBar}>
             <div className={styles.topField}>
@@ -3172,12 +3198,7 @@ export default function DashboardClient() {
               Calcular CMV
             </button>
 
-            <button
-              type="button"
-              className={isLoadingTables ? styles.topAction : `${styles.topAction} ${styles.topActionEnabled}`}
-              onClick={() => void syncAllAndReload()}
-              disabled={isLoadingTables}
-            >
+            <button type="button" className={styles.topAction} disabled>
               <span className={styles.topActionIcon}>
                 <IconSidebarStore />
               </span>
@@ -3569,7 +3590,7 @@ export default function DashboardClient() {
               </div>
             </div>
           ) : (
-            <div className={styles.tableWrapper}>
+            <div className={styles.tableWrapper} data-qa-grid="dashboard-cmv-real">
               {isLoadingTables ? (
                 <div className={styles.loadingOverlay}>
                   <LoadingSpinner />
@@ -3645,7 +3666,13 @@ export default function DashboardClient() {
                 <div className={styles.tableEmpty}>Nenhum item encontrado com os filtros atuais.</div>
               ) : (
                 visibleRows.map((r) => (
-                  <div key={r.index} className={styles.tableRow} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+                  <div
+                    key={r.index}
+                    className={styles.tableRow}
+                    style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                    data-qa-grid-row
+                    data-qa-row-id={r.insumoId}
+                  >
                     {tableColumnOrder.map((column) => (
                       <div key={column}>{renderDashboardCell(r, column)}</div>
                     ))}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE } from "../../../lib/supabaseAuthCookies";
+import { shouldUseSecureCookies } from "../../../lib/cookieSecurity";
 
 const COOKIE_NAME = "cmv_admin_session";
 
@@ -28,7 +29,7 @@ export async function POST(req: Request) {
     value: "",
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: shouldUseSecureCookies(req),
     path: "/",
     maxAge: 0,
   });

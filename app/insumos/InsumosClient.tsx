@@ -14,6 +14,7 @@ import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type En
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./insumos.module.css";
 
 type InsumoRow = {
@@ -313,6 +314,7 @@ export default function InsumosClient() {
   const toastTimerRef = useRef<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
@@ -346,6 +348,8 @@ export default function InsumosClient() {
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
+  const isReadOnly = Boolean(sourceMeta.readOnly);
+  const isCompatSource = sourceMeta.source === "compat";
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -380,106 +384,16 @@ export default function InsumosClient() {
   }
 
   async function runAutoImportDiagnosis() {
-    setAutoImportDiag((prev) => ({ ...prev, loading: true, error: "" }));
-    try {
-      let bubbleBaseUrl = "";
-      let bubbleToken = "";
-      try {
-        bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
-
-      const meRes = await fetch("/api/auth/me", { method: "GET", cache: "no-store" });
-      const meJson = (await meRes.json().catch(() => null)) as any;
-      const meUserId = String(meJson?.userId ?? "").trim();
-
-      const statusRes = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
-      const statusText = await statusRes.text().catch(() => "");
-      let statusJson: any = null;
-      try {
-        statusJson = statusText ? JSON.parse(statusText) : null;
-      } catch {
-        statusJson = null;
-      }
-
-      if (!statusRes.ok) {
-        const msg = statusRes.status === 401 ? "Sem sessão no servidor (cookie de login não encontrado)." : `Falha ao consultar status (${statusRes.status}).`;
-        setAutoImportDiag({
-          loading: false,
-          meUserId,
-          bubbleBaseUrl,
-          bubbleTokenMasked: maskToken(bubbleToken),
-          statusJson,
-          error: msg,
-        });
-        return;
-      }
-
-      setAutoImportDiag({
-        loading: false,
-        meUserId,
-        bubbleBaseUrl,
-        bubbleTokenMasked: maskToken(bubbleToken),
-        statusJson,
-        error: "",
-      });
-    } catch (err) {
-      setAutoImportDiag((prev) => ({
-        ...prev,
-        loading: false,
-        error: err instanceof Error ? err.message : String(err),
-      }));
-    }
+    setAutoImportDiag((prev) => ({ ...prev, loading: false, error: "" }));
   }
 
   async function resumeAutoImport() {
-    try {
-      let bubbleBaseUrl = "";
-      let bubbleToken = "";
-      try {
-        bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
-      await fetch("/api/bubble-import/ensure", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined }),
-        cache: "no-store",
-      });
-    } catch {}
-    window.location.reload();
+    showToast("Importação automática desativada (modo CSV-only).", "error", 7000);
   }
 
-  async function checkAutoImportStatusIfEmpty(nextRows: InsumoRow[]) {
-    if (nextRows.length) return;
-    try {
-      const res = await fetch("/api/bubble-import/status", { method: "GET", cache: "no-store" });
-      const json = (await res.json().catch(() => null)) as any;
-      if (!res.ok || !json?.ok) {
-        const msg = res.status === 401 ? "Sem sessão no servidor para checar a importação automática." : `Falha ao checar importação (${res.status}).`;
-        showToast(msg, "error", 9000);
-        return;
-      }
-      if (json.userIdIsUuid === false) {
-        showToast("Login inválido para importação automática (userId não é UUID). Faça login pelo Supabase.", "error", 8000);
-        return;
-      }
-      if (json.supabaseAdminConfigured === false) {
-        showToast("Supabase (service role) não configurado no servidor. A importação automática não consegue rodar.", "error", 8000);
-        return;
-      }
-      const s = json.summary;
-      const phase = String(s?.phase ?? "");
-      const fetchedTotal = typeof s?.fetchedTotal === "number" ? s.fetchedTotal : null;
-      const importLastError = String(s?.importLastError ?? "").trim();
-      if (phase === "error" || importLastError) {
-        showToast(`Falha na importação automática (${importLastError || "error"}).`, "error", 9000);
-        return;
-      }
-      if (phase === "done" && fetchedTotal === 0) {
-        showToast("Importação automática concluiu, mas o Bubble retornou 0 registros. Verifique URL/token e os nomes dos tipos no Bubble.", "error", 10000);
-      }
-    } catch {}
+  async function checkAutoImportStatusIfEmpty(nextRows: InsumoRow[], meta: { source: "legacy" | "compat"; readOnly: boolean }) {
+    void nextRows;
+    void meta;
   }
 
   useEffect(() => {
@@ -496,6 +410,8 @@ export default function InsumosClient() {
     (async () => {
       try {
         const state = await loadInsumosStateFromSupabase();
+        const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
+        setSourceMeta(meta);
         const mapped = (state.rows ?? []).map((s, idx) => ({
           id: String(s.id || idx + 1),
           ocultar: Boolean(s.ocultar),
@@ -507,10 +423,6 @@ export default function InsumosClient() {
         }));
         rowsReadyRef.current = true;
         setDataRows(mapped);
-        void checkAutoImportStatusIfEmpty(mapped);
-        if (!mapped.length) {
-          void runAutoImportDiagnosis();
-        }
 
         const fromRows = getUniqueCategoriesFromRows(mapped);
         const merged: string[] = [];
@@ -592,6 +504,7 @@ export default function InsumosClient() {
 
   useEffect(() => {
     if (!rowsReadyRef.current || !categoriesReadyRef.current) return;
+    if (isReadOnly) return;
     if (isBootstrapRunning()) return;
     if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
     syncTimeoutRef.current = window.setTimeout(() => {
@@ -614,7 +527,7 @@ export default function InsumosClient() {
           showToast(saveErrorMessage(err), "error");
         });
     }, 650);
-  }, [dataRows, categories]);
+  }, [dataRows, categories, isReadOnly]);
 
   useEffect(() => {
     const fromRows = getUniqueCategoriesFromRows(dataRows);
@@ -657,6 +570,10 @@ export default function InsumosClient() {
   }>({ loading: false, meUserId: "", bubbleBaseUrl: "", bubbleTokenMasked: "", statusJson: null, error: "" });
 
   function toggleOcultar(id: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setDataRows((prev) => {
       const nextRows = prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r));
       const changed = nextRows.find((r) => r.id === id) ?? null;
@@ -885,6 +802,10 @@ export default function InsumosClient() {
   }
 
   function openNewItem() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setIsImportOpen(false);
     setIsEditItemOpen(false);
     setEditingItemId(null);
@@ -900,6 +821,10 @@ export default function InsumosClient() {
   }
 
   function saveNewItem() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const item = newItemName.trim();
     if (!item) return;
     const medida = newUnit.trim() || "-";
@@ -951,6 +876,10 @@ export default function InsumosClient() {
   }
 
   function openEditItem(row: InsumoRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setIsImportOpen(false);
     setIsNewItemOpen(false);
     setIsDeleteItemOpen(false);
@@ -1215,6 +1144,7 @@ export default function InsumosClient() {
   }
 
   const avgUnitCostCentsById = useMemo(() => {
+    if (isReadOnly) return new Map<string, number>();
     const idByKey = new Map<string, string>();
     for (const row of dataRows) {
       const k = normalizeKey(row.item);
@@ -1264,7 +1194,7 @@ export default function InsumosClient() {
       out.set(id, Math.round(cents / qty));
     }
     return out;
-  }, [dataRows, entradas, fornecedorEquivalenciasMap]);
+  }, [dataRows, entradas, fornecedorEquivalenciasMap, isReadOnly]);
 
   const displayCostLabelById = useMemo(() => {
     const out = new Map<string, string>();
@@ -1332,6 +1262,44 @@ export default function InsumosClient() {
   const totalItens = useMemo(() => dataRows.length, [dataRows.length]);
   const totalOcultados = useMemo(() => dataRows.filter((r) => Boolean(r.ocultar)).length, [dataRows]);
 
+  const qaUi = useMemo(() => {
+    const renderedRows = visibleRows.map((r) => {
+      const custoLabel = displayCostLabelById.get(r.id) ?? r.custoMedio;
+      return {
+        id: r.id,
+        ocultar: Boolean(r.ocultar),
+        item: r.item,
+        medida: r.medida,
+        custoMedio: custoLabel,
+        categoria: r.categoria,
+        especificacao: r.especificacao,
+        selected: selectedIds.has(r.id),
+      };
+    });
+    return {
+      kpis: { totalItens, totalOcultados, categoriasCount: categories.length },
+      filters: { searchQuery, categoryFilter },
+      sort: { sortKey, sortDir, columnOrder },
+      selection: { bulkDeleteMode, selectedCount, allSelected },
+      rendered: { visibleRowsCount: visibleRows.length, rows: renderedRows },
+    };
+  }, [
+    allSelected,
+    bulkDeleteMode,
+    categories.length,
+    categoryFilter,
+    columnOrder,
+    displayCostLabelById,
+    searchQuery,
+    selectedCount,
+    selectedIds,
+    sortDir,
+    sortKey,
+    totalItens,
+    totalOcultados,
+    visibleRows,
+  ]);
+
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="insumos" />
@@ -1339,6 +1307,7 @@ export default function InsumosClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
+          <QaModePanel screen="insumos" ui={qaUi} />
         <section className={styles.header}>
           <div className={styles.headerIcon}>
             <IconCube />
@@ -1348,6 +1317,29 @@ export default function InsumosClient() {
             <p className={styles.subtitle}>Aqui você cadastra e gerencia todos os insumos do seu estoque.</p>
           </div>
         </section>
+
+        {isCompatSource ? (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 14,
+              padding: "10px 12px",
+              borderRadius: 12,
+              background: "#eef6ff",
+              border: "1px solid #cfe6ff",
+              color: "#1b3a57",
+              fontSize: 13,
+              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>Fonte: Banco compatível Bubble</span>
+            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+          </div>
+        ) : null}
 
         <section className={styles.kpis}>
           <div className={styles.kpiCard}>
@@ -1391,7 +1383,14 @@ export default function InsumosClient() {
                 <button
                   type="button"
                   className={styles.kpiLink}
-                  onClick={openCategories}
+                  disabled={isReadOnly}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openCategories();
+                  }}
                 >
                   Ver Categorias
                 </button>
@@ -1427,7 +1426,12 @@ export default function InsumosClient() {
             <button
               type="button"
               className={styles.importBtn}
+              disabled={isReadOnly}
               onClick={() => {
+                if (isReadOnly) {
+                  showToast("Modo somente leitura.", "error");
+                  return;
+                }
                 setIsNewItemOpen(false);
                 setBulkDeleteMode(false);
                 setSelectedIds(new Set());
@@ -1437,27 +1441,19 @@ export default function InsumosClient() {
               <IconUpload />
               Importar
             </button>
-            <button
-              type="button"
-              className={styles.importBtn}
-              onClick={() => {
-                setIsAutoImportDiagOpen((v) => {
-                  const next = !v;
-                  if (next) void runAutoImportDiagnosis();
-                  return next;
-                });
-              }}
-            >
-              Diagnóstico
-            </button>
-            <button type="button" className={styles.newBtn} onClick={openNewItem}>
+            <button type="button" className={styles.newBtn} onClick={openNewItem} disabled={isReadOnly}>
               <IconPlus />
               Novo Item
             </button>
             <button
               type="button"
               className={styles.bulkDeleteBtn}
+              disabled={isReadOnly}
               onClick={() => {
+                if (isReadOnly) {
+                  showToast("Modo somente leitura.", "error");
+                  return;
+                }
                 if (!bulkDeleteMode) {
                   toggleBulkMode();
                   return;
@@ -1475,65 +1471,8 @@ export default function InsumosClient() {
         </section>
 
         <div className={styles.tableWrap}>
-          {isAutoImportDiagOpen ? (
-            <div style={{ marginBottom: 12 }}>
-              <div
-                style={{
-                  background: "#f7faf9",
-                  border: "1px solid #dbe7e4",
-                  borderRadius: 12,
-                  padding: 12,
-                  textAlign: "left",
-                  color: "#0f172a",
-                  fontSize: 13,
-                  lineHeight: "18px",
-                }}
-              >
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", marginBottom: 6 }}>
-                  <div style={{ fontWeight: 900 }}>Diagnóstico (importação automática)</div>
-                  <button type="button" className="cmv-button" onClick={() => setIsAutoImportDiagOpen(false)}>
-                    Fechar
-                  </button>
-                </div>
-                <div style={{ display: "grid", gap: 6 }}>
-                  <div>
-                    <span style={{ fontWeight: 800 }}>UserId:</span> {autoImportDiag.meUserId ? autoImportDiag.meUserId : "—"}
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: 800 }}>Bubble URL:</span> {autoImportDiag.bubbleBaseUrl ? autoImportDiag.bubbleBaseUrl : "—"}
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: 800 }}>Bubble token:</span> {autoImportDiag.bubbleTokenMasked ? autoImportDiag.bubbleTokenMasked : "—"}
-                  </div>
-                  <div>
-                    <span style={{ fontWeight: 800 }}>Status:</span>{" "}
-                    {autoImportDiag.loading
-                      ? "checando..."
-                      : autoImportDiag.error
-                        ? autoImportDiag.error
-                        : autoImportDiag.statusJson?.summary
-                          ? `phase=${String(autoImportDiag.statusJson.summary.phase ?? "")} fetched=${String(autoImportDiag.statusJson.summary.fetchedTotal ?? "")} importError=${String(autoImportDiag.statusJson.summary.importLastError ?? "") || "—"}`
-                          : "sem estado"}
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                  <button type="button" className="cmv-button" onClick={() => void runAutoImportDiagnosis()} disabled={autoImportDiag.loading}>
-                    {autoImportDiag.loading ? "Checando..." : "Rechecar"}
-                  </button>
-                  <button type="button" className="cmv-button" onClick={() => void resumeAutoImport()}>
-                    Retomar importação
-                  </button>
-                  <a className="cmv-button" href="/ajustes/importar-bubble-api">
-                    Configurar Bubble
-                  </a>
-                  <a className="cmv-button" href="/api/bubble-import/status" target="_blank" rel="noreferrer">
-                    Abrir status (JSON)
-                  </a>
-                </div>
-              </div>
-            </div>
-          ) : null}
-          <section className={styles.table} style={{ position: "relative" }}>
+          {null}
+          <section className={styles.table} style={{ position: "relative" }} data-qa-grid="insumos">
             {isLoadingTable ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
@@ -1590,58 +1529,10 @@ export default function InsumosClient() {
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
-                <div style={{ marginTop: 12, display: "grid", gap: 10, width: "100%", maxWidth: 720 }}>
-                  <div
-                    style={{
-                      background: "#f7faf9",
-                      border: "1px solid #dbe7e4",
-                      borderRadius: 12,
-                      padding: 12,
-                      textAlign: "left",
-                      color: "#0f172a",
-                      fontSize: 13,
-                      lineHeight: "18px",
-                    }}
-                  >
-                    <div style={{ fontWeight: 900, marginBottom: 6 }}>Diagnóstico (importação automática)</div>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <div>
-                        <span style={{ fontWeight: 800 }}>UserId:</span> {autoImportDiag.meUserId ? autoImportDiag.meUserId : "—"}
-                      </div>
-                      <div>
-                        <span style={{ fontWeight: 800 }}>Bubble URL:</span> {autoImportDiag.bubbleBaseUrl ? autoImportDiag.bubbleBaseUrl : "—"}
-                      </div>
-                      <div>
-                        <span style={{ fontWeight: 800 }}>Bubble token:</span> {autoImportDiag.bubbleTokenMasked ? autoImportDiag.bubbleTokenMasked : "—"}
-                      </div>
-                      <div>
-                        <span style={{ fontWeight: 800 }}>Status:</span>{" "}
-                        {autoImportDiag.loading
-                          ? "checando..."
-                          : autoImportDiag.error
-                            ? autoImportDiag.error
-                            : autoImportDiag.statusJson?.summary
-                              ? `phase=${String(autoImportDiag.statusJson.summary.phase ?? "")} fetched=${String(autoImportDiag.statusJson.summary.fetchedTotal ?? "")} importError=${String(autoImportDiag.statusJson.summary.importLastError ?? "") || "—"}`
-                              : "sem estado"}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-                      <button type="button" className="cmv-button" onClick={() => void runAutoImportDiagnosis()} disabled={autoImportDiag.loading}>
-                        {autoImportDiag.loading ? "Checando..." : "Rechecar"}
-                      </button>
-                      <a className="cmv-button" href="/ajustes/importar-bubble-api">
-                        Configurar Bubble
-                      </a>
-                      <a className="cmv-button" href="/api/bubble-import/status" target="_blank" rel="noreferrer">
-                        Abrir status (JSON)
-                      </a>
-                    </div>
-                  </div>
-                </div>
               </div>
             ) : (
               visibleRows.map((r) => (
-                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }}>
+                <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   <div className={styles.tdSmall}>
                     <label className={styles.toggle}>
                       <input type="checkbox" checked={r.ocultar} onChange={() => toggleOcultar(r.id)} />

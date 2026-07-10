@@ -5,7 +5,17 @@ import type { InsumoStoreItem } from "./insumosStore";
 export type InsumosStatePayload = {
   rows: InsumoStoreItem[];
   categories: string[];
+  meta?: { source: "legacy" | "compat"; readOnly: boolean };
 };
+
+function getQaOverridesFromLocation() {
+  if (typeof window === "undefined") return { userId: "", source: "" };
+  const params = new URLSearchParams(window.location.search);
+  return {
+    userId: String(params.get("userId") ?? "").trim(),
+    source: String(params.get("source") ?? "").trim(),
+  };
+}
 
 function normalizeItem(input: unknown): InsumoStoreItem | null {
   if (!input || typeof input !== "object") return null;
@@ -49,16 +59,33 @@ function normalizeRows(input: unknown): InsumoStoreItem[] {
   return out;
 }
 
-export async function loadInsumosFromSupabase() {
-  const state = await loadInsumosStateFromSupabase();
+function persistPageSource(source: "legacy" | "compat") {
+  if (typeof window === "undefined") return;
+  try {
+    const p = String(window.location.pathname ?? "").trim();
+    if (!p) return;
+    window.sessionStorage.setItem(`cmvfacil:pageSource:v1:${p}`, source);
+  } catch {}
+}
+
+export async function loadInsumosFromSupabase(userId?: string) {
+  const state = await loadInsumosStateFromSupabase(userId);
   return state.rows;
 }
 
-export async function loadInsumosStateFromSupabase(): Promise<InsumosStatePayload> {
-  const res = await fetch(`/api/insumos?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-  const json = (await res.json().catch(() => null)) as { rows?: unknown[]; categories?: unknown[]; error?: string } | null;
+export async function loadInsumosStateFromSupabase(userId?: string): Promise<InsumosStatePayload> {
+  const override = getQaOverridesFromLocation();
+  const u = String(userId ?? "").trim() || override.userId;
+  const source = override.source;
+  const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
+  const res = await fetch(`/api/insumos?ts=${Date.now()}${qp}`, { method: "GET", cache: "no-store" });
+  const json = (await res.json().catch(() => null)) as
+    | { rows?: unknown[]; categories?: unknown[]; source?: string; readOnly?: boolean; error?: string }
+    | null;
   if (!res.ok || !json) throw new Error(json?.error || `failed_to_load_${res.status}`);
-  return { rows: normalizeRows(json.rows), categories: normalizeCategories(json.categories) };
+  const sourceLabel = String(json.source ?? "").trim() === "compat" ? "compat" : "legacy";
+  persistPageSource(sourceLabel);
+  return { rows: normalizeRows(json.rows), categories: normalizeCategories(json.categories), meta: { source: sourceLabel, readOnly: Boolean(json.readOnly) } };
 }
 
 export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreItem[]; categories?: string[] }) {

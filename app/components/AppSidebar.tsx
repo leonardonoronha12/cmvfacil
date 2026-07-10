@@ -295,12 +295,32 @@ const HELP_CENTER_URL = "https://cmv-facil.gitbook.io/cmv-facil";
 export default function AppSidebar({ active }: { active: SidebarKey }) {
   const router = useRouter();
   const pathname = usePathname();
+  const [embedParam] = useState(() => {
+    try {
+      const v = String(new URLSearchParams(window.location.search).get("embed") ?? "")
+        .trim()
+        .toLowerCase();
+      return v === "1" || v === "true" || v === "yes";
+    } catch {
+      return false;
+    }
+  });
+  const [isFramed, setIsFramed] = useState(false);
+  useEffect(() => {
+    try {
+      setIsFramed(window.self !== window.top);
+    } catch {
+      setIsFramed(true);
+    }
+  }, []);
+  const isEmbedded = embedParam || isFramed;
+  if (isEmbedded) return null;
   const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>(() => readPrePreparoEtiquetasFromStore());
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [me, setMe] = useState(() => readMeFromStore());
-  const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(true);
+  const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(false);
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const lastSyncRunIdRef = useRef("");
   const bootstrapSkipUntilRef = useRef(0);
@@ -458,7 +478,46 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     return true;
   };
 
+  const isBubbleObjMigrationPage = () => {
+    const p = String(pathname ?? "").trim() || "/";
+    return (
+      p.startsWith("/ajustes/importar-bubble") ||
+      p.startsWith("/ajustes/importar-bubble-api") ||
+      p.startsWith("/ajustes/importar-bubble-dump") ||
+      p.startsWith("/ajustes/conexao-migracao") ||
+      p.startsWith("/ajustes/bubble-global")
+    );
+  };
+
+  const isCompatInsumosMode = () => {
+    if (typeof window === "undefined") return false;
+    const p = String(pathname ?? "").trim();
+    if (
+      p !== "/insumos" &&
+      p !== "/fornecedores" &&
+      p !== "/entradas" &&
+      p !== "/inventario" &&
+      p !== "/desperdicios" &&
+      p !== "/fichas-tecnicas" &&
+      p !== "/pre-preparo" &&
+      p !== "/lista-de-compras"
+    )
+      return false;
+    if (p !== "/lista-de-compras") return true;
+    const params = new URLSearchParams(window.location.search);
+    const src = String(params.get("source") ?? "").trim().toLowerCase();
+    if (src === "compat") return true;
+    if (src === "legacy") return false;
+    try {
+      const stored = String(window.sessionStorage.getItem(`cmvfacil:pageSource:v1:${p}`) ?? "").trim().toLowerCase();
+      if (stored === "compat") return true;
+      if (stored === "legacy") return false;
+    } catch {}
+    return false;
+  };
+
   const refreshBubbleObjStatus = async () => {
+    if (!isBubbleObjMigrationPage()) return;
     try {
       const res = await fetch(`/api/bubble-obj/migration/status?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const j = (await res.json().catch(() => null)) as any;
@@ -495,15 +554,13 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   };
 
   const fireEnsureBubbleObj = async () => {
-    try {
-      await fetch("/api/bubble-obj/migration/ensure", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
-    } catch {}
+    if (!isBubbleObjMigrationPage()) return;
+    return;
   };
 
   const fireValidateBubbleObj = async () => {
-    try {
-      await fetch("/api/bubble-obj/migration/validate", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}), cache: "no-store" });
-    } catch {}
+    if (!isBubbleObjMigrationPage()) return;
+    return;
   };
 
   const requestStopBootstrap = async () => {
@@ -527,24 +584,10 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const requestRestartBootstrap = async () => {
     bootstrapStopRef.current = true;
     try {
-      let baseUrl = "";
-      let token = "";
-      try {
-        baseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-        token = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-      } catch {}
-      await fetch("/api/bubble-import/sync/restart", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ hard: true, ...(baseUrl ? { baseUrl } : {}), ...(token ? { token } : {}) }),
-        cache: "no-store",
-      });
-    } catch {}
-    try {
       window.sessionStorage.removeItem(bootstrapRunningKey);
       window.sessionStorage.removeItem(bootstrapDoneKey);
     } catch {}
-    window.location.reload();
+    setBootstrap({ status: "error", message: "csv_only_mode", progress: 0, etaMs: null, stage: "", detail: "" });
   };
 
   const computeBootstrapProgress = (state: any) => {
@@ -780,23 +823,38 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, [bootstrap.status]);
 
   useEffect(() => {
+    if (isCompatInsumosMode()) return;
+    if (!isBubbleObjMigrationPage()) return;
     void refreshBubbleObjStatus();
   }, []);
 
   useEffect(() => {
+    if (isCompatInsumosMode()) return;
+    if (!isBubbleObjMigrationPage()) return;
     const st = String(bubbleObj.status ?? "not_started");
     if (st === "completed" || st === "running" || st === "pending_review") return;
     try {
       if (window.sessionStorage.getItem(bubbleObjEnsureKey) === "1") return;
-      window.sessionStorage.setItem(bubbleObjEnsureKey, "1");
     } catch {}
-    setBubbleObjOverlayVisible(true);
-    void fireEnsureBubbleObj().finally(() => {
-      void refreshBubbleObjStatus();
-    });
+
+    void (async () => {
+      try {
+        const state = await loadInsumosStateFromSupabase();
+        if ((state.rows ?? []).length > 0) return;
+      } catch {}
+
+      try {
+        window.sessionStorage.setItem(bubbleObjEnsureKey, "1");
+      } catch {}
+      setBubbleObjOverlayVisible(true);
+      await fireEnsureBubbleObj();
+      await refreshBubbleObjStatus();
+    })();
   }, [bubbleObj.status]);
 
   useEffect(() => {
+    if (isCompatInsumosMode()) return;
+    if (!isBubbleObjMigrationPage()) return;
     const st = String(bubbleObj.status ?? "");
     const v = String(bubbleObj.validation?.status ?? "");
     const isActive = st === "running" || v === "running";
@@ -808,6 +866,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, [bubbleObj.status, bubbleObj.validation?.status]);
 
   useEffect(() => {
+    if (isCompatInsumosMode()) return;
+    if (!isBubbleObjMigrationPage()) return;
     const st = String(bubbleObj.status ?? "");
     if (st !== "completed") return;
     const v = String(bubbleObj.validation?.status ?? "not_started");
@@ -864,185 +924,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, [isDrawerOpen]);
 
   useEffect(() => {
-    if (active === "ajustes") return;
-    if (bootstrap.status === "running") return;
-    void (async () => {
-      try {
-        const skipOverlay = shouldSkipBootstrap();
-        let bubbleBaseUrl = "";
-        let bubbleToken = "";
-        try {
-          bubbleBaseUrl = (window.localStorage.getItem("cmvfacil:bubbleBaseUrl") ?? "").trim();
-          bubbleToken = (window.localStorage.getItem("cmvfacil:bubbleToken") ?? "").trim();
-        } catch {}
-        const res = await fetch("/api/bubble-import/ensure", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ baseUrl: bubbleBaseUrl || undefined, token: bubbleToken || undefined }),
-          cache: "no-store",
-        });
-        const json = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !json?.ok) {
-          const msg = String(json?.error ?? `failed_${res.status}`);
-          setBootstrapOverlayVisible(true);
-          setBootstrapDisplayPct(0);
-          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
-          return;
-        }
-
-        const status = String(json?.status ?? "");
-        if (status === "ready") {
-          try {
-            window.sessionStorage.removeItem(bootstrapRunningKey);
-            window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
-          } catch {
-            // ignore
-          }
-          bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
-          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
-          if (!skipOverlay) setBootstrapOverlayVisible(false);
-          return;
-        }
-        if (status === "needs_setup" || status === "no_files") {
-          const msg = String(json?.reason ?? "no_files");
-          setBootstrapOverlayVisible(true);
-          setBootstrapDisplayPct(0);
-          setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
-          return;
-        }
-
-        const statePath = String(json?.state?.statePath ?? "");
-        const mode = String(json?.mode ?? "");
-        if (!statePath) {
-          setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
-          if (!skipOverlay) setBootstrapOverlayVisible(false);
-          return;
-        }
-
-        const initialMeta = computeBootstrapProgress(json?.state ?? {});
-        setBootstrapOverlayVisible(true);
-        setBootstrapDisplayPct(0);
-        setBootstrap({
-          status: "running",
-          message: "",
-          progress: Math.max(0.02, Math.min(0.98, initialMeta.progress || 0.02)),
-          etaMs: initialMeta.etaMs ?? null,
-          stage: initialMeta.stage || "Atualizando",
-          detail: String(initialMeta.detail ?? ""),
-        });
-
-        try {
-          window.sessionStorage.setItem(bootstrapRunningKey, "1");
-          window.sessionStorage.removeItem(bootstrapDoneKey);
-        } catch {}
-
-        const tickUrl = mode === "sync" ? "/api/bubble-import/sync/tick" : "/api/bubble-import/rebuild/tick";
-        const importAsUserId = mode === "sync" ? String(json?.userId ?? "").trim() : "";
-        bootstrapControlRef.current = { tickUrl, statePath };
-        bootstrapStopRef.current = false;
-        let lastInsumosRefresh = 0;
-
-        for (let i = 0; i < 2000; i++) {
-          await sleep(1200);
-          if (bootstrapStopRef.current) return;
-          const tickRes = await fetch(tickUrl, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body:
-              mode === "sync"
-                ? JSON.stringify({
-                    statePath,
-                    resume: true,
-                    maxOps: 40,
-                    baseUrl: bubbleBaseUrl || undefined,
-                    token: bubbleToken || undefined,
-                    importAsUserId: importAsUserId || undefined,
-                  })
-                : JSON.stringify({ statePath }),
-            cache: "no-store",
-          });
-          const tickJson = (await tickRes.json().catch(() => null)) as any;
-          if (!tickRes.ok || !tickJson?.ok) {
-            const msg = String(tickJson?.error ?? `failed_${tickRes.status}`);
-            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
-          bootstrapSkipUntilRef.current = Date.now() + 60_000;
-            try {
-              window.sessionStorage.removeItem(bootstrapRunningKey);
-            } catch {}
-            return;
-          }
-
-          const meta = computeBootstrapProgress(tickJson?.state ?? {});
-          const currentRunId = String(tickJson?.state?.runId ?? "").trim();
-          const runIdChanged = Boolean(currentRunId && currentRunId !== lastSyncRunIdRef.current);
-          if (runIdChanged) {
-            lastSyncRunIdRef.current = currentRunId;
-            setBootstrapDisplayPct(0);
-          }
-          setBootstrap((prev) => {
-            if (prev.status !== "running") return prev;
-            const nextProgress = runIdChanged ? (meta.progress || 0) : Math.max(prev.progress, meta.progress || 0);
-            const etaMs = meta.etaMs && Number.isFinite(meta.etaMs) ? Math.max(0, meta.etaMs) : null;
-            return { ...prev, progress: nextProgress, etaMs, stage: meta.stage || prev.stage, detail: String(meta.detail ?? "") };
-          });
-
-          if (mode === "sync") {
-            const now = Date.now();
-            if (now - lastInsumosRefresh > 1800) {
-              lastInsumosRefresh = now;
-              void loadInsumosStateFromSupabase()
-                .then((state) => {
-                  writeInsumosToStore(state.rows);
-                  writeInsumoCategoriasToStore(state.categories);
-                })
-                .catch(() => {});
-            }
-          }
-
-          const phase = String(tickJson?.state?.phase ?? "");
-          if (phase === "done") {
-            try {
-              window.sessionStorage.removeItem(bootstrapRunningKey);
-              window.sessionStorage.setItem(bootstrapDoneKey, String(Date.now()));
-            } catch {}
-            bootstrapSkipUntilRef.current = Date.now() + bootstrapDoneTtlMs;
-            setBootstrap({ status: "done", message: "", progress: 1, etaMs: 0, stage: "", detail: "" });
-            void bootstrapUserDataOnce();
-            setBootstrapOverlayVisible(false);
-            return;
-          }
-          if (phase === "paused") {
-            setBootstrap({ status: "error", message: "paused_by_user", progress: 0, etaMs: null, stage: "", detail: "" });
-            bootstrapSkipUntilRef.current = Date.now() + 10_000;
-            try {
-              window.sessionStorage.removeItem(bootstrapRunningKey);
-            } catch {}
-            return;
-          }
-          if (phase === "error") {
-            const msg = mode === "sync"
-              ? String(tickJson?.state?.lastError ?? "") || String(tickJson?.state?.import?.lastError ?? "") || "failed"
-              : String(tickJson?.state?.delete?.lastError ?? "") ||
-                String((Array.isArray(tickJson?.state?.steps) ? tickJson.state.steps.find((s: any) => s?.status === "error")?.lastError : "") ?? "") ||
-                "failed";
-            setBootstrap({ status: "error", message: msg, progress: 0, etaMs: null, stage: "", detail: "" });
-            bootstrapSkipUntilRef.current = Date.now() + 60_000;
-            try {
-              window.sessionStorage.removeItem(bootstrapRunningKey);
-            } catch {}
-            return;
-          }
-        }
-
-        setBootstrap({ status: "error", message: "timeout", progress: 0, etaMs: null, stage: "", detail: "" });
-        bootstrapSkipUntilRef.current = Date.now() + 60_000;
-      } catch (err) {
-        setBootstrapOverlayVisible(true);
-        setBootstrapDisplayPct(0);
-        setBootstrap({ status: "error", message: err instanceof Error ? err.message : String(err), progress: 0, etaMs: null, stage: "", detail: "" });
-        bootstrapSkipUntilRef.current = Date.now() + 60_000;
-      }
-    })();
+    setBootstrapOverlayVisible(false);
+    setBootstrapDisplayPct(0);
+    if (bootstrap.status === "running") setBootstrap({ status: "error", message: "csv_only_mode", progress: 0, etaMs: null, stage: "", detail: "" });
   }, [active, bootstrap.status]);
 
   useEffect(() => {
@@ -1226,7 +1110,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     <>
       {(() => {
         const st = String(bubbleObj.status ?? "not_started");
-        const shouldShow = st === "running" || st === "not_started";
+        const shouldShow = false && st === "running";
         if (!shouldShow) return null;
         const blocked = bubbleObjShouldBlockPath();
         const meta = computeBubbleObjProgress();
@@ -1350,7 +1234,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
       {(() => {
         const st = String(bubbleObj.status ?? "");
-        if (st !== "running" || bubbleObjShouldBlockPath() || bubbleObjOverlayVisible) return null;
+        if (true || st !== "running" || bubbleObjShouldBlockPath() || bubbleObjOverlayVisible) return null;
         const meta = computeBubbleObjProgress();
         const pct = Math.round(Math.max(0, Math.min(1, meta.progress)) * 100);
         return (
@@ -1485,7 +1369,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
         </div>
       ) : null}
 
-      {bootstrap.status === "running" && bootstrapOverlayVisible
+      {false && bootstrap.status === "running" && bootstrapOverlayVisible
         ? typeof document === "undefined"
           ? null
           : createPortal(

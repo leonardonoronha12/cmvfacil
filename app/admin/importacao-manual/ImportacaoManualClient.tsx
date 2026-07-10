@@ -3223,7 +3223,7 @@ export default function ImportacaoManualClient() {
     setIsResolving(true);
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 20000);
+      const timeout = setTimeout(() => controller.abort(), 35000);
       let res: Response | null = null;
       try {
         res = await fetch("/api/admin/importacao-manual/resolve", {
@@ -3248,6 +3248,8 @@ export default function ImportacaoManualClient() {
             ? "Supabase REST não está respondendo (timeout). Verifique o status do projeto e tente novamente."
             : rawMsg === "supabase_rest_unhealthy"
               ? "Supabase REST está indisponível (schema cache). Verifique o status do projeto e tente novamente."
+              : rawMsg === "company_members_timeout" || rawMsg === "companies_timeout"
+                ? "Supabase está lento para carregar vínculos da empresa. Tente novamente em alguns segundos."
               : rawMsg;
         setResolveError(msg || `Falha ao resolver usuário/empresa (HTTP ${res.status}).`);
         return;

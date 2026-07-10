@@ -45,7 +45,7 @@ export async function readBubbleGlobalConfigFromDb() {
     .maybeSingle();
 
   if (error) {
-    if (isMissingTableError(error)) return { ok: true as const, value: null as BubbleGlobalConfig | null };
+    if (isMissingTableError(error)) return { ok: true as const, value: null as BubbleGlobalConfig | null, tableMissing: true as const };
     return { ok: false as const, error: error.message };
   }
 
@@ -53,7 +53,7 @@ export async function readBubbleGlobalConfigFromDb() {
   const token = safeToken(String((data as any)?.api_token ?? ""));
   const updatedAt = String((data as any)?.updated_at ?? "").trim() || null;
   const hasAny = Boolean(baseUrl || token);
-  return { ok: true as const, value: hasAny ? ({ baseUrl, token, updatedAt } as BubbleGlobalConfig) : null };
+  return { ok: true as const, value: hasAny ? ({ baseUrl, token, updatedAt } as BubbleGlobalConfig) : null, tableMissing: false as const };
 }
 
 export async function upsertBubbleGlobalConfigToDb(input: { baseUrl?: string; token?: string; clearToken?: boolean; clearBaseUrl?: boolean }) {

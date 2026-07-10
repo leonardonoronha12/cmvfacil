@@ -10,8 +10,9 @@ import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCa
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
-import { deleteInventarioFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase } from "../lib/inventarioSupabase";
+import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
+import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
 
 function IconBox() {
@@ -164,6 +165,11 @@ export default function InventarioClient() {
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
   const [contagens, setContagens] = useState<InventarioContagem[]>(initialContagens);
   const contagensReadyRef = useRef(false);
+  const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
+  const [compatInventories, setCompatInventories] = useState<InventarioCompatInventory[]>([]);
+  const [selectedCompatInventoryId, setSelectedCompatInventoryId] = useState<string | null>(null);
+  const isReadOnly = Boolean(sourceMeta.readOnly);
+  const isCompatSource = sourceMeta.source === "compat";
 
   const [selectedContagemId, setSelectedContagemId] = useState<string | null>(initialContagens[0]?.id ?? null);
   const [query, setQuery] = useState("");
@@ -195,6 +201,10 @@ export default function InventarioClient() {
   const pendingColBodyRef = useRef<HTMLDivElement | null>(null);
 
   const selectedContagem = useMemo(() => (selectedContagemId ? contagens.find((c) => c.id === selectedContagemId) ?? null : null), [contagens, selectedContagemId]);
+  const selectedCompatInventory = useMemo(
+    () => (selectedCompatInventoryId ? compatInventories.find((c) => c.id === selectedCompatInventoryId) ?? null : compatInventories[0] ?? null),
+    [compatInventories, selectedCompatInventoryId],
+  );
 
   const categorias = useMemo(() => {
     const base = ["Categorias pendentes"];
@@ -258,6 +268,83 @@ export default function InventarioClient() {
     return [...list].sort((a, b) => collator.compare(a.item, b.item));
   }, [allItems]);
 
+  const qaUi = useMemo(() => {
+    if (isCompatSource) {
+      return {
+        meta: sourceMeta,
+        selection: {
+          selectedInventoryId: selectedCompatInventory?.id ?? null,
+          selectedData: selectedCompatInventory?.dataContagem ?? null,
+          inventoriesCount: compatInventories.length,
+        },
+        rendered: {
+          inventoriesCount: compatInventories.length,
+          inventories: compatInventories.map((inv) => ({
+            id: inv.id,
+            bubble_id: inv.bubble_id,
+            dataContagem: inv.dataContagem,
+            status: inv.status,
+            responsavel: inv.responsavel,
+            itensCount: Array.isArray(inv.itens) ? inv.itens.length : 0,
+          })),
+        },
+        details: compatInventories.map((inv) => ({
+          id: inv.id,
+          dataContagem: inv.dataContagem,
+          itens: (inv.itens ?? []).map((it) => ({
+            id: it.id,
+            itemId: it.itemId,
+            item: it.item,
+            categoria: it.categoria,
+            unidade: it.unidade,
+            quantidadeEsperada: it.quantidadeEsperada,
+            quantidadeContada: it.quantidadeContada,
+            diferenca: it.diferenca,
+            custoMedio: it.custoMedio,
+            valorDiferenca: it.valorDiferenca,
+            ocultarCmv: Boolean(it.ocultarCmv),
+          })),
+        })),
+      };
+    }
+    return {
+      meta: sourceMeta,
+      selection: { selectedContagemId, selectedData: selectedContagem?.data ?? null, contagensCount: contagens.length },
+      filters: { query, categoriaFilter },
+      rendered: {
+        pendentes: pendentes.map((r) => ({
+          id: r.id,
+          item: r.item,
+          categoria: itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria",
+          estoqueFinalInput: pendingDrafts[r.id] ?? r.estoqueFinal,
+          unidade: r.unidade,
+        })),
+        contabilizados: contabilizados.map((r) => ({
+          id: r.id,
+          item: r.item,
+          categoria: itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria",
+          estoqueFinal: r.estoqueFinal,
+          unidade: r.unidade,
+        })),
+      },
+    };
+  }, [
+    categoriaFilter,
+    compatInventories,
+    contagens.length,
+    contabilizados,
+    isCompatSource,
+    itemCategoryMap,
+    pendentes,
+    pendingDrafts,
+    query,
+    selectedCompatInventory?.dataContagem,
+    selectedCompatInventory?.id,
+    selectedContagem?.data,
+    selectedContagemId,
+    sourceMeta,
+  ]);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -306,15 +393,35 @@ export default function InventarioClient() {
   useEffect(() => {
     (async () => {
       try {
-        const db = await loadInventarioFromSupabase();
-        if (db[0]) {
-          const sorted = sortContagensDesc(normalizeContagens(db));
+        const db = await loadInventarioStateFromSupabase();
+        if (db.meta) setSourceMeta(db.meta);
+        if (db.meta?.source === "compat") {
+          const invs = (db.compat?.inventories ?? []) as InventarioCompatInventory[];
+          setCompatInventories(invs);
+          setSelectedCompatInventoryId(invs[0]?.id ?? null);
+          setContagens(db.rows ?? []);
+          setSelectedContagemId((db.rows ?? [])[0]?.id ?? null);
+          contagensReadyRef.current = true;
+          return;
+        }
+        if ((db.rows ?? [])[0]) {
+          const sorted = sortContagensDesc(normalizeContagens(db.rows));
           setContagens(sorted);
           setSelectedContagemId(sorted[0]?.id ?? null);
           contagensReadyRef.current = true;
           return;
         }
       } catch {}
+      const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
+      if (forcedCompat) {
+        setContagens([]);
+        setCompatInventories([]);
+        setSelectedCompatInventoryId(null);
+        setSelectedContagemId(null);
+        contagensReadyRef.current = true;
+        setSourceMeta({ source: "compat", readOnly: true });
+        return;
+      }
       const stored = readInventarioFromStore(initialContagens);
       const sortedStored = sortContagensDesc(normalizeContagens(stored));
       setContagens(sortedStored);
@@ -325,11 +432,13 @@ export default function InventarioClient() {
 
   useEffect(() => {
     if (!contagensReadyRef.current) return;
+    if (isReadOnly) return;
     writeInventarioToStore(contagens);
-  }, [contagens]);
+  }, [contagens, isReadOnly]);
 
   useEffect(() => {
     if (!contagensReadyRef.current) return;
+    if (isReadOnly) return;
     if (!insumosStore.length && !insumoCategorias.length && !prePreparoStore.length) return;
     setContagens((prev) => {
       let changed = false;
@@ -439,7 +548,7 @@ export default function InventarioClient() {
       if (sel) void upsertInventarioToSupabase(sel).catch(() => {});
       return next;
     });
-  }, [insumoCategorias, insumosStore, prePreparoStore, selectedContagemId]);
+  }, [insumoCategorias, insumosStore, isReadOnly, prePreparoStore, selectedContagemId]);
 
   useEffect(() => {
     if (!menuContagemId) return;
@@ -803,84 +912,132 @@ export default function InventarioClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
+        <QaModePanel screen="inventario" ui={qaUi} />
+        {isCompatSource ? (
+          <div
+            style={{
+              marginTop: 10,
+              marginBottom: 14,
+              padding: "10px 12px",
+              borderRadius: 12,
+              background: "#eef6ff",
+              border: "1px solid #cfe6ff",
+              color: "#1b3a57",
+              fontSize: 13,
+              fontWeight: 700,
+              display: "flex",
+              justifyContent: "space-between",
+              gap: 12,
+              flexWrap: "wrap",
+            }}
+          >
+            <span>Fonte: Banco compatível Bubble</span>
+            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+          </div>
+        ) : null}
         <section className={styles.layout}>
           <div className={styles.left}>
-            <button type="button" className={styles.newCountBtn} onClick={openNew}>
+            <button
+              type="button"
+              className={styles.newCountBtn}
+              disabled={isReadOnly}
+              onClick={() => {
+                if (isReadOnly) return;
+                openNew();
+              }}
+            >
               <img src="/dashboard/ml7hdudz-6qw4osi.svg" className={styles.newCountIcon} alt="" />
               Nova Contagem
             </button>
 
             <div className={styles.leftTop}>
-              <div className={styles.leftTitle}>{`Suas contagens (${contagens.length})`}</div>
+              <div className={styles.leftTitle}>{isCompatSource ? `Inventários (${compatInventories.length})` : `Suas contagens (${contagens.length})`}</div>
             </div>
 
-            <div className={styles.datesList} ref={datesListRef}>
-              {contagens.map((c) => (
+            <div className={styles.datesList} ref={datesListRef} data-qa-grid="inventario">
+              {(isCompatSource ? compatInventories : contagens).map((c: any) => (
                 <div
                   key={c.id}
                   className={styles.dateRow}
-                  onDoubleClick={() => openEditContagem(c.id)}
+                  onDoubleClick={() => {
+                    if (isReadOnly || isCompatSource) return;
+                    openEditContagem(c.id);
+                  }}
                 >
                   <button
                     type="button"
-                    className={c.id === selectedContagemId ? `${styles.dateBtn} ${styles.dateBtnOn}` : styles.dateBtn}
+                    className={
+                      (isCompatSource ? c.id === selectedCompatInventoryId : c.id === selectedContagemId) ? `${styles.dateBtn} ${styles.dateBtnOn}` : styles.dateBtn
+                    }
                     onClick={() => {
+                      if (isCompatSource) {
+                        setSelectedCompatInventoryId(c.id);
+                        return;
+                      }
                       setSelectedContagemId(c.id);
                       setQuery("");
                     }}
                     onDoubleClick={(e) => {
                       e.preventDefault();
+                      if (isReadOnly || isCompatSource) return;
                       openEditContagem(c.id);
                     }}
+                    data-qa-grid-row
+                    data-qa-row-id={c.id}
                   >
-                    <span>{c.data}</span>
+                    <span>{isCompatSource ? c.dataContagem : c.data}</span>
+                    {isCompatSource ? <span className={styles.dateMeta}>{`${c.status}${c.bubble_id ? ` · ${c.bubble_id}` : ""}`}</span> : null}
                   </button>
-                  <button
-                    type="button"
-                    className={styles.moreBtn}
-                    aria-label="Mais opções"
-                    onClick={(e) => {
-                      const next = menuContagemId === c.id ? null : c.id;
-                      if (!next) {
-                        setMenuContagemId(null);
-                        setMenuRect(null);
-                        return;
-                      }
-                      menuAnchorRef.current = e.currentTarget;
-                      const r = e.currentTarget.getBoundingClientRect();
-                      setMenuRect({ left: Math.max(8, r.right - 160), top: r.bottom + 6 });
-                      setMenuContagemId(next);
-                    }}
-                  >
-                    ⋮
-                  </button>
-                  {menuContagemId === c.id ? (
-                    <div className={styles.moreMenu} ref={menuRef} role="menu" style={menuRect ? { left: menuRect.left, top: menuRect.top } : undefined}>
+                  {isCompatSource ? null : (
+                    <>
                       <button
                         type="button"
-                        className={styles.moreItem}
-                        onClick={() => {
-                          setMenuContagemId(null);
-                          setMenuRect(null);
-                          openEditContagem(c.id);
+                        className={styles.moreBtn}
+                        aria-label="Mais opções"
+                        onClick={(e) => {
+                          const next = menuContagemId === c.id ? null : c.id;
+                          if (!next) {
+                            setMenuContagemId(null);
+                            setMenuRect(null);
+                            return;
+                          }
+                          menuAnchorRef.current = e.currentTarget;
+                          const r = e.currentTarget.getBoundingClientRect();
+                          setMenuRect({ left: Math.max(8, r.right - 160), top: r.bottom + 6 });
+                          setMenuContagemId(next);
                         }}
                       >
-                        Editar
+                        ⋮
                       </button>
-                      <button
-                        type="button"
-                        className={styles.moreItem}
-                        onClick={() => {
-                          openDeleteContagem(c.id);
-                        }}
-                      >
-                        Excluir
-                      </button>
-                    </div>
-                  ) : null}
+                      {menuContagemId === c.id ? (
+                        <div className={styles.moreMenu} ref={menuRef} role="menu" style={menuRect ? { left: menuRect.left, top: menuRect.top } : undefined}>
+                          <button
+                            type="button"
+                            className={styles.moreItem}
+                            onClick={() => {
+                              setMenuContagemId(null);
+                              setMenuRect(null);
+                              openEditContagem(c.id);
+                            }}
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.moreItem}
+                            onClick={() => {
+                              openDeleteContagem(c.id);
+                            }}
+                          >
+                            Excluir
+                          </button>
+                        </div>
+                      ) : null}
+                    </>
+                  )}
                 </div>
               ))}
-              {contagens[0] ? null : <div className={styles.muted}>Sem contagens</div>}
+              {isCompatSource ? (compatInventories[0] ? null : <div className={styles.muted}>Sem inventários</div>) : contagens[0] ? null : <div className={styles.muted}>Sem contagens</div>}
             </div>
           </div>
 
@@ -888,33 +1045,99 @@ export default function InventarioClient() {
             <div className={styles.rightHeader}>
               <div className={styles.rightTitleRow}>
                 <div className={styles.rightTitle}>
-                  <IconBox /> {selectedContagem ? `Inventário de ${selectedContagem.data}` : "Inventário"}
+                  <IconBox />{" "}
+                  {isCompatSource
+                    ? selectedCompatInventory
+                      ? `Inventário de ${selectedCompatInventory.dataContagem}`
+                      : "Inventário"
+                    : selectedContagem
+                      ? `Inventário de ${selectedContagem.data}`
+                      : "Inventário"}
                 </div>
-                <button type="button" className={styles.pdfBtn} onClick={() => void generatePdf()} disabled={!selectedContagem}>
+                <button
+                  type="button"
+                  className={styles.pdfBtn}
+                  onClick={() => void generatePdf()}
+                  disabled={isCompatSource || !selectedContagem}
+                >
                   <img src="/dashboard/ml7hdudz-vztdpis.svg" className={styles.pdfIcon} alt="" />
                   Gerar PDF
                 </button>
               </div>
-              <div className={styles.rightSubtitle}>Visualize a contagem da data selecionada.</div>
-            </div>
-
-            <div className={styles.topFilters}>
-              <div className={styles.search}>
-                <span className={styles.searchIcon} aria-hidden>
-                  <IconSearch />
-                </span>
-                <input className={styles.searchInput} placeholder="Pesquise por itens..." value={query} onChange={(e) => setQuery(e.target.value)} />
+              <div className={styles.rightSubtitle}>
+                {isCompatSource
+                  ? selectedCompatInventory
+                    ? `${selectedCompatInventory.status}${selectedCompatInventory.responsavel && selectedCompatInventory.responsavel !== "-" ? ` · ${selectedCompatInventory.responsavel}` : ""}`
+                    : "Visualize o inventário selecionado."
+                  : "Visualize a contagem da data selecionada."}
               </div>
-
-              <select className={styles.select} value={categoriaFilter} onChange={(e) => setCategoriaFilter(e.target.value)}>
-                {categorias.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
-              </select>
             </div>
 
+            {isCompatSource ? null : (
+              <div className={styles.topFilters}>
+                <div className={styles.search}>
+                  <span className={styles.searchIcon} aria-hidden>
+                    <IconSearch />
+                  </span>
+                  <input className={styles.searchInput} placeholder="Pesquise por itens..." value={query} onChange={(e) => setQuery(e.target.value)} />
+                </div>
+
+                <select className={styles.select} value={categoriaFilter} onChange={(e) => setCategoriaFilter(e.target.value)}>
+                  {categorias.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {isCompatSource ? (
+              <div className={styles.compatTableWrap} data-qa-grid="inventario:itens">
+                <div className={styles.compatTableTitle}>{`Itens (${selectedCompatInventory?.itens?.length ?? 0})`}</div>
+                <div className={styles.compatTableScroll}>
+                  <table className={styles.compatTable}>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Categoria</th>
+                        <th>Unid</th>
+                        <th>Qtd esp.</th>
+                        <th>Qtd cont.</th>
+                        <th>Dif.</th>
+                        <th>Custo méd.</th>
+                        <th>Valor dif.</th>
+                        <th>Ocultar CMV</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(selectedCompatInventory?.itens ?? []).map((it) => (
+                        <tr key={it.id} data-qa-grid-row data-qa-row-id={it.id}>
+                          <td>{it.item}</td>
+                          <td>{it.categoria}</td>
+                          <td>{it.unidade}</td>
+                          <td>{it.quantidadeEsperada}</td>
+                          <td>{it.quantidadeContada}</td>
+                          <td>{it.diferenca}</td>
+                          <td>{it.custoMedio}</td>
+                          <td>{it.valorDiferenca}</td>
+                          <td>{it.ocultarCmv ? "Sim" : "Não"}</td>
+                        </tr>
+                      ))}
+                      {selectedCompatInventory?.itens?.[0] ? null : (
+                        <tr>
+                          <td colSpan={9} className={styles.compatEmpty}>
+                            Sem itens
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : null}
+
+            {isCompatSource ? null : (
             <div className={styles.cols}>
               <div className={styles.col}>
                 <div className={styles.colHeadPending}>Pendentes</div>
@@ -1089,10 +1312,11 @@ export default function InventarioClient() {
                 </div>
               </div>
             </div>
+            )}
           </div>
         </section>
 
-        {mounted && isNewOpen
+        {mounted && isNewOpen && !isCompatSource
           ? createPortal(
               <div className={styles.modalOverlay} role="dialog" aria-modal="true">
             <div className={styles.modal}>
@@ -1211,7 +1435,7 @@ export default function InventarioClient() {
             )
           : null}
 
-        {mounted && isDeleteContagemOpen && deleteContagemRow
+        {mounted && isDeleteContagemOpen && deleteContagemRow && !isCompatSource
           ? createPortal(
               <div
                 className={styles.modalOverlay}
