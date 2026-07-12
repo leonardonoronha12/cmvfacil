@@ -264,7 +264,10 @@ export async function GET(req: NextRequest) {
         categories: categories.length,
         containsCarreteiro: rows.some((r: any) => String(r?.item ?? "").trim().toLowerCase() === "carreteiro"),
       });
-      return json({ source: "compat", readOnly: false, rows, categories }, { status: 200 });
+      return json(
+        { source: "compat", readOnly: false, rows, categories },
+        { status: 200, headers: { "x-cmv-insumos-read-source": "compat" } },
+      );
     }
 
     const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
@@ -273,7 +276,10 @@ export async function GET(req: NextRequest) {
       const rows = Array.isArray(payload?.rows) ? (payload.rows as unknown[]) : [];
       const categories = Array.isArray(payload?.categories) ? (payload.categories as unknown[]) : [];
       await dbg("A", "api/insumos", "legacy_state_response_ready", { rows: rows.length, categories: categories.length });
-      return json({ source: "legacy", readOnly: false, rows, categories }, { status: 200 });
+      return json(
+        { source: "legacy", readOnly: false, rows, categories },
+        { status: 200, headers: { "x-cmv-insumos-read-source": "legacy" } },
+      );
     }
     if (!isMissingTableError(error)) return json({ error: error.message }, { status: 500 });
 
@@ -296,7 +302,10 @@ export async function GET(req: NextRequest) {
     const categories = Array.from(new Set(rows.map((r) => String(r.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
       a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
     );
-    return json({ source: "legacy", readOnly: false, rows, categories }, { status: 200 });
+    return json(
+      { source: "legacy", readOnly: false, rows, categories },
+      { status: 200, headers: { "x-cmv-insumos-read-source": "legacy" } },
+    );
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -468,7 +477,17 @@ export async function POST(req: NextRequest) {
         if (delErr) return json({ error: delErr.message }, { status: 500 });
       }
 
-      return json({ ok: true }, { status: 200 });
+      return json(
+        { ok: true },
+        {
+          status: 200,
+          headers: {
+            "x-cmv-insumos-write-source": "compat",
+            "x-cmv-insumos-keep-count": String(keepIds.size),
+            "x-cmv-insumos-delete-count": String(toDelete.length),
+          },
+        },
+      );
     }
 
     if (typeof categoriesProvided === "undefined") {
@@ -481,7 +500,7 @@ export async function POST(req: NextRequest) {
 
     const payload = { rows, categories };
     const { error } = await supabase.from("insumos_state").upsert({ id, payload } as any, { onConflict: "id" });
-    if (!error) return json({ ok: true }, { status: 200 });
+    if (!error) return json({ ok: true }, { status: 200, headers: { "x-cmv-insumos-write-source": "legacy" } });
     if (!isMissingTableError(error)) return json({ error: error.message }, { status: 500 });
 
     const prefix = `user:${userId}:`;
@@ -512,7 +531,7 @@ export async function POST(req: NextRequest) {
       const { error: upErr } = await supabase.from("insumos").upsert(desired as any, { onConflict: "id" });
       if (upErr) return json({ error: upErr.message }, { status: 500 });
     }
-    return json({ ok: true }, { status: 200 });
+    return json({ ok: true }, { status: 200, headers: { "x-cmv-insumos-write-source": "legacy" } });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
