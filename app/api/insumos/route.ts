@@ -409,6 +409,7 @@ export async function POST(req: NextRequest) {
 
       const upsertByBubble: any[] = [];
       const upsertById: any[] = [];
+      const keepIds = new Set<string>();
 
       for (const r of rows as any[]) {
         const rawId = String(r?.id ?? "").trim();
@@ -436,6 +437,7 @@ export async function POST(req: NextRequest) {
           item_receita: false,
           item_do_cardapio: false,
         };
+        keepIds.add(String((patch as any).id ?? "").trim());
         if (bubbleId) upsertByBubble.push(patch);
         else upsertById.push(patch);
       }
@@ -447,6 +449,23 @@ export async function POST(req: NextRequest) {
       if (upsertById.length) {
         const { error } = await supabase.from("items").upsert(upsertById as any, { onConflict: "id" });
         if (error) return json({ error: error.message }, { status: 500 });
+      }
+
+      const { data: existingInsumos, error: listErr } = await supabase
+        .from("items")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("item_receita", false)
+        .eq("item_do_cardapio", false)
+        .limit(5000);
+      if (listErr) return json({ error: listErr.message }, { status: 500 });
+
+      const toDelete = (existingInsumos ?? [])
+        .map((x: any) => String(x?.id ?? "").trim())
+        .filter((x: string) => x && !keepIds.has(x));
+      if (toDelete.length) {
+        const { error: delErr } = await supabase.from("items").delete().in("id", toDelete);
+        if (delErr) return json({ error: delErr.message }, { status: 500 });
       }
 
       return json({ ok: true }, { status: 200 });
