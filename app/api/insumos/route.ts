@@ -120,6 +120,30 @@ function formatBrl(v: number | null) {
   return `R$${s}`;
 }
 
+function parseBrlNumber(v: unknown) {
+  const raw0 = typeof v === "number" && Number.isFinite(v) ? String(v) : String(v ?? "").trim();
+  if (!raw0 || raw0 === "-") return null;
+  const raw = raw0.replace(/\s/g, "").replace(/^R\$/i, "").trim();
+  if (!raw || raw === "-") return null;
+  const numeric = raw.replace(/\./g, "").replace(",", ".");
+  const n = Number(numeric);
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizeNameKey(v: unknown) {
+  return String(v ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function looksLikeBubbleId(v: unknown) {
+  const s = String(v ?? "").trim();
+  return /^\d{6,}x\d{6,}$/.test(s);
+}
+
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
   const url = new URL(args.req.url);
   const override = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
@@ -240,7 +264,7 @@ export async function GET(req: NextRequest) {
         categories: categories.length,
         containsCarreteiro: rows.some((r: any) => String(r?.item ?? "").trim().toLowerCase() === "carreteiro"),
       });
-      return json({ source: "compat", readOnly: true, rows, categories }, { status: 200 });
+      return json({ source: "compat", readOnly: false, rows, categories }, { status: 200 });
     }
 
     const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
@@ -285,11 +309,149 @@ export async function POST(req: NextRequest) {
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    const userId = id.slice("user:".length);
+
+    const { userId: rawUserId } = getUserIdFromRequest(req);
+    const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
+    const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
 
     const rows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : null;
     if (!rows) return json({ error: "missing_rows" }, { status: 400 });
     const categoriesProvided = (body as any).categories;
     let categories: unknown[] = Array.isArray(categoriesProvided) ? (categoriesProvided as unknown[]) : [];
+
+    if (shouldUseCompat) {
+      const { data: memberRows, error: memberErr } = await supabase
+        .from("company_members")
+        .select("company_id,role,permission_level")
+        .eq("user_id", userId)
+        .limit(50);
+      if (memberErr) return json({ error: memberErr.message }, { status: 500 });
+      const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      if (!companyId) return json({ error: "missing_company" }, { status: 500 });
+
+      const { data: categoriesDb, error: catErr } = await supabase.from("categories").select("id,name").eq("company_id", companyId);
+      if (catErr) return json({ error: catErr.message }, { status: 500 });
+      const categoryIdByKey = new Map<string, string>();
+      for (const c of categoriesDb ?? []) {
+        const id0 = String((c as any)?.id ?? "").trim();
+        const name0 = String((c as any)?.name ?? "").trim();
+        if (!id0 || !name0) continue;
+        categoryIdByKey.set(normalizeNameKey(name0), id0);
+      }
+
+      const categoryNames = new Set<string>();
+      for (const c of categories) {
+        const name0 = String(c ?? "").trim();
+        if (!name0 || name0 === "-") continue;
+        categoryNames.add(name0);
+      }
+      for (const r of rows as any[]) {
+        const name0 = String(r?.categoria ?? "").trim();
+        if (!name0 || name0 === "-") continue;
+        categoryNames.add(name0);
+      }
+
+      const toCreate: { company_id: string; name: string }[] = [];
+      for (const name0 of categoryNames) {
+        const key = normalizeNameKey(name0);
+        if (!key || categoryIdByKey.has(key)) continue;
+        toCreate.push({ company_id: companyId, name: name0 });
+      }
+      if (toCreate.length) {
+        const { data: created, error: createErr } = await supabase.from("categories").insert(toCreate as any).select("id,name");
+        if (createErr) return json({ error: createErr.message }, { status: 500 });
+        for (const c of created ?? []) {
+          const id0 = String((c as any)?.id ?? "").trim();
+          const name0 = String((c as any)?.name ?? "").trim();
+          if (!id0 || !name0) continue;
+          categoryIdByKey.set(normalizeNameKey(name0), id0);
+        }
+      }
+
+      const bubbleIds = Array.from(
+        new Set(
+          (rows as any[])
+            .map((r) => String(r?.id ?? "").trim())
+            .filter((x) => looksLikeBubbleId(x)),
+        ),
+      );
+      const dbIds = Array.from(
+        new Set(
+          (rows as any[])
+            .map((r) => String(r?.id ?? "").trim())
+            .filter((x) => x.startsWith("db:"))
+            .map((x) => x.slice("db:".length))
+            .filter((x) => isUuid(x)),
+        ),
+      );
+
+      const existingIdByBubbleId = new Map<string, string>();
+      if (bubbleIds.length) {
+        const { data, error } = await supabase.from("items").select("id,bubble_id").eq("company_id", companyId).in("bubble_id", bubbleIds);
+        if (error) return json({ error: error.message }, { status: 500 });
+        for (const it of data ?? []) {
+          const id0 = String((it as any)?.id ?? "").trim();
+          const bid = String((it as any)?.bubble_id ?? "").trim();
+          if (id0 && bid) existingIdByBubbleId.set(bid, id0);
+        }
+      }
+
+      const existingIdById = new Map<string, string>();
+      if (dbIds.length) {
+        const { data, error } = await supabase.from("items").select("id").eq("company_id", companyId).in("id", dbIds);
+        if (error) return json({ error: error.message }, { status: 500 });
+        for (const it of data ?? []) {
+          const id0 = String((it as any)?.id ?? "").trim();
+          if (id0) existingIdById.set(id0, id0);
+        }
+      }
+
+      const upsertByBubble: any[] = [];
+      const upsertById: any[] = [];
+
+      for (const r of rows as any[]) {
+        const rawId = String(r?.id ?? "").trim();
+        const name = String(r?.item ?? "").trim();
+        if (!name) continue;
+
+        const categoria = String(r?.categoria ?? "").trim();
+        const categoriaKey = categoria && categoria !== "-" ? normalizeNameKey(categoria) : "";
+        const categoryId = categoriaKey ? categoryIdByKey.get(categoriaKey) ?? null : null;
+
+        const bubbleId = looksLikeBubbleId(rawId) ? rawId : null;
+        const dbId = rawId.startsWith("db:") ? rawId.slice("db:".length) : "";
+        const existingId = bubbleId ? existingIdByBubbleId.get(bubbleId) ?? "" : dbId && existingIdById.has(dbId) ? dbId : "";
+
+        const patch = {
+          company_id: companyId,
+          id: existingId || crypto.randomUUID(),
+          bubble_id: bubbleId,
+          name,
+          unidade_medida: String(r?.medida ?? "").trim() || null,
+          custo_medio: parseBrlNumber(r?.custoMedio),
+          descricao: String(r?.especificacao ?? "").trim() || "",
+          ocultar_cmv: typeof r?.ocultar === "boolean" ? Boolean(r.ocultar) : false,
+          category_id: categoryId,
+          item_receita: false,
+          item_do_cardapio: false,
+        };
+        if (bubbleId) upsertByBubble.push(patch);
+        else upsertById.push(patch);
+      }
+
+      if (upsertByBubble.length) {
+        const { error } = await supabase.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+        if (error) return json({ error: error.message }, { status: 500 });
+      }
+      if (upsertById.length) {
+        const { error } = await supabase.from("items").upsert(upsertById as any, { onConflict: "id" });
+        if (error) return json({ error: error.message }, { status: 500 });
+      }
+
+      return json({ ok: true }, { status: 200 });
+    }
+
     if (typeof categoriesProvided === "undefined") {
       const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
       if (!error) {
@@ -303,7 +465,6 @@ export async function POST(req: NextRequest) {
     if (!error) return json({ ok: true }, { status: 200 });
     if (!isMissingTableError(error)) return json({ error: error.message }, { status: 500 });
 
-    const userId = id.slice("user:".length);
     const prefix = `user:${userId}:`;
     const desired = (rows as any[]).map((r) => {
       const rawId = String(r?.id ?? "").trim();
