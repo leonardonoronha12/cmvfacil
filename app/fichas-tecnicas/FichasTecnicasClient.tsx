@@ -2130,7 +2130,7 @@ export default function FichasTecnicasClient({
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <div style={{ fontSize: 14, fontWeight: 900, color: "#01040e" }}>{selectedCompatRecipe?.receita ?? "Ficha Técnica"}</div>
                     <div style={{ fontSize: 12, fontWeight: 700, color: "#95a8a6" }}>
-                      {selectedCompatRecipe ? `${selectedCompatRecipe.categoria} · ${selectedCompatRecipe.validade}` : "Selecione uma ficha para ver os detalhes."}
+                      {selectedCompatRecipe ? `${selectedCompatRecipe.categoria} · ${selectedCompatRecipe.quadrante}` : "Selecione uma ficha para ver os detalhes."}
                     </div>
                   </div>
 
