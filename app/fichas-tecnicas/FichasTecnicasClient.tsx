@@ -870,6 +870,7 @@ export default function FichasTecnicasClient({
   const [selectedCompatRecipeId, setSelectedCompatRecipeId] = useState<string | null>(null);
   const isCompatSource = sourceMeta.source === "compat";
   const isReadOnly = Boolean(sourceMeta.readOnly);
+  const showCompatSplitView = isCompatSource && String(searchParams.get("view") ?? "").trim().toLowerCase() === "split";
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [tableRows, setTableRows] = useState<RecipeRow[]>(() => readFichasTecnicasFromStore([]) as unknown as RecipeRow[]);
   const [query, setQuery] = useState("");
@@ -2065,7 +2066,7 @@ export default function FichasTecnicasClient({
       <div className={dash.dashboard}>
         <AppSidebar active="fichas-tecnicas" />
         {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
-        {isCompatSource ? (
+        {showCompatSplitView ? (
           <main className={dash.content}>
             <div className={styles.pageFrameWide}>
               <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
@@ -2605,6 +2606,28 @@ export default function FichasTecnicasClient({
             </section>
           ) : (
             <>
+          {isCompatSource ? (
+            <div
+              style={{
+                marginTop: 10,
+                marginBottom: 14,
+                padding: "10px 12px",
+                borderRadius: 12,
+                background: "#eef6ff",
+                border: "1px solid #cfe6ff",
+                color: "#1b3a57",
+                fontSize: 13,
+                fontWeight: 700,
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                flexWrap: "wrap",
+              }}
+            >
+              <span>Fonte: Banco compatível Bubble</span>
+              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+            </div>
+          ) : null}
           <section className={styles.headerRow}>
             <div className={styles.titleWrap}>
               <span className={styles.titleIcon}>
@@ -2619,10 +2642,12 @@ export default function FichasTecnicasClient({
               </div>
             </div>
 
-            <button type="button" className={styles.newButton} onClick={openCreateModal}>
-              <PlusIcon />
-              Nova Ficha Técnica
-            </button>
+            {isReadOnly ? null : (
+              <button type="button" className={styles.newButton} onClick={openCreateModal}>
+                <PlusIcon />
+                Nova Ficha Técnica
+              </button>
+            )}
           </section>
 
           <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
@@ -2664,10 +2689,12 @@ export default function FichasTecnicasClient({
               <div className={styles.emptyStateCard}>
                 <div className={styles.emptyStateTitle}>Nenhuma ficha técnica cadastrada</div>
                 <div className={styles.emptyStateText}>Cadastre sua primeira ficha técnica para acompanhar custos e CMV do cardápio.</div>
-                <button type="button" className={styles.newButton} onClick={openCreateModal}>
-                  <PlusIcon />
-                  Nova Ficha Técnica
-                </button>
+                {isReadOnly ? null : (
+                  <button type="button" className={styles.newButton} onClick={openCreateModal}>
+                    <PlusIcon />
+                    Nova Ficha Técnica
+                  </button>
+                )}
               </div>
             </section>
           ) : (
