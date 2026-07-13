@@ -257,6 +257,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 }
 
 export default function FornecedoresClient() {
+  const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const toastTimerRef = useRef<number | null>(null);
@@ -315,6 +316,23 @@ export default function FornecedoresClient() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const markDirty = (ms = 6000) => {
+    try {
+      window.sessionStorage.setItem("cmvfacil:fornecedores:v1:dirtyUntilMs", String(Date.now() + ms));
+    } catch {}
+  };
+  const getTombstones = (map: FornecedorProdutos) => {
+    const k = TOMBSTONE_KEY;
+    const raw = (map as any)?.[k];
+    const list = Array.isArray(raw) ? raw : [];
+    return list.map((x) => String(x ?? "").trim()).filter(Boolean);
+  };
+  const withTombstones = (map: FornecedorProdutos, tombstones: string[]) => {
+    const next: FornecedorProdutos = { ...map };
+    if (tombstones.length) next[TOMBSTONE_KEY] = Array.from(new Set(tombstones.map((x) => String(x ?? "").trim()).filter(Boolean)));
+    else delete (next as any)[TOMBSTONE_KEY];
+    return next;
+  };
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -775,11 +793,18 @@ export default function FornecedoresClient() {
       whatsapp: whatsapp === "-" ? "" : whatsapp,
       endereco: endereco === "-" ? "" : endereco,
     };
+    markDirty();
+    const curTombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+    curTombstones.delete(key.toUpperCase());
+    const nextProdutosBase = withTombstones(produtosMap, Array.from(curTombstones));
 
     if (!editingId) {
       const nextInfo = { ...infoMap, [key]: infoPayload };
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
+      const nextProdutos = nextProdutosBase;
+      setProdutosMap(nextProdutos);
+      writeFornecedorProdutosMap(nextProdutos);
       setQuery("");
       setSortKey(null);
       setSortDir("asc");
@@ -795,13 +820,13 @@ export default function FornecedoresClient() {
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
 
-      const prevProdutos = produtosMap[prevKey] ?? [];
-      const curProdutos = produtosMap[key] ?? [];
+      const prevProdutos = nextProdutosBase[prevKey] ?? [];
+      const curProdutos = nextProdutosBase[key] ?? [];
       const mergedProdutos: string[] = [];
       for (const item of [...curProdutos, ...prevProdutos]) {
         if (!mergedProdutos.some((x) => x.toLowerCase() === item.toLowerCase())) mergedProdutos.push(item);
       }
-      const nextProdutos = { ...produtosMap };
+      const nextProdutos = { ...nextProdutosBase };
       delete nextProdutos[prevKey];
       nextProdutos[key] = mergedProdutos;
       setProdutosMap(nextProdutos);
@@ -827,6 +852,9 @@ export default function FornecedoresClient() {
       const nextInfo = { ...infoMap, [key]: infoPayload };
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
+      const nextProdutos = nextProdutosBase;
+      setProdutosMap(nextProdutos);
+      writeFornecedorProdutosMap(nextProdutos);
     }
 
     setQuery("");
@@ -853,40 +881,39 @@ export default function FornecedoresClient() {
     const id = deleteId;
     if (!id) return;
     const key = String(id).trim();
-    if (key) {
-      setInfoMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorInfoMap(next);
-        return next;
-      });
-      setProdutosMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorProdutosMap(next);
-        return next;
-      });
-      setEquivalenciasMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorEquivalenciasMap(next);
-        return next;
-      });
-      if (prodFornecedorKey === key) {
-        setIsProdutosOpen(false);
-        setProdFornecedorKey(null);
-        setProdFornecedorLabel("");
-        setProdVendedor("");
-        setProdEndereco("");
-      }
+    if (!key) return;
+    markDirty();
+    const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+    tombstones.add(key.toUpperCase());
+    const nextInfo = { ...infoMap };
+    delete nextInfo[key];
+    const nextProdutosBase = { ...produtosMap };
+    delete (nextProdutosBase as any)[key];
+    const nextProdutos = withTombstones(nextProdutosBase, Array.from(tombstones));
+    const nextEq = { ...equivalenciasMap };
+    delete (nextEq as any)[key];
+
+    writeFornecedorInfoMap(nextInfo);
+    writeFornecedorProdutosMap(nextProdutos);
+    writeFornecedorEquivalenciasMap(nextEq);
+    setInfoMap(nextInfo);
+    setProdutosMap(nextProdutos);
+    setEquivalenciasMap(nextEq);
+
+    if (prodFornecedorKey === key) {
+      setIsProdutosOpen(false);
+      setProdFornecedorKey(null);
+      setProdFornecedorLabel("");
+      setProdVendedor("");
+      setProdEndereco("");
     }
     setIsDeleteOpen(false);
     setDeleteId(null);
     setDeleteName("");
     showToast("Fornecedor excluído.", "success");
+    if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+    fornecedoresSyncTimeoutRef.current = null;
+    void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => showToast("Erro ao salvar no banco de dados.", "error"));
   }
 
   const resultsText = `${visibleRows.length} resultado(s) encontrado(s)`;
@@ -935,7 +962,9 @@ export default function FornecedoresClient() {
         };
       }
       const keepKeys = new Set(Object.keys(nextInfo));
-      const nextProdutos: FornecedorProdutos = {};
+      const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+      for (const k of keepKeys) tombstones.delete(String(k ?? "").trim().toUpperCase());
+      const nextProdutos: FornecedorProdutos = withTombstones({}, Array.from(tombstones));
       for (const [k, list] of Object.entries(produtosMap)) {
         if (!keepKeys.has(k)) continue;
         nextProdutos[k] = list;

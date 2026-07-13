@@ -44,6 +44,17 @@ function setLastRunMs(ms: number) {
   } catch {}
 }
 
+function getDirtyUntilMs(key: string) {
+  if (typeof window === "undefined") return 0;
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    const n = raw ? Number.parseInt(raw, 10) : 0;
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function bootstrapUserDataOnce() {
   if (typeof window === "undefined") return;
   const last = getLastRunMs();
@@ -64,15 +75,18 @@ export async function bootstrapUserDataOnce() {
         .catch(() => {}),
     );
 
-    tasks.push(
-      loadFornecedoresStateFromSupabase()
-        .then((state) => {
-          writeFornecedorInfoMap(state.info);
-          writeFornecedorProdutosMap(state.produtos);
-          writeFornecedorEquivalenciasMap(state.equivalencias);
-        })
-        .catch(() => {}),
-    );
+    const fornecedoresDirtyUntil = getDirtyUntilMs("cmvfacil:fornecedores:v1:dirtyUntilMs");
+    if (!fornecedoresDirtyUntil || fornecedoresDirtyUntil <= now) {
+      tasks.push(
+        loadFornecedoresStateFromSupabase()
+          .then((state) => {
+            writeFornecedorInfoMap(state.info);
+            writeFornecedorProdutosMap(state.produtos);
+            writeFornecedorEquivalenciasMap(state.equivalencias);
+          })
+          .catch(() => {}),
+      );
+    }
 
     tasks.push(loadFichasTecnicasFromSupabase().then(writeFichasTecnicasToStore).catch(() => {}));
     tasks.push(loadFichasTecnicasEtiquetasFromSupabase().then(writeFichasTecnicasEtiquetasToStore).catch(() => {}));

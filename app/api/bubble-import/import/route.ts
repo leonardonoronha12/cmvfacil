@@ -2270,11 +2270,35 @@ export async function POST(req: NextRequest) {
     }
 
     if (enableFornecedores) {
+      const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
       for (const [uid, st] of fornecedoresByUser.entries()) {
         const stateId = `user:${uid}`;
+        let tombstones: string[] = [];
+        try {
+          const { data } = await supabase.from("fornecedores_state").select("produtos").eq("id", stateId).maybeSingle();
+          const raw = (data as any)?.produtos?.[TOMBSTONE_KEY];
+          tombstones = Array.isArray(raw) ? raw.map((x: any) => String(x ?? "").trim()).filter(Boolean) : [];
+        } catch {}
+
+        const skip = new Set(tombstones.map((x) => x.toUpperCase()));
+        const filterKeys = <T extends Record<string, any>>(obj: T) =>
+          Object.fromEntries(
+            Object.entries(obj ?? {}).filter(([k]) => {
+              const kk = String(k ?? "").trim().toUpperCase();
+              if (!kk) return false;
+              if (kk === TOMBSTONE_KEY) return true;
+              return !skip.has(kk);
+            }),
+          ) as T;
+
+        const info = skip.size ? filterKeys(st.infoMap as any) : (st.infoMap as any);
+        const equivalencias = skip.size ? filterKeys(st.equivalenciasMap as any) : (st.equivalenciasMap as any);
+        const produtosBase = skip.size ? filterKeys(st.produtosMap as any) : (st.produtosMap as any);
+        const produtos = tombstones.length ? { ...(produtosBase as any), [TOMBSTONE_KEY]: Array.from(new Set(tombstones.map((x) => x.toUpperCase()))) } : (produtosBase as any);
+
         const { error } = await supabase
           .from("fornecedores_state")
-          .upsert({ id: stateId, info: st.infoMap, produtos: st.produtosMap, equivalencias: st.equivalenciasMap } as any, { onConflict: "id" });
+          .upsert({ id: stateId, info, produtos, equivalencias } as any, { onConflict: "id" });
         if (error) return json({ ok: false, error: `fornecedores_state:${error.message}`, stage }, { status: 500 });
       }
     }

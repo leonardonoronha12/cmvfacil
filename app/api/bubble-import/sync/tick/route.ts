@@ -1673,6 +1673,20 @@ export async function POST(req: NextRequest) {
                     );
                   }
                   const stateId = `user:${uid}`;
+                  const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+                  let tombstones: string[] = [];
+                  try {
+                    const { data } = await supabase.from("fornecedores_state").select("produtos").eq("id", stateId).maybeSingle();
+                    const raw = (data as any)?.produtos?.[TOMBSTONE_KEY];
+                    tombstones = Array.isArray(raw) ? raw.map((x: any) => String(x ?? "").trim()).filter(Boolean) : [];
+                  } catch {}
+                  const skip = new Set(tombstones.map((x) => x.toUpperCase()));
+                  if (skip.size) {
+                    for (const k of Object.keys(cleanedInfo)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedInfo[k];
+                    for (const k of Object.keys(cleanedProdutos)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedProdutos[k];
+                    for (const k of Object.keys(cleanedEq)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedEq[k];
+                  }
+                  if (tombstones.length) cleanedProdutos[TOMBSTONE_KEY] = Array.from(new Set(tombstones.map((x) => x.toUpperCase())));
                   const { error } = await supabase
                     .from("fornecedores_state")
                     .upsert(
