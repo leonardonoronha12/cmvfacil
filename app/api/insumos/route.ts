@@ -218,7 +218,8 @@ export async function GET(req: NextRequest) {
         .from("items")
         .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
         .eq("company_id", companyId)
-        .eq("item_receita", false)
+        .or("item_receita.is.null,item_receita.eq.false")
+        .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
         .order("name", { ascending: true });
       if (itemsErr) return json({ error: itemsErr.message }, { status: 500 });
 
@@ -464,8 +465,8 @@ export async function POST(req: NextRequest) {
         .from("items")
         .select("id")
         .eq("company_id", companyId)
-        .eq("item_receita", false)
-        .eq("item_do_cardapio", false)
+        .or("item_receita.is.null,item_receita.eq.false")
+        .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
         .limit(5000);
       if (listErr) return json({ error: listErr.message }, { status: 500 });
 
