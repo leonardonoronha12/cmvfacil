@@ -1410,7 +1410,7 @@ export default function InsumosClient() {
               flexWrap: "wrap",
             }}
           >
-            <span>Fonte: Banco compatível Bubble</span>
+            <span>Fonte: Banco migrado</span>
             <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
           </div>
         ) : null}

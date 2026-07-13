@@ -216,7 +216,7 @@ export async function GET(req: NextRequest) {
 
       const { data: itemsDb, error: itemsErr } = await supabase
         .from("items")
-        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
+        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio,raw")
         .eq("company_id", companyId)
         .or("item_receita.is.null,item_receita.eq.false")
         .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
@@ -236,6 +236,7 @@ export async function GET(req: NextRequest) {
 
       const rows = (itemsDb ?? [])
         .map((r: any) => {
+          if ((r?.raw as any)?.cmvfacil_deleted) return null;
           const bubbleId = String(r?.bubble_id ?? "").trim();
           const dbId = String(r?.id ?? "").trim();
           const idOut = bubbleId || (dbId ? `db:${dbId}` : "");
@@ -463,7 +464,7 @@ export async function POST(req: NextRequest) {
 
       const { data: existingInsumos, error: listErr } = await supabase
         .from("items")
-        .select("id")
+        .select("id,raw")
         .eq("company_id", companyId)
         .or("item_receita.is.null,item_receita.eq.false")
         .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
@@ -471,11 +472,21 @@ export async function POST(req: NextRequest) {
       if (listErr) return json({ error: listErr.message }, { status: 500 });
 
       const toDelete = (existingInsumos ?? [])
-        .map((x: any) => String(x?.id ?? "").trim())
-        .filter((x: string) => x && !keepIds.has(x));
+        .map((x: any) => ({ id: String(x?.id ?? "").trim(), raw: x?.raw }))
+        .filter((x: any) => x.id && !keepIds.has(x.id) && !(x?.raw as any)?.cmvfacil_deleted);
+
+      let deletedCount = 0;
       if (toDelete.length) {
-        const { error: delErr } = await supabase.from("items").delete().in("id", toDelete);
-        if (delErr) return json({ error: delErr.message }, { status: 500 });
+        const nowIso = new Date().toISOString();
+        for (const x of toDelete as any[]) {
+          const id0 = String(x?.id ?? "").trim();
+          if (!id0) continue;
+          const raw0 = x?.raw && typeof x.raw === "object" ? x.raw : {};
+          const nextRaw = { ...raw0, cmvfacil_deleted: true, cmvfacil_deleted_at: nowIso };
+          const { error: updErr } = await supabase.from("items").update({ raw: nextRaw } as any).eq("id", id0);
+          if (updErr) return json({ error: updErr.message }, { status: 500 });
+          deletedCount++;
+        }
       }
 
       return json(
@@ -485,7 +496,8 @@ export async function POST(req: NextRequest) {
           headers: {
             "x-cmv-insumos-write-source": "compat",
             "x-cmv-insumos-keep-count": String(keepIds.size),
-            "x-cmv-insumos-delete-count": String(toDelete.length),
+            "x-cmv-insumos-delete-count": String(deletedCount),
+            "x-cmv-insumos-delete-mode": "soft",
           },
         },
       );
