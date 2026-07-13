@@ -411,7 +411,6 @@ function normalizeNameKey(value: string) {
 }
 
 const PREPREPARO_HIDE_KEY = "cmvfacil.prepreparo.hidden.v1";
-const PREPREPARO_DIRTY_UNTIL_KEY = "cmvfacil:prepreparo:v1:dirtyUntilMs";
 
 function readPrePreparoHiddenMap(): Record<string, boolean> {
   if (typeof window === "undefined") return {};
@@ -430,18 +429,6 @@ function readPrePreparoHiddenMap(): Record<string, boolean> {
 function writePrePreparoHiddenMap(map: Record<string, boolean>) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(PREPREPARO_HIDE_KEY, JSON.stringify(map ?? {}));
-}
-
-function getPrePreparoDirtyUntilMs() {
-  if (typeof window === "undefined") return 0;
-  const raw = window.sessionStorage.getItem(PREPREPARO_DIRTY_UNTIL_KEY);
-  const n = Number(raw ?? "");
-  return Number.isFinite(n) ? n : 0;
-}
-
-function markPrePreparoDirty(windowMs = 2500) {
-  if (typeof window === "undefined") return;
-  window.sessionStorage.setItem(PREPREPARO_DIRTY_UNTIL_KEY, String(Date.now() + Math.max(0, windowMs)));
 }
 
 function convertQty(qty: number, fromUnit: string, toUnit: string) {
@@ -751,7 +738,6 @@ export default function PrePreparoClient() {
   async function refreshThisPrePreparoFromSupabase(silent = false) {
     if (!detailsRecipeId) return;
     if (isSyncingDetails) return;
-    if (getPrePreparoDirtyUntilMs() > Date.now()) return;
     setIsSyncingDetails(true);
     try {
       const dbRows = await loadPrePreparoFromSupabase();
@@ -1672,20 +1658,7 @@ export default function PrePreparoClient() {
   function confirmDelete() {
     const id = deletingId;
     if (!id) return;
-    markPrePreparoDirty();
-    const nextRows = rows.filter((r) => r.id !== id);
-    setRows(nextRows as any);
-    if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
-    void savePrePreparoToSupabase(nextRows as any)
-      .then(() => {
-        prePreparoSaveErrorShownRef.current = false;
-      })
-      .catch((err) => {
-        if (!prePreparoSaveErrorShownRef.current) {
-          prePreparoSaveErrorShownRef.current = true;
-          showToast(supabaseSaveErrorMessage(err), "error");
-        }
-      });
+    setRows((prev) => prev.filter((r) => r.id !== id));
     setIsDeleteOpen(false);
     setDeletingId(null);
     setDeletingName("");

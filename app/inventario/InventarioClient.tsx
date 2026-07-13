@@ -206,43 +206,16 @@ export default function InventarioClient() {
     [compatInventories, selectedCompatInventoryId],
   );
 
-  function resolveItemTipoLabel(idRaw: string) {
-    const id = String(idRaw ?? "");
-    return id.startsWith("prep:") ? "Pré-preparos" : "Insumos";
-  }
-
-  const allowedItemIds = useMemo(() => {
-    const set = new Set<string>();
-    for (const ins of insumosStore) set.add(String(ins.id ?? ""));
-    for (const prep of prePreparoStore) set.add(prepInventoryId(String(prep.id ?? "")));
-    set.delete("");
-    return set;
-  }, [insumosStore, prePreparoStore]);
-
-  const restrictToKnownItems = allowedItemIds.size > 0;
-
   const categorias = useMemo(() => {
     const base = ["Categorias pendentes"];
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    const names = (selectedContagem?.categorias ?? [])
+      .map((c) => normCatName(String(c.nome ?? "")))
+      .filter(Boolean)
+      .filter((c) => c.toLowerCase() !== "todas");
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const cat of selectedContagem?.categorias ?? []) {
-      const n = normCatName(String(cat.nome ?? ""));
-      if (!n) continue;
-      if (n.toLowerCase() === "todas") continue;
-      if (restrictToKnownItems) {
-        let hasKnown = false;
-        for (const it of cat.itens ?? []) {
-          if (it.removido) continue;
-          const id = String(it.id ?? "");
-          if (!id) continue;
-          if (allowedItemIds.has(id)) {
-            hasKnown = true;
-            break;
-          }
-        }
-        if (!hasKnown) continue;
-      }
+    for (const n of names) {
       const k = n.toLowerCase();
       if (seen.has(k)) continue;
       seen.add(k);
@@ -250,7 +223,7 @@ export default function InventarioClient() {
     }
     out.sort((a, b) => collator.compare(a, b));
     return [...base, ...out];
-  }, [allowedItemIds, restrictToKnownItems, selectedContagem?.categorias]);
+  }, [selectedContagem?.categorias]);
 
   const itemCategoryMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -259,12 +232,11 @@ export default function InventarioClient() {
       for (const it of cat.itens ?? []) {
         const id = String(it.id ?? "");
         if (!id) continue;
-        if (restrictToKnownItems && !allowedItemIds.has(id)) continue;
         map.set(id, name);
       }
     }
     return map;
-  }, [allowedItemIds, restrictToKnownItems, selectedContagem?.categorias]);
+  }, [selectedContagem?.categorias]);
 
   const allItems = useMemo(() => {
     const list = selectedContagem?.categorias ?? [];
@@ -275,7 +247,6 @@ export default function InventarioClient() {
         if (it.removido) continue;
         const id = String(it.id ?? "");
         if (!id) continue;
-        if (restrictToKnownItems && !allowedItemIds.has(id)) continue;
         if (seen.has(id)) continue;
         seen.add(id);
         out.push(it);
@@ -288,7 +259,7 @@ export default function InventarioClient() {
       return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
     }
     return afterQuery;
-  }, [allowedItemIds, categoriaFilter, itemCategoryMap, query, restrictToKnownItems, selectedContagem?.categorias]);
+  }, [categoriaFilter, itemCategoryMap, query, selectedContagem?.categorias]);
 
   const pendentes = useMemo(() => allItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [allItems]);
   const contabilizados = useMemo(() => {
@@ -528,9 +499,7 @@ export default function InventarioClient() {
         }
 
         const allIds = new Set<string>();
-        if (!restrictToKnownItems) {
-          for (const id of existingById.keys()) allIds.add(id);
-        }
+        for (const id of existingById.keys()) allIds.add(id);
         for (const id of sourceById.keys()) allIds.add(id);
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
@@ -1179,7 +1148,7 @@ export default function InventarioClient() {
                         <div className={styles.dotPending} aria-hidden />
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
-                            <div className={styles.itemSub}>{resolveItemTipoLabel(r.id)}</div>
+                            <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
                       <div className={styles.itemRight}>
@@ -1237,7 +1206,7 @@ export default function InventarioClient() {
                         </div>
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
-                            <div className={styles.itemSub}>{resolveItemTipoLabel(r.id)}</div>
+                            <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
                       <div className={styles.itemRight}>
