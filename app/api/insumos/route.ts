@@ -498,3 +498,101 @@ export async function POST(req: NextRequest) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
+
+type DeleteTarget = { id?: string; bubbleId?: string };
+
+function normalizeDeleteTarget(input: { id?: unknown; bubbleId?: unknown }): DeleteTarget | null {
+  const rawId0 = String(input.id ?? "").trim();
+  const rawBubble0 = String(input.bubbleId ?? "").trim();
+
+  const rawId = rawId0.startsWith("db:") ? rawId0.slice("db:".length) : rawId0;
+  const id = isUuid(rawId) ? rawId : "";
+  const bubbleId = looksLikeBubbleId(rawId0) ? rawId0 : looksLikeBubbleId(rawBubble0) ? rawBubble0 : "";
+
+  if (id) return { id };
+  if (bubbleId) return { bubbleId };
+  return null;
+}
+
+async function deleteOneCompatItem(args: { supabase: ReturnType<typeof getSupabaseServerClient>; companyId: string; target: DeleteTarget }) {
+  const base = { ok: false as const, source: "compat" as const, deletedItemCount: 0, deletedIds: [] as string[] };
+
+  const findQ = args.supabase.from("items").select("id").eq("company_id", args.companyId);
+  const findRes = args.target.id ? await findQ.eq("id", args.target.id).maybeSingle() : await findQ.eq("bubble_id", args.target.bubbleId as string).maybeSingle();
+  if (findRes.error) return { status: 500, body: { ...base, error: findRes.error.message } };
+
+  const itemId = String((findRes.data as any)?.id ?? "").trim();
+  if (!itemId) return { status: 404, body: { ...base, error: "not_found" } };
+
+  const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
+  if (delRes.error) return { status: 500, body: { ...base, error: delRes.error.message } };
+
+  const deletedIds = (delRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
+  if (!deletedIds.length) return { status: 404, body: { ...base, error: "not_found" } };
+
+  return { status: 200, body: { ok: true as const, source: "compat" as const, deletedItemCount: deletedIds.length, deletedIds } };
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { accessToken, id } = resolveUserScopedId(req);
+    if (!id) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    const supabase = getSupabaseServerClient(accessToken);
+    const userId = id.slice("user:".length);
+
+    const { userId: rawUserId } = getUserIdFromRequest(req);
+    const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
+    const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
+    if (!shouldUseCompat) return json({ ok: false, error: "compat_required", source: "legacy" }, { status: 400 });
+
+    const { data: memberRows, error: memberErr } = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return json({ ok: false, error: memberErr.message }, { status: 500 });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
+
+    const url = new URL(req.url);
+    const qId = String(url.searchParams.get("id") ?? "").trim();
+    const qBubbleId = String(url.searchParams.get("bubbleId") ?? url.searchParams.get("bubble_id") ?? "").trim();
+    const body = (await req.json().catch(() => null)) as any;
+
+    const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]) : [];
+    const bubbleIds = Array.isArray(body?.bubbleIds) ? (body.bubbleIds as unknown[]) : Array.isArray(body?.bubble_ids) ? (body.bubble_ids as unknown[]) : [];
+
+    const batchTargets: DeleteTarget[] = [];
+    for (const raw of ids) {
+      const t = normalizeDeleteTarget({ id: raw });
+      if (t) batchTargets.push(t);
+    }
+    for (const raw of bubbleIds) {
+      const t = normalizeDeleteTarget({ bubbleId: raw });
+      if (t) batchTargets.push(t);
+    }
+
+    const singleTarget = normalizeDeleteTarget({ id: body?.id ?? qId, bubbleId: body?.bubbleId ?? body?.bubble_id ?? qBubbleId });
+
+    if (batchTargets.length) {
+      const results: any[] = [];
+      for (const t of batchTargets) {
+        const r = await deleteOneCompatItem({ supabase, companyId, target: t });
+        results.push({ ...r.body, status: r.status });
+      }
+      const deletedItemCount = results.reduce((acc, r) => acc + (typeof r.deletedItemCount === "number" ? r.deletedItemCount : 0), 0);
+      const deletedIds = results.flatMap((r) => (Array.isArray(r.deletedIds) ? r.deletedIds : [])).filter(Boolean);
+      return json({ ok: true, source: "compat", deletedItemCount, deletedIds, results }, { status: 200 });
+    }
+
+    if (!singleTarget) {
+      return json({ ok: false, source: "compat", deletedItemCount: 0, deletedIds: [], error: "missing_id" }, { status: 400 });
+    }
+
+    const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget });
+    return json(res.body, { status: res.status });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return json({ ok: false, error: msg }, { status: 500 });
+  }
+}
