@@ -907,6 +907,10 @@ export default function InsumosClient() {
   }
 
   function openDeleteItem(row: InsumoRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setIsImportOpen(false);
     setIsNewItemOpen(false);
     setIsEditItemOpen(false);
@@ -921,7 +925,40 @@ export default function InsumosClient() {
   function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
-    setDataRows((prev) => prev.filter((r) => r.id !== id));
+    setDataRows((prev) => {
+      const nextRows = prev.filter((r) => r.id !== id);
+      writeInsumosToStore(
+        nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+      );
+      if (isBootstrapRunning()) return nextRows;
+      void saveInsumosStateToSupabase({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })) as any,
+        categories,
+      })
+        .then(() => {
+          saveErrorShownRef.current = false;
+        })
+        .catch((err) => {
+          showToast(saveErrorMessage(err), "error");
+        });
+      return nextRows;
+    });
     setIsDeleteItemOpen(false);
     setDeletingItemId(null);
     setDeletingItemName("");
@@ -1032,6 +1069,10 @@ export default function InsumosClient() {
   }
 
   function openDeleteCategory(name: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     const count = categoryCounts.get(name.toLowerCase()) ?? 0;
     if (count > 0) {
       showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
@@ -1097,7 +1138,40 @@ export default function InsumosClient() {
 
   function deleteSelected() {
     if (!selectedIds.size) return;
-    setDataRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+    setDataRows((prev) => {
+      const nextRows = prev.filter((r) => !selectedIds.has(r.id));
+      writeInsumosToStore(
+        nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+      );
+      if (isBootstrapRunning()) return nextRows;
+      void saveInsumosStateToSupabase({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })) as any,
+        categories,
+      })
+        .then(() => {
+          saveErrorShownRef.current = false;
+        })
+        .catch((err) => {
+          showToast(saveErrorMessage(err), "error");
+        });
+      return nextRows;
+    });
     setSelectedIds(new Set());
     setBulkDeleteMode(false);
   }
@@ -1586,7 +1660,7 @@ export default function InsumosClient() {
                     className={styles.iconBtn}
                     aria-label="Editar"
                     onClick={() => openEditItem(r)}
-                    disabled={bulkDeleteMode}
+                    disabled={bulkDeleteMode || isReadOnly}
                   >
                     <IconEdit />
                   </button>
@@ -1594,7 +1668,7 @@ export default function InsumosClient() {
                     type="button"
                     className={styles.iconBtn}
                     aria-label="Excluir"
-                    disabled={bulkDeleteMode}
+                    disabled={bulkDeleteMode || isReadOnly}
                     onClick={() => openDeleteItem(r)}
                   >
                     <IconTrash />
