@@ -314,6 +314,8 @@ export default function InsumosClient() {
   const toastTimerRef = useRef<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
@@ -940,27 +942,44 @@ export default function InsumosClient() {
   async function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
+    const name = deletingItemName;
+    const idx = dataRows.findIndex((r) => r.id === id);
+    const prevRow = dataRows.find((r) => r.id === id) ?? null;
+
+    setIsDeleteItemOpen(false);
+    setDeletingItemId(null);
+    setDeletingItemName("");
+
     if (!isCompatSource) {
       setDataRows((prev) => prev.filter((r) => r.id !== id));
-      setIsDeleteItemOpen(false);
-      setDeletingItemId(null);
-      setDeletingItemName("");
+      showToast("Insumo excluído com sucesso.", "success");
       return;
     }
-    if (isLoadingTable) return;
-    setIsLoadingTable(true);
+    if (isDeletingItem) return;
+    setIsDeletingItem(true);
     try {
+      setDataRows((prev) => prev.filter((r) => r.id !== id));
       await deleteInsumosCompat({ id });
-      const state = await loadInsumosStateFromSupabase();
-      applyLoadedState(state);
-      setIsDeleteItemOpen(false);
-      setDeletingItemId(null);
-      setDeletingItemName("");
-      showToast("Insumo excluído!", "success");
+      showToast(`“${name}” deletado com sucesso.`, "success");
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase();
+          applyLoadedState(state);
+        } catch {}
+      })();
     } catch (err) {
+      if (prevRow) {
+        setDataRows((cur) => {
+          if (cur.some((r) => r.id === id)) return cur;
+          const next = [...cur];
+          const pos = idx >= 0 && idx <= next.length ? idx : 0;
+          next.splice(pos, 0, prevRow);
+          return next;
+        });
+      }
       showToast(deleteErrorMessage(err), "error");
     } finally {
-      setIsLoadingTable(false);
+      setIsDeletingItem(false);
     }
   }
 
@@ -1147,26 +1166,39 @@ export default function InsumosClient() {
     if (!isCompatSource) {
       deleteSelected();
       setIsBulkDeleteOpen(false);
+      showToast("Insumos excluídos com sucesso.", "success");
       return;
     }
     if (!selectedIds.size) return;
-    if (isLoadingTable) return;
-    setIsLoadingTable(true);
+    if (isBulkDeleting) return;
+    setIsBulkDeleting(true);
     try {
       const ids = Array.from(selectedIds);
-      const res = await deleteInsumosCompat({ ids });
-      const failures = Array.isArray(res.results) ? res.results.filter((r) => Number(r?.status ?? 200) !== 200) : [];
-      const state = await loadInsumosStateFromSupabase();
-      applyLoadedState(state);
+      setIsBulkDeleteOpen(false);
       setSelectedIds(new Set());
       setBulkDeleteMode(false);
-      setIsBulkDeleteOpen(false);
+      setDataRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+
+      const res = await deleteInsumosCompat({ ids });
+      const failures = Array.isArray(res.results) ? res.results.filter((r) => Number(r?.status ?? 200) !== 200) : [];
       if (failures.length) showToast("Alguns itens não puderam ser excluídos. A lista foi atualizada.", "error");
-      else showToast(ids.length === 1 ? "Insumo excluído!" : "Insumos excluídos!", "success");
+      else showToast(ids.length === 1 ? "Insumo deletado com sucesso." : "Insumos deletados com sucesso.", "success");
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase();
+          applyLoadedState(state);
+        } catch {}
+      })();
     } catch (err) {
       showToast(deleteErrorMessage(err), "error");
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase();
+          applyLoadedState(state);
+        } catch {}
+      })();
     } finally {
-      setIsLoadingTable(false);
+      setIsBulkDeleting(false);
     }
   }
 
@@ -1686,7 +1718,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem} disabled={isLoadingTable}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem} disabled={isDeletingItem}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteItemOpen(false)}>
@@ -1721,7 +1753,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isLoadingTable}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isBulkDeleting}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
