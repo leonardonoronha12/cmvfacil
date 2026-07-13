@@ -9,6 +9,8 @@ import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type Insum
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
+import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
+import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnicasToStore, type FichaTecnicaRow } from "../lib/fichasTecnicasStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
@@ -97,6 +99,17 @@ function normCatName(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeNameKey(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
 function prepInventoryId(id: string) {
   return `prep:${id}`;
 }
@@ -163,6 +176,7 @@ export default function InventarioClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
+  const [fichasTecnicasRows, setFichasTecnicasRows] = useState<FichaTecnicaRow[]>(() => readFichasTecnicasFromStore([]));
   const [contagens, setContagens] = useState<InventarioContagem[]>(initialContagens);
   const contagensReadyRef = useRef(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
@@ -206,6 +220,15 @@ export default function InventarioClient() {
     [compatInventories, selectedCompatInventoryId],
   );
 
+  const fichaTecnicaNameKeys = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of fichasTecnicasRows) {
+      const k = normalizeNameKey(String((r as any)?.receita ?? ""));
+      if (k) set.add(k);
+    }
+    return set;
+  }, [fichasTecnicasRows]);
+
   const categorias = useMemo(() => {
     const base = ["Categorias pendentes"];
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
@@ -232,11 +255,13 @@ export default function InventarioClient() {
       for (const it of cat.itens ?? []) {
         const id = String(it.id ?? "");
         if (!id) continue;
+        const itemKey = normalizeNameKey(String((it as any)?.item ?? ""));
+        if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
         map.set(id, name);
       }
     }
     return map;
-  }, [selectedContagem?.categorias]);
+  }, [fichaTecnicaNameKeys, selectedContagem?.categorias]);
 
   const allItems = useMemo(() => {
     const list = selectedContagem?.categorias ?? [];
@@ -247,6 +272,8 @@ export default function InventarioClient() {
         if (it.removido) continue;
         const id = String(it.id ?? "");
         if (!id) continue;
+        const itemKey = normalizeNameKey(String((it as any)?.item ?? ""));
+        if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
         if (seen.has(id)) continue;
         seen.add(id);
         out.push(it);
@@ -259,7 +286,7 @@ export default function InventarioClient() {
       return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
     }
     return afterQuery;
-  }, [categoriaFilter, itemCategoryMap, query, selectedContagem?.categorias]);
+  }, [categoriaFilter, fichaTecnicaNameKeys, itemCategoryMap, query, selectedContagem?.categorias]);
 
   const pendentes = useMemo(() => allItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [allItems]);
   const contabilizados = useMemo(() => {
@@ -369,6 +396,18 @@ export default function InventarioClient() {
   }, []);
 
   useEffect(() => {
+    setFichasTecnicasRows(readFichasTecnicasFromStore([]));
+    void (async () => {
+      try {
+        const dbRows = await loadFichasTecnicasFromSupabase();
+        if (dbRows.length) writeFichasTecnicasToStore(dbRows as any);
+      } catch {}
+      setFichasTecnicasRows(readFichasTecnicasFromStore([]));
+    })();
+    return subscribeFichasTecnicas((rows) => setFichasTecnicasRows(rows));
+  }, []);
+
+  useEffect(() => {
     setPrePreparoStore(readPrePreparoFromStore([]));
     void (async () => {
       try {
@@ -451,6 +490,11 @@ export default function InventarioClient() {
           for (const it of cat.itens ?? []) {
             const id = String(it.id ?? "");
             if (!id) continue;
+            const itemKey = normalizeNameKey(String((it as any)?.item ?? ""));
+            if (itemKey && fichaTecnicaNameKeys.has(itemKey)) {
+              changed = true;
+              continue;
+            }
             existingCatById.set(id, catName);
             const prevIt = existingById.get(id);
             if (!prevIt) {
@@ -477,6 +521,8 @@ export default function InventarioClient() {
         }
         for (const c0 of insumoCategorias) addDesiredCategory(String(c0 ?? ""));
         for (const ins of insumosStore) {
+          const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
+          if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
           const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
           sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
           addDesiredCategory(catName);
@@ -548,7 +594,7 @@ export default function InventarioClient() {
       if (sel) void upsertInventarioToSupabase(sel).catch(() => {});
       return next;
     });
-  }, [insumoCategorias, insumosStore, isReadOnly, prePreparoStore, selectedContagemId]);
+  }, [fichaTecnicaNameKeys, insumoCategorias, insumosStore, isReadOnly, prePreparoStore, selectedContagemId]);
 
   useEffect(() => {
     if (!menuContagemId) return;
@@ -657,6 +703,8 @@ export default function InventarioClient() {
       const id = await buildUserScopedId(`c-${Date.now()}`);
       const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
       for (const ins of insumosStore) {
+        const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
+        if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
         const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
         sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
       }

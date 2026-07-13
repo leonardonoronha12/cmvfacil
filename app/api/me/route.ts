@@ -19,6 +19,52 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function normalizePhoneBR(value: string) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("+")) return trimmed;
+  const d = digitsOnly(trimmed);
+  if (!d) return null;
+  if (d.startsWith("55")) return `+${d}`;
+  return `+55${d}`;
+}
+
+function parsePermissionLevel(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function scoreRole(role: unknown) {
+  const r = String(role ?? "").trim().toLowerCase();
+  if (!r) return 0;
+  if (r.includes("owner") || r.includes("propriet")) return 30;
+  if (r.includes("admin")) return 20;
+  if (r.includes("manager") || r.includes("gerente")) return 10;
+  return 0;
+}
+
+function pickBestCompanyId(memberRows: unknown[]) {
+  let bestCompanyId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const companyId = String(r?.company_id ?? "").trim();
+    if (!companyId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCompanyId = companyId;
+    }
+  }
+  return bestCompanyId;
+}
+
 function normalizeKey(input: string) {
   return normalizeKeyFromLib(input);
 }
@@ -672,6 +718,69 @@ export async function GET(req: NextRequest) {
     const email = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
     if (!email) return json({ ok: false, error: "missing_supabase_email" }, { status: 400 });
 
+    const { data: profileDb } = await supabase
+      .from("user_profiles")
+      .select("user_id,email,nome,sobrenome,nome_completo,whatsapp")
+      .eq("user_id", uid)
+      .maybeSingle();
+
+    const { data: memberRows } = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).limit(50);
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
+
+    if (profileDb?.user_id || companyId) {
+      const { data: companyDb } = companyId
+        ? await supabase
+            .from("companies")
+            .select("id,fantasy_name,legal_name,cnpj,phone_e164,industry,logo_url")
+            .eq("id", companyId)
+            .maybeSingle()
+        : { data: null as any };
+
+      const roleRaw = String(membershipForCompany?.role ?? "").trim().toLowerCase();
+      const permissionRole = roleRaw.includes("admin") || roleRaw.includes("owner") ? "Administrador" : "Colaborador";
+
+      const { data: companyMembers } = companyId
+        ? await supabase.from("company_members").select("user_id,role,permission_level").eq("company_id", companyId).limit(500)
+        : { data: [] as any[] };
+      const userIds = Array.from(new Set((companyMembers ?? []).map((r: any) => String(r?.user_id ?? "").trim()).filter(Boolean)));
+      const { data: memberProfiles } = userIds.length
+        ? await supabase.from("user_profiles").select("user_id,email,nome,nome_completo").in("user_id", userIds)
+        : { data: [] as any[] };
+      const profileById = new Map<string, any>((memberProfiles ?? []).map((r: any) => [String(r?.user_id ?? ""), r]));
+      const members = (companyMembers ?? []).map((m: any) => {
+        const mid = String(m?.user_id ?? "").trim();
+        const p = profileById.get(mid) ?? {};
+        const mRoleRaw = String(m?.role ?? "").trim().toLowerCase();
+        const role = mRoleRaw.includes("admin") || mRoleRaw.includes("owner") ? "Administrador" : "Colaborador";
+        const nomeCompleto = String(p?.nome_completo ?? p?.nomeCompleto ?? "").trim() || String(p?.nome ?? "").trim() || String(p?.email ?? "").trim() || "—";
+        return { name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
+      });
+
+      return json(
+        {
+          ok: true,
+          userId: uid,
+          email: String((profileDb as any)?.email ?? email ?? "").trim(),
+          nome: String((profileDb as any)?.nome ?? "").trim(),
+          sobrenome: String((profileDb as any)?.sobrenome ?? "").trim(),
+          nomeCompleto: String((profileDb as any)?.nome_completo ?? "").trim(),
+          whatsapp: String((profileDb as any)?.whatsapp ?? "").trim(),
+          avatarUrl: "",
+          companyName: String(companyDb?.fantasy_name ?? companyDb?.legal_name ?? "").trim(),
+          companyLogoUrl: String(companyDb?.logo_url ?? "").trim(),
+          companyCnpj: String(companyDb?.cnpj ?? "").trim(),
+          companyWhatsapp: String(companyDb?.phone_e164 ?? "").trim(),
+          companyIndustry: String(companyDb?.industry ?? "").trim(),
+          role: permissionRole,
+          plan: null,
+          members,
+          source: { db: true, companyId: companyId || null },
+        },
+        { status: 200 },
+      );
+    }
+
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
     let bubbleUserIdHint = "";
@@ -929,6 +1038,96 @@ export async function GET(req: NextRequest) {
         userBubbleId: userBubbleId || null,
       },
     });
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  let body: unknown;
+  try {
+    body = (await req.json()) as unknown;
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, { status: 400 });
+  }
+
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    const uid = String(userId ?? "").trim();
+    if (!isUuid(uid)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
+
+    let supabase: ReturnType<typeof getSupabaseAdmin>;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch {
+      return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    }
+
+    const authUser = await supabase.auth.admin.getUserById(uid);
+    if (authUser.error) return json({ ok: false, error: `auth_get_user:${authUser.error.message}` }, { status: 400 });
+    const emailFromAuth = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+
+    const input = (body ?? {}) as any;
+    const nome = typeof input.nome === "string" ? input.nome.trim() : null;
+    const sobrenome = typeof input.sobrenome === "string" ? input.sobrenome.trim() : null;
+    const nomeCompleto = typeof input.nomeCompleto === "string" ? input.nomeCompleto.trim() : null;
+    const whatsapp = typeof input.whatsapp === "string" ? input.whatsapp.trim() : null;
+    const permissao = typeof input.permissao === "string" ? input.permissao.trim() : null;
+
+    const companyName = typeof input.companyName === "string" ? input.companyName.trim() : null;
+    const companyWhatsRaw = typeof input.companyWhatsapp === "string" ? input.companyWhatsapp.trim() : null;
+    const companyIndustry = typeof input.companyIndustry === "string" ? input.companyIndustry.trim() : null;
+    const companyCnpjRaw = typeof input.companyCnpj === "string" ? input.companyCnpj.trim() : null;
+    const companyLogoUrlRaw = typeof input.companyLogoUrl === "string" ? input.companyLogoUrl.trim() : null;
+
+    if (nome != null || sobrenome != null || nomeCompleto != null || whatsapp != null || emailFromAuth) {
+      const patch: any = {};
+      if (emailFromAuth) patch.email = emailFromAuth;
+      if (nome != null) patch.nome = nome || null;
+      if (sobrenome != null) patch.sobrenome = sobrenome || null;
+      if (nomeCompleto != null) patch.nome_completo = nomeCompleto || null;
+      if (whatsapp != null) patch.whatsapp = whatsapp || null;
+      await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+    }
+
+    const { data: memberRows } = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("user_id", uid).limit(50);
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    const memberRow = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
+
+    const canAdminWrite = (() => {
+      const roleRaw = String(memberRow?.role ?? "").trim().toLowerCase();
+      if (roleRaw.includes("owner") || roleRaw.includes("admin")) return true;
+      const permRaw = String(memberRow?.permission_level ?? "").trim().toLowerCase();
+      if (permRaw.includes("owner") || permRaw.includes("admin") || permRaw.includes("administrador")) return true;
+      return false;
+    })();
+
+    if (companyId && (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null)) {
+      if (!canAdminWrite) return json({ ok: false, error: "forbidden" }, { status: 403 });
+      const patch: any = {};
+      if (companyName != null) {
+        const nm = companyName.trim();
+        patch.fantasy_name = nm || null;
+        patch.legal_name = nm || null;
+      }
+      if (companyWhatsRaw != null) patch.phone_e164 = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) : null;
+      if (companyIndustry != null) patch.industry = companyIndustry || null;
+      if (companyCnpjRaw != null) {
+        const digits = digitsOnly(companyCnpjRaw);
+        patch.cnpj = digits ? digits : null;
+      }
+      if (companyLogoUrlRaw != null) patch.logo_url = companyLogoUrlRaw ? companyLogoUrlRaw : null;
+      await supabase.from("companies").update(patch).eq("id", companyId);
+    }
+
+    if (companyId && permissao != null) {
+      if (!canAdminWrite) return json({ ok: false, error: "forbidden" }, { status: 403 });
+      const desired = permissao.toLowerCase().includes("admin") ? "admin" : "member";
+      await supabase.from("company_members").update({ role: desired, permission_level: permissao } as any).eq("company_id", companyId).eq("user_id", uid);
+    }
+
+    return json({ ok: true }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

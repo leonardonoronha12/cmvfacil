@@ -64,17 +64,17 @@ export default function AjustesClient() {
   const [sobrenome, setSobrenome] = useState(() => String(readMeFromStore()?.sobrenome ?? "").trim());
   const [email, setEmail] = useState(() => String(readMeFromStore()?.email ?? "").trim());
   const [whatsapp, setWhatsapp] = useState(() => String(readMeFromStore()?.whatsapp ?? "").trim());
-  const [permissao, setPermissao] = useState<"Administrador" | "Colaborador">("Colaborador");
+  const [permissao, setPermissao] = useState<"Administrador" | "Colaborador">(() => readMeFromStore()?.role ?? "Colaborador");
 
   const [senhaAtual, setSenhaAtual] = useState("");
   const [novaSenha, setNovaSenha] = useState("");
   const [repitaSenha, setRepitaSenha] = useState("");
 
   const [empresaNome, setEmpresaNome] = useState(() => String(readMeFromStore()?.companyName ?? "").trim());
-  const [cnpj, setCnpj] = useState("51.590.020/0001-25");
+  const [cnpj, setCnpj] = useState(() => String(readMeFromStore()?.companyCnpj ?? "").trim());
   const [emailCorp, setEmailCorp] = useState("");
-  const [empresaWhats, setEmpresaWhats] = useState("(00) 00000-0000");
-  const [ramo, setRamo] = useState("Hamburgueria");
+  const [empresaWhats, setEmpresaWhats] = useState(() => String(readMeFromStore()?.companyWhatsapp ?? "").trim());
+  const [ramo, setRamo] = useState(() => String(readMeFromStore()?.companyIndustry ?? "").trim() || "Hamburgueria");
 
   const [planType, setPlanType] = useState<"PRO Mensal" | "PRO Anual">("PRO Mensal");
   const [cardLast4, setCardLast4] = useState("8895");
@@ -82,27 +82,51 @@ export default function AjustesClient() {
   const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
 
   const [loggingOut, setLoggingOut] = useState(false);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [savingCompany, setSavingCompany] = useState(false);
+  const [accountSaveError, setAccountSaveError] = useState("");
+  const [companySaveError, setCompanySaveError] = useState("");
 
   const canSaveAccount = Boolean(nome.trim() && sobrenome.trim() && email.trim() && whatsapp.trim() && permissao);
   const canSavePassword = Boolean(senhaAtual.trim() && novaSenha.trim() && repitaSenha.trim() && novaSenha === repitaSenha);
-  const canSaveCompany = Boolean(empresaNome.trim() && cnpj.trim() && empresaWhats.trim() && ramo.trim());
+  const canSaveCompany = Boolean(empresaNome.trim() && empresaWhats.trim() && ramo.trim());
 
   function tabClass(key: TabKey) {
     return key === tab ? `${styles.tab} ${styles.tabActive}` : styles.tab;
   }
 
   const [avatarUrl, setAvatarUrl] = useState(() => String(readMeFromStore()?.avatarUrl ?? "").trim());
+  const [companyLogoUrl, setCompanyLogoUrl] = useState(() => String(readMeFromStore()?.companyLogoUrl ?? "").trim());
 
   useEffect(() => {
     const apply = () => {
       const me = readMeFromStore();
       if (!me) return;
+      const whatsappLocal = String(me.whatsapp ?? "")
+        .trim()
+        .replace(/^\+?55/, "")
+        .trim();
+      const companyWhatsLocal = String((me as any).companyWhatsapp ?? "")
+        .trim()
+        .replace(/^\+?55/, "")
+        .trim();
       setNome((prev) => (prev.trim() ? prev : String(me.nome ?? "").trim()));
       setSobrenome((prev) => (prev.trim() ? prev : String(me.sobrenome ?? "").trim()));
       setEmail((prev) => (prev.trim() ? prev : String(me.email ?? "").trim()));
-      setWhatsapp((prev) => (prev.trim() ? prev : String(me.whatsapp ?? "").trim()));
+      setWhatsapp((prev) => (prev.trim() ? prev : whatsappLocal));
+      setPermissao((prev) => {
+        const desired = String((me as any).role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador";
+        return prev === "Colaborador" ? desired : prev;
+      });
       setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
+      setCnpj((prev) => (prev.trim() ? prev : String((me as any).companyCnpj ?? "").trim()));
+      setEmpresaWhats((prev) => (prev.trim() ? prev : companyWhatsLocal));
+      setRamo((prev) => {
+        const next = String((me as any).companyIndustry ?? "").trim();
+        return prev === "Hamburgueria" && next ? next : prev.trim() ? prev : next;
+      });
       setAvatarUrl(String(me.avatarUrl ?? "").trim());
+      setCompanyLogoUrl(String((me as any).companyLogoUrl ?? "").trim());
       setMembers(Array.isArray(me.members) ? me.members : []);
       const planRaw = String(me.planType ?? "").trim();
       if (planRaw) {
@@ -199,8 +223,37 @@ export default function AjustesClient() {
                   </div>
 
                   <div className={styles.actions}>
-                    <button type="button" className={styles.btnPrimary} disabled={!canSaveAccount}>
-                      Salvar
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      disabled={!canSaveAccount || savingAccount}
+                      onClick={async () => {
+                        if (savingAccount) return;
+                        setAccountSaveError("");
+                        setSavingAccount(true);
+                        try {
+                          const res = await fetch("/api/me", {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({
+                              nome,
+                              sobrenome,
+                              nomeCompleto: `${nome} ${sobrenome}`.replace(/\s+/g, " ").trim(),
+                              whatsapp,
+                              permissao,
+                            }),
+                          });
+                          const j = (await res.json().catch(() => null)) as any;
+                          if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
+                          await loadMeFromApi();
+                        } catch (err) {
+                          setAccountSaveError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setSavingAccount(false);
+                        }
+                      }}
+                    >
+                      {savingAccount ? "Salvando…" : "Salvar"}
                     </button>
                     <button
                       type="button"
@@ -220,6 +273,9 @@ export default function AjustesClient() {
                       {loggingOut ? "Saindo…" : "Logout"}
                     </button>
                   </div>
+                  {accountSaveError ? (
+                    <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{accountSaveError}</div>
+                  ) : null}
                 </div>
               ) : null}
 
@@ -282,7 +338,31 @@ export default function AjustesClient() {
                       <button type="button" className={styles.btnGhost}>
                         Enviar Imagem
                       </button>
-                      <button type="button" className={styles.btnGhost}>
+                      <button
+                        type="button"
+                        className={styles.btnGhost}
+                        disabled={savingCompany}
+                        onClick={async () => {
+                          if (savingCompany) return;
+                          setCompanySaveError("");
+                          setSavingCompany(true);
+                          try {
+                            setCompanyLogoUrl("");
+                            const res = await fetch("/api/me", {
+                              method: "POST",
+                              headers: { "content-type": "application/json" },
+                              body: JSON.stringify({ companyLogoUrl: "" }),
+                            });
+                            const j = (await res.json().catch(() => null)) as any;
+                            if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
+                            await loadMeFromApi();
+                          } catch (err) {
+                            setCompanySaveError(err instanceof Error ? err.message : String(err));
+                          } finally {
+                            setSavingCompany(false);
+                          }
+                        }}
+                      >
                         Apagar
                       </button>
                       <div className={styles.avatarHint}>Tamanho recomendado: 600 x 600 px</div>
@@ -350,10 +430,42 @@ export default function AjustesClient() {
                   </div>
 
                   <div className={styles.actions}>
-                    <button type="button" className={styles.btnPrimary} disabled={!canSaveCompany}>
-                      Salvar
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      disabled={!canSaveCompany || savingCompany}
+                      onClick={async () => {
+                        if (savingCompany) return;
+                        setCompanySaveError("");
+                        setSavingCompany(true);
+                        try {
+                          const res = await fetch("/api/me", {
+                            method: "POST",
+                            headers: { "content-type": "application/json" },
+                            body: JSON.stringify({
+                              companyName: empresaNome,
+                              companyCnpj: cnpj,
+                              companyWhatsapp: empresaWhats,
+                              companyIndustry: ramo,
+                              companyLogoUrl,
+                            }),
+                          });
+                          const j = (await res.json().catch(() => null)) as any;
+                          if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
+                          await loadMeFromApi();
+                        } catch (err) {
+                          setCompanySaveError(err instanceof Error ? err.message : String(err));
+                        } finally {
+                          setSavingCompany(false);
+                        }
+                      }}
+                    >
+                      {savingCompany ? "Salvando…" : "Salvar"}
                     </button>
                   </div>
+                  {companySaveError ? (
+                    <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{companySaveError}</div>
+                  ) : null}
                 </div>
               ) : null}
 
