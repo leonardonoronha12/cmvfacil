@@ -216,7 +216,7 @@ export async function GET(req: NextRequest) {
 
       const { data: itemsDb, error: itemsErr } = await supabase
         .from("items")
-        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio,raw")
+        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
         .eq("company_id", companyId)
         .or("item_receita.is.null,item_receita.eq.false")
         .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
@@ -236,7 +236,6 @@ export async function GET(req: NextRequest) {
 
       const rows = (itemsDb ?? [])
         .map((r: any) => {
-          if ((r?.raw as any)?.cmvfacil_deleted) return null;
           const bubbleId = String(r?.bubble_id ?? "").trim();
           const dbId = String(r?.id ?? "").trim();
           const idOut = bubbleId || (dbId ? `db:${dbId}` : "");
@@ -420,7 +419,6 @@ export async function POST(req: NextRequest) {
 
       const upsertByBubble: any[] = [];
       const upsertById: any[] = [];
-      const keepIds = new Set<string>();
 
       for (const r of rows as any[]) {
         const rawId = String(r?.id ?? "").trim();
@@ -448,7 +446,6 @@ export async function POST(req: NextRequest) {
           item_receita: false,
           item_do_cardapio: false,
         };
-        keepIds.add(String((patch as any).id ?? "").trim());
         if (bubbleId) upsertByBubble.push(patch);
         else upsertById.push(patch);
       }
@@ -462,42 +459,12 @@ export async function POST(req: NextRequest) {
         if (error) return json({ error: error.message }, { status: 500 });
       }
 
-      const { data: existingInsumos, error: listErr } = await supabase
-        .from("items")
-        .select("id,raw")
-        .eq("company_id", companyId)
-        .or("item_receita.is.null,item_receita.eq.false")
-        .or("item_do_cardapio.is.null,item_do_cardapio.eq.false")
-        .limit(5000);
-      if (listErr) return json({ error: listErr.message }, { status: 500 });
-
-      const toDelete = (existingInsumos ?? [])
-        .map((x: any) => ({ id: String(x?.id ?? "").trim(), raw: x?.raw }))
-        .filter((x: any) => x.id && !keepIds.has(x.id) && !(x?.raw as any)?.cmvfacil_deleted);
-
-      let deletedCount = 0;
-      if (toDelete.length) {
-        const nowIso = new Date().toISOString();
-        for (const x of toDelete as any[]) {
-          const id0 = String(x?.id ?? "").trim();
-          if (!id0) continue;
-          const raw0 = x?.raw && typeof x.raw === "object" ? x.raw : {};
-          const nextRaw = { ...raw0, cmvfacil_deleted: true, cmvfacil_deleted_at: nowIso };
-          const { error: updErr } = await supabase.from("items").update({ raw: nextRaw } as any).eq("id", id0);
-          if (updErr) return json({ error: updErr.message }, { status: 500 });
-          deletedCount++;
-        }
-      }
-
       return json(
         { ok: true },
         {
           status: 200,
           headers: {
             "x-cmv-insumos-write-source": "compat",
-            "x-cmv-insumos-keep-count": String(keepIds.size),
-            "x-cmv-insumos-delete-count": String(deletedCount),
-            "x-cmv-insumos-delete-mode": "soft",
           },
         },
       );
@@ -547,5 +514,190 @@ export async function POST(req: NextRequest) {
     return json({ ok: true }, { status: 200, headers: { "x-cmv-insumos-write-source": "legacy" } });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
+type DeleteTarget = { id?: string; bubbleId?: string; key: string };
+
+function normalizeDeleteTarget(input: { id?: unknown; bubbleId?: unknown }, indexKey: string): DeleteTarget | null {
+  const rawId0 = String(input.id ?? "").trim();
+  const rawBubble0 = String(input.bubbleId ?? "").trim();
+
+  const rawId = rawId0.startsWith("db:") ? rawId0.slice("db:".length) : rawId0;
+  const id = isUuid(rawId) ? rawId : "";
+  const bubbleId = looksLikeBubbleId(rawId0) ? rawId0 : looksLikeBubbleId(rawBubble0) ? rawBubble0 : "";
+
+  if (id) return { id, key: indexKey || `id:${id}` };
+  if (bubbleId) return { bubbleId, key: indexKey || `bubble:${bubbleId}` };
+  return null;
+}
+
+async function countRef(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  table: string;
+  companyId: string;
+  column: string;
+  itemId: string;
+}) {
+  const { count, error } = await args.supabase
+    .from(args.table)
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", args.companyId)
+    .eq(args.column, args.itemId);
+  if (error) throw error;
+  return typeof count === "number" ? count : 0;
+}
+
+async function getLinksBlockingDelete(args: { supabase: ReturnType<typeof getSupabaseServerClient>; companyId: string; itemId: string }) {
+  const out: Array<{ table: string; columns: string[]; fk: string; count: number }> = [];
+
+  const invoiceItems = await countRef({ supabase: args.supabase, table: "invoice_items", companyId: args.companyId, column: "item_id", itemId: args.itemId });
+  if (invoiceItems > 0) out.push({ table: "invoice_items", columns: ["item_id"], fk: "set null", count: invoiceItems });
+
+  const inventoryItems = await countRef({ supabase: args.supabase, table: "inventory_items", companyId: args.companyId, column: "item_id", itemId: args.itemId });
+  if (inventoryItems > 0) out.push({ table: "inventory_items", columns: ["item_id"], fk: "set null", count: inventoryItems });
+
+  const wastes = await countRef({ supabase: args.supabase, table: "wastes", companyId: args.companyId, column: "item_id", itemId: args.itemId });
+  if (wastes > 0) out.push({ table: "wastes", columns: ["item_id"], fk: "set null", count: wastes });
+
+  const supplierItems = await countRef({ supabase: args.supabase, table: "supplier_items", companyId: args.companyId, column: "item_id", itemId: args.itemId });
+  if (supplierItems > 0) out.push({ table: "supplier_items", columns: ["item_id"], fk: "cascade", count: supplierItems });
+
+  const shoppingListItems = await countRef({
+    supabase: args.supabase,
+    table: "shopping_list_items",
+    companyId: args.companyId,
+    column: "item_id",
+    itemId: args.itemId,
+  });
+  if (shoppingListItems > 0) out.push({ table: "shopping_list_items", columns: ["item_id"], fk: "set null", count: shoppingListItems });
+
+  const avgCostEvents = await countRef({ supabase: args.supabase, table: "avg_cost_events", companyId: args.companyId, column: "item_id", itemId: args.itemId });
+  if (avgCostEvents > 0) out.push({ table: "avg_cost_events", columns: ["item_id"], fk: "set null", count: avgCostEvents });
+
+  const recipeIngredientRecipe = await countRef({
+    supabase: args.supabase,
+    table: "recipe_ingredients",
+    companyId: args.companyId,
+    column: "recipe_item_id",
+    itemId: args.itemId,
+  });
+  const recipeIngredientIngredient = await countRef({
+    supabase: args.supabase,
+    table: "recipe_ingredients",
+    companyId: args.companyId,
+    column: "ingredient_item_id",
+    itemId: args.itemId,
+  });
+  const recipeIngredients = recipeIngredientRecipe + recipeIngredientIngredient;
+  if (recipeIngredients > 0) {
+    out.push({
+      table: "recipe_ingredients",
+      columns: ["recipe_item_id", "ingredient_item_id"],
+      fk: "set null",
+      count: recipeIngredients,
+    });
+  }
+
+  return out;
+}
+
+async function deleteOneCompatItem(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  target: DeleteTarget;
+}) {
+  const base = { source: "compat" as const, deletedCount: 0, deletedIds: [] as string[] };
+
+  const findQ = args.supabase.from("items").select("id,bubble_id").eq("company_id", args.companyId);
+  const findRes = args.target.id ? await findQ.eq("id", args.target.id).maybeSingle() : await findQ.eq("bubble_id", args.target.bubbleId as string).maybeSingle();
+  if (findRes.error) return { status: 500, body: { ...base, ok: false, error: findRes.error.message } };
+  const itemId = String((findRes.data as any)?.id ?? "").trim();
+  if (!itemId) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
+
+  try {
+    const links = await getLinksBlockingDelete({ supabase: args.supabase, companyId: args.companyId, itemId });
+    if (links.length) return { status: 409, body: { ...base, ok: false, error: "conflict_links", links } };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return { status: 500, body: { ...base, ok: false, error: msg } };
+  }
+
+  const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
+  if (delRes.error) return { status: 500, body: { ...base, ok: false, error: delRes.error.message } };
+  const deletedIds = (delRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
+  if (!deletedIds.length) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
+
+  const verify = await args.supabase.from("items").select("id").eq("company_id", args.companyId).eq("id", itemId).maybeSingle();
+  if (verify.error) return { status: 500, body: { ...base, ok: false, error: verify.error.message } };
+  if (verify.data) return { status: 500, body: { ...base, ok: false, error: "delete_not_applied" } };
+
+  return { status: 200, body: { ...base, ok: true, deletedCount: deletedIds.length, deletedIds } };
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { accessToken, id } = resolveUserScopedId(req);
+    if (!id) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    const supabase = getSupabaseServerClient(accessToken);
+    const userId = id.slice("user:".length);
+
+    const { userId: rawUserId } = getUserIdFromRequest(req);
+    const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
+    const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
+    if (!shouldUseCompat) return json({ ok: false, error: "compat_required", source: "legacy" }, { status: 400 });
+
+    const { data: memberRows, error: memberErr } = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return json({ ok: false, error: memberErr.message }, { status: 500 });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
+
+    const url = new URL(req.url);
+    const qId = String(url.searchParams.get("id") ?? "").trim();
+    const qBubbleId = String(url.searchParams.get("bubbleId") ?? url.searchParams.get("bubble_id") ?? "").trim();
+    const body = (await req.json().catch(() => null)) as any;
+
+    const ids = Array.isArray(body?.ids) ? (body.ids as unknown[]) : [];
+    const bubbleIds = Array.isArray(body?.bubbleIds) ? (body.bubbleIds as unknown[]) : Array.isArray(body?.bubble_ids) ? (body.bubble_ids as unknown[]) : [];
+
+    const batchTargets: DeleteTarget[] = [];
+    for (let i = 0; i < ids.length; i++) {
+      const t = normalizeDeleteTarget({ id: ids[i] }, `ids[${i}]`);
+      if (t) batchTargets.push(t);
+    }
+    for (let i = 0; i < bubbleIds.length; i++) {
+      const t = normalizeDeleteTarget({ bubbleId: bubbleIds[i] }, `bubbleIds[${i}]`);
+      if (t) batchTargets.push(t);
+    }
+
+    const singleTarget = normalizeDeleteTarget(
+      { id: body?.id ?? qId, bubbleId: body?.bubbleId ?? body?.bubble_id ?? qBubbleId },
+      "single",
+    );
+
+    if (batchTargets.length) {
+      const results: any[] = [];
+      for (const t of batchTargets) {
+        const r = await deleteOneCompatItem({ supabase, companyId, target: t });
+        results.push({ key: t.key, ...r.body, status: r.status });
+      }
+      const deletedCount = results.reduce((acc, r) => acc + (typeof r.deletedCount === "number" ? r.deletedCount : 0), 0);
+      const deletedIds = results.flatMap((r) => (Array.isArray(r.deletedIds) ? r.deletedIds : [])).filter(Boolean);
+      return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
+    }
+
+    if (!singleTarget) {
+      return json({ ok: false, source: "compat", deletedCount: 0, deletedIds: [], error: "missing_id" }, { status: 400 });
+    }
+
+    const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget });
+    return json(res.body, { status: res.status });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    return json({ ok: false, error: msg }, { status: 500 });
   }
 }

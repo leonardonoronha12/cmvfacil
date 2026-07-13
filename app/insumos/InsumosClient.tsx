@@ -9,7 +9,7 @@ import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
+import { deleteInsumoFromSupabase, deleteInsumosBatchFromSupabase, loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
@@ -26,6 +26,10 @@ type InsumoRow = {
   categoria: string;
   especificacao: string;
 };
+
+function isUuidValue(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value ?? "").trim());
+}
 
 function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
@@ -925,6 +929,53 @@ export default function InsumosClient() {
   function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
+    if (isCompatSource) {
+      void (async () => {
+        try {
+          const raw = String(id ?? "").trim();
+          const isDb = raw.startsWith("db:");
+          const uuid = isDb ? raw.slice("db:".length) : raw;
+          const bubbleId = !isDb && /^\d{6,}x\d{6,}$/.test(raw) ? raw : "";
+          const res = await deleteInsumoFromSupabase({ id: isDb ? uuid : isUuidValue(uuid) ? uuid : undefined, bubbleId: bubbleId || undefined, source: "compat" });
+          if (!res?.deletedCount) throw new Error("deletedCount=0");
+          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
+          const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
+          setSourceMeta(meta);
+          const mapped = (state.rows ?? []).map((s, idx) => ({
+            id: String(s.id || idx + 1),
+            ocultar: Boolean(s.ocultar),
+            item: String(s.item ?? "").trim(),
+            medida: String(s.medida ?? "").trim() || "Und",
+            custoMedio: String(s.custoMedio ?? "").trim() || "-",
+            categoria: String(s.categoria ?? "").trim() || "-",
+            especificacao: String(s.especificacao ?? "").trim() || "-",
+          }));
+          setDataRows(mapped);
+          const fromRows = getUniqueCategoriesFromRows(mapped);
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const c of [...(state.categories ?? []), ...fromRows]) {
+            const name = normalizeCategoryName(c);
+            if (!name || name === "-") continue;
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(name);
+          }
+          setCategories(merged);
+          writeInsumosToStore(state.rows ?? []);
+          writeInsumoCategoriasToStore(merged);
+          showToast("Item excluído.", "success");
+        } catch (err) {
+          showToast(saveErrorMessage(err), "error");
+        } finally {
+          setIsDeleteItemOpen(false);
+          setDeletingItemId(null);
+          setDeletingItemName("");
+        }
+      })();
+      return;
+    }
     setDataRows((prev) => {
       const nextRows = prev.filter((r) => r.id !== id);
       writeInsumosToStore(
@@ -1138,6 +1189,66 @@ export default function InsumosClient() {
 
   function deleteSelected() {
     if (!selectedIds.size) return;
+    if (isCompatSource) {
+      void (async () => {
+        try {
+          const ids: string[] = [];
+          const bubbleIds: string[] = [];
+          for (const raw of Array.from(selectedIds)) {
+            const s = String(raw ?? "").trim();
+            if (!s) continue;
+            if (s.startsWith("db:")) {
+              const v = s.slice("db:".length);
+              if (isUuidValue(v)) ids.push(v);
+              continue;
+            }
+            if (/^\d{6,}x\d{6,}$/.test(s)) bubbleIds.push(s);
+          }
+          const res = await deleteInsumosBatchFromSupabase({ ids, bubbleIds, source: "compat" });
+          const okCount = typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0;
+          const failed = Array.isArray((res as any)?.results) ? (res as any).results.filter((r: any) => !r?.ok) : [];
+          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
+          const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
+          setSourceMeta(meta);
+          const mapped = (state.rows ?? []).map((s, idx) => ({
+            id: String(s.id || idx + 1),
+            ocultar: Boolean(s.ocultar),
+            item: String(s.item ?? "").trim(),
+            medida: String(s.medida ?? "").trim() || "Und",
+            custoMedio: String(s.custoMedio ?? "").trim() || "-",
+            categoria: String(s.categoria ?? "").trim() || "-",
+            especificacao: String(s.especificacao ?? "").trim() || "-",
+          }));
+          setDataRows(mapped);
+          const fromRows = getUniqueCategoriesFromRows(mapped);
+          const merged: string[] = [];
+          const seen = new Set<string>();
+          for (const c of [...(state.categories ?? []), ...fromRows]) {
+            const name = normalizeCategoryName(c);
+            if (!name || name === "-") continue;
+            const key = name.toLowerCase();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(name);
+          }
+          setCategories(merged);
+          writeInsumosToStore(state.rows ?? []);
+          writeInsumoCategoriasToStore(merged);
+          if (failed.length) {
+            const sample = String(failed[0]?.error ?? "falha").trim() || "falha";
+            showToast(`Exclusão parcial: ${okCount} ok; ${failed.length} falha (${sample}).`, "error");
+          } else {
+            showToast(`${okCount} itens excluídos.`, "success");
+          }
+        } catch (err) {
+          showToast(saveErrorMessage(err), "error");
+        } finally {
+          setSelectedIds(new Set());
+          setBulkDeleteMode(false);
+        }
+      })();
+      return;
+    }
     setDataRows((prev) => {
       const nextRows = prev.filter((r) => !selectedIds.has(r.id));
       writeInsumosToStore(
