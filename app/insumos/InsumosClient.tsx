@@ -311,7 +311,6 @@ function IconCheck() {
 }
 
 export default function InsumosClient() {
-  const toastTimerRef = useRef<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
@@ -338,7 +337,13 @@ export default function InsumosClient() {
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const categoriesReadyRef = useRef(false);
-  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    title: string;
+    message: string;
+    tone: "success" | "error";
+    durationMs?: number;
+    icon?: "success" | "error" | "loading";
+  } | null>(null);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -353,13 +358,8 @@ export default function InsumosClient() {
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
-  function showToast(message: string, type: "success" | "error", durationMs = 4500, title?: string) {
-    setToast({ title: title ?? (type === "success" ? "Sucesso" : "Erro"), message, tone: type });
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, durationMs);
+  function showToast(message: string, type: "success" | "error", durationMs = 4500, title?: string, icon?: "success" | "error" | "loading") {
+    setToast({ title: title ?? (type === "success" ? "Sucesso" : "Erro"), message, tone: type, durationMs, icon });
   }
 
   function saveErrorMessage(err: unknown) {
@@ -444,12 +444,6 @@ export default function InsumosClient() {
 
   useEffect(() => {
     setMounted(true);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    };
   }, []);
 
   useEffect(() => {
@@ -959,7 +953,7 @@ export default function InsumosClient() {
     setIsDeletingItem(true);
     try {
       setDataRows((prev) => prev.filter((r) => r.id !== id));
-      showToast(`Excluindo “${name}”…`, "success", 12000, "Excluindo…");
+      showToast(`Excluindo “${name}”…`, "success", 12000, "Excluindo…", "loading");
       await deleteInsumosCompat({ id });
       showToast(`“${name}” deletado com sucesso.`, "success");
       void (async () => {
@@ -1396,7 +1390,16 @@ export default function InsumosClient() {
   return (
     <div className={dash.dashboard}>
       <AppSidebar active="insumos" />
-      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {toast ? (
+        <SystemToast
+          title={toast.title}
+          message={toast.message}
+          tone={toast.tone}
+          icon={toast.icon}
+          durationMs={toast.durationMs}
+          onClose={() => setToast(null)}
+        />
+      ) : null}
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>

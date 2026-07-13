@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import dash from "../dashboard/dashboard.module.css";
 
 type SystemToastTone = "success" | "error";
+type SystemToastIcon = "success" | "error" | "loading";
 
 function IconSuccess() {
   return (
@@ -24,6 +25,15 @@ function IconError() {
   );
 }
 
+function IconLoading(props: { svgRef: React.Ref<SVGSVGElement> }) {
+  return (
+    <svg ref={props.svgRef} width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="9.25" stroke="currentColor" strokeOpacity="0.25" strokeWidth="1.8" />
+      <path d="M21.25 12a9.25 9.25 0 0 0-9.25-9.25" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function IconClipboard() {
   return (
     <svg width="22" height="22" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -35,15 +45,37 @@ function IconClipboard() {
   );
 }
 
-export default function SystemToast(props: { title: string; message: string; tone: SystemToastTone; onClose: () => void; actions?: ReactNode }) {
+export default function SystemToast(props: {
+  title: string;
+  message: string;
+  tone: SystemToastTone;
+  onClose: () => void;
+  actions?: ReactNode;
+  icon?: SystemToastIcon;
+  durationMs?: number;
+}) {
   const isSuccess = props.tone === "success";
+  const icon = props.icon ?? (isSuccess ? "success" : "error");
+  const autoCloseMs = typeof props.durationMs === "number" && Number.isFinite(props.durationMs) ? Math.max(0, props.durationMs) : 0;
   const rootRef = useRef<HTMLDivElement | null>(null);
   const closingRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
+  const autoCloseTimerRef = useRef<number | null>(null);
+  const progressRef = useRef<HTMLDivElement | null>(null);
+  const progressAnimRef = useRef<Animation | null>(null);
+  const loadingSvgElRef = useRef<SVGSVGElement | null>(null);
+  const spinnerAnimRef = useRef<Animation | null>(null);
+  const setLoadingSvgRef = (el: SVGSVGElement | null) => {
+    loadingSvgElRef.current = el;
+  };
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
+
+  useEffect(() => {
+    closingRef.current = false;
+  }, [props.title, props.message, props.tone, props.icon]);
 
   useEffect(() => {
     const el = rootRef.current;
@@ -58,6 +90,36 @@ export default function SystemToast(props: { title: string; message: string; ton
       );
     } catch {}
   }, [isMounted, props.title, props.message, props.tone]);
+
+  useEffect(() => {
+    spinnerAnimRef.current?.cancel();
+    spinnerAnimRef.current = null;
+    if (!isMounted || icon !== "loading") return;
+    const el = loadingSvgElRef.current;
+    if (!el) return;
+    try {
+      spinnerAnimRef.current = el.animate([{ transform: "rotate(0deg)" }, { transform: "rotate(360deg)" }], {
+        duration: 900,
+        easing: "linear",
+        iterations: Infinity,
+      });
+    } catch {}
+  }, [icon, isMounted]);
+
+  useEffect(() => {
+    progressAnimRef.current?.cancel();
+    progressAnimRef.current = null;
+    if (!isMounted || autoCloseMs <= 0) return;
+    const el = progressRef.current;
+    if (!el) return;
+    try {
+      progressAnimRef.current = el.animate([{ transform: "scaleX(1)" }, { transform: "scaleX(0)" }], {
+        duration: autoCloseMs,
+        easing: "linear",
+        fill: "both",
+      });
+    } catch {}
+  }, [autoCloseMs, isMounted, props.title, props.message, props.tone, props.icon]);
 
   function handleClose() {
     const el = rootRef.current;
@@ -81,9 +143,25 @@ export default function SystemToast(props: { title: string; message: string; ton
       props.onClose();
     }
   }
+
+  useEffect(() => {
+    if (!isMounted || autoCloseMs <= 0) return;
+    if (autoCloseTimerRef.current) window.clearTimeout(autoCloseTimerRef.current);
+    autoCloseTimerRef.current = window.setTimeout(() => {
+      autoCloseTimerRef.current = null;
+      handleClose();
+    }, autoCloseMs);
+    return () => {
+      if (autoCloseTimerRef.current) window.clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    };
+  }, [autoCloseMs, isMounted, props.title, props.message, props.tone, props.icon]);
+
   return (
     <div ref={rootRef} className={`${dash.hideAlert} ${isSuccess ? dash.hideAlertShow : ""}`} role="alert" aria-live="assertive">
-      <div className={dash.hideAlertLeading}>{isSuccess ? <IconSuccess /> : <IconError />}</div>
+      <div className={dash.hideAlertLeading}>
+        {icon === "loading" ? <IconLoading svgRef={setLoadingSvgRef} /> : icon === "success" ? <IconSuccess /> : <IconError />}
+      </div>
       <div className={dash.hideAlertBody}>
         <div className={dash.hideAlertTitleRow}>
           <span className={dash.hideAlertItemIcon}>
@@ -92,6 +170,19 @@ export default function SystemToast(props: { title: string; message: string; ton
           <span className={dash.hideAlertTitle}>{props.title}</span>
         </div>
         {props.message ? <div className={dash.hideAlertText}>{props.message}</div> : null}
+        {autoCloseMs > 0 ? (
+          <div
+            style={{
+              marginTop: 10,
+              height: 3,
+              borderRadius: 999,
+              background: isSuccess ? "rgba(0,169,157,0.16)" : "rgba(239,46,46,0.16)",
+              overflow: "hidden",
+            }}
+          >
+            <div ref={progressRef} style={{ height: "100%", width: "100%", background: "currentColor", transformOrigin: "left center" }} />
+          </div>
+        ) : null}
         {props.actions ? <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>{props.actions}</div> : null}
       </div>
       <button type="button" className={dash.hideAlertClose} aria-label="Fechar alerta" onClick={handleClose}>
