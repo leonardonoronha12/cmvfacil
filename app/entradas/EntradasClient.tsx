@@ -109,11 +109,19 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
   return labelFromState || rawNoSuffix || raw;
 }
 
-function resolveResponsavelDisplay(responsavelRaw: string, currentUserEmail: string) {
+function resolveResponsavelDisplay(responsavelRaw: string, currentUserFullName: string, currentUserEmail: string) {
   const raw = sanitizeUiLabel(responsavelRaw);
   if (!raw) return "-";
-  if (raw.includes("@")) return raw;
-  if ((looksLikeBubbleId(raw) || looksLikeUuid(raw)) && currentUserEmail) return currentUserEmail;
+  const name = sanitizeUiLabel(currentUserFullName);
+  const email = sanitizeUiLabel(currentUserEmail);
+  if (raw.includes("@")) {
+    if (name && email && raw.toLowerCase() === email.toLowerCase()) return name;
+    return raw;
+  }
+  if (looksLikeBubbleId(raw) || looksLikeUuid(raw)) {
+    if (name) return name;
+    if (email) return email;
+  }
   return raw;
 }
 
@@ -500,6 +508,7 @@ export default function EntradasClient() {
   const fornecedoresSaveErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [currentUserFullName, setCurrentUserFullName] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
@@ -524,6 +533,8 @@ export default function EntradasClient() {
         if (!res.ok || !data?.ok) return;
         const email = String(data?.user?.email ?? "").trim();
         if (email) setCurrentUserEmail(email);
+        const fullName = String(data?.user?.fullName ?? "").trim();
+        if (fullName) setCurrentUserFullName(fullName);
       } catch {}
     })();
   }, []);
@@ -566,7 +577,10 @@ export default function EntradasClient() {
           cmp = collator.compare(resolveFornecedorDisplay(a.row.fornecedor, fornecedorInfoMap), resolveFornecedorDisplay(b.row.fornecedor, fornecedorInfoMap));
           break;
         case "responsavel":
-          cmp = collator.compare(resolveResponsavelDisplay(a.row.responsavel, currentUserEmail), resolveResponsavelDisplay(b.row.responsavel, currentUserEmail));
+          cmp = collator.compare(
+            resolveResponsavelDisplay(a.row.responsavel, currentUserFullName, currentUserEmail),
+            resolveResponsavelDisplay(b.row.responsavel, currentUserFullName, currentUserEmail),
+          );
           break;
         case "valorNota":
           cmp = parseBrlToCents(a.row.valorNota) - parseBrlToCents(b.row.valorNota);
@@ -576,7 +590,7 @@ export default function EntradasClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+  }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
 
   const qaUi = useMemo(() => {
     return {
@@ -591,7 +605,7 @@ export default function EntradasClient() {
           dataLancamento: r.dataLancamento,
           fornecedor: resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap),
           valorNota: r.valorNota,
-          responsavel: resolveResponsavelDisplay(r.responsavel, currentUserEmail),
+          responsavel: resolveResponsavelDisplay(r.responsavel, currentUserFullName, currentUserEmail),
           dataCriacao: r.dataCriacao,
           itens: r.itens,
         })),
@@ -611,7 +625,7 @@ export default function EntradasClient() {
         })),
       })),
     };
-  }, [columnOrder, currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, sortDir, sortKey, sourceMeta, visible]);
+  }, [columnOrder, currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, sortDir, sortKey, sourceMeta, visible]);
 
   function toggleSort(key: EntradaTableColumn) {
     if (sortKey !== key) {
@@ -677,7 +691,7 @@ export default function EntradasClient() {
       return <div className={styles.td}>{resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap)}</div>;
     }
     if (column === "responsavel") {
-      return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserEmail)}</div>;
+      return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserFullName, currentUserEmail)}</div>;
     }
     if (column === "dataCriacao") {
       return <div className={styles.tdStrong}>{row.dataCriacao}</div>;
@@ -2091,7 +2105,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Responsável</div>
-                      <div className={styles.sideValue}>{resolveResponsavelDisplay(detailsRow.responsavel, currentUserEmail)}</div>
+                      <div className={styles.sideValue}>{resolveResponsavelDisplay(detailsRow.responsavel, currentUserFullName, currentUserEmail)}</div>
                     </div>
                   </div>
                 </aside>
