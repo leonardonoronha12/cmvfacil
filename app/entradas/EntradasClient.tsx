@@ -28,6 +28,7 @@ import { deleteEntradaFromSupabase, loadEntradasStateFromSupabase, loadEntradasF
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
+import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./entradas.module.css";
 
@@ -526,17 +527,16 @@ export default function EntradasClient() {
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/debug/context", { cache: "no-store" });
-        const data = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !data?.ok) return;
-        const email = String(data?.user?.email ?? "").trim();
-        if (email) setCurrentUserEmail(email);
-        const fullName = String(data?.user?.fullName ?? "").trim();
-        if (fullName) setCurrentUserFullName(fullName);
-      } catch {}
-    })();
+    const applyFromStore = () => {
+      const me = readMeFromStore();
+      const email = String(me?.email ?? "").trim();
+      const fullName = String(me?.nomeCompleto ?? "").trim() || `${String(me?.nome ?? "").trim()} ${String(me?.sobrenome ?? "").trim()}`.trim();
+      if (email) setCurrentUserEmail(email);
+      if (fullName) setCurrentUserFullName(fullName);
+    };
+    applyFromStore();
+    void loadMeFromApi().finally(() => applyFromStore());
+    return subscribeMe(() => applyFromStore());
   }, []);
 
   useEffect(() => {
