@@ -353,8 +353,8 @@ export default function InsumosClient() {
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
-  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
+  function showToast(message: string, type: "success" | "error", durationMs = 4500, title?: string) {
+    setToast({ title: title ?? (type === "success" ? "Sucesso" : "Erro"), message, tone: type });
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
@@ -959,6 +959,7 @@ export default function InsumosClient() {
     setIsDeletingItem(true);
     try {
       setDataRows((prev) => prev.filter((r) => r.id !== id));
+      showToast(`Excluindo “${name}”…`, "success", 12000, "Excluindo…");
       await deleteInsumosCompat({ id });
       showToast(`“${name}” deletado com sucesso.`, "success");
       void (async () => {
@@ -1174,6 +1175,7 @@ export default function InsumosClient() {
     setIsBulkDeleting(true);
     try {
       const ids = Array.from(selectedIds);
+      showToast(ids.length === 1 ? "Excluindo 1 item…" : `Excluindo ${ids.length} itens…`, "success", 12000, "Excluindo…");
       setIsBulkDeleteOpen(false);
       setSelectedIds(new Set());
       setBulkDeleteMode(false);

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import dash from "../dashboard/dashboard.module.css";
 
 type SystemToastTone = "success" | "error";
@@ -37,8 +37,52 @@ function IconClipboard() {
 
 export default function SystemToast(props: { title: string; message: string; tone: SystemToastTone; onClose: () => void; actions?: ReactNode }) {
   const isSuccess = props.tone === "success";
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const closingRef = useRef(false);
+  const [isMounted, setIsMounted] = useState(false);
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el || !isMounted) return;
+    try {
+      el.animate(
+        [
+          { opacity: 0, transform: "translate3d(0,-10px,0) scale(0.98)" },
+          { opacity: 1, transform: "translate3d(0,0,0) scale(1)" },
+        ],
+        { duration: 190, easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "both" },
+      );
+    } catch {}
+  }, [isMounted, props.title, props.message, props.tone]);
+
+  function handleClose() {
+    const el = rootRef.current;
+    if (!el) {
+      props.onClose();
+      return;
+    }
+    if (closingRef.current) return;
+    closingRef.current = true;
+    try {
+      const anim = el.animate(
+        [
+          { opacity: 1, transform: "translate3d(0,0,0) scale(1)" },
+          { opacity: 0, transform: "translate3d(0,-10px,0) scale(0.98)" },
+        ],
+        { duration: 150, easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "both" },
+      );
+      anim.addEventListener("finish", () => props.onClose(), { once: true });
+      setTimeout(() => props.onClose(), 220);
+    } catch {
+      props.onClose();
+    }
+  }
   return (
-    <div className={`${dash.hideAlert} ${isSuccess ? dash.hideAlertShow : ""}`} role="alert" aria-live="assertive">
+    <div ref={rootRef} className={`${dash.hideAlert} ${isSuccess ? dash.hideAlertShow : ""}`} role="alert" aria-live="assertive">
       <div className={dash.hideAlertLeading}>{isSuccess ? <IconSuccess /> : <IconError />}</div>
       <div className={dash.hideAlertBody}>
         <div className={dash.hideAlertTitleRow}>
@@ -50,7 +94,7 @@ export default function SystemToast(props: { title: string; message: string; ton
         {props.message ? <div className={dash.hideAlertText}>{props.message}</div> : null}
         {props.actions ? <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>{props.actions}</div> : null}
       </div>
-      <button type="button" className={dash.hideAlertClose} aria-label="Fechar alerta" onClick={props.onClose}>
+      <button type="button" className={dash.hideAlertClose} aria-label="Fechar alerta" onClick={handleClose}>
         ×
       </button>
     </div>
