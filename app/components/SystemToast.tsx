@@ -83,7 +83,7 @@ export default function SystemToast(props: {
     try {
       el.animate(
         [
-          { opacity: 0, transform: "translate3d(0,-10px,0) scale(0.98)" },
+          { opacity: 1, transform: "translate3d(0,-10px,0) scale(0.98)" },
           { opacity: 1, transform: "translate3d(0,0,0) scale(1)" },
         ],
         { duration: 190, easing: "cubic-bezier(0.2, 0.9, 0.2, 1)", fill: "both" },
