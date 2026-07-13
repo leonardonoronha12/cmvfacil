@@ -101,3 +101,34 @@ export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreIte
     throw new Error(msg);
   }
 }
+
+export type DeleteInsumosCompatResponse =
+  | {
+      ok: true;
+      source: "compat";
+      deletedItemCount: number;
+      deletedIds: string[];
+      results?: Array<{ status?: number; ok?: boolean; error?: string; deletedItemCount?: number; deletedIds?: string[] }>;
+    }
+  | { ok: false; error: string; source?: string };
+
+export async function deleteInsumosCompat(args: { ids?: string[]; id?: string; bubbleIds?: string[]; bubbleId?: string }) {
+  const override = getQaOverridesFromLocation();
+  const u = override.userId;
+  const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}&source=compat`;
+  const res = await fetch(`/api/insumos?ts=${Date.now()}${qp}`, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ids: Array.isArray(args.ids) ? args.ids : args.id ? [args.id] : [],
+      bubbleIds: Array.isArray(args.bubbleIds) ? args.bubbleIds : args.bubbleId ? [args.bubbleId] : [],
+    }),
+  });
+  const text = await res.text().catch(() => "");
+  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosCompatResponse | null;
+  if (!res.ok || !json?.ok) {
+    const msg = String((json as any)?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_delete_${res.status}`;
+    throw new Error(msg);
+  }
+  return json;
+}

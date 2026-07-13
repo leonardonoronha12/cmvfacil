@@ -9,7 +9,7 @@ import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
+import { deleteInsumosCompat, loadInsumosStateFromSupabase, saveInsumosStateToSupabase, type InsumosStatePayload } from "../lib/insumosSupabase";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
@@ -368,6 +368,14 @@ export default function InsumosClient() {
     return `Não foi possível salvar no Supabase (${msg}).`;
   }
 
+  function deleteErrorMessage(err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+    if (!msg) return "Não foi possível excluir o insumo.";
+    if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+    if (msg === "compat_required") return "Sua sessão ainda não está no modo compat. Atualize a página e tente novamente.";
+    return `Não foi possível excluir o insumo (${msg}).`;
+  }
+
   function isBootstrapRunning() {
     try {
       return window.sessionStorage.getItem("cmvfacil:bootstrapRunning:v5") === "1";
@@ -396,6 +404,42 @@ export default function InsumosClient() {
     void meta;
   }
 
+  function applyLoadedState(state: InsumosStatePayload) {
+    const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
+    setSourceMeta(meta);
+
+    const mapped = (state.rows ?? []).map((s, idx) => ({
+      id: String(s.id || idx + 1),
+      ocultar: Boolean(s.ocultar),
+      item: String(s.item ?? "").trim(),
+      medida: String(s.medida ?? "").trim() || "Und",
+      custoMedio: String(s.custoMedio ?? "").trim() || "-",
+      categoria: String(s.categoria ?? "").trim() || "-",
+      especificacao: String(s.especificacao ?? "").trim() || "-",
+    }));
+    rowsReadyRef.current = true;
+    setDataRows(mapped);
+
+    const fromRows = getUniqueCategoriesFromRows(mapped);
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const c of [...(state.categories ?? []), ...fromRows]) {
+      const name = normalizeCategoryName(c);
+      if (!name || name === "-") continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(name);
+    }
+    setCategories(merged);
+    categoriesReadyRef.current = true;
+
+    writeInsumosToStore(state.rows ?? []);
+    writeInsumoCategoriasToStore(merged);
+
+    return { mapped, meta };
+  }
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -410,36 +454,7 @@ export default function InsumosClient() {
     (async () => {
       try {
         const state = await loadInsumosStateFromSupabase();
-        const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
-        setSourceMeta(meta);
-        const mapped = (state.rows ?? []).map((s, idx) => ({
-          id: String(s.id || idx + 1),
-          ocultar: Boolean(s.ocultar),
-          item: String(s.item ?? "").trim(),
-          medida: String(s.medida ?? "").trim() || "Und",
-          custoMedio: String(s.custoMedio ?? "").trim() || "-",
-          categoria: String(s.categoria ?? "").trim() || "-",
-          especificacao: String(s.especificacao ?? "").trim() || "-",
-        }));
-        rowsReadyRef.current = true;
-        setDataRows(mapped);
-
-        const fromRows = getUniqueCategoriesFromRows(mapped);
-        const merged: string[] = [];
-        const seen = new Set<string>();
-        for (const c of [...(state.categories ?? []), ...fromRows]) {
-          const name = normalizeCategoryName(c);
-          if (!name || name === "-") continue;
-          const key = name.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          merged.push(name);
-        }
-        setCategories(merged);
-        categoriesReadyRef.current = true;
-
-        writeInsumosToStore(state.rows ?? []);
-        writeInsumoCategoriasToStore(merged);
+        applyLoadedState(state);
       } catch (err) {
         rowsReadyRef.current = true;
         setDataRows([]);
@@ -907,6 +922,10 @@ export default function InsumosClient() {
   }
 
   function openDeleteItem(row: InsumoRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
     setIsImportOpen(false);
     setIsNewItemOpen(false);
     setIsEditItemOpen(false);
@@ -918,13 +937,31 @@ export default function InsumosClient() {
     setIsDeleteItemOpen(true);
   }
 
-  function confirmDeleteItem() {
+  async function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
-    setDataRows((prev) => prev.filter((r) => r.id !== id));
-    setIsDeleteItemOpen(false);
-    setDeletingItemId(null);
-    setDeletingItemName("");
+    if (!isCompatSource) {
+      setDataRows((prev) => prev.filter((r) => r.id !== id));
+      setIsDeleteItemOpen(false);
+      setDeletingItemId(null);
+      setDeletingItemName("");
+      return;
+    }
+    if (isLoadingTable) return;
+    setIsLoadingTable(true);
+    try {
+      await deleteInsumosCompat({ id });
+      const state = await loadInsumosStateFromSupabase();
+      applyLoadedState(state);
+      setIsDeleteItemOpen(false);
+      setDeletingItemId(null);
+      setDeletingItemName("");
+      showToast("Insumo excluído!", "success");
+    } catch (err) {
+      showToast(deleteErrorMessage(err), "error");
+    } finally {
+      setIsLoadingTable(false);
+    }
   }
 
   function saveEditItem() {
@@ -1106,9 +1143,31 @@ export default function InsumosClient() {
     setIsBulkDeleteOpen(true);
   }
 
-  function confirmBulkDelete() {
-    deleteSelected();
-    setIsBulkDeleteOpen(false);
+  async function confirmBulkDelete() {
+    if (!isCompatSource) {
+      deleteSelected();
+      setIsBulkDeleteOpen(false);
+      return;
+    }
+    if (!selectedIds.size) return;
+    if (isLoadingTable) return;
+    setIsLoadingTable(true);
+    try {
+      const ids = Array.from(selectedIds);
+      const res = await deleteInsumosCompat({ ids });
+      const failures = Array.isArray(res.results) ? res.results.filter((r) => Number(r?.status ?? 200) !== 200) : [];
+      const state = await loadInsumosStateFromSupabase();
+      applyLoadedState(state);
+      setSelectedIds(new Set());
+      setBulkDeleteMode(false);
+      setIsBulkDeleteOpen(false);
+      if (failures.length) showToast("Alguns itens não puderam ser excluídos. A lista foi atualizada.", "error");
+      else showToast(ids.length === 1 ? "Insumo excluído!" : "Insumos excluídos!", "success");
+    } catch (err) {
+      showToast(deleteErrorMessage(err), "error");
+    } finally {
+      setIsLoadingTable(false);
+    }
   }
 
   useEffect(() => {
@@ -1627,7 +1686,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem} disabled={isLoadingTable}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteItemOpen(false)}>
@@ -1662,7 +1721,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isLoadingTable}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
