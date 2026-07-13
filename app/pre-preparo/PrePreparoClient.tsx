@@ -1101,30 +1101,6 @@ export default function PrePreparoClient() {
   }, [isReadOnly, rows]);
 
   useEffect(() => {
-    if (isReadOnly) return;
-    if (!etiquetasLoadedRef.current) return;
-    if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
-    saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
-      void savePrePreparoEtiquetasToSupabase(etiquetasRows)
-        .then(() => {
-          etiquetasSaveErrorShownRef.current = false;
-        })
-        .catch(async () => {
-          try {
-            await new Promise((r) => window.setTimeout(r, 700));
-            await savePrePreparoEtiquetasToSupabase(etiquetasRows);
-            etiquetasSaveErrorShownRef.current = false;
-          } catch (err2) {
-            if (!etiquetasSaveErrorShownRef.current) {
-              etiquetasSaveErrorShownRef.current = true;
-              showToast(supabaseSaveErrorMessage(err2), "error");
-            }
-          }
-        });
-    }, 700);
-  }, [etiquetasRows, isReadOnly]);
-
-  useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);
   }, [hiddenMap]);
 

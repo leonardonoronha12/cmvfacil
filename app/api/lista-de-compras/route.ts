@@ -72,13 +72,7 @@ function resolveUserScopedId(req: NextRequest) {
 }
 
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  const url = new URL(args.req.url);
-  const override = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
-  if (args.isAdmin) {
-    if (override === "compat") return true;
-    if (override === "legacy") return false;
-  }
-  return true;
+  return false;
 }
 
 function extractBubbleId(input: unknown) {
@@ -417,7 +411,7 @@ export async function GET(req: NextRequest) {
         { status: 200 },
       );
     }
-    return json({ ok: false, error: "legacy_source_disabled" }, { status: 400 });
+    return json({ ok: true, source: "legacy", readOnly: false, rows: [] }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

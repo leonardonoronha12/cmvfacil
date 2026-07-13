@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -945,15 +945,19 @@ export default function InsumosClient() {
     setDeletingItemName("");
 
     if (!isCompatSource) {
-      setDataRows((prev) => prev.filter((r) => r.id !== id));
-      showToast("Insumo excluído com sucesso.", "success");
+      flushSync(() => {
+        setDataRows((prev) => prev.filter((r) => r.id !== id));
+        showToast("Insumo excluído com sucesso.", "success");
+      });
       return;
     }
     if (isDeletingItem) return;
     setIsDeletingItem(true);
     try {
-      setDataRows((prev) => prev.filter((r) => r.id !== id));
-      showToast(`Excluindo “${name}”…`, "success", 12000, "Excluindo…", "loading");
+      flushSync(() => {
+        setDataRows((prev) => prev.filter((r) => r.id !== id));
+        showToast(`Excluindo “${name}”…`, "success", 12000, "Excluindo…", "loading");
+      });
       await deleteInsumosCompat({ id });
       showToast(`“${name}” deletado com sucesso.`, "success");
       void (async () => {
@@ -1159,9 +1163,11 @@ export default function InsumosClient() {
 
   async function confirmBulkDelete() {
     if (!isCompatSource) {
-      deleteSelected();
-      setIsBulkDeleteOpen(false);
-      showToast("Insumos excluídos com sucesso.", "success");
+      flushSync(() => {
+        deleteSelected();
+        setIsBulkDeleteOpen(false);
+        showToast("Insumos excluídos com sucesso.", "success");
+      });
       return;
     }
     if (!selectedIds.size) return;
@@ -1169,11 +1175,14 @@ export default function InsumosClient() {
     setIsBulkDeleting(true);
     try {
       const ids = Array.from(selectedIds);
-      showToast(ids.length === 1 ? "Excluindo 1 item…" : `Excluindo ${ids.length} itens…`, "success", 12000, "Excluindo…");
-      setIsBulkDeleteOpen(false);
-      setSelectedIds(new Set());
-      setBulkDeleteMode(false);
-      setDataRows((prev) => prev.filter((r) => !selectedIds.has(r.id)));
+      const idsSet = new Set(ids);
+      flushSync(() => {
+        showToast(ids.length === 1 ? "Excluindo 1 item…" : `Excluindo ${ids.length} itens…`, "success", 12000, "Excluindo…", "loading");
+        setIsBulkDeleteOpen(false);
+        setSelectedIds(new Set());
+        setBulkDeleteMode(false);
+        setDataRows((prev) => prev.filter((r) => !idsSet.has(r.id)));
+      });
 
       const res = await deleteInsumosCompat({ ids });
       const failures = Array.isArray(res.results) ? res.results.filter((r) => Number(r?.status ?? 200) !== 200) : [];

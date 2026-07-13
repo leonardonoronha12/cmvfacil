@@ -205,6 +205,25 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function parseCsvEnv(value: string | undefined) {
+  return String(value ?? "")
+    .split(/[,\n;]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function isAdminUserId(userId: string) {
+  const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
+  const emails = new Set(
+    [...parseCsvEnv(process.env.ADMIN_USER_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS_LEGACY)].map((x) => x.toLowerCase()),
+  );
+  const raw = userId.toLowerCase();
+  if (!isUuid(userId) && raw.includes("@") && process.env.ADMIN_SECRET) return true;
+  if (ids.size && ids.has(raw)) return true;
+  if (emails.size && emails.has(raw)) return true;
+  return false;
+}
+
 function extractUuidFromText(input: string) {
   const s = String(input ?? "").trim();
   if (!s) return null;
@@ -575,6 +594,7 @@ export async function POST(req: NextRequest) {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
+    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
     const overrideTargetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : "";
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;

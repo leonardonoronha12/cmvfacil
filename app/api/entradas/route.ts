@@ -109,28 +109,6 @@ function resolveUserScopedId(req: NextRequest) {
 }
 
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  const url = new URL(args.req.url);
-  const override = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
-  if (args.isAdmin) {
-    if (override === "compat") return true;
-    if (override === "legacy") return false;
-  }
-
-  const enabled = String(process.env.BUBBLE_COMPAT_READ_ENTRADAS ?? "").trim().toLowerCase();
-  if (!(enabled === "1" || enabled === "true" || enabled === "yes" || enabled === "on")) return false;
-
-  const allowUsers = new Set(parseCsvEnv(process.env.BUBBLE_COMPAT_READ_ENTRADAS_USER_IDS).map((x) => x.toLowerCase()));
-  const allowEmails = new Set(parseCsvEnv(process.env.BUBBLE_COMPAT_READ_ENTRADAS_EMAILS).map((x) => x.toLowerCase()));
-  const hasAllowList = allowUsers.size > 0 || allowEmails.size > 0;
-  if (!hasAllowList) return true;
-
-  const uid = String(args.userId ?? "").trim().toLowerCase();
-  if (allowUsers.has(uid)) return true;
-
-  const { data, error } = await args.supabase.from("user_profiles").select("email").eq("user_id", args.userId).maybeSingle();
-  if (error) return false;
-  const email = String((data as any)?.email ?? "").trim().toLowerCase();
-  if (email && allowEmails.has(email)) return true;
   return false;
 }
 
