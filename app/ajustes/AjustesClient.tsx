@@ -314,25 +314,37 @@ export default function AjustesClient() {
               {tab === "minha-empresa" ? (
                 <div className={styles.panelInner}>
                   <div className={styles.avatarRow}>
-                    <div className={styles.avatarBox} style={{ borderRadius: 999, background: "#f4c400", color: "#01040e" }}>
-                      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path
-                          d="M5 10.5c0-2.5 3-4.5 7-4.5s7 2 7 4.5"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                        />
-                        <path d="M6 11.5h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        <path
-                          d="M6.5 13.5h11c.3 0 .5.2.5.5v.7c0 1.6-1.3 2.8-2.8 2.8H8.8C7.2 17.5 6 16.3 6 14.7V14c0-.3.2-.5.5-.5Z"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinejoin="round"
-                        />
-                        <path d="M7.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        <path d="M11 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        <path d="M14.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                      </svg>
+                    <div
+                      className={styles.avatarBox}
+                      style={{
+                        borderRadius: 999,
+                        background: companyLogoUrl ? "#ffffff" : "#eef2f7",
+                        color: "#01040e",
+                        overflow: "hidden",
+                      }}
+                    >
+                      {companyLogoUrl ? (
+                        <img src={companyLogoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                          <path
+                            d="M5 10.5c0-2.5 3-4.5 7-4.5s7 2 7 4.5"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinecap="round"
+                          />
+                          <path d="M6 11.5h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          <path
+                            d="M6.5 13.5h11c.3 0 .5.2.5.5v.7c0 1.6-1.3 2.8-2.8 2.8H8.8C7.2 17.5 6 16.3 6 14.7V14c0-.3.2-.5.5-.5Z"
+                            stroke="currentColor"
+                            strokeWidth="1.8"
+                            strokeLinejoin="round"
+                          />
+                          <path d="M7.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          <path d="M11 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                          <path d="M14.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                        </svg>
+                      )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", rowGap: 6 }}>
                       <button type="button" className={styles.btnGhost}>
