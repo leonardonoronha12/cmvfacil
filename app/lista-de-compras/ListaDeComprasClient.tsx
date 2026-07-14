@@ -666,33 +666,94 @@ export default function ListaDeComprasClient() {
         } satisfies CompraRow;
       });
     }
+    const contagemByIso = new Map<string, InventarioContagem>();
+    const contagemOptions: Array<{ iso: string; t: number }> = [];
+    for (const c of contagens) {
+      const t = parseDateLoose(c.data);
+      if (!t) continue;
+      const date = new Date(t);
+      const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      if (!contagemByIso.has(iso)) contagemByIso.set(iso, c);
+      contagemOptions.push({ iso, t });
+    }
 
-    const insumoByBubbleId = new Map<string, InsumoStoreItem>();
-    for (const r of insumos) {
-      const id = String(r.id ?? "");
-      const bubbleId = id.includes("insumo:") ? id.split("insumo:", 2)[1] : "";
-      if (!bubbleId || insumoByBubbleId.has(bubbleId)) continue;
-      insumoByBubbleId.set(bubbleId, r);
+    contagemOptions.sort((a, b) => b.t - a.t);
+    const availableIsos = new Set(contagemOptions.map((x) => x.iso));
+    const endIso = (endDate && availableIsos.has(endDate) ? endDate : contagemOptions[0]?.iso) ?? "";
+    const startIso = (startDate && availableIsos.has(startDate) ? startDate : contagemOptions[contagemOptions.length - 1]?.iso) ?? endIso;
+
+    const startContagem = startIso ? contagemByIso.get(startIso) ?? null : null;
+    const endContagem = endIso ? contagemByIso.get(endIso) ?? null : null;
+
+    const sumInventory = (inv: InventarioContagem | null) => {
+      const out = new Map<string, { qty: number; unit: string }>();
+      if (!inv) return out;
+      for (const cat of inv.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if (it.removido) continue;
+          const key = normalizeText(it.item);
+          if (!key) continue;
+          const qty = parseDecimalInput(String(it.estoqueFinal ?? ""));
+          const unit = normalizeUnit(String(it.unidade ?? ""));
+          const cur = out.get(key);
+          out.set(key, { qty: (cur?.qty ?? 0) + qty, unit: cur?.unit || unit });
+        }
+      }
+      return out;
+    };
+
+    const estoqueInicialByKey = sumInventory(startContagem);
+    const estoqueFinalByKey = sumInventory(endContagem);
+
+    const startT = startIso ? Date.parse(startIso) : NaN;
+    const endT = endIso ? Date.parse(endIso) : NaN;
+    const diasCorridos = Number.isFinite(startT) && Number.isFinite(endT) ? Math.max(Math.round((endT - startT) / 86_400_000), 0) : 0;
+
+    const entradasByKey = new Map<string, { qty: number; unit: string }>();
+    for (const entrada of entradas) {
+      const t = parseDateLoose(entrada.dataLancamento);
+      if (!t) continue;
+      if (Number.isFinite(startT) && t < startT) continue;
+      if (Number.isFinite(endT) && t > endT + 86_399_000) continue;
+      for (const item of entrada.itensNota ?? []) {
+        const key = normalizeText(item.nome);
+        if (!key) continue;
+        const parsed = parseQtyLabel(item.quantidadeLabel);
+        if (!parsed.qty) continue;
+        const cur = entradasByKey.get(key);
+        entradasByKey.set(key, { qty: (cur?.qty ?? 0) + parsed.qty, unit: cur?.unit || parsed.unit });
+      }
     }
 
     const rows: CompraRow[] = [];
-    for (const r of bubbleListaRows) {
-      if (String(r.tipo ?? "").trim() && String(r.tipo).trim() !== "itens") continue;
-      const ins = r.bubbleItemId ? insumoByBubbleId.get(r.bubbleItemId) ?? null : null;
-      const itemName = String(ins?.item ?? r.itemNome ?? "").trim() || "Item";
-      const medida = String(ins?.medida ?? r.itemMedida ?? "").trim() || "Und";
-      const categoria = String(ins?.categoria ?? "").trim() || "-";
-      const custoMedioValue = ins ? parseMoney(String(ins.custoMedio ?? "")) : 0;
-      const qtdCompra = Number(r.qtdCompra ?? 0) || 0;
-      const qtdSugestao = Number(r.qtdSugestao ?? 0) || 0;
-      const comprarValue = Math.max(qtdCompra > 0 ? qtdCompra : qtdSugestao, 0);
-      const itemKey = normalizeText(itemName);
-      const fornecedorFromLatest = itemKey ? latestEntriesIndex.get(itemKey)?.fornecedor ?? "" : "";
-      const fornecedorFromFallback = itemKey ? fornecedorFallbackIndex.get(itemKey) ?? "" : "";
+    for (const ins of insumos) {
+      if (ins.ocultar) continue;
+      const itemName = String(ins.item ?? "").trim() || "Item";
+      const key = normalizeText(itemName);
+      if (!key) continue;
+
+      const medida = String(ins.medida ?? "").trim() || "Und";
+      const categoria = String(ins.categoria ?? "").trim() || "-";
+      const custoMedioValue = parseMoney(String(ins.custoMedio ?? ""));
+
+      const startInv = estoqueInicialByKey.get(key);
+      const endInv = estoqueFinalByKey.get(key);
+      const entradasAgg = entradasByKey.get(key);
+
+      const estoqueInicial = startInv ? convertUnitQty(startInv.qty, startInv.unit, medida) : 0;
+      const estoqueFinal = endInv ? convertUnitQty(endInv.qty, endInv.unit, medida) : 0;
+      const entradasQty = entradasAgg ? convertUnitQty(entradasAgg.qty, entradasAgg.unit, medida) : 0;
+
+      const saidas = estoqueInicial + (entradasQty - estoqueFinal);
+      const consumoDiario = diasCorridos > 0 ? Math.max(saidas / diasCorridos, 0) : 0;
+
+      const fornecedorFromLatest = key ? latestEntriesIndex.get(key)?.fornecedor ?? "" : "";
+      const fornecedorFromFallback = key ? fornecedorFallbackIndex.get(key) ?? "" : "";
       const fornecedorCandidate = String(fornecedorFromLatest || fornecedorFromFallback || "-").trim() || "-";
       const fornecedorLabel = normalizeText(fornecedorCandidate) === "sem fornecedor" ? "-" : fornecedorCandidate;
+
       rows.push({
-        id: String(r.bubbleListaId),
+        id: String(ins.id),
         item: itemName,
         displayItem: itemName,
         itemMetaLabel: `${categoria}${fornecedorLabel && fornecedorLabel !== "-" ? ` • ${fornecedorLabel}` : ""}`,
@@ -703,13 +764,24 @@ export default function ListaDeComprasClient() {
         fornecedor: fornecedorLabel,
         fornecedorMedida: medida,
         fornecedorFator: 1,
-        consumoDiario: 0,
-        estoqueFinal: 0,
-        comprar: comprarValue,
+        consumoDiario,
+        estoqueFinal,
+        comprar: 0,
       });
     }
+    rows.sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base", numeric: true }));
     return rows;
-  }, [bubbleListaRows, compat, fornecedorFallbackIndex, insumos, latestEntriesIndex]);
+  }, [compat, contagens, endDate, entradas, fornecedorFallbackIndex, insumos, latestEntriesIndex, startDate]);
+
+  useEffect(() => {
+    if (compat?.source === "compat") return;
+    setEstoqueFinalMap((prev) => {
+      if (Object.keys(prev).length) return prev;
+      const next: Record<string, string> = { ...prev };
+      for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
+      return next;
+    });
+  }, [baseRows, compat]);
 
   const categorias = useMemo(() => {
     const seen = new Set<string>();

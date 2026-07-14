@@ -45,6 +45,13 @@ function parseCsvEnv(value: string | undefined) {
     .filter(Boolean);
 }
 
+function parseEnvBool(value: string | undefined) {
+  const v = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  return v === "1" || v === "true" || v === "yes" || v === "on";
+}
+
 function normalizeNameKey(value: unknown) {
   return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
 }
@@ -72,7 +79,16 @@ function resolveUserScopedId(req: NextRequest) {
 }
 
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  return false;
+  const url = new URL(args.req.url);
+  const source = String(url.searchParams.get("source") ?? "")
+    .trim()
+    .toLowerCase();
+  if (source === "legacy") return false;
+
+  const enabled = parseEnvBool(process.env.BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS);
+  if (source === "compat") return args.isAdmin ? true : enabled;
+
+  return enabled;
 }
 
 function extractBubbleId(input: unknown) {
