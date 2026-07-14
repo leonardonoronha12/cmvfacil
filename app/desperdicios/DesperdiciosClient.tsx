@@ -354,6 +354,50 @@ function parseDateLabelLoose(value: string) {
   return d;
 }
 
+function hashCode7(input: string) {
+  const s = String(input ?? "").trim();
+  if (!s) return "";
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const base = Math.abs(h >>> 0).toString(36).toUpperCase();
+  return base.padStart(7, "0").slice(0, 7);
+}
+
+function formatEtiquetaQtyLabel(qtyLabel: string, unitLabel: string) {
+  const unit = String(unitLabel ?? "").trim() || "Und";
+  const n = parsePtNumber(String(qtyLabel ?? ""));
+  if (!Number.isFinite(n) || n <= 0) return `${String(qtyLabel ?? "").trim() || "0"} ${unit}`.trim();
+  const isInt = Math.abs(n - Math.round(n)) < 1e-9;
+  const qty = n.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: isInt ? 0 : 3 });
+  return `${qty} ${unit}`.trim();
+}
+
+function formatEtiquetaCreatedMeta(e: { id: string; code?: string; createdAt?: string; dataProducao?: string }) {
+  const code = String(e.code ?? "").trim() || hashCode7(String(e.id ?? ""));
+  const created = e.createdAt ? new Date(e.createdAt) : null;
+  if (created && Number.isFinite(created.getTime())) {
+    const date = created.toLocaleDateString("pt-BR");
+    const time = created.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    return `#${code} • Criado em ${date} às ${time}`;
+  }
+  const prod = String(e.dataProducao ?? "").trim();
+  if (prod) return `#${code} • Produção ${prod}`;
+  return `#${code}`;
+}
+
+function daysOverdueLabel(validadeLabel: string) {
+  const validade = parseDateLabelLoose(validadeLabel);
+  if (!validade) return "";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const exp = new Date(validade.getFullYear(), validade.getMonth(), validade.getDate()).getTime();
+  const diff = Math.floor((today - exp) / 86_400_000);
+  return diff > 0 ? `VENCIDO HÁ ${diff}D` : "VENCIDO";
+}
+
 function IconWaste() {
   return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
@@ -449,6 +493,14 @@ function IconCheck() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
       <path d="M20 6 9 17l-5-5" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconX() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 6l12 12M18 6 6 18" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -1916,42 +1968,59 @@ export default function DesperdiciosClient({
 
         {etiquetaWasteSummary.pending.length ? (
           <section className={styles.etiquetaPrompt}>
-            <div className={styles.etiquetaPromptTop}>
-              <div className={styles.etiquetaPromptTitle}>Etiquetas vencidas</div>
-              <div className={styles.etiquetaPromptText}>
-                {`${etiquetaWasteSummary.pending.length} pendente(s) • ${etiquetaWasteSummary.launched.length} lançada(s)`}
-              </div>
+            <div className={styles.etiquetaPromptHeading}>
+              {`Você possui ${etiquetaWasteSummary.pending.length} ${
+                etiquetaWasteSummary.pending.length === 1 ? "Etiqueta vencida" : "Etiquetas vencidas"
+              }`}
             </div>
 
-            {etiquetaWasteSummary.pending.length ? (
-              <div className={styles.etiquetaPromptActions}>
-                <button type="button" className={styles.etiquetaPromptPrimary} onClick={launchAllEtiquetasPendentes}>
-                  Lançar todas
-                </button>
-                <button type="button" className={styles.etiquetaPromptGhost} onClick={ignoreAllEtiquetasPendentes}>
-                  Ignorar todas
-                </button>
-              </div>
-            ) : null}
+            <div className={styles.etiquetaPromptCards}>
+              {etiquetaWasteSummary.pending.map((e) => {
+                const qtyLabel = formatEtiquetaQtyLabel(e.quantidade, e.unidade);
+                const item = String(e.receita ?? "").trim() || "Item";
+                const badge = daysOverdueLabel(String(e.dataValidade ?? ""));
+                const meta = formatEtiquetaCreatedMeta(e);
+                return (
+                  <div key={e.id} className={styles.etiquetaPromptCard}>
+                    <div className={styles.etiquetaPromptCardTop}>
+                      <div className={styles.etiquetaPromptCardTitle}>{`${qtyLabel} - ${item}`}</div>
+                      <div className={styles.etiquetaPromptCardBadge}>{badge}</div>
+                    </div>
+                    <div className={styles.etiquetaPromptCardMeta}>{meta}</div>
 
-            <div className={styles.etiquetaPromptList}>
-              {etiquetaWasteSummary.pending.map((e) => (
-                <div key={e.id} className={styles.etiquetaPromptRow}>
-                  <div className={styles.etiquetaPromptMain}>
-                    <div className={styles.etiquetaPromptItem}>{e.receita}</div>
-                    <div className={styles.etiquetaPromptMeta}>{`${e.quantidade} ${e.unidade} • Venceu em: ${e.dataValidade}`}</div>
-                  </div>
-                  <div className={styles.etiquetaPromptRowActions}>
-                    <button type="button" className={styles.etiquetaPromptMini} onClick={() => setEtiquetaWasteStatus(e.id, "launched")}>
-                      Lançar
-                    </button>
-                    <button type="button" className={styles.etiquetaPromptMiniGhost} onClick={() => setEtiquetaWasteStatus(e.id, "ignored")}>
-                      Ignorar
-                    </button>
-                  </div>
-                </div>
-              ))}
+                    <div className={styles.etiquetaPromptCardLines}>
+                      <div className={styles.etiquetaPromptCardLine}>
+                        <div className={styles.etiquetaPromptCardLabel}>Responsável:</div>
+                        <div className={styles.etiquetaPromptCardValue}>{String(e.responsavel ?? "").trim() || "-"}</div>
+                      </div>
+                      <div className={styles.etiquetaPromptCardLine}>
+                        <div className={styles.etiquetaPromptCardLabel}>Data Produção:</div>
+                        <div className={styles.etiquetaPromptCardValue}>{formatDateNumericLoose(String(e.dataProducao ?? "")) || "-"}</div>
+                      </div>
+                      <div className={styles.etiquetaPromptCardLine}>
+                        <div className={`${styles.etiquetaPromptCardLabel} ${styles.etiquetaPromptCardDanger}`}>Data de Validade</div>
+                        <div className={`${styles.etiquetaPromptCardValue} ${styles.etiquetaPromptCardDanger}`}>
+                          {formatDateNumericLoose(String(e.dataValidade ?? "")) || "-"}
+                        </div>
+                      </div>
+                    </div>
 
+                    <div className={styles.etiquetaPromptCardBottom}>
+                      <div className={styles.etiquetaPromptCardQuestion}>Marcar Desperdício?</div>
+                      <div className={styles.etiquetaPromptCardChoice}>
+                        <button type="button" className={styles.etiquetaPromptCardYes} onClick={() => setEtiquetaWasteStatus(e.id, "launched")}>
+                          <IconCheck />
+                          Sim
+                        </button>
+                        <button type="button" className={styles.etiquetaPromptCardNo} onClick={() => setEtiquetaWasteStatus(e.id, "ignored")}>
+                          <IconX />
+                          Não
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </section>
         ) : null}
