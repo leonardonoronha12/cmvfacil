@@ -163,6 +163,13 @@ async function downloadBytes(supabase: ReturnType<typeof getSupabaseAdmin>, buck
   return await dl.data.arrayBuffer();
 }
 
+async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, obj: unknown) {
+  const raw = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(raw);
+  const up = await supabase.storage.from(bucket).upload(path, bytes, { upsert: true, contentType: "application/json" } as any);
+  if (up.error) throw new Error(up.error.message || "upload_failed");
+}
+
 function parseBubbleXlsxToObjects(buf: ArrayBuffer) {
   const wb = XLSX.read(buf, { type: "array" });
   const sheetName = wb.SheetNames?.[0];
@@ -938,7 +945,41 @@ export async function GET(req: NextRequest) {
     const currentCompanyId = bubbleRowNorm && knownCompanyIds.size ? guessCurrentCompanyId(bubbleRowNorm) : "";
     const primaryCompanyId = currentCompanyId && knownCompanyIds.has(currentCompanyId) ? currentCompanyId : companies[0]?.id ?? "";
     const companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
-    const companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
+    const companyRowNorm = primaryCompanyId ? companyRowNormById.get(primaryCompanyId) ?? null : null;
+    let companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
+    const companyWhatsappRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["whatsapp", "telefone", "celular", "fone", "phone_e164", "phone", "phone_number"]) ||
+        pickKeyLike(companyRowNorm, ["whatsapp", "telefone", "celular", "phone"], ["id", "uuid", "cnpj", "email", "nome", "name"])
+      : "";
+    const companyIndustryRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["ramo", "industry", "segmento", "tipo", "categoria"]) ||
+        pickKeyLike(companyRowNorm, ["ramo", "industry", "segmento"], ["id", "uuid", "cnpj", "email", "nome", "name"])
+      : "";
+    const companyCnpjRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["cnpj", "cpf_cnpj", "cnpj_cpf"]) || pickKeyLike(companyRowNorm, ["cnpj"], ["id", "uuid", "email", "nome", "name"])
+      : "";
+
+    let companyWhatsapp = companyWhatsappRaw ? normalizePhone(companyWhatsappRaw) : "";
+    let companyIndustry = String(companyIndustryRaw ?? "").trim();
+    let companyCnpj = digitsOnly(String(companyCnpjRaw ?? "").trim());
+    if (companyCnpj && companyCnpj.length !== 14) companyCnpj = "";
+
+    let role: "Administrador" | "Colaborador" = "Administrador";
+    const ownerEmails = primaryCompanyId ? companyOwnerEmailsById.get(primaryCompanyId) ?? new Set<string>() : new Set<string>();
+    if (email && ownerEmails.size) role = ownerEmails.has(email) ? "Administrador" : "Colaborador";
+
+    let companyOverrides: any = null;
+    try {
+      const overridesRaw = await downloadText(supabase, bucket, `user:${uid}/profile/overrides.json`);
+      companyOverrides = JSON.parse(overridesRaw) as any;
+    } catch {}
+    if (companyOverrides && typeof companyOverrides === "object") {
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyWhatsapp")) companyWhatsapp = String(companyOverrides.companyWhatsapp ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyIndustry")) companyIndustry = String(companyOverrides.companyIndustry ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyCnpj")) companyCnpj = digitsOnly(String(companyOverrides.companyCnpj ?? ""));
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyLogoUrl")) companyLogoUrl = String(companyOverrides.companyLogoUrl ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "role")) role = String(companyOverrides.role ?? "") === "Administrador" ? "Administrador" : role;
+    }
     const plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
 
     const members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }> = [];
@@ -946,7 +987,6 @@ export async function GET(req: NextRequest) {
       const memberEmails =
         primaryCompanyId && membershipEmailsByCompanyId.get(primaryCompanyId) ? Array.from(membershipEmailsByCompanyId.get(primaryCompanyId) ?? []) : [];
       const memberEmailSet = new Set(memberEmails.map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean));
-      const ownerEmails = primaryCompanyId ? companyOwnerEmailsById.get(primaryCompanyId) ?? new Set<string>() : new Set<string>();
       for (const e of ownerEmails) memberEmailSet.add(String(e ?? "").trim().toLowerCase());
       if (!memberEmailSet.size && email) memberEmailSet.add(email);
 
@@ -1024,6 +1064,10 @@ export async function GET(req: NextRequest) {
       avatarUrl: avatarUrl || "",
       companyName,
       companyLogoUrl,
+      companyCnpj,
+      companyWhatsapp,
+      companyIndustry,
+      role,
       companies,
       plan,
       members,
@@ -1125,6 +1169,25 @@ export async function POST(req: NextRequest) {
       if (!canAdminWrite) return json({ ok: false, error: "forbidden" }, { status: 403 });
       const desired = permissao.toLowerCase().includes("admin") ? "admin" : "member";
       await supabase.from("company_members").update({ role: desired, permission_level: permissao } as any).eq("company_id", companyId).eq("user_id", uid);
+    }
+
+    if (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null || permissao != null) {
+      const bucket = "bubble-imports";
+      await ensureBucket(supabase, bucket);
+      let prev: any = {};
+      try {
+        const raw = await downloadText(supabase, bucket, `user:${uid}/profile/overrides.json`);
+        const parsed = JSON.parse(raw) as any;
+        if (parsed && typeof parsed === "object") prev = parsed;
+      } catch {}
+      const next: any = { ...prev, updatedAt: new Date().toISOString() };
+      if (companyName != null) next.companyName = companyName || "";
+      if (companyWhatsRaw != null) next.companyWhatsapp = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) ?? "" : "";
+      if (companyIndustry != null) next.companyIndustry = companyIndustry || "";
+      if (companyCnpjRaw != null) next.companyCnpj = digitsOnly(companyCnpjRaw);
+      if (companyLogoUrlRaw != null) next.companyLogoUrl = companyLogoUrlRaw || "";
+      if (permissao != null) next.role = permissao.toLowerCase().includes("admin") ? "Administrador" : "Colaborador";
+      await uploadJson(supabase, bucket, `user:${uid}/profile/overrides.json`, next);
     }
 
     return json({ ok: true }, { status: 200 });
