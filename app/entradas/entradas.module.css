@@ -145,6 +145,66 @@
   white-space: nowrap;
 }
 
+.toolbarActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.secondaryBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  column-gap: 8px;
+  border: 1px solid #e1e5e4;
+  border-radius: 10px;
+  background: #ffffff;
+  height: 38px;
+  padding: 0 14px;
+  color: #01040e;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.dangerBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  column-gap: 8px;
+  border: 1px solid #ef4444;
+  border-radius: 10px;
+  background: #ef4444;
+  height: 38px;
+  padding: 0 14px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.ghostBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e1e5e4;
+  border-radius: 10px;
+  background: #ffffff;
+  height: 38px;
+  padding: 0 14px;
+  color: #20312f;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.secondaryBtn:disabled,
+.dangerBtn:disabled,
+.ghostBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .tableCard {
   align-self: stretch;
   border-radius: 14px;
@@ -172,6 +232,24 @@
 
 .thActions {
   text-align: right;
+}
+
+.selectHead {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selectCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selectHead input,
+.selectCell input {
+  width: 16px;
+  height: 16px;
 }
 
 .tableHeadDrag {

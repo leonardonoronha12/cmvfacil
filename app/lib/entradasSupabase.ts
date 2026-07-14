@@ -97,3 +97,12 @@ export async function deleteEntradaFromSupabase(id: string) {
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_delete");
 }
+
+export async function deleteEntradasFromSupabase(ids: string[]) {
+  const list = Array.isArray(ids) ? ids.map((x) => String(x ?? "").trim()).filter(Boolean) : [];
+  if (!list.length) return;
+  const res = await fetch("/api/entradas", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ ids: list }) });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; deletedCount?: number; deletedIds?: string[] } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_delete");
+  return { deletedCount: Number(json.deletedCount ?? 0), deletedIds: Array.isArray(json.deletedIds) ? json.deletedIds : [] };
+}

@@ -24,7 +24,7 @@ import {
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
-import { deleteEntradaFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
+import { deleteEntradaFromSupabase, deleteEntradasFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
@@ -468,6 +468,9 @@ export default function EntradasClient() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingDate, setDeletingDate] = useState<string>("");
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [newFornecedor, setNewFornecedor] = useState("");
   const [newDataReceb, setNewDataReceb] = useState(() => formatDateLabelPT(new Date()));
@@ -512,6 +515,13 @@ export default function EntradasClient() {
   const [currentUserFullName, setCurrentUserFullName] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
+
+  useEffect(() => {
+    if (!isReadOnly) return;
+    setBulkDeleteMode(false);
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+  }, [isReadOnly]);
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -592,6 +602,20 @@ export default function EntradasClient() {
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
 
+  useEffect(() => {
+    if (!bulkDeleteMode) return;
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+  }, [bulkDeleteMode, query, dateStart, dateEnd, sortKey, sortDir]);
+
+  const visibleIdSet = useMemo(() => new Set(visible.map((r) => r.id)), [visible]);
+  const selectedList = useMemo(() => {
+    const ids = Object.keys(selectedIds).filter((id) => Boolean(selectedIds[id]));
+    return ids.filter((id) => visibleIdSet.has(id));
+  }, [selectedIds, visibleIdSet]);
+  const selectedCount = selectedList.length;
+  const allVisibleSelected = visible.length > 0 && visible.every((row) => Boolean(selectedIds[row.id]));
+
   const qaUi = useMemo(() => {
     return {
       meta: sourceMeta,
@@ -656,7 +680,8 @@ export default function EntradasClient() {
   }
 
   const tableGridTemplateColumns = useMemo(() => {
-    const widths: Record<EntradaTableColumn | "acoes", string> = {
+    const widths: Record<EntradaTableColumn | "acoes" | "select", string> = {
+      select: "44px",
       dataLancamento: "220px",
       fornecedor: "minmax(220px, 1fr)",
       valorNota: "160px",
@@ -664,9 +689,9 @@ export default function EntradasClient() {
       dataCriacao: "160px",
       acoes: "110px",
     };
-    const orderedColumns: Array<EntradaTableColumn | "acoes"> = [...columnOrder, "acoes"];
+    const orderedColumns: Array<EntradaTableColumn | "acoes" | "select"> = bulkDeleteMode ? ["select", ...columnOrder, "acoes"] : [...columnOrder, "acoes"];
     return orderedColumns.map((column) => widths[column]).join(" ");
-  }, [columnOrder]);
+  }, [bulkDeleteMode, columnOrder]);
 
   function renderCell(row: EntradaRow, column: EntradaTableColumn) {
     if (column === "dataLancamento") {
@@ -697,6 +722,52 @@ export default function EntradasClient() {
       return <div className={styles.tdStrong}>{row.dataCriacao}</div>;
     }
     return <div className={styles.td}>{row[column]}</div>;
+  }
+
+  function toggleSelectAllVisible() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      if (allVisibleSelected) {
+        for (const row of visible) delete next[row.id];
+      } else {
+        for (const row of visible) next[row.id] = true;
+      }
+      return next;
+    });
+  }
+
+  function toggleRowSelected(id: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  }
+
+  function confirmBulkDelete() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    if (!selectedList.length) return;
+    const ids = [...selectedList];
+    setRows((prev) => prev.filter((r) => !ids.includes(r.id)));
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+    setBulkDeleteMode(false);
+    showToast(ids.length === 1 ? "Nota excluída!" : "Notas excluídas!", "success");
+    void deleteEntradasFromSupabase(ids).catch((err) => {
+      showToast(err instanceof Error ? err.message : "Falha ao excluir notas.", "error");
+    });
   }
 
   const detailsRow = useMemo(() => {
@@ -1677,21 +1748,75 @@ export default function EntradasClient() {
             </div>
           </div>
 
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            disabled={isReadOnly}
-            onClick={() => {
-              if (isReadOnly) {
-                showToast("Modo somente leitura.", "error");
-                return;
-              }
-              openNewModal();
-            }}
-          >
-            <IconPlus />
-            Nova Nota
-          </button>
+          <div className={styles.toolbarActions}>
+            {bulkDeleteMode ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.dangerBtn}
+                  disabled={isReadOnly || selectedCount === 0}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    if (!selectedCount) return;
+                    setIsBulkDeleteOpen(true);
+                  }}
+                >
+                  <IconTrash />
+                  {`Excluir (${selectedCount})`}
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostBtn}
+                  onClick={() => {
+                    setBulkDeleteMode(false);
+                    setSelectedIds({});
+                    setIsBulkDeleteOpen(false);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  disabled={isReadOnly || visible.length === 0}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    if (!visible.length) return;
+                    setBulkDeleteMode(true);
+                    setSelectedIds({});
+                    setIsBulkDeleteOpen(false);
+                  }}
+                >
+                  <IconTrash />
+                  Excluir várias
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={isReadOnly}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openNewModal();
+                  }}
+                >
+                  <IconPlus />
+                  Nova Nota
+                </button>
+              </>
+            )}
+          </div>
         </section>
 
         <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="entradas">
@@ -1701,6 +1826,11 @@ export default function EntradasClient() {
             </div>
           ) : null}
           <div className={styles.tableHead} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+            {bulkDeleteMode ? (
+              <label className={styles.selectHead} onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} disabled={isReadOnly} />
+              </label>
+            ) : null}
             {columnOrder.map((column) => {
               const label =
                 column === "dataLancamento"
@@ -1749,13 +1879,27 @@ export default function EntradasClient() {
                   role="button"
                   tabIndex={0}
                   style={{ gridTemplateColumns: tableGridTemplateColumns }}
-                  onClick={() => openDetailsModal(r)}
+                  onClick={() => (bulkDeleteMode ? toggleRowSelected(r.id) : openDetailsModal(r))}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") openDetailsModal(r);
+                    if (e.key === "Enter") {
+                      if (bulkDeleteMode) toggleRowSelected(r.id);
+                      else openDetailsModal(r);
+                    }
                   }}
                   data-qa-grid-row
                   data-qa-row-id={r.id}
                 >
+                {bulkDeleteMode ? (
+                  <label className={styles.selectCell} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedIds[r.id])}
+                      onChange={() => toggleRowSelected(r.id)}
+                      disabled={isReadOnly}
+                      aria-label="Selecionar nota"
+                    />
+                  </label>
+                ) : null}
                 {columnOrder.map((column) => (
                   <div key={column} className={styles.tableCellWrap}>
                     {renderCell(r, column)}
@@ -1775,9 +1919,13 @@ export default function EntradasClient() {
                       showToast("Modo somente leitura.", "error");
                       return;
                     }
+                    if (bulkDeleteMode) {
+                      showToast("Saia do modo de seleção para editar.", "error");
+                      return;
+                    }
                     openEditModal(r);
                     }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || bulkDeleteMode}
                   >
                     <IconPencil />
                   </button>
@@ -1791,9 +1939,13 @@ export default function EntradasClient() {
                       showToast("Modo somente leitura.", "error");
                       return;
                     }
+                    if (bulkDeleteMode) {
+                      showToast("Saia do modo de seleção para excluir.", "error");
+                      return;
+                    }
                     openDeleteModal(r);
                     }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || bulkDeleteMode}
                   >
                     <IconTrash />
                   </button>
@@ -2060,6 +2212,35 @@ export default function EntradasClient() {
                     setDeletingDate("");
                   }}
                 >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isBulkDeleteOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBulkDeleteOpen(false)}>
+            <div className={`${styles.modal} ${styles.confirmModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>{`Excluir ${selectedCount} ${selectedCount === 1 ? "Nota" : "Notas"}?`}</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsBulkDeleteOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon} aria-hidden>
+                  <IconTrashOutlineBig />
+                </div>
+                <div className={styles.confirmText}>{`Você está prestes a excluir ${selectedCount} ${selectedCount === 1 ? "nota" : "notas"}. Essa ação não pode ser desfeita.`}</div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isReadOnly || selectedCount === 0}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
                   Cancelar
                 </button>
               </div>
