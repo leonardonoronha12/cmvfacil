@@ -17,6 +17,8 @@ import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCa
 import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
+import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -1035,18 +1037,42 @@ export default function PrePreparoClient() {
   useEffect(() => {
     void (async () => {
       try {
+        let fichas = readFichasTecnicasFromStore();
+        if (!fichas.length) {
+          try {
+            fichas = await loadFichasTecnicasFromSupabase();
+            if (fichas.length) writeFichasTecnicasToStore(fichas);
+          } catch {}
+        }
+        const fichaNameKeys = new Set<string>();
+        for (const r of fichas) {
+          const k = normalizeNameKey(String((r as any)?.receita ?? ""));
+          if (k) fichaNameKeys.add(k);
+        }
         const st = await loadPrePreparoStateFromSupabase();
         if (st.meta) setSourceMeta(st.meta);
         if (st.meta?.source === "compat") {
           const list = Array.isArray((st.compat as any)?.prePreparos) ? ((st.compat as any).prePreparos as PrePreparoCompatRow[]) : [];
           setCompatRows(list);
           setSelectedCompatId(list[0]?.id ?? null);
-          setRows(st.rows as any);
+          const filtered = Array.isArray(st.rows)
+            ? (st.rows as any[]).filter((row) => {
+                const key = normalizeNameKey(String((row as any)?.receita ?? ""));
+                return !key || !fichaNameKeys.has(key);
+              })
+            : [];
+          setRows(filtered as any);
           prePreparoLoadErrorShownRef.current = false;
           prePreparoLoadedRef.current = true;
           return;
         }
-        setRows(st.rows as any);
+        const filtered = Array.isArray(st.rows)
+          ? (st.rows as any[]).filter((row) => {
+              const key = normalizeNameKey(String((row as any)?.receita ?? ""));
+              return !key || !fichaNameKeys.has(key);
+            })
+          : [];
+        setRows(filtered as any);
         prePreparoLoadErrorShownRef.current = false;
         prePreparoLoadedRef.current = true;
       } catch (err) {
