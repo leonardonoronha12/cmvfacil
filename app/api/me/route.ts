@@ -739,7 +739,7 @@ export async function GET(req: NextRequest) {
       const { data: companyDb } = companyId
         ? await supabase
             .from("companies")
-            .select("id,fantasy_name,legal_name,cnpj,phone_e164,industry,logo_url")
+            .select("id,fantasy_name,legal_name,cnpj,email,phone_e164,industry,logo_url")
             .eq("id", companyId)
             .maybeSingle()
         : { data: null as any };
@@ -777,6 +777,7 @@ export async function GET(req: NextRequest) {
           companyName: String(companyDb?.fantasy_name ?? companyDb?.legal_name ?? "").trim(),
           companyLogoUrl: String(companyDb?.logo_url ?? "").trim(),
           companyCnpj: String(companyDb?.cnpj ?? "").trim(),
+          companyEmail: String(companyDb?.email ?? "").trim(),
           companyWhatsapp: String(companyDb?.phone_e164 ?? "").trim(),
           companyIndustry: String(companyDb?.industry ?? "").trim(),
           role: permissionRole,
@@ -1120,6 +1121,7 @@ export async function POST(req: NextRequest) {
     const permissao = typeof input.permissao === "string" ? input.permissao.trim() : null;
 
     const companyName = typeof input.companyName === "string" ? input.companyName.trim() : null;
+    const companyEmail = typeof input.companyEmail === "string" ? input.companyEmail.trim() : null;
     const companyWhatsRaw = typeof input.companyWhatsapp === "string" ? input.companyWhatsapp.trim() : null;
     const companyIndustry = typeof input.companyIndustry === "string" ? input.companyIndustry.trim() : null;
     const companyCnpjRaw = typeof input.companyCnpj === "string" ? input.companyCnpj.trim() : null;
@@ -1147,14 +1149,20 @@ export async function POST(req: NextRequest) {
       return false;
     })();
 
-    if (companyId && (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null)) {
-      if (!canAdminWrite) return json({ ok: false, error: "forbidden" }, { status: 403 });
+    if (
+      companyId &&
+      (companyName != null || companyEmail != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null)
+    ) {
+      if (!canAdminWrite) {
+        // ignore company updates for non-admin
+      } else {
       const patch: any = {};
       if (companyName != null) {
         const nm = companyName.trim();
         patch.fantasy_name = nm || null;
         patch.legal_name = nm || null;
       }
+      if (companyEmail != null) patch.email = companyEmail.trim().toLowerCase() || null;
       if (companyWhatsRaw != null) patch.phone_e164 = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) : null;
       if (companyIndustry != null) patch.industry = companyIndustry || null;
       if (companyCnpjRaw != null) {
@@ -1163,15 +1171,20 @@ export async function POST(req: NextRequest) {
       }
       if (companyLogoUrlRaw != null) patch.logo_url = companyLogoUrlRaw ? companyLogoUrlRaw : null;
       await supabase.from("companies").update(patch).eq("id", companyId);
+      }
     }
 
     if (companyId && permissao != null) {
-      if (!canAdminWrite) return json({ ok: false, error: "forbidden" }, { status: 403 });
-      const desired = permissao.toLowerCase().includes("admin") ? "admin" : "member";
-      await supabase.from("company_members").update({ role: desired, permission_level: permissao } as any).eq("company_id", companyId).eq("user_id", uid);
+      if (canAdminWrite) {
+        const desired = permissao.toLowerCase().includes("admin") ? "admin" : "member";
+        await supabase.from("company_members").update({ role: desired, permission_level: permissao } as any).eq("company_id", companyId).eq("user_id", uid);
+      }
     }
 
-    if (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null || permissao != null) {
+    if (
+      canAdminWrite &&
+      (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null || permissao != null)
+    ) {
       const bucket = "bubble-imports";
       await ensureBucket(supabase, bucket);
       let prev: any = {};

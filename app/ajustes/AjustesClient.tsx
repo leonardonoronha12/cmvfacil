@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
@@ -72,7 +72,7 @@ export default function AjustesClient() {
 
   const [empresaNome, setEmpresaNome] = useState(() => String(readMeFromStore()?.companyName ?? "").trim());
   const [cnpj, setCnpj] = useState(() => String(readMeFromStore()?.companyCnpj ?? "").trim());
-  const [emailCorp, setEmailCorp] = useState("");
+  const [emailCorp, setEmailCorp] = useState(() => String((readMeFromStore() as any)?.companyEmail ?? "").trim());
   const [empresaWhats, setEmpresaWhats] = useState(() => String(readMeFromStore()?.companyWhatsapp ?? "").trim());
   const [ramo, setRamo] = useState(() => String(readMeFromStore()?.companyIndustry ?? "").trim() || "Hamburgueria");
 
@@ -87,9 +87,9 @@ export default function AjustesClient() {
   const [accountSaveError, setAccountSaveError] = useState("");
   const [companySaveError, setCompanySaveError] = useState("");
 
-  const canSaveAccount = Boolean(nome.trim() && sobrenome.trim() && email.trim() && whatsapp.trim() && permissao);
+  const canSaveAccount = Boolean(nome.trim() && sobrenome.trim() && email.trim() && permissao);
   const canSavePassword = Boolean(senhaAtual.trim() && novaSenha.trim() && repitaSenha.trim() && novaSenha === repitaSenha);
-  const canSaveCompany = Boolean(empresaNome.trim() && empresaWhats.trim() && ramo.trim());
+  const canSaveCompany = Boolean(empresaNome.trim());
 
   function tabClass(key: TabKey) {
     return key === tab ? `${styles.tab} ${styles.tabActive}` : styles.tab;
@@ -97,6 +97,7 @@ export default function AjustesClient() {
 
   const [avatarUrl, setAvatarUrl] = useState(() => String(readMeFromStore()?.avatarUrl ?? "").trim());
   const [companyLogoUrl, setCompanyLogoUrl] = useState(() => String(readMeFromStore()?.companyLogoUrl ?? "").trim());
+  const companyLogoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const apply = () => {
@@ -120,6 +121,7 @@ export default function AjustesClient() {
       });
       setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
       setCnpj((prev) => (prev.trim() ? prev : String((me as any).companyCnpj ?? "").trim()));
+      setEmailCorp((prev) => (prev.trim() ? prev : String((me as any).companyEmail ?? "").trim()));
       setEmpresaWhats((prev) => (prev.trim() ? prev : companyWhatsLocal));
       setRamo((prev) => {
         const next = String((me as any).companyIndustry ?? "").trim();
@@ -143,6 +145,33 @@ export default function AjustesClient() {
     void loadMeFromApi().then(() => apply());
     return () => unsub();
   }, []);
+
+  async function uploadCompanyLogo(file: File) {
+    if (savingCompany) return;
+    setCompanySaveError("");
+    setSavingCompany(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const up = await fetch("/api/companies/logo", { method: "POST", body: form });
+      const upj = (await up.json().catch(() => null)) as any;
+      if (!up.ok || !upj?.ok || !upj?.publicUrl) throw new Error(String(upj?.error ?? upj?.details ?? "upload_failed"));
+      const publicUrl = String(upj.publicUrl).trim();
+      setCompanyLogoUrl(publicUrl);
+      const res = await fetch("/api/me", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyLogoUrl: publicUrl }),
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
+      await loadMeFromApi();
+    } catch (err) {
+      setCompanySaveError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSavingCompany(false);
+    }
+  }
 
   return (
     <div className={dash.dashboard}>
@@ -203,7 +232,7 @@ export default function AjustesClient() {
 
                     <label className={styles.field}>
                       <span className={styles.label}>Email</span>
-                      <input className={styles.input} value={email} onChange={(e) => setEmail(e.target.value)} />
+                      <input className={styles.input} value={email} disabled />
                     </label>
                     <label className={styles.field}>
                       <span className={styles.label}>WhatsApp</span>
@@ -347,9 +376,29 @@ export default function AjustesClient() {
                       )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", rowGap: 6 }}>
-                      <button type="button" className={styles.btnGhost}>
+                      <button
+                        type="button"
+                        className={styles.btnGhost}
+                        disabled={savingCompany}
+                        onClick={() => {
+                          if (savingCompany) return;
+                          companyLogoInputRef.current?.click();
+                        }}
+                      >
                         Enviar Imagem
                       </button>
+                      <input
+                        ref={companyLogoInputRef}
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const file = e.target.files && e.target.files[0];
+                          e.target.value = "";
+                          if (!file) return;
+                          void uploadCompanyLogo(file);
+                        }}
+                      />
                       <button
                         type="button"
                         className={styles.btnGhost}
@@ -457,6 +506,7 @@ export default function AjustesClient() {
                             body: JSON.stringify({
                               companyName: empresaNome,
                               companyCnpj: cnpj,
+                              companyEmail: emailCorp,
                               companyWhatsapp: empresaWhats,
                               companyIndustry: ramo,
                               companyLogoUrl,

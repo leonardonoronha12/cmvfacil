@@ -13,6 +13,7 @@ export type MeProfile = {
   companyName: string;
   companyLogoUrl: string;
   companyCnpj: string;
+  companyEmail: string;
   companyWhatsapp: string;
   companyIndustry: string;
   role: "Administrador" | "Colaborador";
@@ -142,6 +143,7 @@ export async function loadMeFromApi() {
         companyName: String(j.companyName ?? "").trim(),
         companyLogoUrl: String(j.companyLogoUrl ?? "").trim(),
         companyCnpj: String(j.companyCnpj ?? "").trim(),
+        companyEmail: String(j.companyEmail ?? "").trim(),
         companyWhatsapp: String(j.companyWhatsapp ?? "").trim(),
         companyIndustry: String(j.companyIndustry ?? "").trim(),
         role: String(j.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador",
