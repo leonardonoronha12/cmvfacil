@@ -52,6 +52,38 @@ function parseEnvBool(value: string | undefined) {
   return v === "1" || v === "true" || v === "yes" || v === "on";
 }
 
+function parsePermissionLevel(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function scoreRole(role: unknown) {
+  const r = String(role ?? "").trim().toLowerCase();
+  if (!r) return 0;
+  if (r.includes("owner") || r.includes("propriet")) return 30;
+  if (r.includes("admin")) return 20;
+  if (r.includes("manager") || r.includes("gerente")) return 10;
+  return 0;
+}
+
+function pickBestCompanyId(memberRows: unknown[]) {
+  let bestCompanyId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const companyId = String(r?.company_id ?? "").trim();
+    if (!companyId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCompanyId = companyId;
+    }
+  }
+  return bestCompanyId;
+}
+
 function normalizeNameKey(value: unknown) {
   return String(value ?? "")
     .normalize("NFD")
@@ -160,11 +192,6 @@ export async function GET(req: NextRequest) {
       flags: { BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS: process.env.BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS ?? null },
     });
     if (useCompat) {
-      const { data: memberRows, error: memberErr } = await supabaseServer.from("company_members").select("company_id").eq("user_id", userId).limit(1);
-      if (memberErr) return json({ ok: false, error: memberErr.message, source: "compat", readOnly: true }, { status: 500 });
-      const companyId = String(((memberRows ?? [])[0] as any)?.company_id ?? "").trim();
-      if (!companyId) return json({ ok: false, error: "missing_company", source: "compat", readOnly: true }, { status: 500 });
-
       const url = new URL(req.url);
       const diagEnabled = String(url.searchParams.get("diag") ?? "").trim() === "1";
       const startInventoryId = String(url.searchParams.get("startInventoryId") ?? "").trim();
@@ -175,6 +202,39 @@ export async function GET(req: NextRequest) {
       const prazoFornecedorNumRaw = prazoFornecedorParam ? Number(prazoFornecedorParam.replace(/[^\d.]/g, "")) : NaN;
       const diasEstoque = Number.isFinite(diasEstoqueNumRaw) && diasEstoqueNumRaw > 0 ? Math.floor(diasEstoqueNumRaw) : 7;
       const prazoFornecedor = Number.isFinite(prazoFornecedorNumRaw) && prazoFornecedorNumRaw >= 0 ? Math.floor(prazoFornecedorNumRaw) : 1;
+
+      const { data: memberRows, error: memberErr } = await supabaseServer
+        .from("company_members")
+        .select("company_id,role,permission_level")
+        .eq("user_id", userId)
+        .limit(50);
+      if (memberErr) return json({ ok: false, error: memberErr.message, source: "compat", readOnly: true }, { status: 500 });
+      let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      if (!companyId) {
+        const { data: createdRows, error: createdErr } = await supabaseServer
+          .from("companies")
+          .select("id")
+          .eq("created_by_user_id", userId)
+          .order("updated_at", { ascending: false })
+          .limit(1);
+        if (createdErr) {
+          await dbg("E", "api/lista-de-compras", "missing_company_fallback_failed", { error: createdErr.message, userId });
+        }
+        companyId = String(((createdRows ?? [])[0] as any)?.id ?? "").trim();
+      }
+      if (!companyId) {
+        await dbg("E", "api/lista-de-compras", "missing_company", { userId, memberRows: (memberRows ?? []).length });
+        return json(
+          {
+            ok: true,
+            source: "legacy",
+            readOnly: false,
+            rows: [],
+            banner: diagEnabled ? "Sem vínculo de empresa no banco compatível (company_members). Use legacy." : undefined,
+          },
+          { status: 200 },
+        );
+      }
 
       const { data: invRows, error: invErr } = await supabaseServer
         .from("inventories")
