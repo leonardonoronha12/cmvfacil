@@ -218,7 +218,7 @@ export async function GET(req: NextRequest) {
         const iid = String(r?.inventory_id ?? "").trim();
         const itemId = String(r?.item_id ?? "").trim();
         if (!iid || !itemId) continue;
-        const qty = typeof r?.quantidade_contada === "number" ? r.quantidade_contada : 0;
+        const qty = parseNumber(r?.quantidade_contada);
         if (iid === startInvId) estoqueInicialByItemId.set(itemId, qty);
         if (iid === endInvId) estoqueFinalByItemId.set(itemId, qty);
       }
@@ -240,8 +240,8 @@ export async function GET(req: NextRequest) {
       for (const r of (entradaRows ?? []) as any[]) {
         const itemId = String(r?.item_id ?? "").trim();
         if (!itemId) continue;
-        const qty = typeof r?.quantidade === "number" ? r.quantidade : 0;
-        const subtotal = typeof r?.subtotal === "number" ? r.subtotal : 0;
+        const qty = parseNumber(r?.quantidade);
+        const subtotal = parseNumber(r?.subtotal);
         if (qty) entradasByItemId.set(itemId, (entradasByItemId.get(itemId) ?? 0) + qty);
         if (subtotal) entradasSubtotalByItemId.set(itemId, (entradasSubtotalByItemId.get(itemId) ?? 0) + subtotal);
       }
@@ -284,7 +284,7 @@ export async function GET(req: NextRequest) {
       for (const r of (realRows ?? []) as any[]) {
         const itemId = String(r?.item_id ?? "").trim();
         if (!itemId) continue;
-        const q = typeof r?.quantidade === "number" ? r.quantidade : 0;
+        const q = parseNumber(r?.quantidade);
         realByItemId.set(itemId, q);
       }
 
@@ -347,8 +347,8 @@ export async function GET(req: NextRequest) {
           const consumoPrazoFornecedor = consumoDiario * prazoFornecedor;
           const sugestaoCalc = consumoDiasManter - (estoqueAtual + consumoPrazoFornecedor);
 
-          const qtdCompraStored = sel && typeof sel?.qtd_compra === "number" ? sel.qtd_compra : 0;
-          const qtdSugestaoStored = sel && typeof sel?.qtd_sugestao === "number" ? sel.qtd_sugestao : 0;
+          const qtdCompraStored = sel ? parseNumber(sel?.qtd_compra) : 0;
+          const qtdSugestaoStored = sel ? parseNumber(sel?.qtd_sugestao) : 0;
           const comprar = Math.max(qtdCompraStored > 0 ? qtdCompraStored : sugestaoCalc, 0);
 
           const realQty = realByItemId.get(itemId) ?? 0;
