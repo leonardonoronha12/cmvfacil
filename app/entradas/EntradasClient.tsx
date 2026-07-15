@@ -2248,9 +2248,10 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isDetailsOpen && detailsRow ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
-            <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isDetailsOpen && detailsRow
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
+                <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
                 <div className={styles.detailsTitle}>{`Detalhes da Nota ${detailsRow.numero}`}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
@@ -2574,8 +2575,10 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         {isNewOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsNewOpen(false)}>
@@ -2909,17 +2912,18 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isFornecedorProdutosOpen && fornecedorModalKey ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              setIsFornecedorProdutosOpen(false);
-              setFornecedorModalKey(null);
-              setFornecedorModalLabel("");
-            }}
-          >
-            <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isFornecedorProdutosOpen && fornecedorModalKey
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  setIsFornecedorProdutosOpen(false);
+                  setFornecedorModalKey(null);
+                  setFornecedorModalLabel("");
+                }}
+              >
+                <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{fornecedorModalLabel || fornecedorModalKey}</div>
                 <button
@@ -3044,8 +3048,10 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
         </div>
       </main>
     </div>

@@ -512,6 +512,7 @@ const CMVREAL_SNAPSHOT_KEY = "cmvfacil.cmvreal.snapshot.v1";
 type CalcSnapshot = {
   cmvPercent: number;
   deltaPp: number;
+  targetCmvPercent?: number | null;
   initialCents: number;
   comprasCents: number;
   finalCents: number;
@@ -1045,6 +1046,7 @@ export default function DashboardClient() {
   const [calc, setCalc] = useState<{
     cmvPercent: number;
     deltaPp: number;
+    targetCmvPercent?: number | null;
     initialCents: number;
     comprasCents: number;
     finalCents: number;
@@ -1753,18 +1755,25 @@ export default function DashboardClient() {
     targetCmv,
   ]);
 
+  const targetCmvValue = parsePtNumber(targetCmv);
+  const targetCmvProvided = Boolean(targetCmv.trim());
+  const targetCmvIsValid = !targetCmvProvided || (targetCmvValue >= 1 && targetCmvValue <= 99);
+
   const canCalculate =
     inventoryOptions.length > 0 &&
     Boolean(startDate.trim()) &&
     Boolean(endDate.trim()) &&
     parseBrlToCents(revenue) > 0 &&
-    parsePtNumber(targetCmv) >= 1 &&
-    parsePtNumber(targetCmv) <= 99;
+    targetCmvIsValid;
 
   function handleCalculate() {
     try {
-      if (!canCalculate) {
-        setCalcError("Preencha datas, faturamento e CMV meta para calcular.");
+      if (inventoryOptions.length <= 0 || !startDate.trim() || !endDate.trim() || parseBrlToCents(revenue) <= 0) {
+        setCalcError("Preencha datas e faturamento para calcular.");
+        return;
+      }
+      if (!targetCmvIsValid) {
+        setCalcError("CMV meta deve estar entre 1% e 99%.");
         return;
       }
       setCalcError("");
@@ -1952,9 +1961,9 @@ export default function DashboardClient() {
       }
 
       const revenueCents = parseBrlToCents(revenue);
-      const target = parsePtNumber(targetCmv);
+      const targetCmvPercent = targetCmvProvided && targetCmvValue >= 1 && targetCmvValue <= 99 ? targetCmvValue : null;
       const cmvPercent = revenueCents > 0 ? (saidasCents / revenueCents) * 100 : 0;
-      const deltaPp = cmvPercent - target;
+      const deltaPp = targetCmvPercent != null ? cmvPercent - targetCmvPercent : 0;
 
       let desperdiciosCents = 0;
       for (const d of desperdiciosIntegrados) {
@@ -1971,6 +1980,7 @@ export default function DashboardClient() {
       setCalc({
         cmvPercent,
         deltaPp,
+        targetCmvPercent,
         initialCents,
         comprasCents,
         finalCents,
@@ -2285,11 +2295,14 @@ export default function DashboardClient() {
   }, [calc?.cmvPercent]);
 
   const deltaLabel = useMemo(() => {
-    const d = calc?.deltaPp ?? 0;
+    if (!calc) return "—";
+    const target = typeof calc.targetCmvPercent === "number" && Number.isFinite(calc.targetCmvPercent) ? calc.targetCmvPercent : null;
+    if (target == null) return "Meta não definida";
+    const d = calc.deltaPp;
     const abs = Math.abs(d);
     const label = `${abs.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% p.p.`;
     return d > 0 ? `${label} acima da meta` : `${label} abaixo da meta`;
-  }, [calc?.deltaPp]);
+  }, [calc]);
 
   const comparativoAnteriorLabel = useMemo(() => {
     if (!calc || !lastCalc) return "";
@@ -3209,13 +3222,6 @@ export default function DashboardClient() {
               </span>
               Calcular CMV
             </button>
-
-            <button type="button" className={styles.topAction} disabled>
-              <span className={styles.topActionIcon}>
-                <IconSidebarStore />
-              </span>
-              Sincronizar tudo
-            </button>
           </div>
 
           {calcError ? <div className={styles.calcError}>{calcError}</div> : null}
@@ -3224,7 +3230,7 @@ export default function DashboardClient() {
             <span className={styles.topHintIcon}>
               <IconInfoSmall />
             </span>
-            Selecione o período, insira o faturamento referente a essas datas e defina a meta de CMV. Em seguida, clique
+            Selecione o período, insira o faturamento referente a essas datas e defina a meta de CMV (opcional). Em seguida, clique
             em Calcular CMV.
           </div>
 
@@ -3426,60 +3432,7 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div className={styles.historyTitle} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                          <span>Histórico de Entradas</span>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <button
-                              type="button"
-                              onClick={() => void syncAllAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 900,
-                                cursor: isLoadingTables ? "default" : "pointer",
-                              }}
-                            >
-                              Sincronizar tudo
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void reimportEntradasAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 800,
-                                cursor: isLoadingTables ? "default" : "pointer",
-                              }}
-                            >
-                              Sincronizar entradas
-                            </button>
-                          </div>
-                        </div>
-                        {isLoadingTables ? null : historicoEntradas.length && historicoHasFornecedorIds ? (
-                          <div style={{ margin: "8px 0 0" }}>
-                            <button
-                              type="button"
-                              onClick={() => void reimportFornecedoresAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Sincronizar fornecedores
-                            </button>
-                          </div>
-                        ) : null}
+                        <div className={styles.historyTitle}>Histórico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>
@@ -3507,23 +3460,6 @@ export default function DashboardClient() {
                           ) : (
                             <div className={styles.historyEmpty}>
                               Nenhuma entrada encontrada para este item.
-                              <div style={{ marginTop: 10 }}>
-                                <button
-                                  type="button"
-                                  onClick={() => void reimportEntradasAndReload()}
-                                  disabled={isLoadingTables}
-                                  style={{
-                                    border: "1px solid #e4e8e7",
-                                    background: "#ffffff",
-                                    borderRadius: 10,
-                                    padding: "10px 12px",
-                                    fontWeight: 800,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Sincronizar entradas
-                                </button>
-                              </div>
                             </div>
                           )}
                         </div>
@@ -3858,9 +3794,10 @@ export default function DashboardClient() {
           </div>
         ) : null}
 
-        {isFornecedorModalOpen && fornecedorModalKey ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={closeFornecedorModal}>
-            <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {mounted && isFornecedorModalOpen && fornecedorModalKey
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={closeFornecedorModal}>
+                <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{fornecedorModalLabel || fornecedorModalKey}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={closeFornecedorModal}>
@@ -3981,8 +3918,10 @@ export default function DashboardClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         {isDeleteItemOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteItemOpen(false)}>

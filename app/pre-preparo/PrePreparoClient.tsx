@@ -3158,11 +3158,6 @@ export default function PrePreparoClient() {
                       Baixar Ficha Técnica
                     </button>
 
-                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void refreshThisPrePreparoFromSupabase()} disabled={isSyncingDetails}>
-                      <IconSync />
-                      {isSyncingDetails ? "Carregando..." : "Recarregar itens"}
-                    </button>
-
                     <div className={dash.itemAsideKpis}>
                       <div className={dash.itemAsideKpi}>
                         <div className={dash.itemAsideKpiIcon}>

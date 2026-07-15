@@ -1176,7 +1176,6 @@ export default function DesperdiciosClient({
       } catch (err) {
         if (!loadErrorShownRef.current) {
           loadErrorShownRef.current = true;
-          showToast(supabaseErrorMessage(err, "carregar"), "error", 8000);
         }
       }
       const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
@@ -1260,7 +1259,6 @@ export default function DesperdiciosClient({
       void upsertDesperdicioToSupabase(row).catch((err) => {
         if (!saveErrorShownRef.current) {
           saveErrorShownRef.current = true;
-          showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
         }
       });
     }
@@ -1268,7 +1266,6 @@ export default function DesperdiciosClient({
       void deleteDesperdicioFromSupabase(row.id).catch((err) => {
         if (!deleteErrorShownRef.current) {
           deleteErrorShownRef.current = true;
-          showToast(supabaseErrorMessage(err, "excluir"), "error", 8000);
         }
       });
     }
@@ -1367,7 +1364,7 @@ export default function DesperdiciosClient({
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (e.id === etiquetaId ? { ...e, wasteStatus: status } : e));
       writePrePreparoEtiquetasToStore(next);
-      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
+      void savePrePreparoEtiquetasToSupabase(next).catch(() => {});
       return next;
     });
   }
@@ -1378,7 +1375,7 @@ export default function DesperdiciosClient({
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "launched" as const } : e));
       writePrePreparoEtiquetasToStore(next);
-      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
+      void savePrePreparoEtiquetasToSupabase(next).catch(() => {});
       return next;
     });
   }
@@ -1389,7 +1386,7 @@ export default function DesperdiciosClient({
     setPrePreparoEtiquetas((prev) => {
       const next = prev.map((e) => (ids.has(e.id) ? { ...e, wasteStatus: "ignored" as const } : e));
       writePrePreparoEtiquetasToStore(next);
-      void savePrePreparoEtiquetasToSupabase(next).catch((err) => showToast(supabaseErrorMessage(err, "salvar"), "error", 8000));
+      void savePrePreparoEtiquetasToSupabase(next).catch(() => {});
       return next;
     });
   }
@@ -1581,7 +1578,6 @@ export default function DesperdiciosClient({
         void upsertDesperdicioToSupabase(r).catch((err) => {
           if (!saveErrorShownRef.current) {
             saveErrorShownRef.current = true;
-            showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
           }
         });
         setIsFormOpen(false);
@@ -1596,7 +1592,6 @@ export default function DesperdiciosClient({
     void upsertDesperdicioToSupabase({ id, data, item, quantidade, custo, motivo }).catch((err) => {
       if (!saveErrorShownRef.current) {
         saveErrorShownRef.current = true;
-        showToast(supabaseErrorMessage(err, "salvar"), "error", 8000);
       }
     });
     setIsFormOpen(false);
@@ -1610,7 +1605,6 @@ export default function DesperdiciosClient({
     void deleteDesperdicioFromSupabase(row.id).catch((err) => {
       if (!deleteErrorShownRef.current) {
         deleteErrorShownRef.current = true;
-        showToast(supabaseErrorMessage(err, "excluir"), "error", 8000);
       }
     });
   }

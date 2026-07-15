@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
@@ -258,6 +259,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 
 export default function FornecedoresClient() {
   const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+  const [isMounted, setIsMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const toastTimerRef = useRef<number | null>(null);
@@ -344,6 +346,7 @@ export default function FornecedoresClient() {
   }
 
   useEffect(() => {
+    setIsMounted(true);
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
@@ -1200,9 +1203,10 @@ export default function FornecedoresClient() {
           </div>
         </div>
 
-        {isFormOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsFormOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isFormOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsFormOpen(false)}>
+                <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{editingId ? "Editar Fornecedor" : "Cadastro de Fornecedor"}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsFormOpen(false)}>
@@ -1271,12 +1275,15 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isDeleteOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isDeleteOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
+                <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Excluir Fornecedor?</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDeleteOpen(false)}>
@@ -1302,18 +1309,21 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isImportOpen ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              if (!importing) setIsImportOpen(false);
-            }}
-          >
-            <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isImportOpen
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  if (!importing) setIsImportOpen(false);
+                }}
+              >
+                <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Fornecedores por Planilha</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)} disabled={importing}>
@@ -1389,20 +1399,23 @@ export default function FornecedoresClient() {
                 </a>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isProdutosOpen && prodFornecedorKey ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              setIsProdutosOpen(false);
-              setProdFornecedorKey(null);
-              setProdFornecedorLabel("");
-            }}
-          >
-            <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isProdutosOpen && prodFornecedorKey
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  setIsProdutosOpen(false);
+                  setProdFornecedorKey(null);
+                  setProdFornecedorLabel("");
+                }}
+              >
+                <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{prodFornecedorLabel || prodFornecedorKey}</div>
                 <button
@@ -1560,12 +1573,15 @@ export default function FornecedoresClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isProdutosOpen && prodFornecedorKey && isVincOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVincOpen(false)}>
-            <div className={`${styles.modal} ${styles.vincModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isProdutosOpen && prodFornecedorKey && isVincOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVincOpen(false)}>
+                <div className={`${styles.modal} ${styles.vincModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Configurar Vinculação</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsVincOpen(false)}>
@@ -1627,11 +1643,18 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         </div>
-        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+        {isMounted && toast
+          ? createPortal(
+              <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
+              document.body,
+            )
+          : null}
       </main>
     </div>
   );
