@@ -129,8 +129,9 @@ export async function loadMeFromApi() {
       const res = await fetch(`/api/me?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok) {
-        clearMeStore();
-        return null;
+        const keep = prev && prev.userId === sessionUserId ? prev : null;
+        if (!keep) clearMeStore();
+        return keep;
       }
       const next: MeProfile = {
         userId: String(j.userId ?? "").trim(),

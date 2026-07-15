@@ -479,24 +479,8 @@ export default function ListaDeComprasClient() {
 
       const isCompat = Boolean(res?.ok && json?.ok && json?.source === "compat" && Array.isArray(json?.rows));
       if (isCompat) {
-        setCompat(null);
-        const rows = ((json.rows as any[]) ?? [])
-          .map((r: any) => {
-            const bubbleListaId = String(r?.id ?? "").trim();
-            if (!bubbleListaId) return null;
-            return {
-              bubbleListaId,
-              bubbleItemId: String(r?.bubble_id ?? "").trim(),
-              empresaId: "",
-              itemNome: String(r?.itemNome ?? "").trim(),
-              itemMedida: String(r?.unidade ?? "").trim(),
-              qtdSugestao: typeof r?.quantidadeSugerida === "number" ? r.quantidadeSugerida : Number(r?.quantidadeSugerida ?? 0) || 0,
-              qtdCompra: typeof r?.quantidadeCompra === "number" ? r.quantidadeCompra : Number(r?.quantidadeCompra ?? 0) || 0,
-              tipo: "itens",
-            } satisfies BubbleListaComprasRow;
-          })
-          .filter(Boolean) as BubbleListaComprasRow[];
-        setBubbleListaRows(rows);
+        setCompat(json as CompatListaComprasResponse);
+        setBubbleListaRows([]);
       }
 
       const rows = (res?.ok && json?.ok && Array.isArray(json?.rows) ? (json.rows as any[]) : []) as BubbleListaComprasRow[];

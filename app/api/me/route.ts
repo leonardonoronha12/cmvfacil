@@ -57,7 +57,7 @@ async function resolveSupabaseUser(
   const email = safeEmail(raw);
   if (!email) return { uid: null, email: null, error: "user_not_supabase_uuid" };
 
-  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").eq("email", email).maybeSingle();
+  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").ilike("email", email).maybeSingle();
   const uid = String((profileDb as any)?.user_id ?? "").trim();
   if (uid && isUuid(uid)) return { uid, email, error: null };
 

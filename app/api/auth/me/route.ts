@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
   }
   if (!supabase) return json({ userId: null }, { status: 200 });
 
-  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").eq("email", email).maybeSingle();
+  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").ilike("email", email).maybeSingle();
   const fromProfile = String((profileDb as any)?.user_id ?? "").trim();
   if (fromProfile && isUuid(fromProfile)) return json({ userId: fromProfile }, { status: 200 });
 
