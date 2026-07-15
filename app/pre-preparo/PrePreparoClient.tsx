@@ -27,6 +27,7 @@ type PrePreparoRow = {
   id: string;
   categoria: string;
   receita: string;
+  recipeImage?: string;
   custoTotal: string;
   rendimento: string;
   custoUnitario: string;
@@ -762,6 +763,7 @@ export default function PrePreparoClient() {
   const [newRecipeUnit, setNewRecipeUnit] = useState("");
   const [newRecipeValidity, setNewRecipeValidity] = useState("7");
   const [newRecipeValidityUnit, setNewRecipeValidityUnit] = useState("Dia(s)");
+  const [newRecipeImageUrl, setNewRecipeImageUrl] = useState("");
   const newRecipeFileRef = useRef<HTMLInputElement | null>(null);
   const [newRecipeIngredients, setNewRecipeIngredients] = useState<IngredienteRow[]>([]);
   const [ingredientQuery, setIngredientQuery] = useState("");
@@ -788,7 +790,9 @@ export default function PrePreparoClient() {
   const [draftUnit, setDraftUnit] = useState("Kg");
   const [draftValidity, setDraftValidity] = useState("7");
   const [draftValidityUnit, setDraftValidityUnit] = useState("Dia(s)");
+  const [draftImageUrl, setDraftImageUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [isEtiquetaOpen, setIsEtiquetaOpen] = useState(false);
   const [etiquetaRecipeId, setEtiquetaRecipeId] = useState<string | null>(null);
@@ -1473,6 +1477,7 @@ export default function PrePreparoClient() {
     const from = toTitleCase(normalizeCategoryName(String(row.categoria ?? "")));
     const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
     setDraftCategory(match);
+    setDraftImageUrl(String(row.recipeImage ?? "").trim());
     setDraftSpec("");
     setDraftUnit("Kg");
     setDraftValidity("7");
@@ -1488,6 +1493,7 @@ export default function PrePreparoClient() {
     setNewRecipeUnit("");
     setNewRecipeValidity("7");
     setNewRecipeValidityUnit("Dia(s)");
+    setNewRecipeImageUrl("");
     setNewRecipeIngredients([]);
     setIngredientQuery("");
     setIngredientQty("0,000");
@@ -1497,6 +1503,15 @@ export default function PrePreparoClient() {
     setNewRecipeYieldUnit("Kg");
     setIsNewRecipeOpen(true);
     if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+  }
+
+  async function uploadPrePreparoImage(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/pre-preparo/image", { method: "POST", body: form });
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; publicUrl?: string; error?: string; details?: string } | null;
+    if (!res.ok || !json?.ok || !json.publicUrl) throw new Error(json?.details || json?.error || "upload_failed");
+    return String(json.publicUrl);
   }
 
   function openEtiquetaModal(row?: PrePreparoRow | null) {
@@ -3296,7 +3311,7 @@ export default function PrePreparoClient() {
                     <div className={styles.recipeTop}>
                       <div className={styles.recipeLeft}>
                         <div className={styles.recipeIcon} aria-hidden>
-                          <IconCubeOutline />
+                          {r.recipeImage ? <img src={r.recipeImage} alt="" className={styles.recipeIconImg} /> : <IconCubeOutline />}
                         </div>
                         <div className={styles.recipeMeta}>
                           <div className={styles.recipeCategory}>{r.categoria}</div>
@@ -3431,7 +3446,13 @@ export default function PrePreparoClient() {
               <div className={styles.modalBody}>
                 <div className={styles.imageRow}>
                   <div className={styles.imageBox} onClick={() => fileInputRef.current?.click()} role="button" tabIndex={0}>
-                    Enviar Imagem
+                      {draftImageUrl ? (
+                        <img src={draftImageUrl} alt="" className={styles.imagePreview} />
+                      ) : isUploadingImage ? (
+                        "Enviando..."
+                      ) : (
+                        "Enviar Imagem"
+                      )}
                   </div>
                   <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
                   <input
@@ -3439,9 +3460,21 @@ export default function PrePreparoClient() {
                     type="file"
                     accept="image/*"
                     className={styles.fileInput}
-                    onChange={() => {
-                      if (fileInputRef.current) fileInputRef.current.value = "";
-                    }}
+                      onChange={async (e) => {
+                        const file = e.currentTarget.files?.[0] ?? null;
+                        e.currentTarget.value = "";
+                        if (!file) return;
+                        try {
+                          setIsUploadingImage(true);
+                          const url = await uploadPrePreparoImage(file);
+                          setDraftImageUrl(url);
+                          showToast("Imagem enviada.", "success");
+                        } catch (err) {
+                          showToast(supabaseSaveErrorMessage(err), "error", 9000);
+                        } finally {
+                          setIsUploadingImage(false);
+                        }
+                      }}
                   />
                 </div>
 
@@ -3506,7 +3539,11 @@ export default function PrePreparoClient() {
                     if (!editingId) return;
                     const name = draftName.trim();
                     if (!name) return;
-                    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, receita: name, categoria: draftCategory } : r)));
+                    setRows((prev) =>
+                      prev.map((r) =>
+                        r.id === editingId ? { ...r, receita: name, categoria: draftCategory, recipeImage: draftImageUrl ? draftImageUrl : undefined } : r,
+                      ),
+                    );
                     setIsEditOpen(false);
                     setEditingId(null);
                   }}
@@ -3763,7 +3800,13 @@ export default function PrePreparoClient() {
                   <>
                     <div className={styles.imageRow}>
                       <div className={styles.imageBox} onClick={() => newRecipeFileRef.current?.click()} role="button" tabIndex={0}>
-                        Enviar Imagem
+                        {newRecipeImageUrl ? (
+                          <img src={newRecipeImageUrl} alt="" className={styles.imagePreview} />
+                        ) : isUploadingImage ? (
+                          "Enviando..."
+                        ) : (
+                          "Enviar Imagem"
+                        )}
                       </div>
                       <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
                       <input
@@ -3771,8 +3814,20 @@ export default function PrePreparoClient() {
                         type="file"
                         accept="image/*"
                         className={styles.fileInput}
-                        onChange={() => {
-                          if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+                        onChange={async (e) => {
+                          const file = e.currentTarget.files?.[0] ?? null;
+                          e.currentTarget.value = "";
+                          if (!file) return;
+                          try {
+                            setIsUploadingImage(true);
+                            const url = await uploadPrePreparoImage(file);
+                            setNewRecipeImageUrl(url);
+                            showToast("Imagem enviada.", "success");
+                          } catch (err) {
+                            showToast(supabaseSaveErrorMessage(err), "error", 9000);
+                          } finally {
+                            setIsUploadingImage(false);
+                          }
                         }}
                       />
                     </div>
@@ -4077,6 +4132,7 @@ export default function PrePreparoClient() {
                           id: nextId,
                           categoria: newRecipeCategory,
                           receita: newRecipeName.trim(),
+                          recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
                           custoTotal: totalLabel,
                           rendimento: rendimentoLabel,
                           custoUnitario: unitCostLabel,

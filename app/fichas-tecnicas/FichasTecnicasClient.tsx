@@ -318,10 +318,17 @@ function BcgIcon({ type }: { type: string }) {
   );
 }
 
-function RecipeThumb({ type }: { type: ThumbType }) {
+function RecipeThumb({ type, src }: { type: ThumbType; src?: string }) {
+  const url = String(src ?? "").trim();
   return (
     <div className={`${styles.thumb} ${type === "burger" ? styles.thumbBurger : type === "duplo" ? styles.thumbDuplo : styles.thumbTriplo}`}>
-      {type === "burger" ? <span className={styles.thumbBurgerIcon}>🍔</span> : <span className={styles.thumbText}>{type.toUpperCase()}</span>}
+      {url ? (
+        <img src={url} alt="" className={styles.thumbImg} />
+      ) : type === "burger" ? (
+        <span className={styles.thumbBurgerIcon}>🍔</span>
+      ) : (
+        <span className={styles.thumbText}>{type.toUpperCase()}</span>
+      )}
     </div>
   );
 }
@@ -1556,7 +1563,7 @@ export default function FichasTecnicasClient({
     if (column === "receita") {
       return (
         <div className={styles.recipeCell}>
-          <RecipeThumb type={row.thumb} />
+          <RecipeThumb type={row.thumb} src={row.recipeImage} />
           <div className={styles.recipeName}>{row.receita}</div>
         </div>
       );

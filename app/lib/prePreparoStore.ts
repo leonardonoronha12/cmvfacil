@@ -4,6 +4,7 @@ export type PrePreparoStoreRow = {
   id: string;
   categoria: string;
   receita: string;
+  recipeImage?: string;
   custoTotal: string;
   rendimento: string;
   custoUnitario: string;
@@ -30,10 +31,12 @@ function normalizeRows(input: unknown): PrePreparoStoreRow[] {
     const id = String(r.id ?? "").trim();
     const receita = String(r.receita ?? "").trim();
     if (!id || !receita) continue;
+    const recipeImage = String((r as any).recipeImage ?? (r as any).recipeImageUrl ?? (r as any).imageUrl ?? "").trim();
     out.push({
       id,
       categoria: String(r.categoria ?? "").trim() || "-",
       receita,
+      recipeImage: recipeImage ? recipeImage : undefined,
       custoTotal: String(r.custoTotal ?? "").trim() || "-",
       rendimento: String(r.rendimento ?? "").trim() || "-",
       custoUnitario: String(r.custoUnitario ?? "").trim() || "-",
