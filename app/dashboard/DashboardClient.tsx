@@ -766,6 +766,18 @@ function parseDateDDMMYYYY(value: string) {
   return d;
 }
 
+function parseDateISOYYYYMMDD(value: string) {
+  const raw = value.trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10) - 1;
+  const day = Number.parseInt(m[3], 10);
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return d;
+}
+
 function formatDateLabelShortPT(d: Date) {
   const day = String(d.getDate()).padStart(2, "0");
   const year = d.getFullYear();
@@ -832,14 +844,14 @@ function parseDateLabelLoose(value: string) {
 function normalizeDateLabelForUI(value: string) {
   const raw = String(value ?? "").trim();
   if (!raw) return "-";
-  const d = parseDateLabelLoose(raw) ?? parseDateDDMMYYYY(raw);
+  const d = parseDateLabelLoose(raw) ?? parseDateDDMMYYYY(raw) ?? parseDateISOYYYYMMDD(raw);
   return d ? formatDateLabelShortPT(d) : raw;
 }
 
 function normalizeHistoryDateLabel(value: string) {
   const raw = String(value ?? "").trim();
   if (!raw) return "-";
-  const d = parseDateDDMMYYYY(raw) ?? parseDateLabelLoose(raw);
+  const d = parseDateDDMMYYYY(raw) ?? parseDateLabelLoose(raw) ?? parseDateISOYYYYMMDD(raw);
   return d ? formatDateLabelDDMMYYYY(d) : raw;
 }
 
@@ -1581,7 +1593,7 @@ export default function DashboardClient() {
     const entradasQtyById = new Map<string, number>();
     let comprasCents = 0;
     for (const e of entradas) {
-      const d = parseDateLabelLoose(e.dataLancamento);
+      const d = parseDateDDMMYYYY(e.dataLancamento) ?? parseDateISOYYYYMMDD(e.dataLancamento) ?? parseDateLabelLoose(e.dataLancamento);
       if (!d) continue;
       const t = startOfDay(d).getTime();
       if (t < minT || t > maxT) continue;
@@ -1822,7 +1834,7 @@ export default function DashboardClient() {
       const entradasCentsById = new Map<string, number>();
       let comprasCents = 0;
     for (const e of safeArray<any>(entradas)) {
-        const d = parseDateLabelLoose(e.dataLancamento);
+        const d = parseDateDDMMYYYY(e.dataLancamento) ?? parseDateISOYYYYMMDD(e.dataLancamento) ?? parseDateLabelLoose(e.dataLancamento);
         if (!d) continue;
         const t = startOfDay(d).getTime();
         if (t < minT || t > maxT) continue;
