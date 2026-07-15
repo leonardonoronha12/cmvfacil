@@ -660,12 +660,28 @@ export default function ListaDeComprasClient() {
     }
     const contagemByIso = new Map<string, InventarioContagem>();
     const contagemOptions: Array<{ iso: string; t: number }> = [];
+    const scoreContagem = (inv: InventarioContagem) => {
+      let s = 0;
+      for (const cat of inv.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if ((it as any)?.removido) continue;
+          const raw = String((it as any)?.estoqueFinal ?? "").trim();
+          if (!raw) continue;
+          const n = parsePtNumber(raw);
+          if (n > 0) s += 2;
+          else s += 1;
+        }
+      }
+      return s;
+    };
     for (const c of contagens) {
       const t = parseDateLoose(c.data);
       if (!t) continue;
       const date = new Date(t);
       const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-      if (!contagemByIso.has(iso)) contagemByIso.set(iso, c);
+      const prev = contagemByIso.get(iso) ?? null;
+      if (!prev) contagemByIso.set(iso, c);
+      else if (scoreContagem(c) > scoreContagem(prev)) contagemByIso.set(iso, c);
       contagemOptions.push({ iso, t });
     }
 
