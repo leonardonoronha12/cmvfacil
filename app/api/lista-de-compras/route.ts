@@ -219,8 +219,14 @@ export async function GET(req: NextRequest) {
         const itemId = String(r?.item_id ?? "").trim();
         if (!iid || !itemId) continue;
         const qty = parseNumber(r?.quantidade_contada);
-        if (iid === startInvId) estoqueInicialByItemId.set(itemId, qty);
-        if (iid === endInvId) estoqueFinalByItemId.set(itemId, qty);
+        if (iid === startInvId) {
+          const prev = estoqueInicialByItemId.get(itemId) ?? 0;
+          estoqueInicialByItemId.set(itemId, Math.max(prev, qty));
+        }
+        if (iid === endInvId) {
+          const prev = estoqueFinalByItemId.get(itemId) ?? 0;
+          estoqueFinalByItemId.set(itemId, Math.max(prev, qty));
+        }
       }
 
       const { data: entradaRows, error: entradaErr } =
