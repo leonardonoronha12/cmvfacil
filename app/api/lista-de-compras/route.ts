@@ -120,10 +120,28 @@ function parseNumber(v: unknown) {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   const s = String(v ?? "")
     .trim()
+    .replace(/[^\d,.-]/g, "")
     .replace(/\./g, "")
     .replace(",", ".");
   const n = Number(s);
   return Number.isFinite(n) ? n : 0;
+}
+
+function parseDateOnlyLoose(value: unknown) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return null;
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(raw);
+  if (m) {
+    const dd = Number(m[1]);
+    const mm = Number(m[2]);
+    const yyyy = Number(m[3]);
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
+  const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
+  if (isoMatch) return raw;
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return null;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 export async function GET(req: NextRequest) {
@@ -206,6 +224,56 @@ export async function GET(req: NextRequest) {
         if (!Number.isFinite(ta) || !Number.isFinite(tb)) return 0;
         return Math.round((tb - ta) / 86_400_000);
       };
+
+      const legacyPrefix = `${id}:`;
+      const legacyInventarios = endDate || startDate
+        ? await supabaseServer
+            .from("inventario")
+            .select("id,data,categorias,created_at")
+            .like("id", `${legacyPrefix}%`)
+            .order("created_at", { ascending: false })
+            .limit(400)
+        : { data: [], error: null as any };
+      if ((legacyInventarios as any)?.error) {
+        await dbg("E", "api/lista-de-compras", "legacy_inventario_load_failed", { error: String((legacyInventarios as any)?.error?.message ?? "") });
+      }
+      const legacyRows = ((legacyInventarios as any)?.data ?? []) as any[];
+      const findLegacyInventoryRow = (targetDate: string | null) => {
+        if (!targetDate) return null;
+        for (const r of legacyRows) {
+          const d = parseDateOnlyLoose(r?.data);
+          if (d === targetDate) return r;
+        }
+        return null;
+      };
+      const legacyStartRow = findLegacyInventoryRow(startDate);
+      const legacyEndRow = findLegacyInventoryRow(endDate);
+      const legacyStartQtyByNameKey = new Map<string, number>();
+      const legacyEndQtyByNameKey = new Map<string, number>();
+      const fillLegacyMap = (row: any, map: Map<string, number>) => {
+        const categorias = Array.isArray(row?.categorias) ? (row.categorias as any[]) : [];
+        for (const c of categorias) {
+          const itens = Array.isArray(c?.itens) ? (c.itens as any[]) : [];
+          for (const it of itens) {
+            const nameKey = normalizeNameKey(String(it?.item ?? ""));
+            if (!nameKey) continue;
+            const qty = parseNumber(it?.estoqueFinal ?? it?.quantidadeContada ?? it?.quantidade_contada ?? it?.quantidade ?? "");
+            const prev = map.get(nameKey) ?? 0;
+            map.set(nameKey, Math.max(prev, qty));
+          }
+        }
+      };
+      if (legacyStartRow) fillLegacyMap(legacyStartRow, legacyStartQtyByNameKey);
+      if (legacyEndRow) fillLegacyMap(legacyEndRow, legacyEndQtyByNameKey);
+      await dbg("E", "api/lista-de-compras", "legacy_inventario_fallback_loaded", {
+        startDate,
+        endDate,
+        legacyStartFound: Boolean(legacyStartRow),
+        legacyEndFound: Boolean(legacyEndRow),
+        legacyStartItems: legacyStartQtyByNameKey.size,
+        legacyEndItems: legacyEndQtyByNameKey.size,
+      });
+
       const invIdsToLoad = Array.from(new Set([startInvId, endInvId].filter(Boolean)));
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
@@ -436,6 +504,8 @@ export async function GET(req: NextRequest) {
             (bubbleItemId ? estoqueInicialByBubbleId.get(bubbleItemId) : undefined) ??
             (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined) ??
             0;
+          const legacyEstoqueInicial = nameKey ? legacyStartQtyByNameKey.get(nameKey) ?? 0 : 0;
+          const estoqueInicialResolved = estoqueInicial !== 0 ? estoqueInicial : legacyEstoqueInicial;
 
           const estoqueAtual =
             estoqueFinalByItemId.get(itemId) ??
@@ -443,13 +513,15 @@ export async function GET(req: NextRequest) {
             (bubbleItemId ? estoqueFinalByBubbleId.get(bubbleItemId) : undefined) ??
             (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined) ??
             0;
+          const legacyEstoqueAtual = nameKey ? legacyEndQtyByNameKey.get(nameKey) ?? 0 : 0;
+          const estoqueAtualResolved = estoqueAtual !== 0 ? estoqueAtual : legacyEstoqueAtual;
           const entradas = entradasByItemId.get(itemId) ?? 0;
 
-          const saidas = estoqueInicial + (entradas - estoqueAtual);
+          const saidas = estoqueInicialResolved + (entradas - estoqueAtualResolved);
           const consumoDiario = diasCorridosBubble > 0 ? saidas / diasCorridosBubble : 0;
           const consumoDiasManter = consumoDiario * diasEstoque;
           const consumoPrazoFornecedor = consumoDiario * prazoFornecedor;
-          const sugestaoCalc = consumoDiasManter - (estoqueAtual + consumoPrazoFornecedor);
+          const sugestaoCalc = consumoDiasManter - (estoqueAtualResolved + consumoPrazoFornecedor);
 
           const qtdCompraStored = sel ? parseNumber(sel?.qtd_compra) : 0;
           const qtdSugestaoStored = sel ? parseNumber(sel?.qtd_sugestao) : 0;
@@ -494,8 +566,8 @@ export async function GET(req: NextRequest) {
               diasCorridos: diasCorridosBubble,
               diasEstoque,
               prazoFornecedor,
-              estoqueInicial,
-              estoqueAtual,
+              estoqueInicial: estoqueInicialResolved,
+              estoqueAtual: estoqueAtualResolved,
               entradas,
               saidas,
               consumoDiario,
