@@ -210,7 +210,7 @@ export async function GET(req: NextRequest) {
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
             .from("inventory_items")
-            .select("inventory_id,item_id,quantidade_contada,item:items(id,bubble_id,name)")
+            .select("inventory_id,item_id,quantidade_contada,raw,item:items(id,bubble_id,name)")
             .eq("company_id", companyId)
             .in("inventory_id", invIdsToLoad)
             .limit(50_000)
@@ -348,6 +348,10 @@ export async function GET(req: NextRequest) {
         let resolvedItemId = "";
         let bubbleId = String(r?.item?.bubble_id ?? "").trim();
         let nameKey = normalizeNameKey(String(r?.item?.name ?? ""));
+        const rawBubbleItemId = extractBubbleId(r?.raw?.item_id ?? r?.raw?.item_bubble_id ?? r?.raw?.item ?? "");
+        const rawItemName = r?.raw?.item_nome ?? r?.raw?.nome_item ?? r?.raw?.item_name ?? r?.raw?.nome ?? "";
+        if (!bubbleId && rawBubbleItemId) bubbleId = rawBubbleItemId;
+        if (!nameKey && rawItemName) nameKey = normalizeNameKey(rawItemName);
 
         const linkedItemId = String(r?.item?.id ?? "").trim();
         if (linkedItemId) {
@@ -356,8 +360,18 @@ export async function GET(req: NextRequest) {
           if (!nameKey) nameKey = normalizeNameKey(String(itemsById.get(resolvedItemId)?.name ?? ""));
         } else if (isUuid(rawItemId)) {
           resolvedItemId = rawItemId;
-          if (!bubbleId) bubbleId = String(itemsById.get(resolvedItemId)?.bubble_id ?? "").trim();
-          if (!nameKey) nameKey = normalizeNameKey(String(itemsById.get(resolvedItemId)?.name ?? ""));
+          const exists = itemsById.has(resolvedItemId);
+          if (exists) {
+            if (!bubbleId) bubbleId = String(itemsById.get(resolvedItemId)?.bubble_id ?? "").trim();
+            if (!nameKey) nameKey = normalizeNameKey(String(itemsById.get(resolvedItemId)?.name ?? ""));
+          } else if (rawBubbleItemId) {
+            const mapped = itemUuidByBubbleId.get(rawBubbleItemId) ?? "";
+            if (mapped) {
+              resolvedItemId = mapped;
+              bubbleId = bubbleId || rawBubbleItemId;
+              nameKey = nameKey || normalizeNameKey(String(itemsById.get(mapped)?.name ?? ""));
+            }
+          }
         } else {
           const extracted = extractBubbleId(rawItemId);
           const bubbleCandidate = extracted || rawItemId;
