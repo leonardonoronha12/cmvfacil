@@ -827,6 +827,7 @@ export default function ListaDeComprasClient() {
     const out: Array<{ value: string; iso: string; label: string; t: number }> = [];
 
     if (compat?.source === "compat" && Array.isArray(compat.inventories)) {
+      const seenIso = new Set<string>();
       for (const inv of compat.inventories) {
         const id = String(inv?.id ?? "").trim();
         const d = String(inv?.data_contagem ?? "").trim();
@@ -834,8 +835,13 @@ export default function ListaDeComprasClient() {
         const t = Date.parse(d);
         if (!Number.isFinite(t)) continue;
         const date = new Date(t);
-        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-        const label = date.toLocaleDateString("pt-BR");
+        const y = date.getUTCFullYear();
+        const m = date.getUTCMonth() + 1;
+        const day = date.getUTCDate();
+        const iso = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        if (seenIso.has(iso)) continue;
+        seenIso.add(iso);
+        const label = `${String(day).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
         out.push({ value: id, iso, label, t });
       }
       out.sort((a, b) => b.t - a.t);
