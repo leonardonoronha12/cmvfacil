@@ -166,6 +166,7 @@ export async function GET(req: NextRequest) {
       if (!companyId) return json({ ok: false, error: "missing_company", source: "compat", readOnly: true }, { status: 500 });
 
       const url = new URL(req.url);
+      const diagEnabled = String(url.searchParams.get("diag") ?? "").trim() === "1";
       const startInventoryId = String(url.searchParams.get("startInventoryId") ?? "").trim();
       const endInventoryId = String(url.searchParams.get("endInventoryId") ?? "").trim();
       const diasEstoqueParam = String(url.searchParams.get("diasEstoque") ?? "").trim();
@@ -589,6 +590,52 @@ export async function GET(req: NextRequest) {
         { itens: 0, custoPrevisto: 0, custoReal: 0 },
       );
 
+      const diag = (() => {
+        if (!diagEnabled) return null;
+        const legacyDatesSample = legacyRows.slice(0, 12).map((r: any) => ({ data: r?.data ?? null, parsed: parseDateOnlyLoose(r?.data) }));
+        const sampleNameKeys = ["brownie tradicional 6x6", "papel acoplado", "caixa de fritas simples"];
+        const samples = sampleNameKeys.map((nk) => {
+          const row = (rowsCompat as any[]).find((x) => normalizeNameKey(x?.itemNome ?? "") === nk) ?? null;
+          if (!row) return { nameKey: nk, found: false };
+          const itemId = String(row?.db_item_id ?? "").trim();
+          const bubbleId = String(row?.bubble_id ?? "").trim();
+          const nameKey = normalizeNameKey(String(row?.itemNome ?? ""));
+          const compatValue =
+            estoqueFinalByItemId.get(itemId) ??
+            (bubbleId ? estoqueFinalByBubbleId.get(bubbleId) : undefined) ??
+            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined) ??
+            0;
+          const legacyValue = nameKey ? legacyEndQtyByNameKey.get(nameKey) ?? 0 : 0;
+          const resolved = parseNumber(row?.calc?.estoqueAtual);
+          return { nameKey: nk, found: true, itemId: itemId || null, bubbleId: bubbleId || null, compatValue, legacyValue, resolved };
+        });
+        const nonZeroFinal = (rowsCompat as any[]).reduce((acc, r) => acc + (parseNumber(r?.calc?.estoqueAtual) > 0 ? 1 : 0), 0);
+        return {
+          useCompat,
+          companyId,
+          startInvId,
+          endInvId,
+          startDate,
+          endDate,
+          diasEstoque,
+          prazoFornecedor,
+          invItemRows: invItemRowsSafe.length,
+          invResolvedByUuid,
+          invResolvedByBubble,
+          invResolvedByName,
+          estoqueFinalByItemId: estoqueFinalByItemId.size,
+          estoqueFinalByBubbleId: estoqueFinalByBubbleId.size,
+          estoqueFinalByNameKey: estoqueFinalByNameKey.size,
+          legacyRows: legacyRows.length,
+          legacyStartFound: Boolean(legacyStartRow),
+          legacyEndFound: Boolean(legacyEndRow),
+          legacyEndItems: legacyEndQtyByNameKey.size,
+          legacyDatesSample,
+          nonZeroFinal,
+          samples,
+        };
+      })();
+
       return json(
         {
           ok: true,
@@ -599,6 +646,7 @@ export async function GET(req: NextRequest) {
           totals,
           filters: { startInventoryId: startInvId || null, endInventoryId: endInvId || null, diasEstoque, prazoFornecedor },
           inventories,
+          diag,
         },
         { status: 200 },
       );
