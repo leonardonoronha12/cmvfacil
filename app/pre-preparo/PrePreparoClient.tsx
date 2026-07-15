@@ -3150,13 +3150,18 @@ export default function PrePreparoClient() {
                 <aside className={`${dash.itemDetailsAside} ${ft.detailsSidebar}`}>
                   <div className={ft.detailsSidebarCard}>
                     <div className={ft.detailsPreviewBox}>
-                      <div className={ft.detailsPreviewFallback}>
-                        <div className={ft.previewTopBar} />
-                        <div className={ft.previewThumbGrid}>
-                          <span className={ft.previewThumbMain} />
-                          <span className={ft.previewThumbSide} />
+                      {String((detailsRow as any)?.recipeImage ?? "")
+                        .trim() ? (
+                        <img src={String((detailsRow as any).recipeImage).trim()} alt="" className={ft.detailsPreviewImage} />
+                      ) : (
+                        <div className={ft.detailsPreviewFallback}>
+                          <div className={ft.previewTopBar} />
+                          <div className={ft.previewThumbGrid}>
+                            <span className={ft.previewThumbMain} />
+                            <span className={ft.previewThumbSide} />
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                     <div className={`${dash.itemAsideTitle} ${ft.detailsSidebarTitle}`}>{detailsRow.receita}</div>
                     <div className={`${dash.itemAsideMeta} ${ft.detailsSidebarMeta}`}>Pré-Preparo</div>

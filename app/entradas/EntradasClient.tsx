@@ -1102,35 +1102,6 @@ export default function EntradasClient() {
   }, [customFornecedores, isReadOnly, rows]);
 
   useEffect(() => {
-    if (isReadOnly) return;
-    const next: FornecedorProdutos = { ...fornecedorProdutosMap };
-    let changed = false;
-    for (const r of rows) {
-      const fornecedor = String((r as any)?.fornecedor ?? "").trim().toUpperCase();
-      if (!fornecedor) continue;
-      const itens = r.itensNota ?? [];
-      if (!itens.length) continue;
-      const cur = next[fornecedor] ? [...next[fornecedor]] : [];
-      let curChanged = false;
-      for (const it of itens) {
-        const name = String((it as any)?.nome ?? "").trim();
-        if (!name) continue;
-        const has = cur.some((x) => x.toLowerCase() === name.toLowerCase());
-        if (has) continue;
-        cur.push(name);
-        curChanged = true;
-      }
-      if (curChanged) {
-        next[fornecedor] = cur;
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    setFornecedorProdutosMap(next);
-    writeFornecedorProdutosMap(next);
-  }, [fornecedorProdutosMap, isReadOnly, rows]);
-
-  useEffect(() => {
     const qty = parsePtNumber(detailQty);
     const subtotal = parseBrlToCents(detailSubtotal) / 100;
     if (!qty || !Number.isFinite(qty) || qty <= 0 || !subtotal || !Number.isFinite(subtotal) || subtotal <= 0) {

@@ -19,6 +19,54 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function safeEmail(input: unknown) {
+  const v = String(input ?? "").trim().toLowerCase();
+  if (!v || !v.includes("@")) return "";
+  return v;
+}
+
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(error.message);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const em = String(u?.email ?? "").trim().toLowerCase();
+      if (id && em === target) return id;
+    }
+    if (users.length < 1000) break;
+  }
+  return null;
+}
+
+async function resolveSupabaseUser(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+): Promise<{ uid: string | null; email: string | null; error: string | null }> {
+  const raw = String(userId ?? "").trim();
+  if (isUuid(raw)) {
+    const authUser = await supabase.auth.admin.getUserById(raw);
+    if (authUser.error) return { uid: null, email: null, error: `auth_get_user:${authUser.error.message}` };
+    const email = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+    if (!email) return { uid: null, email: null, error: "missing_supabase_email" };
+    return { uid: raw, email, error: null };
+  }
+
+  const email = safeEmail(raw);
+  if (!email) return { uid: null, email: null, error: "user_not_supabase_uuid" };
+
+  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").eq("email", email).maybeSingle();
+  const uid = String((profileDb as any)?.user_id ?? "").trim();
+  if (uid && isUuid(uid)) return { uid, email, error: null };
+
+  const fromAuth = await findAuthUserIdByEmail(supabase, email);
+  if (fromAuth && isUuid(fromAuth)) return { uid: fromAuth, email, error: null };
+
+  return { uid: null, email, error: "user_not_found" };
+}
+
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -37,6 +85,15 @@ function parsePermissionLevel(v: unknown) {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   const n = Number(String(v ?? "").trim());
   return Number.isFinite(n) ? n : 0;
+}
+
+function isAdminMemberRow(row: any) {
+  const roleRaw = String(row?.role ?? "").trim().toLowerCase();
+  if (roleRaw.includes("owner") || roleRaw.includes("admin") || roleRaw.includes("administrador") || roleRaw.includes("propriet")) return true;
+  const permRaw = String(row?.permission_level ?? "").trim().toLowerCase();
+  if (permRaw.includes("owner") || permRaw.includes("admin") || permRaw.includes("administrador")) return true;
+  const permNum = parsePermissionLevel(row?.permission_level);
+  return Number.isFinite(permNum) && permNum >= 1;
 }
 
 function scoreRole(role: unknown) {
@@ -710,8 +767,6 @@ export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    const uid = String(userId ?? "").trim();
-    if (!isUuid(uid)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -720,18 +775,24 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const authUser = await supabase.auth.admin.getUserById(uid);
-    if (authUser.error) return json({ ok: false, error: `auth_get_user:${authUser.error.message}` }, { status: 400 });
-    const email = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+    const resolved = await resolveSupabaseUser(supabase, String(userId ?? ""));
+    if (!resolved.uid) return json({ ok: false, error: resolved.error ?? "user_not_found" }, { status: 400 });
+    const uid = resolved.uid;
+    const email = String(resolved.email ?? "").trim().toLowerCase();
     if (!email) return json({ ok: false, error: "missing_supabase_email" }, { status: 400 });
 
     const { data: profileDb } = await supabase
       .from("user_profiles")
-      .select("user_id,email,nome,sobrenome,nome_completo,whatsapp")
+      .select("user_id,bubble_user_id,email,nome,sobrenome,nome_completo,whatsapp")
       .eq("user_id", uid)
       .maybeSingle();
 
-    const { data: memberRows } = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).limit(50);
+    const bubbleUserId = String((profileDb as any)?.bubble_user_id ?? "").trim();
+    let { data: memberRows } = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).limit(50);
+    if ((!memberRows || !memberRows.length) && bubbleUserId) {
+      const fallback = await supabase.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", bubbleUserId).limit(50);
+      memberRows = fallback.data ?? [];
+    }
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
 
@@ -744,8 +805,7 @@ export async function GET(req: NextRequest) {
             .maybeSingle()
         : { data: null as any };
 
-      const roleRaw = String(membershipForCompany?.role ?? "").trim().toLowerCase();
-      const permissionRole = roleRaw.includes("admin") || roleRaw.includes("owner") ? "Administrador" : "Colaborador";
+      const permissionRole = isAdminMemberRow(membershipForCompany) ? "Administrador" : "Colaborador";
 
       const { data: companyMembers } = companyId
         ? await supabase.from("company_members").select("user_id,role,permission_level").eq("company_id", companyId).limit(500)
@@ -758,8 +818,7 @@ export async function GET(req: NextRequest) {
       const members = (companyMembers ?? []).map((m: any) => {
         const mid = String(m?.user_id ?? "").trim();
         const p = profileById.get(mid) ?? {};
-        const mRoleRaw = String(m?.role ?? "").trim().toLowerCase();
-        const role = mRoleRaw.includes("admin") || mRoleRaw.includes("owner") ? "Administrador" : "Colaborador";
+        const role = isAdminMemberRow(m) ? "Administrador" : "Colaborador";
         const nomeCompleto = String(p?.nome_completo ?? p?.nomeCompleto ?? "").trim() || String(p?.nome ?? "").trim() || String(p?.email ?? "").trim() || "—";
         return { name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
       });
@@ -1099,8 +1158,6 @@ export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    const uid = String(userId ?? "").trim();
-    if (!isUuid(uid)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -1109,9 +1166,10 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const authUser = await supabase.auth.admin.getUserById(uid);
-    if (authUser.error) return json({ ok: false, error: `auth_get_user:${authUser.error.message}` }, { status: 400 });
-    const emailFromAuth = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+    const resolved = await resolveSupabaseUser(supabase, String(userId ?? ""));
+    if (!resolved.uid) return json({ ok: false, error: resolved.error ?? "user_not_found" }, { status: 400 });
+    const uid = resolved.uid;
+    const emailFromAuth = String(resolved.email ?? "").trim().toLowerCase();
 
     const input = (body ?? {}) as any;
     const nome = typeof input.nome === "string" ? input.nome.trim() : null;
@@ -1134,50 +1192,63 @@ export async function POST(req: NextRequest) {
       if (sobrenome != null) patch.sobrenome = sobrenome || null;
       if (nomeCompleto != null) patch.nome_completo = nomeCompleto || null;
       if (whatsapp != null) patch.whatsapp = whatsapp || null;
-      await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+      const up = await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+      if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
     }
 
-    const { data: memberRows } = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("user_id", uid).limit(50);
+    const { data: profileDb } = await supabase.from("user_profiles").select("bubble_user_id").eq("user_id", uid).maybeSingle();
+    const bubbleUserId = String((profileDb as any)?.bubble_user_id ?? "").trim();
+    let { data: memberRows } = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("user_id", uid).limit(50);
+    if ((!memberRows || !memberRows.length) && bubbleUserId) {
+      const fallback = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("bubble_user_id", bubbleUserId).limit(50);
+      memberRows = fallback.data ?? [];
+    }
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     const memberRow = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
 
-    const canAdminWrite = (() => {
-      const roleRaw = String(memberRow?.role ?? "").trim().toLowerCase();
-      if (roleRaw.includes("owner") || roleRaw.includes("admin")) return true;
-      const permRaw = String(memberRow?.permission_level ?? "").trim().toLowerCase();
-      if (permRaw.includes("owner") || permRaw.includes("admin") || permRaw.includes("administrador")) return true;
-      return false;
-    })();
+    const canAdminWrite = isAdminMemberRow(memberRow);
 
     if (
       companyId &&
       (companyName != null || companyEmail != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null)
     ) {
       if (!canAdminWrite) {
-        // ignore company updates for non-admin
       } else {
-      const patch: any = {};
-      if (companyName != null) {
-        const nm = companyName.trim();
-        patch.fantasy_name = nm || null;
-        patch.legal_name = nm || null;
-      }
-      if (companyEmail != null) patch.email = companyEmail.trim().toLowerCase() || null;
-      if (companyWhatsRaw != null) patch.phone_e164 = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) : null;
-      if (companyIndustry != null) patch.industry = companyIndustry || null;
-      if (companyCnpjRaw != null) {
-        const digits = digitsOnly(companyCnpjRaw);
-        patch.cnpj = digits ? digits : null;
-      }
-      if (companyLogoUrlRaw != null) patch.logo_url = companyLogoUrlRaw ? companyLogoUrlRaw : null;
-      await supabase.from("companies").update(patch).eq("id", companyId);
+        const patch: any = {};
+        if (companyName != null) {
+          const nm = companyName.trim();
+          patch.fantasy_name = nm || null;
+          patch.legal_name = nm || null;
+        }
+        if (companyEmail != null) patch.email = companyEmail.trim().toLowerCase() || null;
+        if (companyWhatsRaw != null) patch.phone_e164 = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) : null;
+        if (companyIndustry != null) patch.industry = companyIndustry || null;
+        if (companyCnpjRaw != null) {
+          const digits = digitsOnly(companyCnpjRaw);
+          patch.cnpj = digits ? digits : null;
+        }
+        if (companyLogoUrlRaw != null) patch.logo_url = companyLogoUrlRaw ? companyLogoUrlRaw : null;
+        const up = await supabase.from("companies").update(patch).eq("id", companyId);
+        if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
       }
     }
 
     if (companyId && permissao != null) {
       if (canAdminWrite) {
-        const desired = permissao.toLowerCase().includes("admin") ? "admin" : "member";
-        await supabase.from("company_members").update({ role: desired, permission_level: permissao } as any).eq("company_id", companyId).eq("user_id", uid);
+        const desiredIsAdmin = permissao.toLowerCase().includes("admin");
+        const desiredRole = desiredIsAdmin ? "admin" : "member";
+        const permValue = (() => {
+          const raw = (memberRow as any)?.permission_level;
+          if (typeof raw === "number") return desiredIsAdmin ? Math.max(1, parsePermissionLevel(raw)) : 0;
+          const s = String(raw ?? "").trim();
+          if (/^\d+$/.test(s)) return desiredIsAdmin ? Math.max(1, parsePermissionLevel(s)) : 0;
+          return desiredIsAdmin ? "Administrador" : "Colaborador";
+        })();
+        const up = await supabase
+          .from("company_members")
+          .update({ role: desiredRole, permission_level: permValue } as any)
+          .eq("id", String(memberRow?.id ?? "").trim());
+        if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
       }
     }
 

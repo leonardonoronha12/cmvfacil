@@ -41,6 +41,7 @@ type CompraRow = {
   custoMedio: number;
   custoMedioLabel: string;
   fornecedor: string;
+  fornecedores?: string[];
   fornecedorMedida: string;
   fornecedorFator: number;
   consumoDiario: number;
@@ -648,6 +649,12 @@ export default function ListaDeComprasClient() {
         const medida = String(r.unidade ?? "").trim() || "Und";
         const custoMedioValue = Number(r.custoMedio ?? 0) || 0;
         const fornecedorLabel = String(r.fornecedor ?? "-").trim() || "-";
+        const fornecedores = Array.isArray(r.fornecedores)
+          ? (r.fornecedores as any[])
+              .map((x) => String(x ?? "").trim())
+              .filter(Boolean)
+              .filter((x) => x !== "-")
+          : [];
         return {
           id: String(r.id),
           item: itemName,
@@ -658,6 +665,7 @@ export default function ListaDeComprasClient() {
           custoMedio: custoMedioValue,
           custoMedioLabel: formatMoney(custoMedioValue),
           fornecedor: fornecedorLabel,
+          fornecedores,
           fornecedorMedida: medida,
           fornecedorFator: 1,
           consumoDiario: Number(r.calc?.consumoDiario ?? 0) || 0,
@@ -727,7 +735,6 @@ export default function ListaDeComprasClient() {
 
     const rows: CompraRow[] = [];
     for (const ins of insumos) {
-      if (ins.ocultar) continue;
       const itemName = String(ins.item ?? "").trim() || "Item";
       const key = normalizeText(itemName);
       if (!key) continue;
@@ -946,9 +953,13 @@ export default function ListaDeComprasClient() {
     const search = query.trim().toLowerCase();
     const mapped = baseRows.filter((row) => {
       if (mode === "categoria" && categoriaFilter !== "Categoria" && row.categoria !== categoriaFilter) return false;
-      if (mode === "fornecedor" && fornecedorFilter === "Fornecedor") return false;
+      if (mode === "fornecedor" && fornecedorFilter !== "Fornecedor") {
+        const extra = Array.isArray(row.fornecedores) ? row.fornecedores : [];
+        if (row.fornecedor !== fornecedorFilter && !extra.includes(fornecedorFilter)) return false;
+      }
       if (!search) return true;
-      return `${row.displayItem} ${row.item} ${row.categoria} ${row.fornecedor}`.toLowerCase().includes(search);
+      const suppliers = [row.fornecedor, ...(Array.isArray(row.fornecedores) ? row.fornecedores : [])].join(" ");
+      return `${row.displayItem} ${row.item} ${row.categoria} ${suppliers}`.toLowerCase().includes(search);
     });
 
     const decorated = mapped.map((row, index) => ({ row, index }));
@@ -1414,10 +1425,24 @@ export default function ListaDeComprasClient() {
             </div>
 
             <div className={styles.modeSwitch}>
-              <button type="button" className={mode === "categoria" ? styles.modeActive : styles.modeBtn} onClick={() => setMode("categoria")}>
+              <button
+                type="button"
+                className={mode === "categoria" ? styles.modeActive : styles.modeBtn}
+                onClick={() => {
+                  setMode("categoria");
+                  setCategoriaFilter("Categoria");
+                }}
+              >
                 Por Categoria
               </button>
-              <button type="button" className={mode === "fornecedor" ? styles.modeActive : styles.modeBtn} onClick={() => setMode("fornecedor")}>
+              <button
+                type="button"
+                className={mode === "fornecedor" ? styles.modeActive : styles.modeBtn}
+                onClick={() => {
+                  setMode("fornecedor");
+                  setFornecedorFilter("Fornecedor");
+                }}
+              >
                 Por Fornecedor
               </button>
             </div>

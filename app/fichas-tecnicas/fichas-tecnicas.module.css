@@ -1319,6 +1319,11 @@
   height: 100%;
 }
 
+.detailsPreviewImage {
+  display: block;
+  object-fit: cover;
+}
+
 .detailsPreviewFallback {
   display: flex;
   flex-direction: column;
