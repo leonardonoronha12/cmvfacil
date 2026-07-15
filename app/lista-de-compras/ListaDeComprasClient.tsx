@@ -685,7 +685,7 @@ export default function ListaDeComprasClient() {
           if (it.removido) continue;
           const key = normalizeText(it.item);
           if (!key) continue;
-          const qty = parseDecimalInput(String(it.estoqueFinal ?? ""));
+          const qty = parsePtNumber(String(it.estoqueFinal ?? ""));
           const unit = normalizeUnit(String(it.unidade ?? ""));
           const cur = out.get(key);
           out.set(key, { qty: (cur?.qty ?? 0) + qty, unit: cur?.unit || unit });
