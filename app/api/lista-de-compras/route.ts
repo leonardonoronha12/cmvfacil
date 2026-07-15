@@ -53,7 +53,12 @@ function parseEnvBool(value: string | undefined) {
 }
 
 function normalizeNameKey(value: unknown) {
-  return String(value ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function isAdminUserId(userId: string) {
@@ -205,29 +210,14 @@ export async function GET(req: NextRequest) {
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
             .from("inventory_items")
-            .select("inventory_id,item_id,quantidade_contada")
+            .select("inventory_id,item_id,quantidade_contada,item:items(id,bubble_id,name)")
             .eq("company_id", companyId)
             .in("inventory_id", invIdsToLoad)
             .limit(50_000)
         : { data: [], error: null as any };
       if (invItemErr) return json({ ok: false, error: invItemErr.message, source: "compat", readOnly: true }, { status: 500 });
 
-      const estoqueInicialByItemId = new Map<string, number>();
-      const estoqueFinalByItemId = new Map<string, number>();
-      for (const r of (invItemRows ?? []) as any[]) {
-        const iid = String(r?.inventory_id ?? "").trim();
-        const itemId = String(r?.item_id ?? "").trim();
-        if (!iid || !itemId) continue;
-        const qty = parseNumber(r?.quantidade_contada);
-        if (iid === startInvId) {
-          const prev = estoqueInicialByItemId.get(itemId) ?? 0;
-          estoqueInicialByItemId.set(itemId, Math.max(prev, qty));
-        }
-        if (iid === endInvId) {
-          const prev = estoqueFinalByItemId.get(itemId) ?? 0;
-          estoqueFinalByItemId.set(itemId, Math.max(prev, qty));
-        }
-      }
+      const invItemRowsSafe = (invItemRows ?? []) as any[];
 
       const { data: entradaRows, error: entradaErr } =
         startDate && endDate
@@ -260,6 +250,17 @@ export async function GET(req: NextRequest) {
         .order("name", { ascending: true })
         .limit(50_000);
       if (itemsErr) return json({ ok: false, error: itemsErr.message, source: "compat", readOnly: true }, { status: 500 });
+
+      const itemUuidByBubbleId = new Map<string, string>();
+      const itemUuidByNameKey = new Map<string, string>();
+      for (const it of (itemsRows ?? []) as any[]) {
+        const id = String(it?.id ?? "").trim();
+        if (!id) continue;
+        const b = String(it?.bubble_id ?? "").trim();
+        const nameKey = normalizeNameKey(String(it?.name ?? ""));
+        if (b && !itemUuidByBubbleId.has(b)) itemUuidByBubbleId.set(b, id);
+        if (nameKey && !itemUuidByNameKey.has(nameKey)) itemUuidByNameKey.set(nameKey, id);
+      }
 
       const categoryIds = Array.from(new Set((itemsRows ?? []).map((r: any) => String(r?.category_id ?? "").trim()).filter(Boolean)));
       const { data: catRows, error: catErr } = categoryIds.length
@@ -328,6 +329,76 @@ export async function GET(req: NextRequest) {
 
       const itemsById = new Map<string, any>((itemsRows ?? []).map((r: any) => [String(r?.id ?? "").trim(), r]));
 
+      const estoqueInicialByItemId = new Map<string, number>();
+      const estoqueFinalByItemId = new Map<string, number>();
+      const estoqueInicialByBubbleId = new Map<string, number>();
+      const estoqueFinalByBubbleId = new Map<string, number>();
+      const estoqueInicialByNameKey = new Map<string, number>();
+      const estoqueFinalByNameKey = new Map<string, number>();
+      let invResolvedByUuid = 0;
+      let invResolvedByBubble = 0;
+      let invResolvedByName = 0;
+      for (const r of invItemRowsSafe) {
+        const iid = String(r?.inventory_id ?? "").trim();
+        const rawItemId = String(r?.item_id ?? "").trim();
+        if (!iid || !rawItemId) continue;
+        const qty = parseNumber(r?.quantidade_contada);
+        if (!qty) continue;
+
+        let resolvedItemId = "";
+        let bubbleId = String(r?.item?.bubble_id ?? "").trim();
+        let nameKey = normalizeNameKey(String(r?.item?.name ?? ""));
+
+        const linkedItemId = String(r?.item?.id ?? "").trim();
+        if (linkedItemId) {
+          resolvedItemId = linkedItemId;
+          if (!bubbleId) bubbleId = String(itemsById.get(resolvedItemId)?.bubble_id ?? "").trim();
+          if (!nameKey) nameKey = normalizeNameKey(String(itemsById.get(resolvedItemId)?.name ?? ""));
+        } else if (isUuid(rawItemId)) {
+          resolvedItemId = rawItemId;
+          if (!bubbleId) bubbleId = String(itemsById.get(resolvedItemId)?.bubble_id ?? "").trim();
+          if (!nameKey) nameKey = normalizeNameKey(String(itemsById.get(resolvedItemId)?.name ?? ""));
+        } else {
+          const extracted = extractBubbleId(rawItemId);
+          const bubbleCandidate = extracted || rawItemId;
+          const mapped = bubbleCandidate ? itemUuidByBubbleId.get(bubbleCandidate) ?? "" : "";
+          if (mapped) {
+            resolvedItemId = mapped;
+            bubbleId = bubbleId || bubbleCandidate;
+            nameKey = nameKey || normalizeNameKey(String(itemsById.get(mapped)?.name ?? ""));
+          }
+        }
+
+        if (!resolvedItemId && !nameKey) continue;
+        if (!resolvedItemId && nameKey) {
+          const mappedByName = itemUuidByNameKey.get(nameKey) ?? "";
+          if (mappedByName) resolvedItemId = mappedByName;
+        }
+
+        if (resolvedItemId) invResolvedByUuid += 1;
+        if (bubbleId) invResolvedByBubble += 1;
+        if (nameKey) invResolvedByName += 1;
+
+        if (iid === startInvId) {
+          if (resolvedItemId) estoqueInicialByItemId.set(resolvedItemId, Math.max(estoqueInicialByItemId.get(resolvedItemId) ?? 0, qty));
+          if (bubbleId) estoqueInicialByBubbleId.set(bubbleId, Math.max(estoqueInicialByBubbleId.get(bubbleId) ?? 0, qty));
+          if (nameKey) estoqueInicialByNameKey.set(nameKey, Math.max(estoqueInicialByNameKey.get(nameKey) ?? 0, qty));
+        }
+        if (iid === endInvId) {
+          if (resolvedItemId) estoqueFinalByItemId.set(resolvedItemId, Math.max(estoqueFinalByItemId.get(resolvedItemId) ?? 0, qty));
+          if (bubbleId) estoqueFinalByBubbleId.set(bubbleId, Math.max(estoqueFinalByBubbleId.get(bubbleId) ?? 0, qty));
+          if (nameKey) estoqueFinalByNameKey.set(nameKey, Math.max(estoqueFinalByNameKey.get(nameKey) ?? 0, qty));
+        }
+      }
+      await dbg("E", "api/lista-de-compras", "compat_inventory_items_resolve_stats", {
+        loaded: invItemRowsSafe.length,
+        invResolvedByUuid,
+        invResolvedByBubble,
+        invResolvedByName,
+        startInvId,
+        endInvId,
+      });
+
       const diasCorridosBubble = startDate && endDate ? daysBetweenDateOnly(startDate, endDate) : 0;
 
       const rowsCompat = (itemsRows ?? [])
@@ -341,10 +412,23 @@ export async function GET(req: NextRequest) {
 
           const categoria = categoryNameById.get(String(item?.category_id ?? "").trim()) || "Sem categoria";
           const unidade = String(item?.unidade_medida ?? "").trim() || "Und";
-          const custoMedio = typeof item?.custo_medio === "number" ? item.custo_medio : 0;
+          const custoMedio = parseNumber(item?.custo_medio);
 
-          const estoqueInicial = estoqueInicialByItemId.get(itemId) ?? 0;
-          const estoqueAtual = estoqueFinalByItemId.get(itemId) ?? 0;
+          const nameKey = normalizeNameKey(String(item?.name ?? ""));
+
+          const estoqueInicial =
+            estoqueInicialByItemId.get(itemId) ??
+            (bubbleItemId ? estoqueInicialByItemId.get(bubbleItemId) : undefined) ??
+            (bubbleItemId ? estoqueInicialByBubbleId.get(bubbleItemId) : undefined) ??
+            (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined) ??
+            0;
+
+          const estoqueAtual =
+            estoqueFinalByItemId.get(itemId) ??
+            (bubbleItemId ? estoqueFinalByItemId.get(bubbleItemId) : undefined) ??
+            (bubbleItemId ? estoqueFinalByBubbleId.get(bubbleItemId) : undefined) ??
+            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined) ??
+            0;
           const entradas = entradasByItemId.get(itemId) ?? 0;
 
           const saidas = estoqueInicial + (entradas - estoqueAtual);
