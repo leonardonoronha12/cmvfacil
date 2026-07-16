@@ -411,6 +411,8 @@ export default function ListaDeComprasClient() {
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const toastTimerRef = useRef<number | null>(null);
   const compatFetchKeyRef = useRef<string>("");
+  const estoqueFinalAutoKeyRef = useRef<string>("");
+  const estoqueFinalIsManualRef = useRef(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
@@ -782,13 +784,19 @@ export default function ListaDeComprasClient() {
 
   useEffect(() => {
     if (compat?.source === "compat") return;
-    setEstoqueFinalMap((prev) => {
-      if (Object.keys(prev).length) return prev;
-      const next: Record<string, string> = { ...prev };
+    const key = `start=${startDate}|end=${endDate}`;
+    const keyChanged = estoqueFinalAutoKeyRef.current !== key;
+    if (keyChanged) {
+      estoqueFinalAutoKeyRef.current = key;
+      estoqueFinalIsManualRef.current = false;
+    }
+    if (estoqueFinalIsManualRef.current) return;
+    setEstoqueFinalMap(() => {
+      const next: Record<string, string> = {};
       for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
       return next;
     });
-  }, [baseRows, compat]);
+  }, [baseRows, compat, endDate, startDate]);
 
   const categorias = useMemo(() => {
     const seen = new Set<string>();
@@ -1342,6 +1350,7 @@ export default function ListaDeComprasClient() {
   function updateEstoqueFinal(id: string, value: string) {
     if (isReadOnly) return;
     const cleaned = value.replace(/[^\d,]/g, "");
+    estoqueFinalIsManualRef.current = true;
     setEstoqueFinalMap((prev) => ({ ...prev, [id]: cleaned }));
   }
   const isCompatMode = compat?.source === "compat";
