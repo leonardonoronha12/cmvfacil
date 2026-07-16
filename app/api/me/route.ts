@@ -1004,12 +1004,16 @@ export async function GET(req: NextRequest) {
 
     const currentCompanyId = bubbleRowNorm && knownCompanyIds.size ? guessCurrentCompanyId(bubbleRowNorm) : "";
     const primaryCompanyId = currentCompanyId && knownCompanyIds.has(currentCompanyId) ? currentCompanyId : companies[0]?.id ?? "";
-    const companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
+    let companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
     const companyRowNorm = primaryCompanyId ? companyRowNormById.get(primaryCompanyId) ?? null : null;
     let companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
     const companyWhatsappRaw = companyRowNorm
       ? pickFirst(companyRowNorm, ["whatsapp", "telefone", "celular", "fone", "phone_e164", "phone", "phone_number"]) ||
         pickKeyLike(companyRowNorm, ["whatsapp", "telefone", "celular", "phone"], ["id", "uuid", "cnpj", "email", "nome", "name"])
+      : "";
+    const companyEmailRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["email", "mail", "e_mail", "company_email", "contato_email", "email_corporativo"]) ||
+        pickKeyLike(companyRowNorm, ["email", "mail"], ["id", "uuid", "cnpj", "telefone", "whatsapp", "nome", "name"])
       : "";
     const companyIndustryRaw = companyRowNorm
       ? pickFirst(companyRowNorm, ["ramo", "industry", "segmento", "tipo", "categoria"]) ||
@@ -1020,6 +1024,7 @@ export async function GET(req: NextRequest) {
       : "";
 
     let companyWhatsapp = companyWhatsappRaw ? normalizePhone(companyWhatsappRaw) : "";
+    let companyEmail = companyEmailRaw ? (extractEmail(companyEmailRaw) ?? companyEmailRaw.trim().toLowerCase()) : "";
     let companyIndustry = String(companyIndustryRaw ?? "").trim();
     let companyCnpj = digitsOnly(String(companyCnpjRaw ?? "").trim());
     if (companyCnpj && companyCnpj.length !== 14) companyCnpj = "";
@@ -1034,6 +1039,8 @@ export async function GET(req: NextRequest) {
       companyOverrides = JSON.parse(overridesRaw) as any;
     } catch {}
     if (companyOverrides && typeof companyOverrides === "object") {
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyName")) companyName = String(companyOverrides.companyName ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyEmail")) companyEmail = String(companyOverrides.companyEmail ?? "").trim().toLowerCase();
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyWhatsapp")) companyWhatsapp = String(companyOverrides.companyWhatsapp ?? "");
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyIndustry")) companyIndustry = String(companyOverrides.companyIndustry ?? "");
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyCnpj")) companyCnpj = digitsOnly(String(companyOverrides.companyCnpj ?? ""));
@@ -1125,6 +1132,7 @@ export async function GET(req: NextRequest) {
       companyName,
       companyLogoUrl,
       companyCnpj,
+      companyEmail,
       companyWhatsapp,
       companyIndustry,
       role,
@@ -1253,8 +1261,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (
-      canAdminWrite &&
-      (companyName != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null || permissao != null)
+      companyName != null ||
+      companyEmail != null ||
+      companyWhatsRaw != null ||
+      companyIndustry != null ||
+      companyCnpjRaw != null ||
+      companyLogoUrlRaw != null ||
+      (permissao != null && !companyId)
     ) {
       const bucket = "bubble-imports";
       await ensureBucket(supabase, bucket);
@@ -1266,11 +1279,12 @@ export async function POST(req: NextRequest) {
       } catch {}
       const next: any = { ...prev, updatedAt: new Date().toISOString() };
       if (companyName != null) next.companyName = companyName || "";
+      if (companyEmail != null) next.companyEmail = companyEmail.trim().toLowerCase() || "";
       if (companyWhatsRaw != null) next.companyWhatsapp = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) ?? "" : "";
       if (companyIndustry != null) next.companyIndustry = companyIndustry || "";
       if (companyCnpjRaw != null) next.companyCnpj = digitsOnly(companyCnpjRaw);
       if (companyLogoUrlRaw != null) next.companyLogoUrl = companyLogoUrlRaw || "";
-      if (permissao != null) next.role = permissao.toLowerCase().includes("admin") ? "Administrador" : "Colaborador";
+      if (permissao != null && !companyId) next.role = permissao.toLowerCase().includes("admin") ? "Administrador" : "Colaborador";
       await uploadJson(supabase, bucket, `user:${uid}/profile/overrides.json`, next);
     }
 
