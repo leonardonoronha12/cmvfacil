@@ -796,7 +796,7 @@ export async function GET(req: NextRequest) {
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
 
-    if (profileDb?.user_id || companyId) {
+    if (companyId) {
       const { data: companyDb } = companyId
         ? await supabase
             .from("companies")
