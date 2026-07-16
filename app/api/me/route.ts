@@ -1061,6 +1061,19 @@ export async function GET(req: NextRequest) {
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyCnpj")) companyCnpj = digitsOnly(String(companyOverrides.companyCnpj ?? ""));
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyLogoUrl")) companyLogoUrl = String(companyOverrides.companyLogoUrl ?? "");
       if (Object.prototype.hasOwnProperty.call(companyOverrides, "role")) role = String(companyOverrides.role ?? "") === "Administrador" ? "Administrador" : role;
+      const oNome = Object.prototype.hasOwnProperty.call(companyOverrides, "nome") ? String(companyOverrides.nome ?? "").trim() : "";
+      const oSobrenome = Object.prototype.hasOwnProperty.call(companyOverrides, "sobrenome") ? String(companyOverrides.sobrenome ?? "").trim() : "";
+      const oNomeCompleto = Object.prototype.hasOwnProperty.call(companyOverrides, "nomeCompleto")
+        ? String(companyOverrides.nomeCompleto ?? "").trim()
+        : "";
+      const oWhatsapp = Object.prototype.hasOwnProperty.call(companyOverrides, "whatsapp") ? String(companyOverrides.whatsapp ?? "").trim() : "";
+      if (oNome && !nameParts.first) nameParts = { ...nameParts, first: oNome };
+      if (oSobrenome && !nameParts.last) nameParts = { ...nameParts, last: oSobrenome };
+      if ((oNomeCompleto || (oNome && oSobrenome)) && !nameParts.full) {
+        const full = oNomeCompleto || `${oNome} ${oSobrenome}`.replace(/\s+/g, " ").trim();
+        nameParts = { ...nameParts, full };
+      }
+      if (oWhatsapp && !whatsapp) whatsapp = normalizePhone(oWhatsapp) || "";
     }
     const plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
 
@@ -1276,6 +1289,10 @@ export async function POST(req: NextRequest) {
     }
 
     if (
+      nome != null ||
+      sobrenome != null ||
+      nomeCompleto != null ||
+      whatsapp != null ||
       companyName != null ||
       companyEmail != null ||
       companyWhatsRaw != null ||
@@ -1293,6 +1310,10 @@ export async function POST(req: NextRequest) {
         if (parsed && typeof parsed === "object") prev = parsed;
       } catch {}
       const next: any = { ...prev, updatedAt: new Date().toISOString() };
+      if (nome != null) next.nome = nome || "";
+      if (sobrenome != null) next.sobrenome = sobrenome || "";
+      if (nomeCompleto != null) next.nomeCompleto = nomeCompleto || "";
+      if (whatsapp != null) next.whatsapp = whatsapp || "";
       if (companyName != null) next.companyName = companyName || "";
       if (companyEmail != null) next.companyEmail = companyEmail.trim().toLowerCase() || "";
       if (companyWhatsRaw != null) next.companyWhatsapp = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) ?? "" : "";
