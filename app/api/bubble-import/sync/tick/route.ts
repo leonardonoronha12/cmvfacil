@@ -1754,7 +1754,7 @@ export async function POST(req: NextRequest) {
               for (let i = 0; i < allRows.length; i += 500) {
                 const chunk = allRows.slice(i, i + 500);
                 if (!chunk.length) continue;
-                const { error } = await supabase.from("inventario").upsert(chunk as any, { onConflict: "id" });
+                const { error } = await supabase.from("inventario").upsert(chunk as any, { onConflict: "id", ignoreDuplicates: true });
                 if (error) throw new Error(`inventario:${error.message}`);
                 ops += 1;
                 if (ops >= maxOps || Date.now() - startMs >= hardMs) {
