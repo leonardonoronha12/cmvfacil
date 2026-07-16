@@ -878,11 +878,26 @@ export async function GET(req: NextRequest) {
     const bubbleRowNorm = ctx.bubbleRowNorm;
     const usersAllRows = ctx.usersAllRows;
 
-    const nameParts = bubbleRowNorm ? guessUserNameParts(bubbleRowNorm) : { first: "", last: "", full: "" };
+    let nameParts = bubbleRowNorm ? guessUserNameParts(bubbleRowNorm) : { first: "", last: "", full: "" };
+    const profileNome = String((profileDb as any)?.nome ?? "").trim();
+    const profileSobrenome = String((profileDb as any)?.sobrenome ?? "").trim();
+    const profileNomeCompleto = String((profileDb as any)?.nome_completo ?? "").trim();
+    if ((!nameParts.first || !nameParts.last || !nameParts.full) && (profileNome || profileSobrenome || profileNomeCompleto)) {
+      const full = profileNomeCompleto || `${profileNome} ${profileSobrenome}`.replace(/\s+/g, " ").trim();
+      nameParts = {
+        first: nameParts.first || profileNome,
+        last: nameParts.last || profileSobrenome,
+        full: nameParts.full || full,
+      };
+    }
     const whatsappRaw = bubbleRowNorm
       ? pickFirst(bubbleRowNorm, ["whatsapp", "telefone", "celular", "fone", "phone", "phone_number"]) || pickKeyLike(bubbleRowNorm, ["whatsapp", "telefone", "celular", "phone"], ["id", "uuid"])
       : "";
-    const whatsapp = whatsappRaw ? normalizePhone(whatsappRaw) : "";
+    let whatsapp = whatsappRaw ? normalizePhone(whatsappRaw) : "";
+    if (!whatsapp) {
+      const profileWhats = String((profileDb as any)?.whatsapp ?? "").trim();
+      if (profileWhats) whatsapp = normalizePhone(profileWhats) || "";
+    }
     const avatarUrl = bubbleRowNorm ? guessUserAvatar(bubbleRowNorm) : "";
 
     const bubbleUserIdToEmail = new Map<string, string>();
