@@ -1348,7 +1348,7 @@ export default function InventarioClient() {
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
-                            onClick={() => uncountItem(r.id)}
+                            onClick={() => removeItem(r.id)}
                           >
                             <IconTrash />
                           </button>
