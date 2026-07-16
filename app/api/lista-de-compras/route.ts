@@ -171,6 +171,34 @@ function parseDateOnlyLoose(value: unknown) {
   }
   const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw);
   if (isoMatch) return raw;
+  const normalized = raw
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(",", "")
+    .replace(/\s+/g, " ");
+  const monthMap: Record<string, number> = {
+    jan: 1,
+    fev: 2,
+    mar: 3,
+    abr: 4,
+    mai: 5,
+    jun: 6,
+    jul: 7,
+    ago: 8,
+    set: 9,
+    out: 10,
+    nov: 11,
+    dez: 12,
+  };
+  const monthMatch = /^(\d{1,2})\s+([a-z]{3})\.?\s+(\d{4})$/.exec(normalized);
+  if (monthMatch) {
+    const dd = Number(monthMatch[1]);
+    const mm = monthMap[monthMatch[2]] ?? 0;
+    const yyyy = Number(monthMatch[3]);
+    if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) return `${yyyy}-${String(mm).padStart(2, "0")}-${String(dd).padStart(2, "0")}`;
+  }
   const d = new Date(raw);
   if (!Number.isFinite(d.getTime())) return null;
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`;
@@ -301,11 +329,21 @@ export async function GET(req: NextRequest) {
       const legacyRows = ((legacyInventarios as any)?.data ?? []) as any[];
       const findLegacyInventoryRow = (targetDate: string | null) => {
         if (!targetDate) return null;
+        const targetT = Date.parse(targetDate);
+        let bestRow: any = null;
+        let bestT = Number.NEGATIVE_INFINITY;
         for (const r of legacyRows) {
           const d = parseDateOnlyLoose(r?.data);
+          if (!d) continue;
           if (d === targetDate) return r;
+          const t = Date.parse(d);
+          if (!Number.isFinite(targetT) || !Number.isFinite(t)) continue;
+          if (t <= targetT && t > bestT) {
+            bestT = t;
+            bestRow = r;
+          }
         }
-        return null;
+        return bestRow;
       };
       const legacyStartRow = findLegacyInventoryRow(startDate);
       const legacyEndRow = findLegacyInventoryRow(endDate);
