@@ -49,12 +49,29 @@ export default function CadastroEmpresaClient() {
                 logoUrl,
               }),
             });
-            const json = (await res.json().catch(() => null)) as { error?: string; details?: string } | null;
+            const json = (await res.json().catch(() => null)) as { ok?: boolean; company_id?: string; error?: string; details?: string } | null;
             if (!res.ok) {
               setError(json?.details ?? json?.error ?? "Erro ao salvar.");
               return;
             }
             setSuccess(true);
+            try {
+              const checkout = await fetch("/api/billing/checkout", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ plan_key: "pro_monthly" }),
+              });
+              const cj = (await checkout.json().catch(() => null)) as { ok?: boolean; url?: string; error?: string } | null;
+              if (checkout.ok && cj?.ok && cj?.url) {
+                window.location.href = String(cj.url);
+                return;
+              }
+              window.location.href = "/ajustes?tab=planos";
+              return;
+            } catch {
+              window.location.href = "/ajustes?tab=planos";
+              return;
+            }
           } catch {
             setError("Erro ao salvar.");
           } finally {

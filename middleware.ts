@@ -148,7 +148,9 @@ export async function middleware(req: NextRequest) {
     pathname === "/api/health/auth-debug" ||
     pathname === "/api/health/bubble-config" ||
     pathname === "/api/health/bubble-ping" ||
-    pathname.startsWith("/api/bubble-compat/")
+    pathname.startsWith("/api/bubble-compat/") ||
+    pathname.startsWith("/api/billing/") ||
+    pathname === "/api/stripe/webhook"
   ) {
     return NextResponse.next();
   }
@@ -157,7 +159,53 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (await isAuthenticated(req)) return NextResponse.next();
+  if (await isAuthenticated(req)) {
+    if (
+      pathname === "/ajustes" ||
+      pathname.startsWith("/ajustes/") ||
+      pathname === "/api/me" ||
+      pathname.startsWith("/api/billing/") ||
+      pathname === "/api/stripe/webhook"
+    ) {
+      return NextResponse.next();
+    }
+
+    try {
+      const checkUrl = req.nextUrl.clone();
+      checkUrl.pathname = "/api/billing/access";
+      checkUrl.search = "";
+      const cookie = req.headers.get("cookie") ?? "";
+      const authorization = req.headers.get("authorization") ?? "";
+      const res = await fetchWithTimeout(
+        checkUrl.toString(),
+        { method: "GET", headers: { ...(cookie ? { cookie } : {}), ...(authorization ? { authorization } : {}) } },
+        2500,
+      );
+      const data = (await res.json().catch(() => null)) as { access?: { allowed?: boolean } } | null;
+      const allowed = Boolean(data?.access?.allowed);
+      if (allowed) return NextResponse.next();
+
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "subscription_required", access: data?.access ?? null }, { status: 402 });
+      }
+
+      const url = req.nextUrl.clone();
+      url.pathname = "/ajustes";
+      url.searchParams.set("tab", "planos");
+      url.searchParams.set("blocked", "1");
+      return NextResponse.redirect(url);
+    } catch {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "billing_check_failed" }, { status: 503 });
+      }
+      const url = req.nextUrl.clone();
+      url.pathname = "/ajustes";
+      url.searchParams.set("tab", "planos");
+      url.searchParams.set("blocked", "1");
+      url.searchParams.set("reason", "billing_check_failed");
+      return NextResponse.redirect(url);
+    }
+  }
 
   const refreshToken = (req.cookies.get(SUPABASE_RT_COOKIE)?.value ?? "").trim();
   if (refreshToken) {

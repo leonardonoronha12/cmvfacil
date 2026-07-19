@@ -77,8 +77,12 @@ export default function AjustesClient() {
   const [ramo, setRamo] = useState(() => String(readMeFromStore()?.companyIndustry ?? "").trim() || "Hamburgueria");
 
   const [planType, setPlanType] = useState<"PRO Mensal" | "PRO Anual">("PRO Mensal");
-  const [cardLast4, setCardLast4] = useState("8895");
+  const [cardLast4, setCardLast4] = useState("");
   const [planStatus, setPlanStatus] = useState("");
+  const [billingAccess, setBillingAccess] = useState<any | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState("");
+  const [billingWorking, setBillingWorking] = useState(false);
   const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
 
   const [loggingOut, setLoggingOut] = useState(false);
@@ -143,8 +147,56 @@ export default function AjustesClient() {
     apply();
     const unsub = subscribeMe(() => apply());
     void loadMeFromApi().then(() => apply());
+    void (async () => {
+      setBillingLoading(true);
+      setBillingError("");
+      try {
+        const res = await fetch("/api/billing/access", { method: "GET" });
+        const j = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "billing_access_failed"));
+        setBillingAccess(j.access ?? null);
+        const status = String(j?.access?.subscription?.status ?? "").trim();
+        setPlanStatus(status);
+        const plan = String(j?.access?.subscription?.plan ?? "").trim();
+        if (plan === "pro_yearly") setPlanType("PRO Anual");
+        else if (plan === "pro_monthly") setPlanType("PRO Mensal");
+      } catch (err) {
+        setBillingError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setBillingLoading(false);
+      }
+    })();
     return () => unsub();
   }, []);
+
+  useEffect(() => {
+    const qp = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
+    if (!qp) return;
+    void (async () => {
+      if (qp === "cancel") {
+        try {
+          await fetch("/api/billing/access", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ action: "checkout_cancel" }),
+          });
+        } catch {}
+      }
+
+      try {
+        const res = await fetch("/api/billing/access", { method: "GET" });
+        const j = (await res.json().catch(() => null)) as any;
+        if (res.ok && j?.ok) {
+          setBillingAccess(j.access ?? null);
+          const status = String(j?.access?.subscription?.status ?? "").trim();
+          setPlanStatus(status);
+          const plan = String(j?.access?.subscription?.plan ?? "").trim();
+          if (plan === "pro_yearly") setPlanType("PRO Anual");
+          else if (plan === "pro_monthly") setPlanType("PRO Mensal");
+        }
+      } catch {}
+    })();
+  }, [searchParams]);
 
   async function uploadCompanyLogo(file: File) {
     if (savingCompany) return;
@@ -170,6 +222,79 @@ export default function AjustesClient() {
       setCompanySaveError(err instanceof Error ? err.message : String(err));
     } finally {
       setSavingCompany(false);
+    }
+  }
+
+  const blockedParam = String(searchParams.get("blocked") ?? "").trim() === "1";
+  const accessAllowed = billingAccess ? Boolean(billingAccess.allowed) : true;
+  const accessReason = String(billingAccess?.reason ?? "").trim();
+  const subStatus = String(billingAccess?.subscription?.status ?? "").trim();
+  const subPlan = String(billingAccess?.subscription?.plan ?? "").trim();
+  const trialEndsAt = String(billingAccess?.trial?.endsAt ?? "").trim();
+  const trialDays = typeof billingAccess?.trial?.daysRemaining === "number" ? billingAccess.trial.daysRemaining : null;
+  const periodEnd = String(billingAccess?.subscription?.currentPeriodEnd ?? "").trim();
+  const cancelAtPeriodEnd = Boolean(billingAccess?.subscription?.cancelAtPeriodEnd);
+
+  const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
+
+  function statusLabel(raw: string) {
+    const s = raw.trim().toLowerCase();
+    if (!s) return "—";
+    if (s === "trial_internal") return "Teste";
+    if (s === "trialing") return "Trial";
+    if (s === "active") return "Ativa";
+    if (s === "past_due") return "Pagamento pendente";
+    if (s === "canceled" || s === "cancelled") return "Cancelada";
+    if (s === "incomplete") return "Incompleta";
+    if (s === "incomplete_expired") return "Expirada";
+    if (s === "unpaid") return "Inadimplente";
+    return raw;
+  }
+
+  async function openPortal() {
+    if (billingWorking) return;
+    setBillingWorking(true);
+    setBillingError("");
+    try {
+      const res = await fetch("/api/billing/portal", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "portal_failed"));
+      window.location.href = String(j.url);
+    } catch (err) {
+      setBillingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBillingWorking(false);
+    }
+  }
+
+  async function startCheckout(planKey: "pro_monthly" | "pro_yearly") {
+    if (billingWorking) return;
+    setBillingWorking(true);
+    setBillingError("");
+    try {
+      const res = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ plan_key: planKey }),
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "checkout_failed"));
+      window.location.href = String(j.url);
+    } catch (err) {
+      setBillingError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBillingWorking(false);
+    }
+  }
+
+  async function doLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      clearMeStore();
+      window.location.href = "/login";
     }
   }
 
@@ -289,14 +414,7 @@ export default function AjustesClient() {
                       className={styles.btnDanger}
                       disabled={loggingOut}
                       onClick={async () => {
-                        if (loggingOut) return;
-                        setLoggingOut(true);
-                        try {
-                          await fetch("/api/auth/logout", { method: "POST" });
-                        } finally {
-                          clearMeStore();
-                          window.location.href = "/login";
-                        }
+                        await doLogout();
                       }}
                     >
                       {loggingOut ? "Saindo…" : "Logout"}
@@ -571,23 +689,52 @@ export default function AjustesClient() {
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Plano</div>
                       <div className={styles.planMiniValue}>{planType}</div>
-                      <button type="button" className={styles.planMiniLink} disabled>
-                        Alterar
+                      <button
+                        type="button"
+                        className={styles.planMiniLink}
+                        disabled={billingLoading || billingWorking || !subStatus || subStatus.toLowerCase() === "trial_internal"}
+                        onClick={async () => openPortal()}
+                      >
+                        Gerenciar
                       </button>
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Status</div>
-                      <div className={styles.planMiniValue}>{planStatus || "—"}</div>
+                      <div className={styles.planMiniValue}>{statusLabel(planStatus) || "—"}</div>
                       <div className={styles.planMiniMuted}>Status da assinatura</div>
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Cartão</div>
                       <div className={styles.planMiniValue}>{cardLast4 ? `**** **** **** ${cardLast4}` : "—"}</div>
-                      <button type="button" className={styles.planMiniLink} disabled>
+                      <button
+                        type="button"
+                        className={styles.planMiniLink}
+                        disabled={billingLoading || billingWorking || !subStatus || subStatus.toLowerCase() === "trial_internal"}
+                        onClick={async () => openPortal()}
+                      >
                         Alterar
                       </button>
                     </div>
                   </div>
+
+                  {billingLoading ? (
+                    <div className={styles.planMiniMuted} style={{ marginTop: 10 }}>
+                      Carregando assinatura…
+                    </div>
+                  ) : null}
+                  {billingError ? (
+                    <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{billingError}</div>
+                  ) : null}
+                  {trialEndsAt ? (
+                    <div className={styles.planMiniMuted} style={{ marginTop: 10 }}>
+                      Trial interno até {new Date(trialEndsAt).toLocaleDateString("pt-BR")} {typeof trialDays === "number" ? `(${trialDays} dias restantes)` : ""}
+                    </div>
+                  ) : null}
+                  {periodEnd ? (
+                    <div className={styles.planMiniMuted} style={{ marginTop: 6 }}>
+                      Próximo ciclo até {new Date(periodEnd).toLocaleDateString("pt-BR")} {cancelAtPeriodEnd ? "(cancelamento agendado)" : ""}
+                    </div>
+                  ) : null}
 
                   <div className={styles.plansGrid}>
                     <div className={styles.planCard}>
@@ -599,8 +746,16 @@ export default function AjustesClient() {
                         </div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
                       </div>
-                      <button type="button" className={styles.planSelectBtn} disabled>
-                        Selecionar Plano
+                      <button
+                        type="button"
+                        className={styles.planSelectBtn}
+                        disabled={billingLoading || billingWorking || (subPlan === "pro_monthly" && Boolean(subStatus))}
+                        onClick={async () => {
+                          if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
+                          else await startCheckout("pro_monthly");
+                        }}
+                      >
+                        {subPlan === "pro_monthly" && subStatus ? "Plano Atual" : subStatus && subStatus.toLowerCase() !== "trial_internal" ? "Alterar no Portal" : "Assinar Mensal"}
                       </button>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
@@ -623,8 +778,16 @@ export default function AjustesClient() {
                         </div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
                       </div>
-                      <button type="button" className={styles.planSelectBtn} disabled>
-                        Selecionar Plano
+                      <button
+                        type="button"
+                        className={styles.planSelectBtn}
+                        disabled={billingLoading || billingWorking || (subPlan === "pro_yearly" && Boolean(subStatus))}
+                        onClick={async () => {
+                          if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
+                          else await startCheckout("pro_yearly");
+                        }}
+                      >
+                        {subPlan === "pro_yearly" && subStatus ? "Plano Atual" : subStatus && subStatus.toLowerCase() !== "trial_internal" ? "Alterar no Portal" : "Assinar Anual"}
                       </button>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
@@ -641,6 +804,27 @@ export default function AjustesClient() {
           </div>
         </div>
       </main>
+      {showBlocked ? (
+        <div className={styles.blockedOverlay}>
+          <div className={styles.blockedCard}>
+            <div className={styles.blockedTitle}>Assinatura necessária</div>
+            <div className={styles.blockedText}>
+              Seu período gratuito terminou. Assine o Plano PRO para continuar utilizando todas as funções do CMV Fácil.
+            </div>
+            <div className={styles.blockedActions}>
+              <button type="button" className={styles.btnPrimary} disabled={billingWorking} onClick={async () => startCheckout("pro_monthly")}>
+                Assinar por R$ 97/mês
+              </button>
+              <button type="button" className={styles.btnGhost} disabled={billingWorking} onClick={async () => startCheckout("pro_yearly")}>
+                Ver plano anual
+              </button>
+              <button type="button" className={styles.btnDanger} disabled={loggingOut} onClick={async () => doLogout()}>
+                Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
