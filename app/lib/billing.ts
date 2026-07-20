@@ -100,6 +100,10 @@ function toIsoOrNull(value: unknown) {
   return s ? s : null;
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 export async function requireAuthUserId(req: NextRequest) {
   const { userId } = getUserIdFromRequest(req);
   if (!userId) throw new Error("unauthorized");
@@ -121,7 +125,11 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
     .eq("user_id", userId)
     .limit(50);
   if (memberError) throw new Error(memberError.message);
-  const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+  let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+  if (!companyId && isUuid(userId)) {
+    const fallback = await supabase.from("companies").select("id").eq("created_by_user_id", userId).limit(1).maybeSingle();
+    if (!fallback.error) companyId = String((fallback.data as any)?.id ?? "").trim();
+  }
   if (!companyId) return { companyId: null as string | null, company: null as BillingCompany | null };
 
   const selectFull =
