@@ -195,16 +195,6 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     };
   }
 
-  if (hasTrial && trialEndsMs > nowMs) {
-    return {
-      allowed: true,
-      reason: "trial_internal",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
-      subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
-    };
-  }
-
   const statusLower = String(status ?? "").toLowerCase();
   if (cancelAtPeriodEnd && periodActive) {
     return {
@@ -237,6 +227,16 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     return {
       allowed: true,
       reason: "past_due",
+      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
+      checkout: { status: checkoutStatus, url: checkoutUrl },
+    };
+  }
+
+  if (hasTrial && trialEndsMs > nowMs) {
+    return {
+      allowed: true,
+      reason: "trial_internal",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl },

@@ -195,6 +195,13 @@ export default function AjustesClient() {
           else if (plan === "pro_monthly") setPlanType("PRO Mensal");
         }
       } catch {}
+
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("checkout");
+        const nextSearch = url.searchParams.toString();
+        window.history.replaceState({}, "", `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}`);
+      } catch {}
     })();
   }, [searchParams]);
 
