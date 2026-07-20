@@ -101,6 +101,15 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+function safeNextPath(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "/") return "/dashboard";
+  if (!raw.startsWith("/")) return "/dashboard";
+  if (raw.startsWith("//")) return "/dashboard";
+  if (raw.includes("://")) return "/dashboard";
+  return raw;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isPublicFile = /\.[^/]+$/.test(pathname);
@@ -134,6 +143,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/cadastro-usuario/") ||
     pathname === "/cadastro-empresa" ||
     pathname.startsWith("/cadastro-empresa/") ||
+    pathname === "/billing/return" ||
+    pathname.startsWith("/billing/return/") ||
     pathname === "/resetar-senha" ||
     pathname.startsWith("/resetar-senha/") ||
     pathname === "/restaurar-senha" ||
@@ -150,6 +161,7 @@ export async function middleware(req: NextRequest) {
     pathname === "/api/health/bubble-ping" ||
     pathname.startsWith("/api/bubble-compat/") ||
     pathname.startsWith("/api/billing/") ||
+    pathname.startsWith("/api/cron/") ||
     pathname === "/api/stripe/webhook"
   ) {
     return NextResponse.next();
@@ -256,7 +268,8 @@ export async function middleware(req: NextRequest) {
 
   const url = req.nextUrl.clone();
   url.pathname = "/login";
-  url.searchParams.set("next", pathname);
+  url.search = "";
+  url.searchParams.set("next", safeNextPath(`${pathname}${req.nextUrl.search}`));
   return NextResponse.redirect(url);
 }
 

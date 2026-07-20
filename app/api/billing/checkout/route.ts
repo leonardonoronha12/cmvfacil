@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOrReuseCheckoutUrl, getBillingAccessForCurrentCompany, isSubscriptionBlockingNewCheckout, type PlanKey } from "../../../lib/billing";
+import {
+  createOrReuseCheckoutUrl,
+  getBillingAccessForCurrentCompany,
+  isSubscriptionBlockingNewCheckout,
+  type CheckoutOrigin,
+  type PlanKey,
+} from "../../../lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +25,13 @@ function parsePlanKey(value: unknown): PlanKey | null {
   return null;
 }
 
+function parseOrigin(value: unknown): CheckoutOrigin | null {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (v === "signup") return "signup";
+  if (v === "settings") return "settings";
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     let body: unknown;
@@ -31,6 +44,8 @@ export async function POST(req: NextRequest) {
     const planKey = parsePlanKey((body as any)?.plan_key ?? (body as any)?.planKey ?? (body as any)?.plan);
     if (!planKey) return json({ ok: false, error: "invalid_plan" }, { status: 400 });
 
+    const origin = parseOrigin((body as any)?.origin) ?? "settings";
+
     const { userId, supabase, companyId, company } = await getBillingAccessForCurrentCompany(req);
     if (!companyId || !company) return json({ ok: false, error: "company_not_found" }, { status: 400 });
 
@@ -38,7 +53,7 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: "subscription_already_active" }, { status: 409 });
     }
 
-    const url = await createOrReuseCheckoutUrl({ supabase, company, companyId, userId, planKey });
+    const url = await createOrReuseCheckoutUrl({ supabase, company, companyId, userId, planKey, origin });
     return json({ ok: true, url }, { status: 200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

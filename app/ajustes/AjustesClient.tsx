@@ -234,6 +234,10 @@ export default function AjustesClient() {
   const trialDays = typeof billingAccess?.trial?.daysRemaining === "number" ? billingAccess.trial.daysRemaining : null;
   const periodEnd = String(billingAccess?.subscription?.currentPeriodEnd ?? "").trim();
   const cancelAtPeriodEnd = Boolean(billingAccess?.subscription?.cancelAtPeriodEnd);
+  const checkoutParam = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
+  const checkoutStatus = String(billingAccess?.checkout?.status ?? "").trim();
+  const checkoutUrl = String(billingAccess?.checkout?.url ?? "").trim();
+  const checkoutOpen = checkoutStatus.trim().toLowerCase() === "open" && Boolean(checkoutUrl);
 
   const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
 
@@ -259,7 +263,7 @@ export default function AjustesClient() {
       const res = await fetch("/api/billing/portal", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "portal_failed"));
-      window.location.href = String(j.url);
+      window.location.assign(String(j.url));
     } catch (err) {
       setBillingError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -267,19 +271,43 @@ export default function AjustesClient() {
     }
   }
 
+  async function reloadBillingAccess() {
+    setBillingLoading(true);
+    setBillingError("");
+    try {
+      const res = await fetch("/api/billing/access", { method: "GET" });
+      const j = (await res.json().catch(() => null)) as any;
+      if (res.ok && j?.ok) {
+        setBillingAccess(j.access ?? null);
+        const status = String(j?.access?.subscription?.status ?? "").trim();
+        setPlanStatus(status);
+        const plan = String(j?.access?.subscription?.plan ?? "").trim();
+        if (plan === "pro_yearly") setPlanType("PRO Anual");
+        else if (plan === "pro_monthly") setPlanType("PRO Mensal");
+      }
+    } catch {}
+    setBillingLoading(false);
+  }
+
   async function startCheckout(planKey: "pro_monthly" | "pro_yearly") {
     if (billingWorking) return;
     setBillingWorking(true);
     setBillingError("");
     try {
+      const existingUrl = String(billingAccess?.checkout?.url ?? "").trim();
+      const existingStatus = String(billingAccess?.checkout?.status ?? "").trim().toLowerCase();
+      if (existingUrl && existingStatus === "open") {
+        window.location.assign(existingUrl);
+        return;
+      }
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan_key: planKey }),
+        body: JSON.stringify({ plan_key: planKey, origin: "settings" }),
       });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "checkout_failed"));
-      window.location.href = String(j.url);
+      window.location.assign(String(j.url));
     } catch (err) {
       setBillingError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -735,6 +763,39 @@ export default function AjustesClient() {
                       Próximo ciclo até {new Date(periodEnd).toLocaleDateString("pt-BR")} {cancelAtPeriodEnd ? "(cancelamento agendado)" : ""}
                     </div>
                   ) : null}
+                  {checkoutParam === "cancel" ? (
+                    <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
+                      Pagamento cancelado. Seu período de avaliação continua ativo.
+                    </div>
+                  ) : null}
+                  {checkoutParam === "success" && subStatus.trim().toLowerCase() === "active" ? (
+                    <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>Plano PRO ativado com sucesso.</div>
+                  ) : null}
+                  {checkoutParam === "processing" || (checkoutParam === "success" && subStatus.trim().toLowerCase() !== "active") ? (
+                    <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
+                      Seu pagamento foi recebido. Estamos ativando sua assinatura.
+                      <div style={{ marginTop: 8 }}>
+                        <button type="button" className={styles.planMiniLink} disabled={billingLoading || billingWorking} onClick={() => void reloadBillingAccess()}>
+                          Verificar novamente
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                  {checkoutOpen ? (
+                    <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
+                      Pagamento iniciado.
+                      <div style={{ marginTop: 8 }}>
+                        <button
+                          type="button"
+                          className={styles.planMiniLink}
+                          disabled={billingLoading || billingWorking || !checkoutUrl}
+                          onClick={() => window.location.assign(checkoutUrl)}
+                        >
+                          Continuar pagamento
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
 
                   <div className={styles.plansGrid}>
                     <div className={styles.planCard}>
@@ -749,7 +810,7 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || (subPlan === "pro_monthly" && Boolean(subStatus))}
+                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_monthly" && Boolean(subStatus))}
                         onClick={async () => {
                           if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
                           else await startCheckout("pro_monthly");
@@ -781,7 +842,7 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || (subPlan === "pro_yearly" && Boolean(subStatus))}
+                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_yearly" && Boolean(subStatus))}
                         onClick={async () => {
                           if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
                           else await startCheckout("pro_yearly");

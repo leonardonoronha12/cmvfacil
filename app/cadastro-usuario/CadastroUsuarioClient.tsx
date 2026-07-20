@@ -66,6 +66,19 @@ export default function CadastroUsuarioClient() {
         message: required === false ? "Você já pode fazer login." : "Verifique seu email para confirmar o cadastro.",
         tone: "success",
       });
+      if (required === false) {
+        try {
+          sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+        } catch {}
+        try {
+          await fetch("/api/auth/supabase-login", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ email, password, remember: true }),
+          });
+        } catch {}
+        router.push("/cadastro-empresa");
+      }
     } catch {
       setError("Erro ao criar conta.");
     } finally {

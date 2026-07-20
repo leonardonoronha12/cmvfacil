@@ -1080,6 +1080,20 @@ export default function DashboardClient() {
     }, durationMs);
   }
 
+  useEffect(() => {
+    const checkout = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
+    if (!checkout) return;
+    if (checkout === "success") showToast("Plano PRO ativado com sucesso.", "success", 8000);
+    else if (checkout === "cancel") showToast("Pagamento cancelado. Seu período de avaliação continua ativo.", "error", 9000);
+    else if (checkout === "processing") showToast("Pagamento recebido. Aguardando confirmação.", "success", 9000);
+    else if (checkout === "error") showToast("Não foi possível iniciar a assinatura. Você pode tentar novamente em Ajustes.", "error", 10000);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    } catch {}
+  }, [searchParams]);
+
   async function loadEntradasLegacyFallback() {
     return [];
   }

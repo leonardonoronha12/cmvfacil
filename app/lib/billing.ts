@@ -5,6 +5,7 @@ import { getUserIdFromRequest } from "./requestUserId";
 import { getAppUrl, getStripe } from "./stripeServer";
 
 export type PlanKey = "pro_monthly" | "pro_yearly";
+export type CheckoutOrigin = "signup" | "settings";
 
 export const LIVE_PRICES: Record<PlanKey, string> = {
   pro_monthly: "price_1RKM5AH2QavNEPHFhH1Ysixv",
@@ -306,8 +307,9 @@ export async function createOrReuseCheckoutUrl(params: {
   companyId: string;
   userId: string;
   planKey: PlanKey;
+  origin: CheckoutOrigin;
 }) {
-  const { supabase, company, companyId, userId, planKey } = params;
+  const { supabase, company, companyId, userId, planKey, origin } = params;
 
   const checkoutUrl = String(company.checkout_url ?? "").trim();
   const startedAt = String(company.checkout_started_at ?? "").trim();
@@ -322,8 +324,9 @@ export async function createOrReuseCheckoutUrl(params: {
   const priceId = getAllowedPriceId(planKey);
 
   const appUrl = getAppUrl();
-  const successUrl = `${appUrl}/ajustes?tab=planos&checkout=success&session_id={CHECKOUT_SESSION_ID}`;
-  const cancelUrl = `${appUrl}/ajustes?tab=planos&checkout=cancel`;
+  const returnUrl = `${appUrl}/billing/return`;
+  const successUrl = `${returnUrl}?checkout=success&origin=${origin}&session_id={CHECKOUT_SESSION_ID}`;
+  const cancelUrl = `${returnUrl}?checkout=cancel&origin=${origin}`;
 
   const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
   const idempotencyKey = `checkout:create:${companyId}:${planKey}:${bucket}`;
@@ -336,9 +339,9 @@ export async function createOrReuseCheckoutUrl(params: {
       allow_promotion_codes: false,
       success_url: successUrl,
       cancel_url: cancelUrl,
-      metadata: { company_id: companyId, user_id: userId, plan_key: planKey, environment: "live" },
+      metadata: { company_id: companyId, user_id: userId, plan_key: planKey, origin, environment: "live" },
       subscription_data: {
-        metadata: { company_id: companyId, user_id: userId, plan_key: planKey, environment: "live" },
+        metadata: { company_id: companyId, user_id: userId, plan_key: planKey, origin, environment: "live" },
       },
     },
     { idempotencyKey },

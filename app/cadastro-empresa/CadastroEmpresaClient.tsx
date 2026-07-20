@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import LoadingSpinner from "../components/LoadingSpinner";
 
 export default function CadastroEmpresaClient() {
   const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
@@ -16,6 +17,41 @@ export default function CadastroEmpresaClient() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [checkoutPending, setCheckoutPending] = useState(false);
+  const didRedirectRef = useRef(false);
+
+  useEffect(() => {
+    const pending = (() => {
+      try {
+        return sessionStorage.getItem("cmv_onboarding_checkout_pending") === "1";
+      } catch {
+        return false;
+      }
+    })();
+    if (pending) setCheckoutPending(true);
+  }, []);
+
+  if (checkoutPending) {
+    return (
+      <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ maxWidth: 520, width: "100%", textAlign: "center" }}>
+          <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+            <LoadingSpinner size={18} />
+            <span>
+              Cadastro concluído.
+              <br />
+              Preparando sua assinatura…
+            </span>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <a className="cmv-company-submit" href="/ajustes?tab=planos" style={{ display: "inline-block", textDecoration: "none" }}>
+              Ir para Ajustes
+            </a>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main className="cmv-company">
@@ -56,22 +92,35 @@ export default function CadastroEmpresaClient() {
             }
             setSuccess(true);
             try {
+              try {
+                sessionStorage.setItem("cmv_onboarding_checkout_pending", "1");
+              } catch {}
+              setCheckoutPending(true);
               const checkout = await fetch("/api/billing/checkout", {
                 method: "POST",
                 headers: { "content-type": "application/json" },
-                body: JSON.stringify({ plan_key: "pro_monthly" }),
+                body: JSON.stringify({ plan_key: "pro_monthly", origin: "signup" }),
               });
               const cj = (await checkout.json().catch(() => null)) as { ok?: boolean; url?: string; error?: string } | null;
               if (checkout.ok && cj?.ok && cj?.url) {
-                window.location.href = String(cj.url);
+                try {
+                  sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+                } catch {}
+                if (!didRedirectRef.current) {
+                  didRedirectRef.current = true;
+                  window.location.assign(String(cj.url));
+                }
                 return;
               }
-              window.location.href = "/ajustes?tab=planos";
-              return;
-            } catch {
-              window.location.href = "/ajustes?tab=planos";
-              return;
+            } catch {}
+            try {
+              sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+            } catch {}
+            if (!didRedirectRef.current) {
+              didRedirectRef.current = true;
+              window.location.assign("/dashboard?checkout=error");
             }
+            return;
           } catch {
             setError("Erro ao salvar.");
           } finally {

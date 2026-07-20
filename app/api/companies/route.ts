@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../lib/supabaseAdmin";
+import { getUserIdFromRequest } from "../../lib/requestUserId";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -26,7 +27,7 @@ function normalizePhoneBR(value: string) {
   return `+55${d}`;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   let body: unknown;
   try {
     body = (await req.json()) as unknown;
@@ -75,6 +76,23 @@ export async function POST(req: Request) {
 
   if (error) {
     return json({ error: "supabase_error", details: error.message }, { status: 500 });
+  }
+
+  const { userId } = getUserIdFromRequest(req);
+  const uid = String(userId ?? "").trim();
+  if (uid) {
+    const up = await supabase.from("company_members").upsert(
+      {
+        company_id: companyId,
+        user_id: uid,
+        role: "owner",
+        permission_level: "3",
+      } as any,
+      { onConflict: "company_id,user_id" },
+    );
+    if (up.error) {
+      return json({ error: "company_member_failed", details: up.error.message }, { status: 500 });
+    }
   }
 
   return json({ ok: true, company_id: companyId }, { status: 200 });

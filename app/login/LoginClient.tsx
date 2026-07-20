@@ -10,9 +10,12 @@ export default function LoginClient() {
   const router = useRouter();
   const params = useSearchParams();
   const nextPath = useMemo(() => {
-    const next = (params.get("next") ?? "").trim();
-    if (!next || next === "/") return "/dashboard";
-    return next;
+    const raw = (params.get("next") ?? "").trim();
+    if (!raw || raw === "/") return "/dashboard";
+    if (!raw.startsWith("/")) return "/dashboard";
+    if (raw.startsWith("//")) return "/dashboard";
+    if (raw.includes("://")) return "/dashboard";
+    return raw;
   }, [params]);
   const loginBgUrl = useMemo(() => (process.env.NEXT_PUBLIC_LOGIN_BG_URL ?? "").trim(), []);
 

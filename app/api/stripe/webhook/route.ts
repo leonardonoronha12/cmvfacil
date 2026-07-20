@@ -40,6 +40,10 @@ function isStripeObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isValidE164(value: string) {
+  return /^\+\d{10,15}$/.test(value.trim());
+}
+
 function extractCustomerId(event: Stripe.Event): string | null {
   const obj = event.data?.object as any;
   if (!obj || typeof obj !== "object") return null;
@@ -127,13 +131,17 @@ async function maybeEnqueueCheckoutAbandoned(params: {
   supabase: ReturnType<typeof getSupabaseAdmin>;
   companyId: string;
   customerId: string;
+  userId: string | null;
+  checkoutSessionId: string | null;
+  planKey: string | null;
+  origin: string | null;
+  trialEndsAt: string | null;
   checkoutUrl: string | null;
 }) {
   const enabled = String(process.env.BILLING_WHATSAPP_AUTOMATION_ENABLED ?? "").trim().toLowerCase() === "true";
   if (!enabled) return;
 
-  const { supabase, companyId, customerId, checkoutUrl } = params;
-  if (!checkoutUrl) return;
+  const { supabase, companyId, customerId, userId, checkoutSessionId, planKey, origin, trialEndsAt, checkoutUrl } = params;
   const companyRes = await supabase
     .from("companies")
     .select("id,fantasy_name,legal_name,email,phone_e164,whatsapp_automation_triggered_at,whatsapp_automation_status,subscription_status")
@@ -149,6 +157,15 @@ async function maybeEnqueueCheckoutAbandoned(params: {
 
   const phone = String((companyRes.data as any)?.phone_e164 ?? "").trim();
   if (!phone) return;
+  if (!isValidE164(phone)) {
+    const patch: any = {
+      whatsapp_automation_triggered_at: new Date().toISOString(),
+      whatsapp_automation_status: "skipped_invalid_phone",
+      subscription_updated_at: new Date().toISOString(),
+    };
+    await supabase.from("companies").update(patch).eq("id", companyId);
+    return;
+  }
 
   const email = String((companyRes.data as any)?.email ?? "").trim() || null;
   const name = String((companyRes.data as any)?.fantasy_name ?? (companyRes.data as any)?.legal_name ?? "").trim();
@@ -196,8 +213,16 @@ async function maybeEnqueueCheckoutAbandoned(params: {
     },
     raw: {
       company_id: companyId,
+      user_id: userId,
+      name,
+      phone_e164: phone,
       stripe_customer_id: customerId,
+      checkout_session_id: checkoutSessionId,
       checkout_url: checkoutUrl,
+      cta_url: checkoutUrl || "/ajustes?tab=planos",
+      plan_key: planKey,
+      origin,
+      trial_ends_at: trialEndsAt,
       event_type: "billing.checkout_abandoned",
     },
   };
@@ -289,16 +314,33 @@ export async function POST(req: NextRequest) {
 
   try {
     if (type === "checkout.session.expired") {
+      const session = event.data.object as any;
+      const sessionId = asString(session?.id);
+      const origin = asString(session?.metadata?.origin);
+      const planKey = asString(session?.metadata?.plan_key);
+      const userId = asString(session?.metadata?.user_id);
       const patch: any = {
         stripe_customer_id: customerId,
+        checkout_url: null,
         checkout_status: "expired",
         checkout_abandoned_at: new Date().toISOString(),
         subscription_updated_at: new Date().toISOString(),
       };
+      if (sessionId) patch.stripe_checkout_session_id = sessionId;
       const r = await supabase.from("companies").update(patch).eq("id", company.id);
       if (r.error) throw new Error(r.error.message);
       await bumpEventMarker({ supabase, companyId: company.id, event });
-      await maybeEnqueueCheckoutAbandoned({ supabase, companyId: company.id, customerId, checkoutUrl: asString(company.checkout_url) });
+      await maybeEnqueueCheckoutAbandoned({
+        supabase,
+        companyId: company.id,
+        customerId,
+        userId,
+        checkoutSessionId: sessionId,
+        planKey,
+        origin,
+        trialEndsAt: asString(company.trial_ends_at),
+        checkoutUrl: null,
+      });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });
     }
