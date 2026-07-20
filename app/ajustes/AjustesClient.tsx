@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import styles from "./ajustes.module.css";
@@ -51,6 +51,7 @@ type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios" | "
 
 export default function AjustesClient() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const tab = useMemo(() => {
     const raw = String(searchParams.get("tab") ?? "").trim().toLowerCase();
     if (raw === "alterar-senha") return "alterar-senha";
@@ -171,7 +172,8 @@ export default function AjustesClient() {
 
   useEffect(() => {
     const qp = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
-    if (!qp) return;
+    const hasReturnParams = Boolean(qp || searchParams.get("session_id") || searchParams.get("origin"));
+    if (!hasReturnParams) return;
     void (async () => {
       if (qp === "cancel") {
         try {
@@ -197,13 +199,10 @@ export default function AjustesClient() {
       } catch {}
 
       try {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("checkout");
-        const nextSearch = url.searchParams.toString();
-        window.history.replaceState({}, "", `${url.pathname}${nextSearch ? `?${nextSearch}` : ""}`);
+        router.replace("/ajustes?tab=planos");
       } catch {}
     })();
-  }, [searchParams]);
+  }, [router, searchParams]);
 
   async function uploadCompanyLogo(file: File) {
     if (savingCompany) return;

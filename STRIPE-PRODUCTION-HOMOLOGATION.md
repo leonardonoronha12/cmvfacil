@@ -220,3 +220,25 @@ O Stripe está homologado para produção?
 - expired;
 - automação de abandono ponta a ponta;
 - troca mensal/anual no Customer Portal.
+
+## Go Live
+
+Status: APROVADO
+
+## Bugs corrigidos
+
+- checkout=processing preso na URL
+- computeBillingAccess priorizando trial_internal sobre past_due
+
+## Riscos residuais
+
+- checkout.session.expired
+- automação de abandono
+- monitoramento dos primeiros clientes
+
+## Próximos passos
+
+- acompanhar primeiros pagamentos
+- acompanhar webhooks
+- acompanhar erros Stripe
+- acompanhar billing/access
