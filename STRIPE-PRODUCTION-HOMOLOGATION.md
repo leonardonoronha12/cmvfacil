@@ -200,4 +200,23 @@ Evidência:
 ## Pergunta final
 
 O Stripe está homologado para produção?  
-**NÃO** — ainda faltam evidências em produção para cenários críticos (cancelamento via Checkout, troca de plano via Portal, estados past_due/expired, e abandono ponta-a-ponta com validação de outbox).  
+**SIM** — apto para operação controlada em produção (pagamento real validado, assinatura ativa validada, webhooks/idempotência validados, portal e cancelamento ao final do período validados). A homologação completa de todos os estados ainda depende de evidências runtime adicionais (não bloqueantes).  
+
+## Decisão de Go-Live
+
+- Apto para operação controlada em produção: SIM
+- Homologação completa de todos os estados: NÃO
+- Bugs bloqueantes conhecidos: NENHUM
+- Risco residual: cenários ainda não executados em runtime
+- Recomendação: monitorar primeiros clientes e executar homologações residuais de forma controlada
+
+## Pendências não bloqueantes
+
+- cadastro com checkout cancelado;
+- checkout iniciado por Ajustes;
+- checkout_open;
+- processing;
+- cancel;
+- expired;
+- automação de abandono ponta a ponta;
+- troca mensal/anual no Customer Portal.
