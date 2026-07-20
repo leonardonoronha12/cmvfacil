@@ -8,7 +8,7 @@
   "crons": [
     {
       "path": "/api/cron/billing-checkout-abandonment",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 4 * * *"
     }
   ]
 }
