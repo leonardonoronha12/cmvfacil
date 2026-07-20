@@ -2,7 +2,7 @@
 
 Data: 2026-07-20  
 Ambiente: Production (Vercel + Supabase + Stripe Live)  
-Branch/commit em produção: `billing/stripe-live` / `fc800c411abaebb9f9a881001c5f41f20dc086da`  
+Branch/commit em produção: `billing/stripe-live` / `b97dc14b1dadcf11010fb30905c462c672e4ae1a`  
 Fonte de verdade de acesso: Webhooks + Banco + `GET /api/billing/access`
 
 ## Regras desta fase
@@ -103,6 +103,7 @@ Evidências (sem cobrança nova, sem cancelamento imediato):
   - `cancel_at = current_period_end` (sem encerrar imediatamente)
 - Webhook:
   - `customer.subscription.updated` recebido e marcado como `processed` em `stripe_webhook_events`
+  - Evidência: `evt_1TvLsEH2QavNEPHFHr3h3CEr` (`stripe_created_at=2026-07-20T18:25:06+00:00`)
 - Banco (`companies`, company_id de teste):
   - `cancel_at_period_end=true`
   - `current_period_end` preenchido/preservado
@@ -199,4 +200,4 @@ Evidência:
 ## Pergunta final
 
 O Stripe está homologado para produção?  
-**NÃO** — faltam evidências em produção para cenários críticos (cancelamento, portal, cancel_at_period_end, past_due, expirado e automação ponta-a-ponta).  
+**NÃO** — ainda faltam evidências em produção para cenários críticos (cancelamento via Checkout, troca de plano via Portal, estados past_due/expired, e abandono ponta-a-ponta com validação de outbox).  
