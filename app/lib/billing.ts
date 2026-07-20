@@ -371,8 +371,8 @@ export async function updateCompanyFromSubscription(params: {
   subscription: Stripe.Subscription;
 }) {
   const { supabase, customerId, subscription } = params;
+  const item = subscription.items?.data?.[0] as any;
   const priceId = (() => {
-    const item = subscription.items?.data?.[0];
     return String(item?.price?.id ?? "").trim() || null;
   })();
   const planKey = planKeyFromPriceId(priceId);
@@ -387,7 +387,13 @@ export async function updateCompanyFromSubscription(params: {
   if (!companyId) return;
   const existingCpeIso = String((existing.data as any)?.current_period_end ?? "").trim() || null;
   const existingCpeMs = existingCpeIso ? Date.parse(existingCpeIso) : NaN;
-  const newCpeIso = subscription.current_period_end ? new Date(subscription.current_period_end * 1000).toISOString() : null;
+  const cpe = typeof (subscription as any)?.current_period_end === "number" ? (subscription as any).current_period_end : null;
+  const cps = typeof (subscription as any)?.current_period_start === "number" ? (subscription as any).current_period_start : null;
+  const fallbackCpe = typeof item?.current_period_end === "number" ? item.current_period_end : null;
+  const fallbackCps = typeof item?.current_period_start === "number" ? item.current_period_start : null;
+  const chosenCpe = cpe ?? fallbackCpe;
+  const chosenCps = cps ?? fallbackCps;
+  const newCpeIso = chosenCpe ? new Date(chosenCpe * 1000).toISOString() : null;
   const newCpeMs = newCpeIso ? Date.parse(newCpeIso) : NaN;
   if (Number.isFinite(existingCpeMs) && Number.isFinite(newCpeMs) && newCpeMs < existingCpeMs) return;
 
@@ -398,7 +404,7 @@ export async function updateCompanyFromSubscription(params: {
     subscription_plan: planKey,
     subscription_status: String(subscription.status ?? "").trim() || null,
     cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
-    current_period_start: subscription.current_period_start ? new Date(subscription.current_period_start * 1000).toISOString() : null,
+    current_period_start: chosenCps ? new Date(chosenCps * 1000).toISOString() : null,
     current_period_end: newCpeIso,
     subscription_updated_at: new Date().toISOString(),
   } as any;
