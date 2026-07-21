@@ -24,10 +24,19 @@ function cardLast4FromPaymentMethod(pm: any) {
   return digits.length === 4 ? digits : null;
 }
 
+function tryGetStripe() {
+  try {
+    return getStripe() as any;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchCardLast4(company: any) {
   const customerId = asString(company?.stripe_customer_id);
   if (!customerId) return null;
-  const stripe = getStripe() as any;
+  const stripe = tryGetStripe();
+  if (!stripe) return null;
 
   const subId = asString(company?.stripe_subscription_id);
   if (subId) {
@@ -91,12 +100,14 @@ export async function POST(req: NextRequest) {
       const sessionId = asString((company as any)?.stripe_checkout_session_id);
       const status = String((company as any)?.checkout_status ?? "").trim().toLowerCase();
       if (sessionId && (status === "open" || !status)) {
-        try {
-          const stripe = getStripe() as any;
-          await stripe.checkout.sessions.expire(sessionId);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
+        const stripe = tryGetStripe();
+        if (stripe) {
+          try {
+            await stripe.checkout.sessions.expire(sessionId);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
+          }
         }
       }
       patch.checkout_status = "canceled";
@@ -109,12 +120,14 @@ export async function POST(req: NextRequest) {
       const sessionId = asString((company as any)?.stripe_checkout_session_id);
       const status = String((company as any)?.checkout_status ?? "").trim().toLowerCase();
       if (sessionId && (status === "open" || !status)) {
-        try {
-          const stripe = getStripe() as any;
-          await stripe.checkout.sessions.expire(sessionId);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
+        const stripe = tryGetStripe();
+        if (stripe) {
+          try {
+            await stripe.checkout.sessions.expire(sessionId);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
+          }
         }
       }
       patch.checkout_status = "abandoned";
