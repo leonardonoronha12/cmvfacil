@@ -159,6 +159,10 @@ export default function AjustesClient() {
         setBillingAccess(j.access ?? null);
         const status = String(j?.access?.subscription?.status ?? "").trim();
         setPlanStatus(status);
+        const last4 = String(j?.access?.cardLast4 ?? "")
+          .trim()
+          .replace(/[^\d]/g, "");
+        if (last4.length === 4) setCardLast4(last4);
         const plan = String(j?.access?.subscription?.plan ?? "").trim();
         if (plan === "pro_yearly") setPlanType("PRO Anual");
         else if (plan === "pro_monthly") setPlanType("PRO Mensal");
@@ -193,6 +197,10 @@ export default function AjustesClient() {
           setBillingAccess(j.access ?? null);
           const status = String(j?.access?.subscription?.status ?? "").trim();
           setPlanStatus(status);
+          const last4 = String(j?.access?.cardLast4 ?? "")
+            .trim()
+            .replace(/[^\d]/g, "");
+          if (last4.length === 4) setCardLast4(last4);
           const plan = String(j?.access?.subscription?.plan ?? "").trim();
           if (plan === "pro_yearly") setPlanType("PRO Anual");
           else if (plan === "pro_monthly") setPlanType("PRO Mensal");
@@ -254,6 +262,14 @@ export default function AjustesClient() {
   const periodActive = periodEnd && Number.isFinite(periodEndMs) ? Date.now() < periodEndMs : false;
   const hasRecognizedSubscription =
     subStatusLower === "active" || subStatusLower === "trialing" || subStatusLower === "past_due" || (cancelAtPeriodEnd && periodActive);
+  const checkoutPlanLower = checkoutPlan.trim().toLowerCase();
+  const checkoutMonthly = checkoutOpen && checkoutPlanLower === "pro_monthly";
+  const checkoutYearly = checkoutOpen && checkoutPlanLower === "pro_yearly";
+  const planMiniValue = hasRecognizedSubscription
+    ? planLabel(subPlan) || "PRO"
+    : checkoutOpen
+      ? planLabel(checkoutPlan) || "Pagamento iniciado"
+      : "Sem assinatura";
 
   function planLabel(key: string) {
     const s = key.trim().toLowerCase();
@@ -277,6 +293,7 @@ export default function AjustesClient() {
     if (s.includes("missing_plan_key") || s.includes("invalid_plan_key")) return "Plano inválido. Atualize a página e tente novamente.";
     if (s.includes("subscription_blocked")) return "Você já possui uma assinatura ativa para esta empresa.";
     if (s.includes("checkout_in_progress")) return "Já existe um pagamento pendente. Continue o pagamento ou cancele para escolher outro plano.";
+    if (s.includes("stripe_expire_failed")) return "Não foi possível cancelar o pagamento no momento. Tente novamente.";
     if (s.includes("billing_access_failed")) return "Não foi possível verificar sua assinatura no momento. Tente novamente.";
     if (s.includes("portal_failed")) return "Não foi possível abrir a área de pagamento agora. Tente novamente.";
     if (s.includes("checkout_failed")) return "Não foi possível abrir o Stripe Checkout agora. Tente novamente.";
@@ -325,6 +342,10 @@ export default function AjustesClient() {
         setBillingAccess(j.access ?? null);
         const status = String(j?.access?.subscription?.status ?? "").trim();
         setPlanStatus(status);
+        const last4 = String(j?.access?.cardLast4 ?? "")
+          .trim()
+          .replace(/[^\d]/g, "");
+        if (last4.length === 4) setCardLast4(last4);
         const plan = String(j?.access?.subscription?.plan ?? "").trim();
         if (plan === "pro_yearly") setPlanType("PRO Anual");
         else if (plan === "pro_monthly") setPlanType("PRO Mensal");
@@ -380,6 +401,10 @@ export default function AjustesClient() {
       setBillingAccess(j.access ?? null);
       const status = String(j?.access?.subscription?.status ?? "").trim();
       setPlanStatus(status);
+      const last4 = String(j?.access?.cardLast4 ?? "")
+        .trim()
+        .replace(/[^\d]/g, "");
+      if (last4.length === 4) setCardLast4(last4);
       const plan = String(j?.access?.subscription?.plan ?? "").trim();
       if (plan === "pro_yearly") setPlanType("PRO Anual");
       else if (plan === "pro_monthly") setPlanType("PRO Mensal");
@@ -792,7 +817,7 @@ export default function AjustesClient() {
                   <div className={styles.plansTopRow}>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Plano</div>
-                      <div className={styles.planMiniValue}>{planType}</div>
+                      <div className={styles.planMiniValue}>{planMiniValue}</div>
                       {hasRecognizedSubscription ? (
                         <button
                           type="button"
@@ -865,31 +890,6 @@ export default function AjustesClient() {
                       </div>
                     </div>
                   ) : null}
-                  {checkoutOpen ? (
-                    <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
-                      {planLabel(checkoutPlan) ? `Plano escolhido: ${planLabel(checkoutPlan)}` : "Pagamento iniciado."}
-                      <div style={{ marginTop: 4 }}>Pagamento pendente.</div>
-                      <div style={{ marginTop: 8 }}>
-                        <button
-                          type="button"
-                          className={styles.planMiniLink}
-                          disabled={billingLoading || billingWorking || !checkoutUrl}
-                          onClick={() => window.location.assign(checkoutUrl)}
-                        >
-                          Continuar pagamento
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.planMiniLink}
-                          disabled={billingLoading || billingWorking}
-                          onClick={() => void cancelPendingCheckout()}
-                          style={{ marginLeft: 12, color: "#b42318" }}
-                        >
-                          {billingWorking && billingAction === "cancel_pending" ? "Cancelando…" : "Cancelar pagamento pendente"}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
 
                   <div className={styles.plansGrid}>
                     <div className={styles.planCard}>
@@ -904,20 +904,45 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_monthly" && hasRecognizedSubscription)}
+                        disabled={billingLoading || billingWorking || (!checkoutMonthly && checkoutOpen) || (subPlan === "pro_monthly" && hasRecognizedSubscription)}
                         onClick={async () => {
-                          if (hasRecognizedSubscription) await openPortal();
+                          if (checkoutMonthly) {
+                            if (checkoutUrl) window.location.assign(checkoutUrl);
+                          } else if (hasRecognizedSubscription) await openPortal();
                           else await startCheckout("pro_monthly");
                         }}
                       >
                         {billingWorking && billingAction === "checkout_monthly"
                           ? "Abrindo Checkout…"
-                          : subPlan === "pro_monthly" && hasRecognizedSubscription
-                            ? "Plano Atual"
-                            : hasRecognizedSubscription
-                              ? "Alterar no Portal"
-                              : "Assinar Mensal"}
+                          : checkoutMonthly
+                            ? "Continuar pagamento"
+                            : subPlan === "pro_monthly" && hasRecognizedSubscription
+                              ? "Plano Atual"
+                              : hasRecognizedSubscription
+                                ? "Alterar no Portal"
+                                : checkoutOpen
+                                  ? "Escolher após cancelar"
+                                  : "Assinar Mensal"}
                       </button>
+                      {checkoutMonthly ? (
+                        <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
+                          {planLabel(checkoutPlan) ? `Plano escolhido: ${planLabel(checkoutPlan)}` : "Pagamento iniciado."}
+                          <div style={{ marginTop: 4 }}>Pagamento pendente.</div>
+                          <button
+                            type="button"
+                            className={styles.planMiniLink}
+                            disabled={billingLoading || billingWorking}
+                            onClick={() => void cancelPendingCheckout()}
+                            style={{ marginTop: 8, color: "#b42318" }}
+                          >
+                            {billingWorking && billingAction === "cancel_pending" ? "Cancelando…" : "Cancelar pagamento pendente"}
+                          </button>
+                        </div>
+                      ) : checkoutOpen ? (
+                        <div style={{ marginTop: 10, color: "#6b7280", fontSize: 13, fontWeight: 700 }}>
+                          Existe um pagamento pendente em outro plano. Cancele para escolher este.
+                        </div>
+                      ) : null}
                       <div className={styles.planFootnote}>Pagamento seguro processado pela Stripe.</div>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
@@ -944,20 +969,45 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_yearly" && hasRecognizedSubscription)}
+                        disabled={billingLoading || billingWorking || (!checkoutYearly && checkoutOpen) || (subPlan === "pro_yearly" && hasRecognizedSubscription)}
                         onClick={async () => {
-                          if (hasRecognizedSubscription) await openPortal();
+                          if (checkoutYearly) {
+                            if (checkoutUrl) window.location.assign(checkoutUrl);
+                          } else if (hasRecognizedSubscription) await openPortal();
                           else await startCheckout("pro_yearly");
                         }}
                       >
                         {billingWorking && billingAction === "checkout_yearly"
                           ? "Abrindo Checkout…"
-                          : subPlan === "pro_yearly" && hasRecognizedSubscription
-                            ? "Plano Atual"
-                            : hasRecognizedSubscription
-                              ? "Alterar no Portal"
-                              : "Assinar Anual"}
+                          : checkoutYearly
+                            ? "Continuar pagamento"
+                            : subPlan === "pro_yearly" && hasRecognizedSubscription
+                              ? "Plano Atual"
+                              : hasRecognizedSubscription
+                                ? "Alterar no Portal"
+                                : checkoutOpen
+                                  ? "Escolher após cancelar"
+                                  : "Assinar Anual"}
                       </button>
+                      {checkoutYearly ? (
+                        <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
+                          {planLabel(checkoutPlan) ? `Plano escolhido: ${planLabel(checkoutPlan)}` : "Pagamento iniciado."}
+                          <div style={{ marginTop: 4 }}>Pagamento pendente.</div>
+                          <button
+                            type="button"
+                            className={styles.planMiniLink}
+                            disabled={billingLoading || billingWorking}
+                            onClick={() => void cancelPendingCheckout()}
+                            style={{ marginTop: 8, color: "#b42318" }}
+                          >
+                            {billingWorking && billingAction === "cancel_pending" ? "Cancelando…" : "Cancelar pagamento pendente"}
+                          </button>
+                        </div>
+                      ) : checkoutOpen ? (
+                        <div style={{ marginTop: 10, color: "#6b7280", fontSize: 13, fontWeight: 700 }}>
+                          Existe um pagamento pendente em outro plano. Cancele para escolher este.
+                        </div>
+                      ) : null}
                       <div className={styles.planFootnote}>Pagamento seguro processado pela Stripe.</div>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
