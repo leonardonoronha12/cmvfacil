@@ -139,6 +139,7 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
   let effectiveUserId = rawUserId;
   let emailForFallback = "";
   let bubbleUserIdsForFallback: string[] = [];
+  let bubbleCompanyIdsForFallback: string[] = [];
 
   if (!isUuid(effectiveUserId) && effectiveUserId.includes("@")) {
     const email = effectiveUserId.trim().toLowerCase();
@@ -194,20 +195,57 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
 
   let companyId = pickBestCompanyId(resolvedMemberRows);
   if (!companyId && isUuid(effectiveUserId)) {
-    const byBubbleObj = await supabase
-      .from("bubble_obj_empresa")
-      .select("bubble_unique_id,updated_at,created_at")
-      .eq("supabase_user_id", effectiveUserId)
-      .order("updated_at", { ascending: false })
-      .limit(10);
-    if (!byBubbleObj.error) {
-      const bubbleIds = Array.from(
-        new Set(((byBubbleObj.data ?? []) as any[]).map((r: any) => String(r?.bubble_unique_id ?? "").trim()).filter(Boolean)),
-      );
-      if (bubbleIds.length) {
-        const byCompanyBubbleId = await supabase.from("companies").select("id").in("bubble_id", bubbleIds).limit(1).maybeSingle();
-        if (!byCompanyBubbleId.error) companyId = String((byCompanyBubbleId.data as any)?.id ?? "").trim();
+    for (const col of [
+      "created_by_user_id",
+      "created_by",
+      "owner_user_id",
+      "supabase_user_id",
+      "user_id",
+      "admin_user_id",
+      "proprietario_user_id",
+      "created_by_supabase_user_id",
+    ]) {
+      try {
+        const byOwner = await (supabase.from("companies") as any).select("id").eq(col, effectiveUserId).limit(1).maybeSingle();
+        if (!byOwner.error) {
+          companyId = String((byOwner.data as any)?.id ?? "").trim();
+          if (companyId) break;
+        }
+      } catch {}
+    }
+  }
+  if (!companyId && isUuid(effectiveUserId)) {
+    try {
+      const byBubbleObj = await supabase
+        .from("bubble_obj_empresa")
+        .select("bubble_unique_id,updated_at,created_at")
+        .eq("supabase_user_id", effectiveUserId)
+        .order("updated_at", { ascending: false })
+        .limit(10);
+      if (!byBubbleObj.error) {
+        const bubbleIds = ((byBubbleObj.data ?? []) as any[]).map((r: any) => String(r?.bubble_unique_id ?? "").trim()).filter(Boolean);
+        bubbleCompanyIdsForFallback = Array.from(new Set([...bubbleCompanyIdsForFallback, ...bubbleIds]));
       }
+    } catch {}
+  }
+  if (!companyId && bubbleUserIdsForFallback.length) {
+    try {
+      const byBubbleObj = await supabase.from("bubble_obj_empresa").select("bubble_unique_id").in("bubble_user_id", bubbleUserIdsForFallback).limit(10);
+      if (!byBubbleObj.error) {
+        const bubbleIds = ((byBubbleObj.data ?? []) as any[]).map((r: any) => String(r?.bubble_unique_id ?? "").trim()).filter(Boolean);
+        bubbleCompanyIdsForFallback = Array.from(new Set([...bubbleCompanyIdsForFallback, ...bubbleIds]));
+      }
+    } catch {}
+  }
+  if (!companyId && bubbleCompanyIdsForFallback.length) {
+    for (const col of ["bubble_id", "bubble_unique_id", "bubble_company_id", "bubble_empresa_id", "empresa_bubble_id", "company_bubble_id"]) {
+      try {
+        const byCompanyBubbleId = await (supabase.from("companies") as any).select("id").in(col, bubbleCompanyIdsForFallback).limit(1).maybeSingle();
+        if (!byCompanyBubbleId.error) {
+          companyId = String((byCompanyBubbleId.data as any)?.id ?? "").trim();
+          if (companyId) break;
+        }
+      } catch {}
     }
   }
   if (!companyId && emailForFallback) {
