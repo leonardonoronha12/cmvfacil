@@ -6,6 +6,8 @@ import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -602,19 +604,27 @@ export default function EntradasClient() {
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
 
+  const pagination = usePagination({
+    items: visible,
+    pageSize: 20,
+    resetKey: `${query}|${dateStart}|${dateEnd}|${sortKey}|${sortDir}|${rows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
   useEffect(() => {
     if (!bulkDeleteMode) return;
     setSelectedIds({});
     setIsBulkDeleteOpen(false);
   }, [bulkDeleteMode, query, dateStart, dateEnd, sortKey, sortDir]);
 
-  const visibleIdSet = useMemo(() => new Set(visible.map((r) => r.id)), [visible]);
+  const visibleIdSet = useMemo(() => new Set(pagination.pageItems.map((r) => r.id)), [pagination.pageItems]);
   const selectedList = useMemo(() => {
     const ids = Object.keys(selectedIds).filter((id) => Boolean(selectedIds[id]));
     return ids.filter((id) => visibleIdSet.has(id));
   }, [selectedIds, visibleIdSet]);
   const selectedCount = selectedList.length;
-  const allVisibleSelected = visible.length > 0 && visible.every((row) => Boolean(selectedIds[row.id]));
+  const allVisibleSelected = pagination.pageItems.length > 0 && pagination.pageItems.every((row) => Boolean(selectedIds[row.id]));
 
   const qaUi = useMemo(() => {
     return {
@@ -622,8 +632,9 @@ export default function EntradasClient() {
       filters: { query, dateStart, dateEnd },
       sort: { sortKey, sortDir, columnOrder },
       rendered: {
-        rowsCount: visible.length,
-        rows: visible.map((r) => ({
+        rowsCount: pagination.pageItems.length,
+        totalRowsCount: pagination.totalItems,
+        rows: pagination.pageItems.map((r) => ({
           id: r.id,
           numero: r.numero,
           dataLancamento: r.dataLancamento,
@@ -634,7 +645,7 @@ export default function EntradasClient() {
           itens: r.itens,
         })),
       },
-      details: visible.map((r) => ({
+      details: pagination.pageItems.map((r) => ({
         id: r.id,
         numero: r.numero,
         itensNota: (r.itensNota ?? []).map((it) => ({
@@ -649,7 +660,20 @@ export default function EntradasClient() {
         })),
       })),
     };
-  }, [columnOrder, currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, sortDir, sortKey, sourceMeta, visible]);
+  }, [
+    columnOrder,
+    currentUserEmail,
+    currentUserFullName,
+    dateEnd,
+    dateStart,
+    fornecedorInfoMap,
+    pagination.pageItems,
+    pagination.totalItems,
+    query,
+    sortDir,
+    sortKey,
+    sourceMeta,
+  ]);
 
   function toggleSort(key: EntradaTableColumn) {
     if (sortKey !== key) {
@@ -732,9 +756,9 @@ export default function EntradasClient() {
     setSelectedIds((prev) => {
       const next: Record<string, boolean> = { ...prev };
       if (allVisibleSelected) {
-        for (const row of visible) delete next[row.id];
+        for (const row of pagination.pageItems) delete next[row.id];
       } else {
-        for (const row of visible) next[row.id] = true;
+        for (const row of pagination.pageItems) next[row.id] = true;
       }
       return next;
     });
@@ -1791,7 +1815,7 @@ export default function EntradasClient() {
         </section>
 
         <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="entradas">
-          {isLoadingTable ? (
+          {tableLoading.show ? (
             <div className={dash.loadingOverlay}>
               <LoadingSpinner />
             </div>
@@ -1837,13 +1861,13 @@ export default function EntradasClient() {
           </div>
 
           <div className={styles.tableBody} data-qa-grid="entradas:rows">
-            {!visible.length ? (
+            {!pagination.totalItems ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhuma nota cadastrada</div>
                 <div className={styles.emptyText}>Clique em “Nova Nota” para começar.</div>
               </div>
             ) : (
-              visible.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div
                   key={r.id}
                   className={styles.tr}
@@ -1928,19 +1952,45 @@ export default function EntradasClient() {
         </section>
 
         <section className={styles.footer}>
-          <div>{`${visible.length} resultado(s) encontrado(s)`}</div>
+          <div>{`${pagination.totalItems} resultado(s) encontrado(s)`}</div>
           <div className={styles.pagination}>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Primeira página"
+              onClick={() => pagination.setPage(1)}
+            >
               «
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
               ‹
             </button>
-            <div className={styles.pageInfo}>1 de 1</div>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
               ›
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
               »
             </button>
           </div>

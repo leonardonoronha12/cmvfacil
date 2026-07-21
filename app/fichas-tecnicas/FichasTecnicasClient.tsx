@@ -1270,7 +1270,7 @@ export default function FichasTecnicasClient({
     return decorated.map(({ row }) => row);
   }, [query, quadrante, sortDir, sortKey, tableRows]);
 
-  const pageSize = 12;
+  const pageSize = 20;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);

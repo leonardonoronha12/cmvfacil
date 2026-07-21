@@ -116,8 +116,9 @@
 
 .tableWrap {
   align-self: stretch;
-  overflow-x: auto;
+  overflow: auto;
   margin-top: 14px;
+  max-height: calc(100vh - 330px);
 }
 
 .table {

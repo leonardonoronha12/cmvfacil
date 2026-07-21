@@ -6,6 +6,8 @@ import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -733,13 +735,21 @@ export default function FornecedoresClient() {
     return decorated.map((d) => d.r);
   }, [query, rows, sortDir, sortKey]);
 
+  const pagination = usePagination({
+    items: visibleRows,
+    pageSize: 20,
+    resetKey: `${query}|${sortKey}|${sortDir}|${rows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
   const qaUi = useMemo(() => {
     return {
       filters: { query },
       sort: { sortKey, sortDir, columnOrder },
       rendered: {
-        rowsCount: visibleRows.length,
-        rows: visibleRows.map((r) => ({
+        rowsCount: pagination.pageItems.length,
+        rows: pagination.pageItems.map((r) => ({
           id: r.id,
           fornecedor: r.fornecedor,
           itens: r.itens,
@@ -749,7 +759,7 @@ export default function FornecedoresClient() {
         })),
       },
     };
-  }, [columnOrder, query, sortDir, sortKey, visibleRows]);
+  }, [columnOrder, pagination.pageItems, query, sortDir, sortKey]);
 
   function openNew() {
     if (isReadOnly) {
@@ -919,7 +929,7 @@ export default function FornecedoresClient() {
     void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => showToast("Erro ao salvar no banco de dados.", "error"));
   }
 
-  const resultsText = `${visibleRows.length} resultado(s) encontrado(s)`;
+  const resultsText = `${pagination.totalItems} resultado(s) encontrado(s)`;
 
   async function importFile(file: File) {
     if (importing) return;
@@ -1074,7 +1084,7 @@ export default function FornecedoresClient() {
 
         <div className={styles.tableWrap}>
           <section className={styles.table} style={{ position: "relative" }} data-qa-grid="fornecedores">
-            {isLoadingTable ? (
+            {tableLoading.show ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
               </div>
@@ -1105,13 +1115,13 @@ export default function FornecedoresClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {!visibleRows.length ? (
+            {!pagination.pageItems.length ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum fornecedor cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Fornecedor” ou importe uma planilha para começar.</div>
               </div>
             ) : (
-              visibleRows.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   {columnOrder.map((col) => {
                     if (col === "fornecedor") {
@@ -1187,17 +1197,43 @@ export default function FornecedoresClient() {
         <div className={styles.footer}>
           <div>{resultsText}</div>
           <div className={styles.pagination}>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Primeira página"
+              onClick={() => pagination.setPage(1)}
+            >
               «
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
               ‹
             </button>
-            <div className={styles.pageInfo}>1 de 1</div>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
               ›
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
               »
             </button>
           </div>

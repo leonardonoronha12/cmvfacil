@@ -7,6 +7,8 @@ import dash from "../dashboard/dashboard.module.css";
 import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { deleteInsumosCompat, loadInsumosStateFromSupabase, saveInsumosStateToSupabase, type InsumosStatePayload } from "../lib/insumosSupabase";
@@ -1342,6 +1344,14 @@ export default function InsumosClient() {
     return decorated.map((d) => d.r);
   }, [categoryFilter, dataRows, displayCostLabelById, searchQuery, sortDir, sortKey]);
 
+  const pagination = usePagination({
+    items: visibleRows,
+    pageSize: 20,
+    resetKey: `${searchQuery}|${categoryFilter}|${sortKey}|${sortDir}|${dataRows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
   const gridTemplateColumns = useMemo(() => {
     const widths: Record<"ocultar" | "item" | "medida" | "custoMedio" | "categoria" | "especificacao" | "acoes", string> = {
       ocultar: "84px",
@@ -1359,7 +1369,7 @@ export default function InsumosClient() {
   const totalOcultados = useMemo(() => dataRows.filter((r) => Boolean(r.ocultar)).length, [dataRows]);
 
   const qaUi = useMemo(() => {
-    const renderedRows = visibleRows.map((r) => {
+    const renderedRows = pagination.pageItems.map((r) => {
       const custoLabel = displayCostLabelById.get(r.id) ?? r.custoMedio;
       return {
         id: r.id,
@@ -1377,7 +1387,7 @@ export default function InsumosClient() {
       filters: { searchQuery, categoryFilter },
       sort: { sortKey, sortDir, columnOrder },
       selection: { bulkDeleteMode, selectedCount, allSelected },
-      rendered: { visibleRowsCount: visibleRows.length, rows: renderedRows },
+      rendered: { visibleRowsCount: pagination.totalItems, rows: renderedRows },
     };
   }, [
     allSelected,
@@ -1386,6 +1396,8 @@ export default function InsumosClient() {
     categoryFilter,
     columnOrder,
     displayCostLabelById,
+    pagination.pageItems,
+    pagination.totalItems,
     searchQuery,
     selectedCount,
     selectedIds,
@@ -1393,7 +1405,6 @@ export default function InsumosClient() {
     sortKey,
     totalItens,
     totalOcultados,
-    visibleRows,
   ]);
 
   return (
@@ -1578,7 +1589,7 @@ export default function InsumosClient() {
         <div className={styles.tableWrap}>
           {null}
           <section className={styles.table} style={{ position: "relative" }} data-qa-grid="insumos">
-            {isLoadingTable ? (
+            {tableLoading.show ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
               </div>
@@ -1630,13 +1641,13 @@ export default function InsumosClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {!visibleRows.length ? (
+            {!pagination.pageItems.length ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
               </div>
             ) : (
-              visibleRows.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   <div className={styles.tdSmall}>
                     <label className={styles.toggle}>
@@ -1709,6 +1720,45 @@ export default function InsumosClient() {
               ))
             )}
           </section>
+        </div>
+
+        <div className={styles.footer}>
+          <div>{`${pagination.totalItems} resultado(s) encontrado(s)`}</div>
+          <div className={styles.pagination}>
+            <button type="button" className={styles.pageBtn} disabled={pagination.page <= 1} aria-label="Primeira página" onClick={() => pagination.setPage(1)}>
+              «
+            </button>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
+              ‹
+            </button>
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
+              »
+            </button>
+          </div>
         </div>
 
         {mounted && isDeleteItemOpen ? (
