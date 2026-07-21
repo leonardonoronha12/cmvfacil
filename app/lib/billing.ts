@@ -119,15 +119,41 @@ export async function getBillingAccessForCurrentCompany(req: NextRequest) {
 }
 
 export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
+  const rawUserId = String(userId ?? "").trim();
+  let effectiveUserId = rawUserId;
+  let emailForFallback = "";
+
+  if (!isUuid(effectiveUserId) && effectiveUserId.includes("@")) {
+    const email = effectiveUserId.trim().toLowerCase();
+    emailForFallback = email;
+    const profile = await supabase.from("user_profiles").select("user_id").ilike("email", email).maybeSingle();
+    const mapped = String((profile.data as any)?.user_id ?? "").trim();
+    if (mapped && isUuid(mapped)) effectiveUserId = mapped;
+  }
+
+  if (isUuid(effectiveUserId)) {
+    try {
+      const authUser = await supabase.auth.admin.getUserById(effectiveUserId);
+      const email = String(authUser.data?.user?.email ?? "")
+        .trim()
+        .toLowerCase();
+      if (email) emailForFallback = email;
+    } catch {}
+  }
+
   const { data: memberRows, error: memberError } = await supabase
     .from("company_members")
     .select("company_id,role,permission_level")
-    .eq("user_id", userId)
+    .eq("user_id", effectiveUserId)
     .limit(50);
   if (memberError) throw new Error(memberError.message);
   let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-  if (!companyId && isUuid(userId)) {
-    const fallback = await supabase.from("companies").select("id").eq("created_by_user_id", userId).limit(1).maybeSingle();
+  if (!companyId) {
+    const fallback = await supabase.from("companies").select("id").eq("created_by_user_id", effectiveUserId).limit(1).maybeSingle();
+    if (!fallback.error) companyId = String((fallback.data as any)?.id ?? "").trim();
+  }
+  if (!companyId && emailForFallback) {
+    const fallback = await supabase.from("companies").select("id").ilike("email", emailForFallback).limit(1).maybeSingle();
     if (!fallback.error) companyId = String((fallback.data as any)?.id ?? "").trim();
   }
   if (!companyId) return { companyId: null as string | null, company: null as BillingCompany | null };
