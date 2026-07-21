@@ -181,6 +181,16 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
     } catch {}
   }
 
+  if (isUuid(effectiveUserId)) {
+    try {
+      const profile = await supabase.from("user_profiles").select("bubble_user_id,empresa_id").eq("user_id", effectiveUserId).maybeSingle();
+      const bubbleUserId = String((profile.data as any)?.bubble_user_id ?? "").trim();
+      if (bubbleUserId) bubbleUserIdsForFallback = Array.from(new Set([...bubbleUserIdsForFallback, bubbleUserId]));
+      const empresaId = String((profile.data as any)?.empresa_id ?? "").trim();
+      if (empresaId) bubbleCompanyIdsForFallback = Array.from(new Set([...bubbleCompanyIdsForFallback, empresaId]));
+    } catch {}
+  }
+
   const { data: memberRows, error: memberError } = await supabase
     .from("company_members")
     .select("company_id,role,permission_level")
