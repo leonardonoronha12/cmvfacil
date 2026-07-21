@@ -104,6 +104,22 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(error.message);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const em = String(u?.email ?? "").trim().toLowerCase();
+      if (id && em === target) return id;
+    }
+    if (users.length < 1000) break;
+  }
+  return null;
+}
+
 export async function requireAuthUserId(req: NextRequest) {
   const { userId } = getUserIdFromRequest(req);
   if (!userId) throw new Error("unauthorized");
@@ -156,6 +172,13 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
       if (mappedUid && isUuid(mappedUid)) effectiveUserId = mappedUid;
     }
   } catch {}
+
+  if (!isUuid(effectiveUserId) && emailForFallback) {
+    try {
+      const mappedUid = await findAuthUserIdByEmail(supabase, emailForFallback);
+      if (mappedUid && isUuid(mappedUid)) effectiveUserId = mappedUid;
+    } catch {}
+  }
 
   const { data: memberRows, error: memberError } = await supabase
     .from("company_members")
