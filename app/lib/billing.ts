@@ -122,6 +122,7 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
   const rawUserId = String(userId ?? "").trim();
   let effectiveUserId = rawUserId;
   let emailForFallback = "";
+  let bubbleUserIdForFallback = "";
 
   if (!isUuid(effectiveUserId) && effectiveUserId.includes("@")) {
     const email = effectiveUserId.trim().toLowerCase();
@@ -139,6 +140,10 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
         .toLowerCase();
       if (email) emailForFallback = email;
     } catch {}
+    try {
+      const profile = await supabase.from("user_profiles").select("bubble_user_id").eq("user_id", effectiveUserId).maybeSingle();
+      bubbleUserIdForFallback = String((profile.data as any)?.bubble_user_id ?? "").trim();
+    } catch {}
   }
 
   const { data: memberRows, error: memberError } = await supabase
@@ -147,7 +152,13 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
     .eq("user_id", effectiveUserId)
     .limit(50);
   if (memberError) throw new Error(memberError.message);
-  let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+  let resolvedMemberRows = (memberRows ?? []) as any[];
+  if ((!resolvedMemberRows || !resolvedMemberRows.length) && bubbleUserIdForFallback) {
+    const fallback = await supabase.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", bubbleUserIdForFallback).limit(50);
+    resolvedMemberRows = (fallback.data ?? []) as any[];
+  }
+
+  let companyId = pickBestCompanyId(resolvedMemberRows);
   if (!companyId) {
     const fallback = await supabase.from("companies").select("id").eq("created_by_user_id", effectiveUserId).limit(1).maybeSingle();
     if (!fallback.error) companyId = String((fallback.data as any)?.id ?? "").trim();
