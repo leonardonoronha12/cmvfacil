@@ -84,7 +84,7 @@ export default function AjustesClient() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [billingWorking, setBillingWorking] = useState(false);
-  const [billingAction, setBillingAction] = useState<"" | "portal" | "checkout_monthly" | "checkout_yearly">("");
+  const [billingAction, setBillingAction] = useState<"" | "portal" | "checkout_monthly" | "checkout_yearly" | "cancel_pending">("");
   const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
 
   const [loggingOut, setLoggingOut] = useState(false);
@@ -245,7 +245,7 @@ export default function AjustesClient() {
   const checkoutStatus = String(billingAccess?.checkout?.status ?? "").trim();
   const checkoutUrl = String(billingAccess?.checkout?.url ?? "").trim();
   const checkoutPlan = String(billingAccess?.checkout?.plan ?? "").trim();
-  const checkoutOpen = checkoutStatus.trim().toLowerCase() === "open" && Boolean(checkoutUrl);
+  const checkoutOpen = checkoutStatus.trim().toLowerCase() === "open";
 
   const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
 
@@ -276,6 +276,7 @@ export default function AjustesClient() {
     if (s.includes("unauthorized") || s.includes("forbidden")) return "Sua sessão expirou. Faça login novamente.";
     if (s.includes("missing_plan_key") || s.includes("invalid_plan_key")) return "Plano inválido. Atualize a página e tente novamente.";
     if (s.includes("subscription_blocked")) return "Você já possui uma assinatura ativa para esta empresa.";
+    if (s.includes("checkout_in_progress")) return "Já existe um pagamento pendente. Continue o pagamento ou cancele para escolher outro plano.";
     if (s.includes("billing_access_failed")) return "Não foi possível verificar sua assinatura no momento. Tente novamente.";
     if (s.includes("portal_failed")) return "Não foi possível abrir a área de pagamento agora. Tente novamente.";
     if (s.includes("checkout_failed")) return "Não foi possível abrir o Stripe Checkout agora. Tente novamente.";
@@ -344,6 +345,9 @@ export default function AjustesClient() {
         window.location.assign(existingUrl);
         return;
       }
+      if (existingStatus === "open") {
+        throw new Error("checkout_in_progress");
+      }
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -352,6 +356,33 @@ export default function AjustesClient() {
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "checkout_failed"));
       window.location.assign(String(j.url));
+    } catch (err) {
+      setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
+    } finally {
+      setBillingWorking(false);
+      setBillingAction("");
+    }
+  }
+
+  async function cancelPendingCheckout() {
+    if (billingWorking) return;
+    setBillingWorking(true);
+    setBillingAction("cancel_pending");
+    setBillingError("");
+    try {
+      const res = await fetch("/api/billing/access", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "checkout_abandoned" }),
+      });
+      const j = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "billing_access_failed"));
+      setBillingAccess(j.access ?? null);
+      const status = String(j?.access?.subscription?.status ?? "").trim();
+      setPlanStatus(status);
+      const plan = String(j?.access?.subscription?.plan ?? "").trim();
+      if (plan === "pro_yearly") setPlanType("PRO Anual");
+      else if (plan === "pro_monthly") setPlanType("PRO Mensal");
     } catch (err) {
       setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
     } finally {
@@ -846,6 +877,15 @@ export default function AjustesClient() {
                           onClick={() => window.location.assign(checkoutUrl)}
                         >
                           Continuar pagamento
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.planMiniLink}
+                          disabled={billingLoading || billingWorking}
+                          onClick={() => void cancelPendingCheckout()}
+                          style={{ marginLeft: 12, color: "#b42318" }}
+                        >
+                          {billingWorking && billingAction === "cancel_pending" ? "Cancelando…" : "Cancelar pagamento pendente"}
                         </button>
                       </div>
                     </div>
