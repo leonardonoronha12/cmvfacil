@@ -84,6 +84,7 @@ export default function AjustesClient() {
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState("");
   const [billingWorking, setBillingWorking] = useState(false);
+  const [billingAction, setBillingAction] = useState<"" | "portal" | "checkout_monthly" | "checkout_yearly">("");
   const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
 
   const [loggingOut, setLoggingOut] = useState(false);
@@ -162,7 +163,7 @@ export default function AjustesClient() {
         if (plan === "pro_yearly") setPlanType("PRO Anual");
         else if (plan === "pro_monthly") setPlanType("PRO Mensal");
       } catch (err) {
-        setBillingError(err instanceof Error ? err.message : String(err));
+        setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
       } finally {
         setBillingLoading(false);
       }
@@ -247,6 +248,26 @@ export default function AjustesClient() {
 
   const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
 
+  function formatDateBR(value: string) {
+    const ms = Date.parse(value);
+    if (!Number.isFinite(ms)) return value;
+    return new Date(ms).toLocaleDateString("pt-BR");
+  }
+
+  function toFriendlyBillingError(raw: string) {
+    const v = String(raw ?? "").trim();
+    const s = v.toLowerCase();
+    if (!s) return "Não foi possível carregar as informações de assinatura.";
+    if (s.includes("company_not_found")) return "Não conseguimos localizar sua empresa vinculada à conta. Tente sair e entrar novamente.";
+    if (s.includes("unauthorized") || s.includes("forbidden")) return "Sua sessão expirou. Faça login novamente.";
+    if (s.includes("missing_plan_key") || s.includes("invalid_plan_key")) return "Plano inválido. Atualize a página e tente novamente.";
+    if (s.includes("subscription_blocked")) return "Você já possui uma assinatura ativa para esta empresa.";
+    if (s.includes("billing_access_failed")) return "Não foi possível verificar sua assinatura no momento. Tente novamente.";
+    if (s.includes("portal_failed")) return "Não foi possível abrir a área de pagamento agora. Tente novamente.";
+    if (s.includes("checkout_failed")) return "Não foi possível abrir o Stripe Checkout agora. Tente novamente.";
+    return "Ocorreu um erro ao carregar os planos. Tente novamente.";
+  }
+
   function statusLabel(raw: string) {
     const s = raw.trim().toLowerCase();
     if (!s) return "—";
@@ -264,6 +285,7 @@ export default function AjustesClient() {
   async function openPortal() {
     if (billingWorking) return;
     setBillingWorking(true);
+    setBillingAction("portal");
     setBillingError("");
     try {
       const res = await fetch("/api/billing/portal", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
@@ -271,9 +293,10 @@ export default function AjustesClient() {
       if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "portal_failed"));
       window.location.assign(String(j.url));
     } catch (err) {
-      setBillingError(err instanceof Error ? err.message : String(err));
+      setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
     } finally {
       setBillingWorking(false);
+      setBillingAction("");
     }
   }
 
@@ -298,6 +321,7 @@ export default function AjustesClient() {
   async function startCheckout(planKey: "pro_monthly" | "pro_yearly") {
     if (billingWorking) return;
     setBillingWorking(true);
+    setBillingAction(planKey === "pro_monthly" ? "checkout_monthly" : "checkout_yearly");
     setBillingError("");
     try {
       const existingUrl = String(billingAccess?.checkout?.url ?? "").trim();
@@ -315,9 +339,10 @@ export default function AjustesClient() {
       if (!res.ok || !j?.ok || !j?.url) throw new Error(String(j?.error ?? "checkout_failed"));
       window.location.assign(String(j.url));
     } catch (err) {
-      setBillingError(err instanceof Error ? err.message : String(err));
+      setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
     } finally {
       setBillingWorking(false);
+      setBillingAction("");
     }
   }
 
@@ -723,31 +748,49 @@ export default function AjustesClient() {
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Plano</div>
                       <div className={styles.planMiniValue}>{planType}</div>
-                      <button
-                        type="button"
-                        className={styles.planMiniLink}
-                        disabled={billingLoading || billingWorking || !subStatus || subStatus.toLowerCase() === "trial_internal"}
-                        onClick={async () => openPortal()}
-                      >
-                        Gerenciar
-                      </button>
+                      {subStatus && subStatus.toLowerCase() !== "trial_internal" ? (
+                        <button
+                          type="button"
+                          className={styles.planMiniLink}
+                          disabled={billingLoading || billingWorking}
+                          onClick={async () => openPortal()}
+                        >
+                          {billingWorking && billingAction === "portal" ? "Abrindo…" : "Gerenciar"}
+                        </button>
+                      ) : null}
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Status</div>
-                      <div className={styles.planMiniValue}>{statusLabel(planStatus) || "—"}</div>
-                      <div className={styles.planMiniMuted}>Status da assinatura</div>
+                      <div className={styles.planMiniValue}>
+                        {trialEndsAt && (accessReason === "trial_internal" || subStatus.toLowerCase() === "trialing")
+                          ? "Período de teste ativo"
+                          : subStatus
+                            ? statusLabel(subStatus)
+                            : "Sem assinatura"}
+                      </div>
+                      <div className={styles.planMiniMuted}>
+                        {trialEndsAt && (accessReason === "trial_internal" || subStatus.toLowerCase() === "trialing")
+                          ? `Até ${formatDateBR(trialEndsAt)}${typeof trialDays === "number" ? ` (${trialDays} dias restantes)` : ""}`
+                          : periodEnd
+                            ? `Renova em ${formatDateBR(periodEnd)}${cancelAtPeriodEnd ? " (cancelamento agendado)" : ""}`
+                            : subStatus
+                              ? "Status da assinatura"
+                              : "Você ainda não possui assinatura"}
+                      </div>
                     </div>
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Cartão</div>
                       <div className={styles.planMiniValue}>{cardLast4 ? `**** **** **** ${cardLast4}` : "—"}</div>
-                      <button
-                        type="button"
-                        className={styles.planMiniLink}
-                        disabled={billingLoading || billingWorking || !subStatus || subStatus.toLowerCase() === "trial_internal"}
-                        onClick={async () => openPortal()}
-                      >
-                        Alterar
-                      </button>
+                      {subStatus && subStatus.toLowerCase() !== "trial_internal" ? (
+                        <button
+                          type="button"
+                          className={styles.planMiniLink}
+                          disabled={billingLoading || billingWorking}
+                          onClick={async () => openPortal()}
+                        >
+                          {billingWorking && billingAction === "portal" ? "Abrindo…" : "Alterar"}
+                        </button>
+                      ) : null}
                     </div>
                   </div>
 
@@ -757,17 +800,7 @@ export default function AjustesClient() {
                     </div>
                   ) : null}
                   {billingError ? (
-                    <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{billingError}</div>
-                  ) : null}
-                  {trialEndsAt ? (
-                    <div className={styles.planMiniMuted} style={{ marginTop: 10 }}>
-                      Trial interno até {new Date(trialEndsAt).toLocaleDateString("pt-BR")} {typeof trialDays === "number" ? `(${trialDays} dias restantes)` : ""}
-                    </div>
-                  ) : null}
-                  {periodEnd ? (
-                    <div className={styles.planMiniMuted} style={{ marginTop: 6 }}>
-                      Próximo ciclo até {new Date(periodEnd).toLocaleDateString("pt-BR")} {cancelAtPeriodEnd ? "(cancelamento agendado)" : ""}
-                    </div>
+                    <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{toFriendlyBillingError(billingError)}</div>
                   ) : null}
                   {checkoutParam === "cancel" ? (
                     <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
@@ -822,8 +855,15 @@ export default function AjustesClient() {
                           else await startCheckout("pro_monthly");
                         }}
                       >
-                        {subPlan === "pro_monthly" && subStatus ? "Plano Atual" : subStatus && subStatus.toLowerCase() !== "trial_internal" ? "Alterar no Portal" : "Assinar Mensal"}
+                        {billingWorking && billingAction === "checkout_monthly"
+                          ? "Abrindo Checkout…"
+                          : subPlan === "pro_monthly" && subStatus
+                            ? "Plano Atual"
+                            : subStatus && subStatus.toLowerCase() !== "trial_internal"
+                              ? "Alterar no Portal"
+                              : "Assinar Mensal"}
                       </button>
+                      <div className={styles.planFootnote}>Pagamento seguro processado pela Stripe.</div>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
                         <li>Cadastro ilimitado de fornecedores</li>
@@ -843,6 +883,7 @@ export default function AjustesClient() {
                           <span className={styles.planPrice}>R$ 873,00</span>
                           <span className={styles.planPriceMeta}>/ pago anualmente</span>
                         </div>
+                        <div className={styles.planSavings}>Economize R$ 291 por ano</div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
                       </div>
                       <button
@@ -854,8 +895,15 @@ export default function AjustesClient() {
                           else await startCheckout("pro_yearly");
                         }}
                       >
-                        {subPlan === "pro_yearly" && subStatus ? "Plano Atual" : subStatus && subStatus.toLowerCase() !== "trial_internal" ? "Alterar no Portal" : "Assinar Anual"}
+                        {billingWorking && billingAction === "checkout_yearly"
+                          ? "Abrindo Checkout…"
+                          : subPlan === "pro_yearly" && subStatus
+                            ? "Plano Atual"
+                            : subStatus && subStatus.toLowerCase() !== "trial_internal"
+                              ? "Alterar no Portal"
+                              : "Assinar Anual"}
                       </button>
+                      <div className={styles.planFootnote}>Pagamento seguro processado pela Stripe.</div>
                       <ul className={styles.planList}>
                         <li>Cadastro ilimitado de itens</li>
                         <li>Cadastro ilimitado de fornecedores</li>

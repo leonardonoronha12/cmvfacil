@@ -381,6 +381,12 @@
   color: #95a8a6;
 }
 
+.planSavings {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0ab86d;
+}
+
 .planSeat {
   font-size: 11px;
   color: #101214;
@@ -398,6 +404,13 @@
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
+}
+
+.planFootnote {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #95a8a6;
 }
 
 .planList {
