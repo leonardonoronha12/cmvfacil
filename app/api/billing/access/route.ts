@@ -44,9 +44,11 @@ export async function POST(req: NextRequest) {
     const patch: any = { subscription_updated_at: nowIso };
     if (action === "checkout_cancel") {
       patch.checkout_status = "canceled";
+      patch.checkout_plan = null;
       if (!String(company.checkout_abandoned_at ?? "").trim()) patch.checkout_abandoned_at = nowIso;
     } else if (action === "checkout_abandoned") {
       patch.checkout_status = "abandoned";
+      patch.checkout_plan = null;
       if (!String(company.checkout_abandoned_at ?? "").trim()) patch.checkout_abandoned_at = nowIso;
     }
 

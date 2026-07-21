@@ -66,7 +66,7 @@ async function findCompanyByCustomerId(supabase: ReturnType<typeof getSupabaseAd
   const res = await supabase
     .from("companies")
     .select(
-      "id,stripe_customer_id,subscription_status,subscription_plan,stripe_price_id,current_period_end,cancel_at_period_end,trial_started_at,trial_ends_at,checkout_status,checkout_url,checkout_abandoned_at,billing_last_event_created_at",
+      "id,stripe_customer_id,subscription_status,subscription_plan,stripe_price_id,current_period_end,cancel_at_period_end,trial_started_at,trial_ends_at,checkout_status,checkout_url,checkout_plan,checkout_abandoned_at,billing_last_event_created_at",
     )
     .eq("stripe_customer_id", customerId)
     .maybeSingle();
@@ -323,6 +323,7 @@ export async function POST(req: NextRequest) {
         stripe_customer_id: customerId,
         checkout_url: null,
         checkout_status: "expired",
+        checkout_plan: null,
         checkout_abandoned_at: new Date().toISOString(),
         subscription_updated_at: new Date().toISOString(),
       };
@@ -353,6 +354,7 @@ export async function POST(req: NextRequest) {
         stripe_customer_id: customerId,
         checkout_status: "completed",
         checkout_url: null,
+        checkout_plan: null,
         subscription_updated_at: new Date().toISOString(),
       };
       if (sessionId) patch.stripe_checkout_session_id = sessionId;

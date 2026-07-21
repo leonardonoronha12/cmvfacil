@@ -244,9 +244,23 @@ export default function AjustesClient() {
   const checkoutParam = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
   const checkoutStatus = String(billingAccess?.checkout?.status ?? "").trim();
   const checkoutUrl = String(billingAccess?.checkout?.url ?? "").trim();
+  const checkoutPlan = String(billingAccess?.checkout?.plan ?? "").trim();
   const checkoutOpen = checkoutStatus.trim().toLowerCase() === "open" && Boolean(checkoutUrl);
 
   const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
+
+  const subStatusLower = subStatus.trim().toLowerCase();
+  const periodEndMs = periodEnd ? Date.parse(periodEnd) : NaN;
+  const periodActive = periodEnd && Number.isFinite(periodEndMs) ? Date.now() < periodEndMs : false;
+  const hasRecognizedSubscription =
+    subStatusLower === "active" || subStatusLower === "trialing" || subStatusLower === "past_due" || (cancelAtPeriodEnd && periodActive);
+
+  function planLabel(key: string) {
+    const s = key.trim().toLowerCase();
+    if (s === "pro_yearly") return "PRO Anual";
+    if (s === "pro_monthly") return "PRO Mensal";
+    return "";
+  }
 
   function formatDateBR(value: string) {
     const ms = Date.parse(value);
@@ -748,7 +762,7 @@ export default function AjustesClient() {
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Plano</div>
                       <div className={styles.planMiniValue}>{planType}</div>
-                      {subStatus && subStatus.toLowerCase() !== "trial_internal" ? (
+                      {hasRecognizedSubscription ? (
                         <button
                           type="button"
                           className={styles.planMiniLink}
@@ -781,7 +795,7 @@ export default function AjustesClient() {
                     <div className={styles.planMiniCard}>
                       <div className={styles.planMiniTitle}>Cartão</div>
                       <div className={styles.planMiniValue}>{cardLast4 ? `**** **** **** ${cardLast4}` : "—"}</div>
-                      {subStatus && subStatus.toLowerCase() !== "trial_internal" ? (
+                      {hasRecognizedSubscription ? (
                         <button
                           type="button"
                           className={styles.planMiniLink}
@@ -822,7 +836,8 @@ export default function AjustesClient() {
                   ) : null}
                   {checkoutOpen ? (
                     <div style={{ marginTop: 10, color: "#111827", fontSize: 13, fontWeight: 700 }}>
-                      Pagamento iniciado.
+                      {planLabel(checkoutPlan) ? `Plano escolhido: ${planLabel(checkoutPlan)}` : "Pagamento iniciado."}
+                      <div style={{ marginTop: 4 }}>Pagamento pendente.</div>
                       <div style={{ marginTop: 8 }}>
                         <button
                           type="button"
@@ -849,17 +864,17 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_monthly" && Boolean(subStatus))}
+                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_monthly" && hasRecognizedSubscription)}
                         onClick={async () => {
-                          if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
+                          if (hasRecognizedSubscription) await openPortal();
                           else await startCheckout("pro_monthly");
                         }}
                       >
                         {billingWorking && billingAction === "checkout_monthly"
                           ? "Abrindo Checkout…"
-                          : subPlan === "pro_monthly" && subStatus
+                          : subPlan === "pro_monthly" && hasRecognizedSubscription
                             ? "Plano Atual"
-                            : subStatus && subStatus.toLowerCase() !== "trial_internal"
+                            : hasRecognizedSubscription
                               ? "Alterar no Portal"
                               : "Assinar Mensal"}
                       </button>
@@ -889,17 +904,17 @@ export default function AjustesClient() {
                       <button
                         type="button"
                         className={styles.planSelectBtn}
-                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_yearly" && Boolean(subStatus))}
+                        disabled={billingLoading || billingWorking || checkoutOpen || (subPlan === "pro_yearly" && hasRecognizedSubscription)}
                         onClick={async () => {
-                          if (subStatus && subStatus.toLowerCase() !== "trial_internal") await openPortal();
+                          if (hasRecognizedSubscription) await openPortal();
                           else await startCheckout("pro_yearly");
                         }}
                       >
                         {billingWorking && billingAction === "checkout_yearly"
                           ? "Abrindo Checkout…"
-                          : subPlan === "pro_yearly" && subStatus
+                          : subPlan === "pro_yearly" && hasRecognizedSubscription
                             ? "Plano Atual"
-                            : subStatus && subStatus.toLowerCase() !== "trial_internal"
+                            : hasRecognizedSubscription
                               ? "Alterar no Portal"
                               : "Assinar Anual"}
                       </button>

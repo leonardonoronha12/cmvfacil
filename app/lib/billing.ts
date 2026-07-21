@@ -87,6 +87,7 @@ export type BillingCompany = {
   checkout_started_at?: string | null;
   checkout_abandoned_at?: string | null;
   checkout_url?: string | null;
+  checkout_plan?: string | null;
   whatsapp_automation_triggered_at?: string | null;
   whatsapp_automation_status?: string | null;
 };
@@ -276,7 +277,7 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
     "id,fantasy_name,legal_name,cnpj,email,phone_e164,industry,logo_url," +
     "stripe_customer_id,stripe_subscription_id,stripe_price_id,subscription_status,subscription_plan," +
     "trial_started_at,trial_ends_at,current_period_start,current_period_end,cancel_at_period_end,subscription_updated_at," +
-    "stripe_checkout_session_id,checkout_status,checkout_started_at,checkout_abandoned_at,checkout_url," +
+    "stripe_checkout_session_id,checkout_status,checkout_started_at,checkout_abandoned_at,checkout_url,checkout_plan," +
     "whatsapp_automation_triggered_at,whatsapp_automation_status";
 
   const full = await supabase.from("companies").select(selectFull).eq("id", companyId).maybeSingle();
@@ -308,7 +309,7 @@ export type BillingAccessPayload = {
   reason: BillingAccessReason;
   trial: { startedAt: string | null; endsAt: string | null; daysRemaining: number | null };
   subscription: { status: string | null; plan: PlanKey | null; priceId: string | null; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean };
-  checkout: { status: string | null; url: string | null };
+  checkout: { status: string | null; url: string | null; plan: PlanKey | null };
 };
 
 export function computeBillingAccess(company: BillingCompany | null): BillingAccessPayload {
@@ -332,6 +333,8 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
 
   const checkoutStatus = String(company?.checkout_status ?? "").trim() || null;
   const checkoutUrl = String(company?.checkout_url ?? "").trim() || null;
+  const checkoutPlanRaw = String((company as any)?.checkout_plan ?? "").trim();
+  const checkoutPlan = checkoutPlanRaw === "pro_monthly" ? "pro_monthly" : checkoutPlanRaw === "pro_yearly" ? "pro_yearly" : null;
 
   if (!hasTrial && !status) {
     return {
@@ -339,7 +342,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "legacy_untracked",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
 
@@ -350,7 +353,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "canceling",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
   if (statusLower === "active") {
@@ -359,7 +362,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "active",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
   if (statusLower === "trialing") {
@@ -368,7 +371,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "trialing",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
   if (statusLower === "past_due") {
@@ -377,7 +380,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "past_due",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
 
@@ -387,7 +390,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
       reason: "trial_internal",
       trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-      checkout: { status: checkoutStatus, url: checkoutUrl },
+      checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
 
@@ -396,7 +399,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     reason: hasTrial ? "expired" : "payment_required",
     trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
     subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
-    checkout: { status: checkoutStatus, url: checkoutUrl },
+    checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
   };
 }
 
@@ -504,8 +507,7 @@ export async function createOrReuseCheckoutUrl(params: {
     checkout_status: "open",
     checkout_started_at: new Date().toISOString(),
     checkout_url: url,
-    stripe_price_id: priceId,
-    subscription_plan: planKey,
+    checkout_plan: planKey,
     subscription_updated_at: new Date().toISOString(),
   } as any;
   await supabase.from("companies").update(patch).eq("id", companyId);
