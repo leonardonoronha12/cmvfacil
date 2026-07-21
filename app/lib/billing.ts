@@ -170,6 +170,23 @@ export async function resolveCurrentCompanyForUser(supabase: ReturnType<typeof g
   }
 
   let companyId = pickBestCompanyId(resolvedMemberRows);
+  if (!companyId && isUuid(effectiveUserId)) {
+    const byBubbleObj = await supabase
+      .from("bubble_obj_empresa")
+      .select("bubble_unique_id,updated_at,created_at")
+      .eq("supabase_user_id", effectiveUserId)
+      .order("updated_at", { ascending: false })
+      .limit(10);
+    if (!byBubbleObj.error) {
+      const bubbleIds = Array.from(
+        new Set(((byBubbleObj.data ?? []) as any[]).map((r: any) => String(r?.bubble_unique_id ?? "").trim()).filter(Boolean)),
+      );
+      if (bubbleIds.length) {
+        const byCompanyBubbleId = await supabase.from("companies").select("id").in("bubble_id", bubbleIds).limit(1).maybeSingle();
+        if (!byCompanyBubbleId.error) companyId = String((byCompanyBubbleId.data as any)?.id ?? "").trim();
+      }
+    }
+  }
   if (!companyId && emailForFallback) {
     const fallback = await supabase.from("companies").select("id").ilike("email", emailForFallback).limit(1).maybeSingle();
     if (!fallback.error) companyId = String((fallback.data as any)?.id ?? "").trim();
