@@ -71,6 +71,21 @@ export default function BillingReturnClient() {
       setError("");
 
       if (checkout === "cancel") {
+        if (origin === "signup") {
+          try {
+            sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+          } catch {}
+          try {
+            void fetch("/api/billing/access", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ action: "checkout_cancel" }),
+              keepalive: true,
+            }).catch(() => {});
+          } catch {}
+          window.location.replace(target);
+          return;
+        }
         try {
           const me = await fetch("/api/billing/access", { method: "GET" });
           if (me.status === 401) {
