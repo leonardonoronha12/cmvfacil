@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 import { resolveCurrentCompanyForUser } from "../../../lib/billing";
+import { sendCompanyInviteEmail } from "../../../lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -71,6 +72,20 @@ export async function POST(req: NextRequest) {
     const { companyId } = await resolveCurrentCompanyForUser(supabase, uid);
     if (!companyId) return json({ ok: false, error: "company_not_found" }, { status: 400 });
 
+    const { data: companyDb } = await supabase.from("companies").select("fantasy_name,legal_name").eq("id", companyId).maybeSingle();
+    const companyName = String((companyDb as any)?.fantasy_name ?? (companyDb as any)?.legal_name ?? "").trim() || "Minha Empresa";
+
+    const { data: inviterDb } = await supabase
+      .from("user_profiles")
+      .select("nome_completo,nome,sobrenome,email")
+      .eq("user_id", uid)
+      .maybeSingle();
+    const inviterName =
+      String((inviterDb as any)?.nome_completo ?? "").trim() ||
+      `${String((inviterDb as any)?.nome ?? "").trim()} ${String((inviterDb as any)?.sobrenome ?? "").trim()}`.replace(/\s+/g, " ").trim() ||
+      String((inviterDb as any)?.email ?? "").trim() ||
+      "";
+
     const membership = await supabase
       .from("company_members")
       .select("company_id,role,permission_level")
@@ -84,7 +99,9 @@ export async function POST(req: NextRequest) {
     await supabase.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "company-invite" } } as any).catch(() => null);
 
     const origin = requestOrigin(req) || "https://cmvfacil.app";
-    const redirectTo = `${origin}/restaurar-senha`;
+    const redirectTo = `${origin}/restaurar-senha?invite=1&company=${encodeURIComponent(companyName)}&role=${encodeURIComponent(role)}&email=${encodeURIComponent(
+      email,
+    )}`;
     const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
     if (invite.error) return json({ ok: false, error: invite.error.message }, { status: 500 });
 
@@ -100,9 +117,13 @@ export async function POST(req: NextRequest) {
       if (up.error) throw new Error(up.error.message);
     }
 
-    return json({ ok: true, email, role, actionLink }, { status: 200 });
+    const emailRes = await sendCompanyInviteEmail({ to: email, companyName, roleLabel: role, inviterName, actionLink });
+
+    return json(
+      { ok: true, email, role, actionLink, emailSent: emailRes.ok, ...(emailRes.ok ? {} : { emailError: emailRes.error }) },
+      { status: 200 },
+    );
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
 }
-

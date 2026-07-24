@@ -59,6 +59,26 @@ export async function POST(req: NextRequest) {
       return json({ error: "signup_failed", details: created.error.message }, { status: 400 });
     }
 
+    try {
+      const uid = String((created.data as any)?.user?.id ?? "").trim();
+      if (uid) {
+        await admin
+          .from("user_profiles")
+          .upsert(
+            {
+              user_id: uid,
+              email: email.trim().toLowerCase(),
+              nome: firstName || null,
+              sobrenome: lastName || null,
+              nome_completo: `${firstName} ${lastName}`.replace(/\s+/g, " ").trim() || null,
+              whatsapp: (body.whatsapp ?? "").trim() || null,
+              raw: { source: "signup" },
+            } as any,
+            { onConflict: "user_id" },
+          );
+      }
+    } catch {}
+
     const welcome = await sendWelcomeEmail({
       to: email,
       firstName,

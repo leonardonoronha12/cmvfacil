@@ -102,6 +102,25 @@ function IconBurgerBadge() {
   );
 }
 
+function IconUserPlaceholder() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 12.25c2.071 0 3.75-1.679 3.75-3.75S14.071 4.75 12 4.75 8.25 6.429 8.25 8.5 9.929 12.25 12 12.25Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.5 19.25c1.42-3.05 3.9-4.75 6.5-4.75s5.08 1.7 6.5 4.75"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 function IconCmv() {
   return (
     <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden="true">
@@ -1062,7 +1081,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             {companyAvatarUrl ? (
               <img src={companyAvatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} />
             ) : (
-              <IconBurgerBadge />
+              <IconUserPlaceholder />
             )}
           </div>
           <div className={dash.companyMeta}>

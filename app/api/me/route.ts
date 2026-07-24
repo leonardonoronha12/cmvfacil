@@ -798,6 +798,48 @@ export async function GET(req: NextRequest) {
     const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
 
     if (companyId) {
+      let outNome = String((profileDb as any)?.nome ?? "").trim();
+      let outSobrenome = String((profileDb as any)?.sobrenome ?? "").trim();
+      let outNomeCompleto = String((profileDb as any)?.nome_completo ?? "").trim();
+      let outWhatsapp = String((profileDb as any)?.whatsapp ?? "").trim();
+      let outEmail = String((profileDb as any)?.email ?? email ?? "").trim();
+
+      if ((!outNome && !outSobrenome && !outNomeCompleto && !outWhatsapp) || !outEmail) {
+        try {
+          const authUser = await supabase.auth.admin.getUserById(uid);
+          const meta = ((authUser.data as any)?.user?.user_metadata ?? {}) as any;
+          const metaFirst = String(meta?.first_name ?? meta?.nome ?? "").trim();
+          const metaLast = String(meta?.last_name ?? meta?.sobrenome ?? "").trim();
+          const metaFull = String(meta?.full_name ?? meta?.nome_completo ?? meta?.nomeCompleto ?? "").trim();
+          const metaWhatsapp = String(meta?.whatsapp ?? "").trim();
+          const metaEmail = String((authUser.data as any)?.user?.email ?? email ?? "").trim().toLowerCase();
+
+          const nextNome = outNome || metaFirst;
+          const nextSobrenome = outSobrenome || metaLast;
+          const nextNomeCompleto = outNomeCompleto || metaFull || `${nextNome} ${nextSobrenome}`.replace(/\s+/g, " ").trim();
+          const nextWhatsapp = outWhatsapp || metaWhatsapp;
+          const nextEmail = outEmail || metaEmail;
+
+          if (nextEmail || nextNome || nextSobrenome || nextNomeCompleto || nextWhatsapp) {
+            const patch: any = {};
+            if (nextEmail) patch.email = nextEmail;
+            if (nextNome) patch.nome = nextNome;
+            if (nextSobrenome) patch.sobrenome = nextSobrenome;
+            if (nextNomeCompleto) patch.nome_completo = nextNomeCompleto;
+            if (nextWhatsapp) patch.whatsapp = nextWhatsapp;
+            try {
+              await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+            } catch {}
+          }
+
+          outNome = nextNome;
+          outSobrenome = nextSobrenome;
+          outNomeCompleto = nextNomeCompleto;
+          outWhatsapp = nextWhatsapp;
+          outEmail = nextEmail;
+        } catch {}
+      }
+
       const { data: companyDb } = companyId
         ? await supabase
             .from("companies")
@@ -852,11 +894,11 @@ export async function GET(req: NextRequest) {
         {
           ok: true,
           userId: uid,
-          email: String((profileDb as any)?.email ?? email ?? "").trim(),
-          nome: String((profileDb as any)?.nome ?? "").trim(),
-          sobrenome: String((profileDb as any)?.sobrenome ?? "").trim(),
-          nomeCompleto: String((profileDb as any)?.nome_completo ?? "").trim(),
-          whatsapp: String((profileDb as any)?.whatsapp ?? "").trim(),
+          email: outEmail,
+          nome: outNome,
+          sobrenome: outSobrenome,
+          nomeCompleto: outNomeCompleto,
+          whatsapp: outWhatsapp,
           avatarUrl: "",
           companyName: String(companyDb?.fantasy_name ?? companyDb?.legal_name ?? "").trim(),
           companyLogoUrl: String(companyDb?.logo_url ?? "").trim(),

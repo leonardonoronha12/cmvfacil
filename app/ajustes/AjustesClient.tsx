@@ -47,6 +47,25 @@ function IconBurgerBadge() {
   );
 }
 
+function IconUserPlaceholder() {
+  return (
+    <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M12 12.25c2.071 0 3.75-1.679 3.75-3.75S14.071 4.75 12 4.75 8.25 6.429 8.25 8.5 9.929 12.25 12 12.25Z"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5.5 19.25c1.42-3.05 3.9-4.75 6.5-4.75s5.08 1.7 6.5 4.75"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios" | "planos";
 
 export default function AjustesClient() {
@@ -190,19 +209,32 @@ export default function AjustesClient() {
       setBillingLoading(true);
       setBillingError("");
       try {
-        const res = await fetch("/api/billing/access", { method: "GET" });
-        const j = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "billing_access_failed"));
-        setBillingAccess(j.access ?? null);
-        const status = String(j?.access?.subscription?.status ?? "").trim();
-        setPlanStatus(status);
-        const last4 = String(j?.access?.cardLast4 ?? "")
-          .trim()
-          .replace(/[^\d]/g, "");
-        if (last4.length === 4) setCardLast4(last4);
-        const plan = String(j?.access?.subscription?.plan ?? "").trim();
-        if (plan === "pro_yearly") setPlanType("PRO Anual");
-        else if (plan === "pro_monthly") setPlanType("PRO Mensal");
+        const sleep = (ms: number) => new Promise((r) => window.setTimeout(r, ms));
+        const delays = [0, 800, 1500];
+        let lastErr: unknown = null;
+        for (const d of delays) {
+          if (d) await sleep(d);
+          try {
+            const res = await fetch("/api/billing/access", { method: "GET" });
+            const j = (await res.json().catch(() => null)) as any;
+            if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "billing_access_failed"));
+            setBillingAccess(j.access ?? null);
+            const status = String(j?.access?.subscription?.status ?? "").trim();
+            setPlanStatus(status);
+            const last4 = String(j?.access?.cardLast4 ?? "")
+              .trim()
+              .replace(/[^\d]/g, "");
+            if (last4.length === 4) setCardLast4(last4);
+            const plan = String(j?.access?.subscription?.plan ?? "").trim();
+            if (plan === "pro_yearly") setPlanType("PRO Anual");
+            else if (plan === "pro_monthly") setPlanType("PRO Mensal");
+            lastErr = null;
+            break;
+          } catch (e) {
+            lastErr = e;
+          }
+        }
+        if (lastErr) throw lastErr;
       } catch (err) {
         setBillingError(toFriendlyBillingError(err instanceof Error ? err.message : String(err)));
       } finally {
@@ -377,6 +409,9 @@ export default function AjustesClient() {
     if (!s) return "Não foi possível carregar as informações de assinatura.";
     if (s.includes("company_not_found")) return "Não conseguimos localizar sua empresa vinculada à conta. Tente sair e entrar novamente.";
     if (s.includes("unauthorized") || s.includes("forbidden")) return "Sua sessão expirou. Faça login novamente.";
+    if (s.includes("supabase_not_configured") || s.includes("server_not_configured")) return "O sistema não está configurado corretamente. Fale com o suporte.";
+    if (s.includes("stripe") && s.includes("not") && s.includes("configured")) return "O pagamento ainda não está configurado. Fale com o suporte.";
+    if (s.includes("failed to fetch") || s.includes("networkerror") || s.includes("fetch failed")) return "Instabilidade de conexão. Tente novamente em alguns instantes.";
     if (s.includes("missing_plan_key") || s.includes("invalid_plan_key")) return "Plano inválido. Atualize a página e tente novamente.";
     if (s.includes("subscription_blocked")) return "Você já possui uma assinatura ativa para esta empresa.";
     if (s.includes("checkout_in_progress")) return "Já existe um pagamento pendente. Continue o pagamento ou cancele para escolher outro plano.";
@@ -384,6 +419,7 @@ export default function AjustesClient() {
     if (s.includes("billing_access_failed")) return "Não foi possível verificar sua assinatura no momento. Tente novamente.";
     if (s.includes("portal_failed")) return "Não foi possível abrir a área de pagamento agora. Tente novamente.";
     if (s.includes("checkout_failed")) return "Não foi possível abrir o Stripe Checkout agora. Tente novamente.";
+    if (v.length <= 140) return `Ocorreu um erro ao carregar os planos: ${v}`;
     return "Ocorreu um erro ao carregar os planos. Tente novamente.";
   }
 
@@ -585,12 +621,8 @@ export default function AjustesClient() {
                   <div className={styles.avatarRow}>
                     <div className={styles.avatarBox}>
                       <span className={styles.avatarIcon} aria-hidden>
-                        {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
+                        {avatarUrl ? <img src={avatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconUserPlaceholder />}
                       </span>
-                      <span>Enviar Imagem</span>
-                    </div>
-                    <div>
-                      <div className={styles.avatarHint}>Tamanho recomendado: 600 x 600 px</div>
                     </div>
                   </div>
 
@@ -723,68 +755,8 @@ export default function AjustesClient() {
                       {companyLogoUrl ? (
                         <img src={companyLogoUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                       ) : (
-                        <svg width="34" height="34" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                          <path
-                            d="M5 10.5c0-2.5 3-4.5 7-4.5s7 2 7 4.5"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinecap="round"
-                          />
-                          <path d="M6 11.5h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                          <path
-                            d="M6.5 13.5h11c.3 0 .5.2.5.5v.7c0 1.6-1.3 2.8-2.8 2.8H8.8C7.2 17.5 6 16.3 6 14.7V14c0-.3.2-.5.5-.5Z"
-                            stroke="currentColor"
-                            strokeWidth="1.8"
-                            strokeLinejoin="round"
-                          />
-                          <path d="M7.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                          <path d="M11 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                          <path d="M14.5 12.5h2.2" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-                        </svg>
+                        <IconUserPlaceholder />
                       )}
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", rowGap: 6 }}>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        disabled={savingCompany}
-                        onChange={(e) => {
-                          const file = e.target.files && e.target.files[0];
-                          e.target.value = "";
-                          if (!file) return;
-                          void uploadCompanyLogo(file);
-                        }}
-                      />
-                      {companyLogoUrl ? (
-                        <button
-                          type="button"
-                          className={styles.btnGhost}
-                          disabled={savingCompany}
-                          onClick={async () => {
-                            if (savingCompany) return;
-                            setCompanySaveError("");
-                            setSavingCompany(true);
-                            try {
-                              setCompanyLogoUrl("");
-                              const res = await fetch("/api/me", {
-                                method: "POST",
-                                headers: { "content-type": "application/json" },
-                                body: JSON.stringify({ companyLogoUrl: "" }),
-                              });
-                              const j = (await res.json().catch(() => null)) as any;
-                              if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
-                              await loadMeFromApi();
-                            } catch (err) {
-                              setCompanySaveError(err instanceof Error ? err.message : String(err));
-                            } finally {
-                              setSavingCompany(false);
-                            }
-                          }}
-                        >
-                          Remover imagem
-                        </button>
-                      ) : null}
-                      <div className={styles.avatarHint}>Tamanho recomendado: 600 x 600 px</div>
                     </div>
                   </div>
 
@@ -950,6 +922,10 @@ export default function AjustesClient() {
                                 if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "invite_failed"));
                                 const link = String(j?.actionLink ?? "").trim();
                                 setInviteLink(link);
+                                if (j?.emailSent === false) {
+                                  const raw = String(j?.emailError ?? "").trim();
+                                  setInviteError(raw ? `Convite gerado, mas o email não foi enviado: ${raw}` : "Convite gerado, mas o email não foi enviado.");
+                                }
                                 await loadMeFromApi();
                               } catch (err) {
                                 setInviteError(err instanceof Error ? err.message : String(err));
