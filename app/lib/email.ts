@@ -99,44 +99,57 @@ export async function sendCompanyInviteEmail(args: {
 
   const subject = `Seu acesso ao CMV Fácil (${companyName})`;
   const html = `
-    <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.45; color: #111827; background: #ffffff;">
-      <div style="max-width: 560px; margin: 0 auto; padding: 18px 16px;">
-        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
-          <div style="width: 42px; height: 42px; border-radius: 12px; background: #0ab86d; display: inline-flex; align-items: center; justify-content: center;">
-            <span style="color: #ffffff; font-weight: 800; font-size: 16px;">CMV</span>
+    <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.55; color: #111827; background: #f3f4f6; padding: 26px 12px;">
+      <div style="max-width: 640px; margin: 0 auto;">
+        <div style="padding: 14px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="width: 44px; height: 44px; border-radius: 14px; background: rgba(10, 184, 109, 0.14); display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(10, 184, 109, 0.25);">
+              <span style="color: #06754b; font-weight: 900; font-size: 14px;">CMV</span>
+            </div>
+            <div>
+              <div style="font-weight: 900; font-size: 16px; letter-spacing: -0.2px;">CMV Fácil</div>
+              <div style="color: #6b7280; font-size: 12px;">Convite de acesso</div>
+            </div>
           </div>
-          <div>
-            <div style="font-weight: 900; font-size: 16px;">CMV Fácil</div>
-            <div style="color: #6b7280; font-size: 12px;">Acesso de equipe</div>
-          </div>
+          <div style="color: #6b7280; font-size: 12px; text-align: right;">cmvfacil.app</div>
         </div>
 
-        <h2 style="margin: 0 0 10px 0; font-size: 20px;">Você foi convidado para acessar</h2>
-        <p style="margin: 0 0 12px 0; color: #111827; font-size: 14px;">
-          <strong>${companyName}</strong>
-        </p>
-        <p style="margin: 0 0 14px 0; color: #374151; font-size: 14px;">
-          ${inviterText} Sua permissão será: <strong>${roleLabel}</strong>.
-        </p>
+        <div style="background: #ffffff; border-radius: 16px; border: 1px solid #e5e7eb; box-shadow: 0 18px 50px rgba(0,0,0,0.06); overflow: hidden;">
+          <div style="padding: 18px 18px 14px; background: linear-gradient(180deg, rgba(10, 184, 109, 0.14), rgba(10, 184, 109, 0));">
+            <h2 style="margin: 0 0 8px 0; font-size: 20px; letter-spacing: -0.2px;">Seu acesso está pronto</h2>
+            <p style="margin: 0; color: #374151; font-size: 14px;">
+              Você foi convidado para acessar <strong>${companyName}</strong> no CMV Fácil.
+            </p>
+            <p style="margin: 10px 0 0; color: #374151; font-size: 14px;">
+              ${inviterText} Sua permissão será: <strong>${roleLabel}</strong>.
+            </p>
+          </div>
 
-        <div style="border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px 12px; background: #f9fafb; margin: 0 0 14px 0;">
-          <div style="font-weight: 800; margin: 0 0 6px 0;">Como entrar (bem simples)</div>
-          <ol style="margin: 0; padding-left: 18px; color: #374151; font-size: 14px;">
-            <li>Clique no botão abaixo.</li>
-            <li>Crie sua senha (para entrar sempre que quiser).</li>
-            <li>Pronto: você será levado direto ao painel.</li>
-          </ol>
+          <div style="padding: 0 18px 18px;">
+            <div style="border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 12px; background: #f9fafb; margin: 0 0 16px 0;">
+              <div style="font-weight: 900; margin: 0 0 8px 0; font-size: 14px;">Como entrar (bem simples)</div>
+              <ol style="margin: 0; padding-left: 18px; color: #374151; font-size: 14px;">
+                <li>Clique no botão abaixo.</li>
+                <li>Crie sua senha de acesso (é só para você).</li>
+                <li>Você será redirecionado automaticamente para o painel.</li>
+              </ol>
+            </div>
+
+            <div style="text-align: center; margin: 0 0 14px 0;">
+              <a href="${actionLink}" style="display: inline-block; background: linear-gradient(180deg, #0ab86d, #098c55); color: #ffffff; padding: 12px 18px; border-radius: 12px; text-decoration: none; font-weight: 900;">
+                Acessar sistema
+              </a>
+            </div>
+
+            <div style="border-top: 1px solid #e5e7eb; padding-top: 12px; color: #6b7280; font-size: 12px;">
+              <div style="margin: 0 0 8px 0;">Se o botão não abrir, copie e cole este link no navegador:</div>
+              <div style="word-break: break-all; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 10px;">
+                ${actionLink}
+              </div>
+              <div style="margin: 10px 0 0 0;">Se você não esperava este convite, ignore este email.</div>
+            </div>
+          </div>
         </div>
-
-        <p style="margin: 0 0 14px 0;">
-          <a href="${actionLink}" style="display: inline-block; background: #0ab86d; color: #ffffff; padding: 11px 16px; border-radius: 10px; text-decoration: none; font-weight: 800;">
-            Acessar sistema
-          </a>
-        </p>
-
-        <p style="margin: 0; color: #6b7280; font-size: 12px;">
-          Se você não esperava este convite, ignore este email.
-        </p>
       </div>
     </div>
   `.trim();
