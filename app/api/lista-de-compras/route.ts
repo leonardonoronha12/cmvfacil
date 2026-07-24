@@ -1036,7 +1036,7 @@ export async function GET(req: NextRequest) {
           ok: true,
           source: "compat",
           readOnly: true,
-          banner: "Fonte: Banco compatível Bubble",
+          banner: "Modo somente leitura.",
           rows: rowsCompat,
           totals,
           filters: { startInventoryId: startInvId || null, endInventoryId: endInvId || null, diasEstoque, prazoFornecedor },

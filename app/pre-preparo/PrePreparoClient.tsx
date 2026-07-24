@@ -2571,12 +2571,11 @@ export default function PrePreparoClient() {
                 fontSize: 13,
                 fontWeight: 700,
                 display: "flex",
-                justifyContent: "space-between",
+              justifyContent: "flex-end",
                 gap: 12,
                 flexWrap: "wrap",
               }}
             >
-              <span>Fonte: Banco compatível Bubble</span>
               <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
             </div>
 

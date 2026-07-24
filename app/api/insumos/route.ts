@@ -559,9 +559,13 @@ export async function GET(req: NextRequest) {
         })
         .filter(Boolean);
 
-      const categories = Array.from(new Set(rows.map((r: any) => String(r?.categoria ?? "").trim()).filter(Boolean))).sort((a, b) =>
-        a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }),
-      );
+      const categories = Array.from(
+        new Set(
+          categoriesDb
+            .map((c: any) => String(c?.name ?? "").trim())
+            .filter(Boolean),
+        ),
+      ).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
       await dbg("A", "api/insumos", "compat_response_ready", {
         rows: rows.length,
         categories: categories.length,

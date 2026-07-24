@@ -1477,7 +1477,7 @@ export default function ListaDeComprasClient() {
             </span>
             <span>
               {isCompatMode
-                ? compat?.banner || "Fonte: Banco compatível Bubble"
+                ? compat?.banner || "Modo somente leitura."
                 : inventoryOptions.length
                   ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
                   : "Cadastre inventários para liberar o período e montar sua lista."}
