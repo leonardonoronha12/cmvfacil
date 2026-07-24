@@ -569,7 +569,7 @@ async function processStagingBatch(args: {
         processed += 1;
       }
       if (upserts.length) {
-        const { error: upErr } = await supabase.from("inventario").upsert(upserts as any, { onConflict: "id" });
+        const { error: upErr } = await supabase.from("inventario").upsert(upserts as any, { onConflict: "id", ignoreDuplicates: true });
         if (upErr) throw new Error(upErr.message);
       }
     } else {

@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import { QaModePanel } from "../lib/qaMode";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
@@ -17,6 +16,8 @@ import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCa
 import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
+import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -25,6 +26,7 @@ type PrePreparoRow = {
   id: string;
   categoria: string;
   receita: string;
+  recipeImage?: string;
   custoTotal: string;
   rendimento: string;
   custoUnitario: string;
@@ -760,6 +762,7 @@ export default function PrePreparoClient() {
   const [newRecipeUnit, setNewRecipeUnit] = useState("");
   const [newRecipeValidity, setNewRecipeValidity] = useState("7");
   const [newRecipeValidityUnit, setNewRecipeValidityUnit] = useState("Dia(s)");
+  const [newRecipeImageUrl, setNewRecipeImageUrl] = useState("");
   const newRecipeFileRef = useRef<HTMLInputElement | null>(null);
   const [newRecipeIngredients, setNewRecipeIngredients] = useState<IngredienteRow[]>([]);
   const [ingredientQuery, setIngredientQuery] = useState("");
@@ -786,7 +789,9 @@ export default function PrePreparoClient() {
   const [draftUnit, setDraftUnit] = useState("Kg");
   const [draftValidity, setDraftValidity] = useState("7");
   const [draftValidityUnit, setDraftValidityUnit] = useState("Dia(s)");
+  const [draftImageUrl, setDraftImageUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const [isEtiquetaOpen, setIsEtiquetaOpen] = useState(false);
   const [etiquetaRecipeId, setEtiquetaRecipeId] = useState<string | null>(null);
@@ -1035,18 +1040,42 @@ export default function PrePreparoClient() {
   useEffect(() => {
     void (async () => {
       try {
+        let fichas = readFichasTecnicasFromStore();
+        if (!fichas.length) {
+          try {
+            fichas = await loadFichasTecnicasFromSupabase();
+            if (fichas.length) writeFichasTecnicasToStore(fichas);
+          } catch {}
+        }
+        const fichaNameKeys = new Set<string>();
+        for (const r of fichas) {
+          const k = normalizeNameKey(String((r as any)?.receita ?? ""));
+          if (k) fichaNameKeys.add(k);
+        }
         const st = await loadPrePreparoStateFromSupabase();
         if (st.meta) setSourceMeta(st.meta);
         if (st.meta?.source === "compat") {
           const list = Array.isArray((st.compat as any)?.prePreparos) ? ((st.compat as any).prePreparos as PrePreparoCompatRow[]) : [];
           setCompatRows(list);
           setSelectedCompatId(list[0]?.id ?? null);
-          setRows(st.rows as any);
+          const filtered = Array.isArray(st.rows)
+            ? (st.rows as any[]).filter((row) => {
+                const key = normalizeNameKey(String((row as any)?.receita ?? ""));
+                return !key || !fichaNameKeys.has(key);
+              })
+            : [];
+          setRows(filtered as any);
           prePreparoLoadErrorShownRef.current = false;
           prePreparoLoadedRef.current = true;
           return;
         }
-        setRows(st.rows as any);
+        const filtered = Array.isArray(st.rows)
+          ? (st.rows as any[]).filter((row) => {
+              const key = normalizeNameKey(String((row as any)?.receita ?? ""));
+              return !key || !fichaNameKeys.has(key);
+            })
+          : [];
+        setRows(filtered as any);
         prePreparoLoadErrorShownRef.current = false;
         prePreparoLoadedRef.current = true;
       } catch (err) {
@@ -1099,30 +1128,6 @@ export default function PrePreparoClient() {
         });
     }, 700);
   }, [isReadOnly, rows]);
-
-  useEffect(() => {
-    if (isReadOnly) return;
-    if (!etiquetasLoadedRef.current) return;
-    if (saveEtiquetasTimeoutRef.current) window.clearTimeout(saveEtiquetasTimeoutRef.current);
-    saveEtiquetasTimeoutRef.current = window.setTimeout(() => {
-      void savePrePreparoEtiquetasToSupabase(etiquetasRows)
-        .then(() => {
-          etiquetasSaveErrorShownRef.current = false;
-        })
-        .catch(async () => {
-          try {
-            await new Promise((r) => window.setTimeout(r, 700));
-            await savePrePreparoEtiquetasToSupabase(etiquetasRows);
-            etiquetasSaveErrorShownRef.current = false;
-          } catch (err2) {
-            if (!etiquetasSaveErrorShownRef.current) {
-              etiquetasSaveErrorShownRef.current = true;
-              showToast(supabaseSaveErrorMessage(err2), "error");
-            }
-          }
-        });
-    }, 700);
-  }, [etiquetasRows, isReadOnly]);
 
   useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);
@@ -1471,8 +1476,10 @@ export default function PrePreparoClient() {
     const from = toTitleCase(normalizeCategoryName(String(row.categoria ?? "")));
     const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
     setDraftCategory(match);
+    setDraftImageUrl(String(row.recipeImage ?? "").trim());
     setDraftSpec("");
-    setDraftUnit("Kg");
+    const parsedYield = parseQtyLabel(String(row.rendimento ?? ""));
+    setDraftUnit((parsedYield.unit || "Und").trim() || "Und");
     setDraftValidity("7");
     setDraftValidityUnit("Dia(s)");
     setIsEditOpen(true);
@@ -1486,6 +1493,7 @@ export default function PrePreparoClient() {
     setNewRecipeUnit("");
     setNewRecipeValidity("7");
     setNewRecipeValidityUnit("Dia(s)");
+    setNewRecipeImageUrl("");
     setNewRecipeIngredients([]);
     setIngredientQuery("");
     setIngredientQty("0,000");
@@ -1495,6 +1503,15 @@ export default function PrePreparoClient() {
     setNewRecipeYieldUnit("Kg");
     setIsNewRecipeOpen(true);
     if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+  }
+
+  async function uploadPrePreparoImage(file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/api/pre-preparo/image", { method: "POST", body: form });
+    const json = (await res.json().catch(() => null)) as { ok?: boolean; publicUrl?: string; error?: string; details?: string } | null;
+    if (!res.ok || !json?.ok || !json.publicUrl) throw new Error(json?.details || json?.error || "upload_failed");
+    return String(json.publicUrl);
   }
 
   function openEtiquetaModal(row?: PrePreparoRow | null) {
@@ -2531,8 +2548,7 @@ export default function PrePreparoClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="pre-preparo" />
+    <>
       {isMounted && toast
         ? createPortal(
             <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
@@ -2556,12 +2572,11 @@ export default function PrePreparoClient() {
                 fontSize: 13,
                 fontWeight: 700,
                 display: "flex",
-                justifyContent: "space-between",
+              justifyContent: "flex-end",
                 gap: 12,
                 flexWrap: "wrap",
               }}
             >
-              <span>Fonte: Banco compatível Bubble</span>
               <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
             </div>
 
@@ -3133,13 +3148,18 @@ export default function PrePreparoClient() {
                 <aside className={`${dash.itemDetailsAside} ${ft.detailsSidebar}`}>
                   <div className={ft.detailsSidebarCard}>
                     <div className={ft.detailsPreviewBox}>
-                      <div className={ft.detailsPreviewFallback}>
-                        <div className={ft.previewTopBar} />
-                        <div className={ft.previewThumbGrid}>
-                          <span className={ft.previewThumbMain} />
-                          <span className={ft.previewThumbSide} />
+                      {String((detailsRow as any)?.recipeImage ?? "")
+                        .trim() ? (
+                        <img src={String((detailsRow as any).recipeImage).trim()} alt="" className={ft.detailsPreviewImage} />
+                      ) : (
+                        <div className={ft.detailsPreviewFallback}>
+                          <div className={ft.previewTopBar} />
+                          <div className={ft.previewThumbGrid}>
+                            <span className={ft.previewThumbMain} />
+                            <span className={ft.previewThumbSide} />
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                     <div className={`${dash.itemAsideTitle} ${ft.detailsSidebarTitle}`}>{detailsRow.receita}</div>
                     <div className={`${dash.itemAsideMeta} ${ft.detailsSidebarMeta}`}>Pré-Preparo</div>
@@ -3154,11 +3174,6 @@ export default function PrePreparoClient() {
                     <button type="button" className={ft.detailsReturnBtn} onClick={() => void downloadFichaTecnica(getPdfRow(detailsRow))}>
                       <DetailsPdfIcon />
                       Baixar Ficha Técnica
-                    </button>
-
-                    <button type="button" className={ft.detailsReturnBtn} onClick={() => void refreshThisPrePreparoFromSupabase()} disabled={isSyncingDetails}>
-                      <IconSync />
-                      {isSyncingDetails ? "Carregando..." : "Recarregar itens"}
                     </button>
 
                     <div className={dash.itemAsideKpis}>
@@ -3299,7 +3314,7 @@ export default function PrePreparoClient() {
                     <div className={styles.recipeTop}>
                       <div className={styles.recipeLeft}>
                         <div className={styles.recipeIcon} aria-hidden>
-                          <IconCubeOutline />
+                          {r.recipeImage ? <img src={r.recipeImage} alt="" className={styles.recipeIconImg} /> : <IconCubeOutline />}
                         </div>
                         <div className={styles.recipeMeta}>
                           <div className={styles.recipeCategory}>{r.categoria}</div>
@@ -3434,7 +3449,13 @@ export default function PrePreparoClient() {
               <div className={styles.modalBody}>
                 <div className={styles.imageRow}>
                   <div className={styles.imageBox} onClick={() => fileInputRef.current?.click()} role="button" tabIndex={0}>
-                    Enviar Imagem
+                      {draftImageUrl ? (
+                        <img src={draftImageUrl} alt="" className={styles.imagePreview} />
+                      ) : isUploadingImage ? (
+                        "Enviando..."
+                      ) : (
+                        "Enviar Imagem"
+                      )}
                   </div>
                   <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
                   <input
@@ -3442,9 +3463,21 @@ export default function PrePreparoClient() {
                     type="file"
                     accept="image/*"
                     className={styles.fileInput}
-                    onChange={() => {
-                      if (fileInputRef.current) fileInputRef.current.value = "";
-                    }}
+                      onChange={async (e) => {
+                        const file = e.currentTarget.files?.[0] ?? null;
+                        e.currentTarget.value = "";
+                        if (!file) return;
+                        try {
+                          setIsUploadingImage(true);
+                          const url = await uploadPrePreparoImage(file);
+                          setDraftImageUrl(url);
+                          showToast("Imagem enviada.", "success");
+                        } catch (err) {
+                          showToast(supabaseSaveErrorMessage(err), "error", 9000);
+                        } finally {
+                          setIsUploadingImage(false);
+                        }
+                      }}
                   />
                 </div>
 
@@ -3509,7 +3542,25 @@ export default function PrePreparoClient() {
                     if (!editingId) return;
                     const name = draftName.trim();
                     if (!name) return;
-                    setRows((prev) => prev.map((r) => (r.id === editingId ? { ...r, receita: name, categoria: draftCategory } : r)));
+                    const nextUnit = draftUnit.trim() || "Und";
+                    setRows((prev) =>
+                      prev.map((r) =>
+                        r.id === editingId
+                          ? (() => {
+                              const parsed = parseQtyLabel(String(r.rendimento ?? ""));
+                              const qty = parsed.qty;
+                              const rendimento = `${formatPtQty(qty)} ${nextUnit}`;
+                              return recomputeRowMetrics({
+                                ...r,
+                                receita: name,
+                                categoria: draftCategory,
+                                recipeImage: draftImageUrl ? draftImageUrl : undefined,
+                                rendimento,
+                              });
+                            })()
+                          : r,
+                      ),
+                    );
                     setIsEditOpen(false);
                     setEditingId(null);
                   }}
@@ -3766,7 +3817,13 @@ export default function PrePreparoClient() {
                   <>
                     <div className={styles.imageRow}>
                       <div className={styles.imageBox} onClick={() => newRecipeFileRef.current?.click()} role="button" tabIndex={0}>
-                        Enviar Imagem
+                        {newRecipeImageUrl ? (
+                          <img src={newRecipeImageUrl} alt="" className={styles.imagePreview} />
+                        ) : isUploadingImage ? (
+                          "Enviando..."
+                        ) : (
+                          "Enviar Imagem"
+                        )}
                       </div>
                       <div className={styles.imageHint}>Tamanho recomendado: 600 × 600 px</div>
                       <input
@@ -3774,8 +3831,20 @@ export default function PrePreparoClient() {
                         type="file"
                         accept="image/*"
                         className={styles.fileInput}
-                        onChange={() => {
-                          if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
+                        onChange={async (e) => {
+                          const file = e.currentTarget.files?.[0] ?? null;
+                          e.currentTarget.value = "";
+                          if (!file) return;
+                          try {
+                            setIsUploadingImage(true);
+                            const url = await uploadPrePreparoImage(file);
+                            setNewRecipeImageUrl(url);
+                            showToast("Imagem enviada.", "success");
+                          } catch (err) {
+                            showToast(supabaseSaveErrorMessage(err), "error", 9000);
+                          } finally {
+                            setIsUploadingImage(false);
+                          }
                         }}
                       />
                     </div>
@@ -3820,7 +3889,15 @@ export default function PrePreparoClient() {
 
                       <div className={styles.formField}>
                         <div className={styles.formLabel}>Unidade de Medida</div>
-                        <select className={styles.formSelect} value={newRecipeUnit} onChange={(e) => setNewRecipeUnit(e.target.value)}>
+                        <select
+                          className={styles.formSelect}
+                          value={newRecipeUnit}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setNewRecipeUnit(v);
+                            if (v) setNewRecipeYieldUnit(v);
+                          }}
+                        >
                           <option value="">Selecione</option>
                           <option value="Und">Und</option>
                           <option value="Kg">Kg</option>
@@ -4080,6 +4157,7 @@ export default function PrePreparoClient() {
                           id: nextId,
                           categoria: newRecipeCategory,
                           receita: newRecipeName.trim(),
+                          recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
                           custoTotal: totalLabel,
                           rendimento: rendimentoLabel,
                           custoUnitario: unitCostLabel,
@@ -4224,6 +4302,6 @@ export default function PrePreparoClient() {
         ) : null}
 
       </main>
-    </div>
+    </>
   );
 }

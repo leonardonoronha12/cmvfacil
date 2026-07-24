@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../../dashboard/dashboard.module.css";
-import AppSidebar from "../../components/AppSidebar";
 import styles from "../importar-bubble/importar-bubble.module.css";
 
 function safeJsonMessage(err: unknown) {
@@ -1936,13 +1935,12 @@ export function ImportarBubbleApiPanel(props?: { compact?: boolean; onApi?: (api
 
 export default function ImportarBubbleApiClient() {
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <ImportarBubbleApiPanel />
         </div>
       </main>
-    </div>
+    </>
   );
 }

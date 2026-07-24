@@ -101,11 +101,28 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+function safeNextPath(value: string) {
+  const raw = String(value ?? "").trim();
+  if (!raw || raw === "/") return "/dashboard";
+  if (!raw.startsWith("/")) return "/dashboard";
+  if (raw.startsWith("//")) return "/dashboard";
+  if (raw.includes("://")) return "/dashboard";
+  return raw;
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isPublicFile = /\.[^/]+$/.test(pathname);
   const host = String(req.headers.get("host") ?? "").toLowerCase();
   const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
+  const vercelEnv = String(process.env.VERCEL_ENV ?? "").trim().toLowerCase();
+
+  if (vercelEnv === "production" && host.endsWith(".vercel.app") && host !== "cmvfacil.app") {
+    const url = req.nextUrl.clone();
+    url.host = "cmvfacil.app";
+    url.protocol = "https:";
+    return NextResponse.redirect(url, 308);
+  }
 
   if (
     isLocalhost &&
@@ -132,8 +149,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/login/") ||
     pathname === "/cadastro-usuario" ||
     pathname.startsWith("/cadastro-usuario/") ||
-    pathname === "/cadastro-empresa" ||
-    pathname.startsWith("/cadastro-empresa/") ||
+    pathname === "/billing/return" ||
+    pathname.startsWith("/billing/return/") ||
     pathname === "/resetar-senha" ||
     pathname.startsWith("/resetar-senha/") ||
     pathname === "/restaurar-senha" ||
@@ -142,13 +159,17 @@ export async function middleware(req: NextRequest) {
     pathname === "/sitemap.xml" ||
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/onboarding/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version" ||
     pathname === "/api/health/supabase-config" ||
     pathname === "/api/health/auth-debug" ||
     pathname === "/api/health/bubble-config" ||
     pathname === "/api/health/bubble-ping" ||
-    pathname.startsWith("/api/bubble-compat/")
+    pathname.startsWith("/api/bubble-compat/") ||
+    pathname.startsWith("/api/billing/") ||
+    pathname.startsWith("/api/cron/") ||
+    pathname === "/api/stripe/webhook"
   ) {
     return NextResponse.next();
   }
@@ -157,7 +178,63 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  if (await isAuthenticated(req)) return NextResponse.next();
+  if (await isAuthenticated(req)) {
+    if (pathname === "/") {
+      const url = req.nextUrl.clone();
+      url.pathname = "/dashboard";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
+    if (
+      pathname === "/ajustes" ||
+      pathname.startsWith("/ajustes/") ||
+      pathname === "/cadastro-empresa" ||
+      pathname.startsWith("/cadastro-empresa/") ||
+      pathname === "/api/me" ||
+      pathname.startsWith("/api/billing/") ||
+      pathname === "/api/stripe/webhook"
+    ) {
+      return NextResponse.next();
+    }
+
+    try {
+      const checkUrl = req.nextUrl.clone();
+      checkUrl.pathname = "/api/billing/access";
+      checkUrl.search = "";
+      const cookie = req.headers.get("cookie") ?? "";
+      const authorization = req.headers.get("authorization") ?? "";
+      const res = await fetchWithTimeout(
+        checkUrl.toString(),
+        { method: "GET", headers: { ...(cookie ? { cookie } : {}), ...(authorization ? { authorization } : {}), "x-cmv-middleware": "1" } },
+        8000,
+      );
+      const data = (await res.json().catch(() => null)) as { access?: { allowed?: boolean } } | null;
+      const allowed = Boolean(data?.access?.allowed);
+      if (allowed) return NextResponse.next();
+
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "subscription_required", access: data?.access ?? null }, { status: 402 });
+      }
+
+      const url = req.nextUrl.clone();
+      url.pathname = "/ajustes";
+      url.searchParams.set("tab", "planos");
+      url.searchParams.set("blocked", "1");
+      url.searchParams.set("from", pathname);
+      return NextResponse.redirect(url);
+    } catch {
+      if (pathname.startsWith("/api/")) {
+        return NextResponse.json({ error: "billing_check_failed" }, { status: 503 });
+      }
+      const url = req.nextUrl.clone();
+      url.pathname = "/ajustes";
+      url.searchParams.set("tab", "planos");
+      url.searchParams.set("blocked", "1");
+      url.searchParams.set("reason", "billing_check_failed");
+      url.searchParams.set("from", pathname);
+      return NextResponse.redirect(url);
+    }
+  }
 
   const refreshToken = (req.cookies.get(SUPABASE_RT_COOKIE)?.value ?? "").trim();
   if (refreshToken) {
@@ -208,7 +285,8 @@ export async function middleware(req: NextRequest) {
 
   const url = req.nextUrl.clone();
   url.pathname = "/login";
-  url.searchParams.set("next", pathname);
+  url.search = "";
+  url.searchParams.set("next", safeNextPath(`${pathname}${req.nextUrl.search}`));
   return NextResponse.redirect(url);
 }
 

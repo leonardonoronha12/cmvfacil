@@ -365,6 +365,12 @@
   letter-spacing: 0.02em;
 }
 
+.thumbImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .recipeName {
   color: #101214;
   font-size: 13px;
@@ -1311,6 +1317,11 @@
 .detailsPreviewFallback {
   width: 100%;
   height: 100%;
+}
+
+.detailsPreviewImage {
+  display: block;
+  object-fit: cover;
 }
 
 .detailsPreviewFallback {

@@ -4,7 +4,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
@@ -512,6 +511,7 @@ const CMVREAL_SNAPSHOT_KEY = "cmvfacil.cmvreal.snapshot.v1";
 type CalcSnapshot = {
   cmvPercent: number;
   deltaPp: number;
+  targetCmvPercent?: number | null;
   initialCents: number;
   comprasCents: number;
   finalCents: number;
@@ -766,6 +766,18 @@ function parseDateDDMMYYYY(value: string) {
   return d;
 }
 
+function parseDateISOYYYYMMDD(value: string) {
+  const raw = value.trim();
+  const m = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const year = Number.parseInt(m[1], 10);
+  const month = Number.parseInt(m[2], 10) - 1;
+  const day = Number.parseInt(m[3], 10);
+  const d = new Date(year, month, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
+  return d;
+}
+
 function formatDateLabelShortPT(d: Date) {
   const day = String(d.getDate()).padStart(2, "0");
   const year = d.getFullYear();
@@ -832,14 +844,14 @@ function parseDateLabelLoose(value: string) {
 function normalizeDateLabelForUI(value: string) {
   const raw = String(value ?? "").trim();
   if (!raw) return "-";
-  const d = parseDateLabelLoose(raw) ?? parseDateDDMMYYYY(raw);
+  const d = parseDateLabelLoose(raw) ?? parseDateDDMMYYYY(raw) ?? parseDateISOYYYYMMDD(raw);
   return d ? formatDateLabelShortPT(d) : raw;
 }
 
 function normalizeHistoryDateLabel(value: string) {
   const raw = String(value ?? "").trim();
   if (!raw) return "-";
-  const d = parseDateDDMMYYYY(raw) ?? parseDateLabelLoose(raw);
+  const d = parseDateDDMMYYYY(raw) ?? parseDateLabelLoose(raw) ?? parseDateISOYYYYMMDD(raw);
   return d ? formatDateLabelDDMMYYYY(d) : raw;
 }
 
@@ -1033,6 +1045,7 @@ export default function DashboardClient() {
   const [calc, setCalc] = useState<{
     cmvPercent: number;
     deltaPp: number;
+    targetCmvPercent?: number | null;
     initialCents: number;
     comprasCents: number;
     finalCents: number;
@@ -1065,6 +1078,20 @@ export default function DashboardClient() {
       toastTimerRef.current = null;
     }, durationMs);
   }
+
+  useEffect(() => {
+    const checkout = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
+    if (!checkout) return;
+    if (checkout === "success") showToast("Plano PRO ativado com sucesso.", "success", 8000);
+    else if (checkout === "cancel") showToast("Pagamento cancelado. Seu período de avaliação continua ativo.", "error", 9000);
+    else if (checkout === "processing") showToast("Pagamento recebido. Aguardando confirmação.", "success", 9000);
+    else if (checkout === "error") showToast("Não foi possível iniciar a assinatura. Você pode tentar novamente em Ajustes.", "error", 10000);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("checkout");
+      window.history.replaceState({}, "", url.pathname + url.search);
+    } catch {}
+  }, [searchParams]);
 
   async function loadEntradasLegacyFallback() {
     return [];
@@ -1581,7 +1608,7 @@ export default function DashboardClient() {
     const entradasQtyById = new Map<string, number>();
     let comprasCents = 0;
     for (const e of entradas) {
-      const d = parseDateLabelLoose(e.dataLancamento);
+      const d = parseDateDDMMYYYY(e.dataLancamento) ?? parseDateISOYYYYMMDD(e.dataLancamento) ?? parseDateLabelLoose(e.dataLancamento);
       if (!d) continue;
       const t = startOfDay(d).getTime();
       if (t < minT || t > maxT) continue;
@@ -1741,18 +1768,25 @@ export default function DashboardClient() {
     targetCmv,
   ]);
 
+  const targetCmvValue = parsePtNumber(targetCmv);
+  const targetCmvProvided = Boolean(targetCmv.trim());
+  const targetCmvIsValid = !targetCmvProvided || (targetCmvValue >= 1 && targetCmvValue <= 99);
+
   const canCalculate =
     inventoryOptions.length > 0 &&
     Boolean(startDate.trim()) &&
     Boolean(endDate.trim()) &&
     parseBrlToCents(revenue) > 0 &&
-    parsePtNumber(targetCmv) >= 1 &&
-    parsePtNumber(targetCmv) <= 99;
+    targetCmvIsValid;
 
   function handleCalculate() {
     try {
-      if (!canCalculate) {
-        setCalcError("Preencha datas, faturamento e CMV meta para calcular.");
+      if (inventoryOptions.length <= 0 || !startDate.trim() || !endDate.trim() || parseBrlToCents(revenue) <= 0) {
+        setCalcError("Preencha datas e faturamento para calcular.");
+        return;
+      }
+      if (!targetCmvIsValid) {
+        setCalcError("CMV meta deve estar entre 1% e 99%.");
         return;
       }
       setCalcError("");
@@ -1822,7 +1856,7 @@ export default function DashboardClient() {
       const entradasCentsById = new Map<string, number>();
       let comprasCents = 0;
     for (const e of safeArray<any>(entradas)) {
-        const d = parseDateLabelLoose(e.dataLancamento);
+        const d = parseDateDDMMYYYY(e.dataLancamento) ?? parseDateISOYYYYMMDD(e.dataLancamento) ?? parseDateLabelLoose(e.dataLancamento);
         if (!d) continue;
         const t = startOfDay(d).getTime();
         if (t < minT || t > maxT) continue;
@@ -1940,9 +1974,9 @@ export default function DashboardClient() {
       }
 
       const revenueCents = parseBrlToCents(revenue);
-      const target = parsePtNumber(targetCmv);
+      const targetCmvPercent = targetCmvProvided && targetCmvValue >= 1 && targetCmvValue <= 99 ? targetCmvValue : null;
       const cmvPercent = revenueCents > 0 ? (saidasCents / revenueCents) * 100 : 0;
-      const deltaPp = cmvPercent - target;
+      const deltaPp = targetCmvPercent != null ? cmvPercent - targetCmvPercent : 0;
 
       let desperdiciosCents = 0;
       for (const d of desperdiciosIntegrados) {
@@ -1959,6 +1993,7 @@ export default function DashboardClient() {
       setCalc({
         cmvPercent,
         deltaPp,
+        targetCmvPercent,
         initialCents,
         comprasCents,
         finalCents,
@@ -2273,11 +2308,14 @@ export default function DashboardClient() {
   }, [calc?.cmvPercent]);
 
   const deltaLabel = useMemo(() => {
-    const d = calc?.deltaPp ?? 0;
+    if (!calc) return "—";
+    const target = typeof calc.targetCmvPercent === "number" && Number.isFinite(calc.targetCmvPercent) ? calc.targetCmvPercent : null;
+    if (target == null) return "Meta não definida";
+    const d = calc.deltaPp;
     const abs = Math.abs(d);
     const label = `${abs.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% p.p.`;
     return d > 0 ? `${label} acima da meta` : `${label} abaixo da meta`;
-  }, [calc?.deltaPp]);
+  }, [calc]);
 
   const comparativoAnteriorLabel = useMemo(() => {
     if (!calc || !lastCalc) return "";
@@ -3011,8 +3049,7 @@ export default function DashboardClient() {
   ]);
 
   return (
-    <div className={styles.dashboard}>
-      <AppSidebar active={historyItem ? "insumos" : "dashboard"} />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       {debugMode ? (
         <div
@@ -3197,13 +3234,6 @@ export default function DashboardClient() {
               </span>
               Calcular CMV
             </button>
-
-            <button type="button" className={styles.topAction} disabled>
-              <span className={styles.topActionIcon}>
-                <IconSidebarStore />
-              </span>
-              Sincronizar tudo
-            </button>
           </div>
 
           {calcError ? <div className={styles.calcError}>{calcError}</div> : null}
@@ -3212,7 +3242,7 @@ export default function DashboardClient() {
             <span className={styles.topHintIcon}>
               <IconInfoSmall />
             </span>
-            Selecione o período, insira o faturamento referente a essas datas e defina a meta de CMV. Em seguida, clique
+            Selecione o período, insira o faturamento referente a essas datas e defina a meta de CMV (opcional). Em seguida, clique
             em Calcular CMV.
           </div>
 
@@ -3414,60 +3444,7 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div className={styles.historyTitle} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                          <span>Histórico de Entradas</span>
-                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <button
-                              type="button"
-                              onClick={() => void syncAllAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 900,
-                                cursor: isLoadingTables ? "default" : "pointer",
-                              }}
-                            >
-                              Sincronizar tudo
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void reimportEntradasAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 800,
-                                cursor: isLoadingTables ? "default" : "pointer",
-                              }}
-                            >
-                              Sincronizar entradas
-                            </button>
-                          </div>
-                        </div>
-                        {isLoadingTables ? null : historicoEntradas.length && historicoHasFornecedorIds ? (
-                          <div style={{ margin: "8px 0 0" }}>
-                            <button
-                              type="button"
-                              onClick={() => void reimportFornecedoresAndReload()}
-                              disabled={isLoadingTables}
-                              style={{
-                                border: "1px solid #e4e8e7",
-                                background: "#ffffff",
-                                borderRadius: 10,
-                                padding: "10px 12px",
-                                fontWeight: 800,
-                                cursor: "pointer",
-                              }}
-                            >
-                              Sincronizar fornecedores
-                            </button>
-                          </div>
-                        ) : null}
+                        <div className={styles.historyTitle}>Histórico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>
@@ -3495,23 +3472,6 @@ export default function DashboardClient() {
                           ) : (
                             <div className={styles.historyEmpty}>
                               Nenhuma entrada encontrada para este item.
-                              <div style={{ marginTop: 10 }}>
-                                <button
-                                  type="button"
-                                  onClick={() => void reimportEntradasAndReload()}
-                                  disabled={isLoadingTables}
-                                  style={{
-                                    border: "1px solid #e4e8e7",
-                                    background: "#ffffff",
-                                    borderRadius: 10,
-                                    padding: "10px 12px",
-                                    fontWeight: 800,
-                                    cursor: "pointer",
-                                  }}
-                                >
-                                  Sincronizar entradas
-                                </button>
-                              </div>
                             </div>
                           )}
                         </div>
@@ -3846,9 +3806,10 @@ export default function DashboardClient() {
           </div>
         ) : null}
 
-        {isFornecedorModalOpen && fornecedorModalKey ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={closeFornecedorModal}>
-            <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {mounted && isFornecedorModalOpen && fornecedorModalKey
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={closeFornecedorModal}>
+                <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{fornecedorModalLabel || fornecedorModalKey}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={closeFornecedorModal}>
@@ -3969,8 +3930,10 @@ export default function DashboardClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         {isDeleteItemOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteItemOpen(false)}>
@@ -4108,6 +4071,6 @@ export default function DashboardClient() {
         <div style={{ height: 72, width: "100%" }} />
         </div>
       </main>
-    </div>
+    </>
   );
 }

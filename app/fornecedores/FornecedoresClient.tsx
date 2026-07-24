@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -24,6 +26,7 @@ import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./fornecedores.module.css";
+import { maskPhoneBR } from "../lib/masks";
 
 type FornecedorRow = {
   id: string;
@@ -257,6 +260,8 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 }
 
 export default function FornecedoresClient() {
+  const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+  const [isMounted, setIsMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const toastTimerRef = useRef<number | null>(null);
@@ -315,6 +320,23 @@ export default function FornecedoresClient() {
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const markDirty = (ms = 6000) => {
+    try {
+      window.sessionStorage.setItem("cmvfacil:fornecedores:v1:dirtyUntilMs", String(Date.now() + ms));
+    } catch {}
+  };
+  const getTombstones = (map: FornecedorProdutos) => {
+    const k = TOMBSTONE_KEY;
+    const raw = (map as any)?.[k];
+    const list = Array.isArray(raw) ? raw : [];
+    return list.map((x) => String(x ?? "").trim()).filter(Boolean);
+  };
+  const withTombstones = (map: FornecedorProdutos, tombstones: string[]) => {
+    const next: FornecedorProdutos = { ...map };
+    if (tombstones.length) next[TOMBSTONE_KEY] = Array.from(new Set(tombstones.map((x) => String(x ?? "").trim()).filter(Boolean)));
+    else delete (next as any)[TOMBSTONE_KEY];
+    return next;
+  };
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -326,6 +348,7 @@ export default function FornecedoresClient() {
   }
 
   useEffect(() => {
+    setIsMounted(true);
     return () => {
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
@@ -384,10 +407,11 @@ export default function FornecedoresClient() {
           nextProdutos = db.produtos;
           nextEq = db.equivalencias;
         }
-      } catch {
+      } catch (err) {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          window.alert("Não foi possível carregar fornecedores do Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+          const msg = err instanceof Error ? err.message : String(err ?? "");
+          showToast(`Não foi possível carregar fornecedores do Supabase. ${msg || ""}`.trim(), "error", 9000);
         }
       }
 
@@ -416,10 +440,11 @@ export default function FornecedoresClient() {
     if (isReadOnly) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {
+      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch((err) => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+        const msg = err instanceof Error ? err.message : String(err ?? "");
+        showToast(`Não foi possível salvar fornecedores no Supabase. ${msg || ""}`.trim(), "error", 9000);
       });
     }, 450);
   }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
@@ -712,13 +737,21 @@ export default function FornecedoresClient() {
     return decorated.map((d) => d.r);
   }, [query, rows, sortDir, sortKey]);
 
+  const pagination = usePagination({
+    items: visibleRows,
+    pageSize: 20,
+    resetKey: `${query}|${sortKey}|${sortDir}|${rows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
   const qaUi = useMemo(() => {
     return {
       filters: { query },
       sort: { sortKey, sortDir, columnOrder },
       rendered: {
-        rowsCount: visibleRows.length,
-        rows: visibleRows.map((r) => ({
+        rowsCount: pagination.pageItems.length,
+        rows: pagination.pageItems.map((r) => ({
           id: r.id,
           fornecedor: r.fornecedor,
           itens: r.itens,
@@ -728,7 +761,7 @@ export default function FornecedoresClient() {
         })),
       },
     };
-  }, [columnOrder, query, sortDir, sortKey, visibleRows]);
+  }, [columnOrder, pagination.pageItems, query, sortDir, sortKey]);
 
   function openNew() {
     if (isReadOnly) {
@@ -775,11 +808,18 @@ export default function FornecedoresClient() {
       whatsapp: whatsapp === "-" ? "" : whatsapp,
       endereco: endereco === "-" ? "" : endereco,
     };
+    markDirty();
+    const curTombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+    curTombstones.delete(key.toUpperCase());
+    const nextProdutosBase = withTombstones(produtosMap, Array.from(curTombstones));
 
     if (!editingId) {
       const nextInfo = { ...infoMap, [key]: infoPayload };
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
+      const nextProdutos = nextProdutosBase;
+      setProdutosMap(nextProdutos);
+      writeFornecedorProdutosMap(nextProdutos);
       setQuery("");
       setSortKey(null);
       setSortDir("asc");
@@ -795,13 +835,13 @@ export default function FornecedoresClient() {
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
 
-      const prevProdutos = produtosMap[prevKey] ?? [];
-      const curProdutos = produtosMap[key] ?? [];
+      const prevProdutos = nextProdutosBase[prevKey] ?? [];
+      const curProdutos = nextProdutosBase[key] ?? [];
       const mergedProdutos: string[] = [];
       for (const item of [...curProdutos, ...prevProdutos]) {
         if (!mergedProdutos.some((x) => x.toLowerCase() === item.toLowerCase())) mergedProdutos.push(item);
       }
-      const nextProdutos = { ...produtosMap };
+      const nextProdutos = { ...nextProdutosBase };
       delete nextProdutos[prevKey];
       nextProdutos[key] = mergedProdutos;
       setProdutosMap(nextProdutos);
@@ -827,6 +867,9 @@ export default function FornecedoresClient() {
       const nextInfo = { ...infoMap, [key]: infoPayload };
       setInfoMap(nextInfo);
       writeFornecedorInfoMap(nextInfo);
+      const nextProdutos = nextProdutosBase;
+      setProdutosMap(nextProdutos);
+      writeFornecedorProdutosMap(nextProdutos);
     }
 
     setQuery("");
@@ -853,43 +896,42 @@ export default function FornecedoresClient() {
     const id = deleteId;
     if (!id) return;
     const key = String(id).trim();
-    if (key) {
-      setInfoMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorInfoMap(next);
-        return next;
-      });
-      setProdutosMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorProdutosMap(next);
-        return next;
-      });
-      setEquivalenciasMap((prev) => {
-        if (!prev[key]) return prev;
-        const next = { ...prev };
-        delete next[key];
-        writeFornecedorEquivalenciasMap(next);
-        return next;
-      });
-      if (prodFornecedorKey === key) {
-        setIsProdutosOpen(false);
-        setProdFornecedorKey(null);
-        setProdFornecedorLabel("");
-        setProdVendedor("");
-        setProdEndereco("");
-      }
+    if (!key) return;
+    markDirty();
+    const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+    tombstones.add(key.toUpperCase());
+    const nextInfo = { ...infoMap };
+    delete nextInfo[key];
+    const nextProdutosBase = { ...produtosMap };
+    delete (nextProdutosBase as any)[key];
+    const nextProdutos = withTombstones(nextProdutosBase, Array.from(tombstones));
+    const nextEq = { ...equivalenciasMap };
+    delete (nextEq as any)[key];
+
+    writeFornecedorInfoMap(nextInfo);
+    writeFornecedorProdutosMap(nextProdutos);
+    writeFornecedorEquivalenciasMap(nextEq);
+    setInfoMap(nextInfo);
+    setProdutosMap(nextProdutos);
+    setEquivalenciasMap(nextEq);
+
+    if (prodFornecedorKey === key) {
+      setIsProdutosOpen(false);
+      setProdFornecedorKey(null);
+      setProdFornecedorLabel("");
+      setProdVendedor("");
+      setProdEndereco("");
     }
     setIsDeleteOpen(false);
     setDeleteId(null);
     setDeleteName("");
     showToast("Fornecedor excluído.", "success");
+    if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+    fornecedoresSyncTimeoutRef.current = null;
+    void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => showToast("Erro ao salvar no banco de dados.", "error"));
   }
 
-  const resultsText = `${visibleRows.length} resultado(s) encontrado(s)`;
+  const resultsText = `${pagination.totalItems} resultado(s) encontrado(s)`;
 
   async function importFile(file: File) {
     if (importing) return;
@@ -935,7 +977,9 @@ export default function FornecedoresClient() {
         };
       }
       const keepKeys = new Set(Object.keys(nextInfo));
-      const nextProdutos: FornecedorProdutos = {};
+      const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
+      for (const k of keepKeys) tombstones.delete(String(k ?? "").trim().toUpperCase());
+      const nextProdutos: FornecedorProdutos = withTombstones({}, Array.from(tombstones));
       for (const [k, list] of Object.entries(produtosMap)) {
         if (!keepKeys.has(k)) continue;
         nextProdutos[k] = list;
@@ -964,9 +1008,7 @@ export default function FornecedoresClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="fornecedores" />
-
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="fornecedores" ui={qaUi} />
@@ -993,12 +1035,11 @@ export default function FornecedoresClient() {
               fontSize: 13,
               fontWeight: 700,
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <span>Fonte: Banco compatível Bubble</span>
             <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
           </div>
         ) : null}
@@ -1042,7 +1083,7 @@ export default function FornecedoresClient() {
 
         <div className={styles.tableWrap}>
           <section className={styles.table} style={{ position: "relative" }} data-qa-grid="fornecedores">
-            {isLoadingTable ? (
+            {tableLoading.show ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
               </div>
@@ -1073,13 +1114,13 @@ export default function FornecedoresClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {!visibleRows.length ? (
+            {!pagination.pageItems.length ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum fornecedor cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Fornecedor” ou importe uma planilha para começar.</div>
               </div>
             ) : (
-              visibleRows.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   {columnOrder.map((col) => {
                     if (col === "fornecedor") {
@@ -1155,25 +1196,52 @@ export default function FornecedoresClient() {
         <div className={styles.footer}>
           <div>{resultsText}</div>
           <div className={styles.pagination}>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Primeira página"
+              onClick={() => pagination.setPage(1)}
+            >
               «
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
               ‹
             </button>
-            <div className={styles.pageInfo}>1 de 1</div>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
               ›
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
               »
             </button>
           </div>
         </div>
 
-        {isFormOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsFormOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isFormOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsFormOpen(false)}>
+                <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{editingId ? "Editar Fornecedor" : "Cadastro de Fornecedor"}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsFormOpen(false)}>
@@ -1213,7 +1281,7 @@ export default function FornecedoresClient() {
                           placeholder="(00) 00000-0000"
                           inputMode="tel"
                           value={draftWhatsapp}
-                          onChange={(e) => setDraftWhatsapp(e.target.value)}
+                          onChange={(e) => setDraftWhatsapp(maskPhoneBR(e.target.value))}
                         />
                       </div>
                     </div>
@@ -1242,12 +1310,15 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isDeleteOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isDeleteOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteOpen(false)}>
+                <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Excluir Fornecedor?</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDeleteOpen(false)}>
@@ -1273,18 +1344,21 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isImportOpen ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              if (!importing) setIsImportOpen(false);
-            }}
-          >
-            <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isImportOpen
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  if (!importing) setIsImportOpen(false);
+                }}
+              >
+                <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Fornecedores por Planilha</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)} disabled={importing}>
@@ -1360,20 +1434,23 @@ export default function FornecedoresClient() {
                 </a>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isProdutosOpen && prodFornecedorKey ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              setIsProdutosOpen(false);
-              setProdFornecedorKey(null);
-              setProdFornecedorLabel("");
-            }}
-          >
-            <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isProdutosOpen && prodFornecedorKey
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  setIsProdutosOpen(false);
+                  setProdFornecedorKey(null);
+                  setProdFornecedorLabel("");
+                }}
+              >
+                <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{prodFornecedorLabel || prodFornecedorKey}</div>
                 <button
@@ -1531,12 +1608,15 @@ export default function FornecedoresClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
-        {isProdutosOpen && prodFornecedorKey && isVincOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVincOpen(false)}>
-            <div className={`${styles.modal} ${styles.vincModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isProdutosOpen && prodFornecedorKey && isVincOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVincOpen(false)}>
+                <div className={`${styles.modal} ${styles.vincModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Configurar Vinculação</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsVincOpen(false)}>
@@ -1598,12 +1678,19 @@ export default function FornecedoresClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         </div>
-        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+        {isMounted && toast
+          ? createPortal(
+              <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
+              document.body,
+            )
+          : null}
       </main>
-    </div>
+    </>
   );
 }

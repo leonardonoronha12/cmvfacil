@@ -10,9 +10,12 @@ export default function LoginClient() {
   const router = useRouter();
   const params = useSearchParams();
   const nextPath = useMemo(() => {
-    const next = (params.get("next") ?? "").trim();
-    if (!next || next === "/") return "/dashboard";
-    return next;
+    const raw = (params.get("next") ?? "").trim();
+    if (!raw || raw === "/") return "/dashboard";
+    if (!raw.startsWith("/")) return "/dashboard";
+    if (raw.startsWith("//")) return "/dashboard";
+    if (raw.includes("://")) return "/dashboard";
+    return raw;
   }, [params]);
   const loginBgUrl = useMemo(() => (process.env.NEXT_PUBLIC_LOGIN_BG_URL ?? "").trim(), []);
 
@@ -81,10 +84,7 @@ export default function LoginClient() {
       <section className="cmv-login-left">
         <div className="cmv-login-card">
           <div className="cmv-login-brand">
-            <img src="/login/logo.svg" alt="CMV Fácil Logo" className="cmv-login-logo-img" />
-            <p className="cmv-login-brand-name">
-              <span>CMV&nbsp;</span>Fácil
-            </p>
+            <img src="/brand/logo-preto.svg" alt="CMV Fácil" className="cmv-login-logo-img" />
           </div>
 
           <div className="cmv-login-content">

@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
-import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import SystemToast from "../components/SystemToast";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import {
   readFornecedorEquivalenciasMap,
   readFornecedorInfoMap,
@@ -24,11 +25,13 @@ import {
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
-import { deleteEntradaFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
+import { deleteEntradaFromSupabase, deleteEntradasFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
+import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import { QaModePanel } from "../lib/qaMode";
+import { maskPhoneBR } from "../lib/masks";
 import styles from "./entradas.module.css";
 
 type EntradaRow = {
@@ -109,11 +112,19 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
   return labelFromState || rawNoSuffix || raw;
 }
 
-function resolveResponsavelDisplay(responsavelRaw: string, currentUserEmail: string) {
+function resolveResponsavelDisplay(responsavelRaw: string, currentUserFullName: string, currentUserEmail: string) {
   const raw = sanitizeUiLabel(responsavelRaw);
   if (!raw) return "-";
-  if (raw.includes("@")) return raw;
-  if ((looksLikeBubbleId(raw) || looksLikeUuid(raw)) && currentUserEmail) return currentUserEmail;
+  const name = sanitizeUiLabel(currentUserFullName);
+  const email = sanitizeUiLabel(currentUserEmail);
+  if (raw.includes("@")) {
+    if (name && email && raw.toLowerCase() === email.toLowerCase()) return name;
+    return raw;
+  }
+  if (looksLikeBubbleId(raw) || looksLikeUuid(raw)) {
+    if (name) return name;
+    if (email) return email;
+  }
   return raw;
 }
 
@@ -459,6 +470,9 @@ export default function EntradasClient() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deletingDate, setDeletingDate] = useState<string>("");
+  const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
+  const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [newFornecedor, setNewFornecedor] = useState("");
   const [newDataReceb, setNewDataReceb] = useState(() => formatDateLabelPT(new Date()));
@@ -500,8 +514,16 @@ export default function EntradasClient() {
   const fornecedoresSaveErrorShownRef = useRef(false);
   const [isMounted, setIsMounted] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
+  const [currentUserFullName, setCurrentUserFullName] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
+
+  useEffect(() => {
+    if (!isReadOnly) return;
+    setBulkDeleteMode(false);
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+  }, [isReadOnly]);
 
   function showToast(message: string, type: "success" | "error", durationMs = 6000) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -517,15 +539,16 @@ export default function EntradasClient() {
   }, []);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/debug/context", { cache: "no-store" });
-        const data = (await res.json().catch(() => null)) as any;
-        if (!res.ok || !data?.ok) return;
-        const email = String(data?.user?.email ?? "").trim();
-        if (email) setCurrentUserEmail(email);
-      } catch {}
-    })();
+    const applyFromStore = () => {
+      const me = readMeFromStore();
+      const email = String(me?.email ?? "").trim();
+      const fullName = String(me?.nomeCompleto ?? "").trim() || `${String(me?.nome ?? "").trim()} ${String(me?.sobrenome ?? "").trim()}`.trim();
+      if (email) setCurrentUserEmail(email);
+      if (fullName) setCurrentUserFullName(fullName);
+    };
+    applyFromStore();
+    void loadMeFromApi().finally(() => applyFromStore());
+    return subscribeMe(() => applyFromStore());
   }, []);
 
   useEffect(() => {
@@ -566,7 +589,10 @@ export default function EntradasClient() {
           cmp = collator.compare(resolveFornecedorDisplay(a.row.fornecedor, fornecedorInfoMap), resolveFornecedorDisplay(b.row.fornecedor, fornecedorInfoMap));
           break;
         case "responsavel":
-          cmp = collator.compare(resolveResponsavelDisplay(a.row.responsavel, currentUserEmail), resolveResponsavelDisplay(b.row.responsavel, currentUserEmail));
+          cmp = collator.compare(
+            resolveResponsavelDisplay(a.row.responsavel, currentUserFullName, currentUserEmail),
+            resolveResponsavelDisplay(b.row.responsavel, currentUserFullName, currentUserEmail),
+          );
           break;
         case "valorNota":
           cmp = parseBrlToCents(a.row.valorNota) - parseBrlToCents(b.row.valorNota);
@@ -576,7 +602,29 @@ export default function EntradasClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+  }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+
+  const pagination = usePagination({
+    items: visible,
+    pageSize: 20,
+    resetKey: `${query}|${dateStart}|${dateEnd}|${sortKey}|${sortDir}|${rows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
+  useEffect(() => {
+    if (!bulkDeleteMode) return;
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+  }, [bulkDeleteMode, query, dateStart, dateEnd, sortKey, sortDir]);
+
+  const visibleIdSet = useMemo(() => new Set(pagination.pageItems.map((r) => r.id)), [pagination.pageItems]);
+  const selectedList = useMemo(() => {
+    const ids = Object.keys(selectedIds).filter((id) => Boolean(selectedIds[id]));
+    return ids.filter((id) => visibleIdSet.has(id));
+  }, [selectedIds, visibleIdSet]);
+  const selectedCount = selectedList.length;
+  const allVisibleSelected = pagination.pageItems.length > 0 && pagination.pageItems.every((row) => Boolean(selectedIds[row.id]));
 
   const qaUi = useMemo(() => {
     return {
@@ -584,19 +632,20 @@ export default function EntradasClient() {
       filters: { query, dateStart, dateEnd },
       sort: { sortKey, sortDir, columnOrder },
       rendered: {
-        rowsCount: visible.length,
-        rows: visible.map((r) => ({
+        rowsCount: pagination.pageItems.length,
+        totalRowsCount: pagination.totalItems,
+        rows: pagination.pageItems.map((r) => ({
           id: r.id,
           numero: r.numero,
           dataLancamento: r.dataLancamento,
           fornecedor: resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap),
           valorNota: r.valorNota,
-          responsavel: resolveResponsavelDisplay(r.responsavel, currentUserEmail),
+          responsavel: resolveResponsavelDisplay(r.responsavel, currentUserFullName, currentUserEmail),
           dataCriacao: r.dataCriacao,
           itens: r.itens,
         })),
       },
-      details: visible.map((r) => ({
+      details: pagination.pageItems.map((r) => ({
         id: r.id,
         numero: r.numero,
         itensNota: (r.itensNota ?? []).map((it) => ({
@@ -611,7 +660,20 @@ export default function EntradasClient() {
         })),
       })),
     };
-  }, [columnOrder, currentUserEmail, dateEnd, dateStart, fornecedorInfoMap, query, sortDir, sortKey, sourceMeta, visible]);
+  }, [
+    columnOrder,
+    currentUserEmail,
+    currentUserFullName,
+    dateEnd,
+    dateStart,
+    fornecedorInfoMap,
+    pagination.pageItems,
+    pagination.totalItems,
+    query,
+    sortDir,
+    sortKey,
+    sourceMeta,
+  ]);
 
   function toggleSort(key: EntradaTableColumn) {
     if (sortKey !== key) {
@@ -642,7 +704,8 @@ export default function EntradasClient() {
   }
 
   const tableGridTemplateColumns = useMemo(() => {
-    const widths: Record<EntradaTableColumn | "acoes", string> = {
+    const widths: Record<EntradaTableColumn | "acoes" | "select", string> = {
+      select: "44px",
       dataLancamento: "220px",
       fornecedor: "minmax(220px, 1fr)",
       valorNota: "160px",
@@ -650,9 +713,9 @@ export default function EntradasClient() {
       dataCriacao: "160px",
       acoes: "110px",
     };
-    const orderedColumns: Array<EntradaTableColumn | "acoes"> = [...columnOrder, "acoes"];
+    const orderedColumns: Array<EntradaTableColumn | "acoes" | "select"> = bulkDeleteMode ? ["select", ...columnOrder, "acoes"] : [...columnOrder, "acoes"];
     return orderedColumns.map((column) => widths[column]).join(" ");
-  }, [columnOrder]);
+  }, [bulkDeleteMode, columnOrder]);
 
   function renderCell(row: EntradaRow, column: EntradaTableColumn) {
     if (column === "dataLancamento") {
@@ -677,12 +740,58 @@ export default function EntradasClient() {
       return <div className={styles.td}>{resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap)}</div>;
     }
     if (column === "responsavel") {
-      return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserEmail)}</div>;
+      return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserFullName, currentUserEmail)}</div>;
     }
     if (column === "dataCriacao") {
       return <div className={styles.tdStrong}>{row.dataCriacao}</div>;
     }
     return <div className={styles.td}>{row[column]}</div>;
+  }
+
+  function toggleSelectAllVisible() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      if (allVisibleSelected) {
+        for (const row of pagination.pageItems) delete next[row.id];
+      } else {
+        for (const row of pagination.pageItems) next[row.id] = true;
+      }
+      return next;
+    });
+  }
+
+  function toggleRowSelected(id: string) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  }
+
+  function confirmBulkDelete() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    if (!selectedList.length) return;
+    const ids = [...selectedList];
+    setRows((prev) => prev.filter((r) => !ids.includes(r.id)));
+    setSelectedIds({});
+    setIsBulkDeleteOpen(false);
+    setBulkDeleteMode(false);
+    showToast(ids.length === 1 ? "Nota excluída!" : "Notas excluídas!", "success");
+    void deleteEntradasFromSupabase(ids).catch((err) => {
+      showToast(err instanceof Error ? err.message : "Falha ao excluir notas.", "error");
+    });
   }
 
   const detailsRow = useMemo(() => {
@@ -961,7 +1070,7 @@ export default function EntradasClient() {
       } catch {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          window.alert("Não foi possível carregar fornecedores do Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
         }
       }
 
@@ -992,7 +1101,7 @@ export default function EntradasClient() {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
       });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
@@ -1015,35 +1124,6 @@ export default function EntradasClient() {
     for (const f of customFornecedores) addIfMissing(f);
     if (changed) writeFornecedorInfoMap(next);
   }, [customFornecedores, isReadOnly, rows]);
-
-  useEffect(() => {
-    if (isReadOnly) return;
-    const next: FornecedorProdutos = { ...fornecedorProdutosMap };
-    let changed = false;
-    for (const r of rows) {
-      const fornecedor = String((r as any)?.fornecedor ?? "").trim().toUpperCase();
-      if (!fornecedor) continue;
-      const itens = r.itensNota ?? [];
-      if (!itens.length) continue;
-      const cur = next[fornecedor] ? [...next[fornecedor]] : [];
-      let curChanged = false;
-      for (const it of itens) {
-        const name = String((it as any)?.nome ?? "").trim();
-        if (!name) continue;
-        const has = cur.some((x) => x.toLowerCase() === name.toLowerCase());
-        if (has) continue;
-        cur.push(name);
-        curChanged = true;
-      }
-      if (curChanged) {
-        next[fornecedor] = cur;
-        changed = true;
-      }
-    }
-    if (!changed) return;
-    setFornecedorProdutosMap(next);
-    writeFornecedorProdutosMap(next);
-  }, [fornecedorProdutosMap, isReadOnly, rows]);
 
   useEffect(() => {
     const qty = parsePtNumber(detailQty);
@@ -1392,8 +1472,7 @@ export default function EntradasClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="entradas" />
+    <>
       {isMounted && toast
         ? createPortal(
             <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
@@ -1429,12 +1508,11 @@ export default function EntradasClient() {
               fontSize: 13,
               fontWeight: 700,
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <span>Fonte: Banco compatível Bubble</span>
             <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
           </div>
         ) : null}
@@ -1663,30 +1741,89 @@ export default function EntradasClient() {
             </div>
           </div>
 
-          <button
-            type="button"
-            className={styles.primaryBtn}
-            disabled={isReadOnly}
-            onClick={() => {
-              if (isReadOnly) {
-                showToast("Modo somente leitura.", "error");
-                return;
-              }
-              openNewModal();
-            }}
-          >
-            <IconPlus />
-            Nova Nota
-          </button>
+          <div className={styles.toolbarActions}>
+            {bulkDeleteMode ? (
+              <>
+                <button
+                  type="button"
+                  className={styles.dangerBtn}
+                  disabled={isReadOnly || selectedCount === 0}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    if (!selectedCount) return;
+                    setIsBulkDeleteOpen(true);
+                  }}
+                >
+                  <IconTrash />
+                  {`Excluir (${selectedCount})`}
+                </button>
+                <button
+                  type="button"
+                  className={styles.ghostBtn}
+                  onClick={() => {
+                    setBulkDeleteMode(false);
+                    setSelectedIds({});
+                    setIsBulkDeleteOpen(false);
+                  }}
+                >
+                  Cancelar
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  disabled={isReadOnly || visible.length === 0}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    if (!visible.length) return;
+                    setBulkDeleteMode(true);
+                    setSelectedIds({});
+                    setIsBulkDeleteOpen(false);
+                  }}
+                >
+                  <IconTrash />
+                  Excluir várias
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  disabled={isReadOnly}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openNewModal();
+                  }}
+                >
+                  <IconPlus />
+                  Nova Nota
+                </button>
+              </>
+            )}
+          </div>
         </section>
 
         <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="entradas">
-          {isLoadingTable ? (
+          {tableLoading.show ? (
             <div className={dash.loadingOverlay}>
               <LoadingSpinner />
             </div>
           ) : null}
           <div className={styles.tableHead} style={{ gridTemplateColumns: tableGridTemplateColumns }}>
+            {bulkDeleteMode ? (
+              <label className={styles.selectHead} onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} disabled={isReadOnly} />
+              </label>
+            ) : null}
             {columnOrder.map((column) => {
               const label =
                 column === "dataLancamento"
@@ -1722,26 +1859,40 @@ export default function EntradasClient() {
           </div>
 
           <div className={styles.tableBody} data-qa-grid="entradas:rows">
-            {!visible.length ? (
+            {!pagination.totalItems ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhuma nota cadastrada</div>
                 <div className={styles.emptyText}>Clique em “Nova Nota” para começar.</div>
               </div>
             ) : (
-              visible.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div
                   key={r.id}
                   className={styles.tr}
                   role="button"
                   tabIndex={0}
                   style={{ gridTemplateColumns: tableGridTemplateColumns }}
-                  onClick={() => openDetailsModal(r)}
+                  onClick={() => (bulkDeleteMode ? toggleRowSelected(r.id) : openDetailsModal(r))}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter") openDetailsModal(r);
+                    if (e.key === "Enter") {
+                      if (bulkDeleteMode) toggleRowSelected(r.id);
+                      else openDetailsModal(r);
+                    }
                   }}
                   data-qa-grid-row
                   data-qa-row-id={r.id}
                 >
+                {bulkDeleteMode ? (
+                  <label className={styles.selectCell} onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(selectedIds[r.id])}
+                      onChange={() => toggleRowSelected(r.id)}
+                      disabled={isReadOnly}
+                      aria-label="Selecionar nota"
+                    />
+                  </label>
+                ) : null}
                 {columnOrder.map((column) => (
                   <div key={column} className={styles.tableCellWrap}>
                     {renderCell(r, column)}
@@ -1761,9 +1912,13 @@ export default function EntradasClient() {
                       showToast("Modo somente leitura.", "error");
                       return;
                     }
+                    if (bulkDeleteMode) {
+                      showToast("Saia do modo de seleção para editar.", "error");
+                      return;
+                    }
                     openEditModal(r);
                     }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || bulkDeleteMode}
                   >
                     <IconPencil />
                   </button>
@@ -1777,9 +1932,13 @@ export default function EntradasClient() {
                       showToast("Modo somente leitura.", "error");
                       return;
                     }
+                    if (bulkDeleteMode) {
+                      showToast("Saia do modo de seleção para excluir.", "error");
+                      return;
+                    }
                     openDeleteModal(r);
                     }}
-                  disabled={isReadOnly}
+                  disabled={isReadOnly || bulkDeleteMode}
                   >
                     <IconTrash />
                   </button>
@@ -1791,19 +1950,45 @@ export default function EntradasClient() {
         </section>
 
         <section className={styles.footer}>
-          <div>{`${visible.length} resultado(s) encontrado(s)`}</div>
+          <div>{`${pagination.totalItems} resultado(s) encontrado(s)`}</div>
           <div className={styles.pagination}>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Primeira página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Primeira página"
+              onClick={() => pagination.setPage(1)}
+            >
               «
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Página anterior">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
               ‹
             </button>
-            <div className={styles.pageInfo}>1 de 1</div>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Próxima página">
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
               ›
             </button>
-            <button type="button" className={styles.pageBtn} disabled aria-label="Última página">
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
               »
             </button>
           </div>
@@ -2053,9 +2238,39 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isDetailsOpen && detailsRow ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
-            <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isBulkDeleteOpen ? (
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsBulkDeleteOpen(false)}>
+            <div className={`${styles.modal} ${styles.confirmModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>{`Excluir ${selectedCount} ${selectedCount === 1 ? "Nota" : "Notas"}?`}</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsBulkDeleteOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon} aria-hidden>
+                  <IconTrashOutlineBig />
+                </div>
+                <div className={styles.confirmText}>{`Você está prestes a excluir ${selectedCount} ${selectedCount === 1 ? "nota" : "notas"}. Essa ação não pode ser desfeita.`}</div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isReadOnly || selectedCount === 0}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {isMounted && isDetailsOpen && detailsRow
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
+                <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
                 <div className={styles.detailsTitle}>{`Detalhes da Nota ${detailsRow.numero}`}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
@@ -2091,7 +2306,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Responsável</div>
-                      <div className={styles.sideValue}>{resolveResponsavelDisplay(detailsRow.responsavel, currentUserEmail)}</div>
+                      <div className={styles.sideValue}>{resolveResponsavelDisplay(detailsRow.responsavel, currentUserFullName, currentUserEmail)}</div>
                     </div>
                   </div>
                 </aside>
@@ -2379,8 +2594,10 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
 
         {isNewOpen ? (
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsNewOpen(false)}>
@@ -2624,7 +2841,7 @@ export default function EntradasClient() {
                         className={styles.phoneInput}
                         placeholder="(00) 00000-0000"
                         value={addFornecedorWhatsapp}
-                        onChange={(e) => setAddFornecedorWhatsapp(e.target.value)}
+                        onChange={(e) => setAddFornecedorWhatsapp(maskPhoneBR(e.target.value))}
                       />
                     </div>
                   </div>
@@ -2714,17 +2931,18 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isFornecedorProdutosOpen && fornecedorModalKey ? (
-          <div
-            className={styles.modalOverlay}
-            role="presentation"
-            onClick={() => {
-              setIsFornecedorProdutosOpen(false);
-              setFornecedorModalKey(null);
-              setFornecedorModalLabel("");
-            }}
-          >
-            <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isFornecedorProdutosOpen && fornecedorModalKey
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="presentation"
+                onClick={() => {
+                  setIsFornecedorProdutosOpen(false);
+                  setFornecedorModalKey(null);
+                  setFornecedorModalLabel("");
+                }}
+              >
+                <div className={`${styles.modal} ${styles.fornecedorProdutosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{fornecedorModalLabel || fornecedorModalKey}</div>
                 <button
@@ -2849,10 +3067,12 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
-          </div>
-        ) : null}
+              </div>,
+              document.body,
+            )
+          : null}
         </div>
       </main>
-    </div>
+    </>
   );
 }

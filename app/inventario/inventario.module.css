@@ -51,8 +51,10 @@
   display: grid;
   grid-template-columns: 240px 1fr;
   gap: 14px;
-  min-height: calc(100vh - 260px);
+  height: calc(100vh - 260px);
+  max-height: calc(100vh - 260px);
   width: 100%;
+  min-height: 0;
 }
 
 .left {
@@ -63,6 +65,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .leftTop {
@@ -99,6 +103,8 @@
   gap: 8px;
   overflow: auto;
   padding-right: 4px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .newCountBtn {
@@ -199,6 +205,11 @@
 
 .right {
   min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
 }
 
 .rightHeader {
@@ -282,6 +293,7 @@
 
 .compatTableScroll {
   overflow: auto;
+  max-height: calc(100vh - 420px);
 }
 
 .compatTable {
@@ -319,6 +331,8 @@
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   align-items: start;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 @media (max-width: 980px) {
@@ -432,6 +446,9 @@
   overflow: hidden;
   border: 1px solid #eef1f1;
   background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .colHeadPending {
@@ -458,6 +475,9 @@
   min-height: 260px;
   align-content: start;
   grid-auto-rows: max-content;
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .itemRow {

@@ -205,6 +205,25 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function parseCsvEnv(value: string | undefined) {
+  return String(value ?? "")
+    .split(/[,\n;]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function isAdminUserId(userId: string) {
+  const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
+  const emails = new Set(
+    [...parseCsvEnv(process.env.ADMIN_USER_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS_LEGACY)].map((x) => x.toLowerCase()),
+  );
+  const raw = userId.toLowerCase();
+  if (!isUuid(userId) && raw.includes("@") && process.env.ADMIN_SECRET) return true;
+  if (ids.size && ids.has(raw)) return true;
+  if (emails.size && emails.has(raw)) return true;
+  return false;
+}
+
 function extractUuidFromText(input: string) {
   const s = String(input ?? "").trim();
   if (!s) return null;
@@ -575,6 +594,7 @@ export async function POST(req: NextRequest) {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     if (!isUuid(userId)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
+    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
     const overrideTargetUserId = targetUserIdRaw && isUuid(targetUserIdRaw) ? targetUserIdRaw : "";
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
@@ -2250,11 +2270,35 @@ export async function POST(req: NextRequest) {
     }
 
     if (enableFornecedores) {
+      const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
       for (const [uid, st] of fornecedoresByUser.entries()) {
         const stateId = `user:${uid}`;
+        let tombstones: string[] = [];
+        try {
+          const { data } = await supabase.from("fornecedores_state").select("produtos").eq("id", stateId).maybeSingle();
+          const raw = (data as any)?.produtos?.[TOMBSTONE_KEY];
+          tombstones = Array.isArray(raw) ? raw.map((x: any) => String(x ?? "").trim()).filter(Boolean) : [];
+        } catch {}
+
+        const skip = new Set(tombstones.map((x) => x.toUpperCase()));
+        const filterKeys = <T extends Record<string, any>>(obj: T) =>
+          Object.fromEntries(
+            Object.entries(obj ?? {}).filter(([k]) => {
+              const kk = String(k ?? "").trim().toUpperCase();
+              if (!kk) return false;
+              if (kk === TOMBSTONE_KEY) return true;
+              return !skip.has(kk);
+            }),
+          ) as T;
+
+        const info = skip.size ? filterKeys(st.infoMap as any) : (st.infoMap as any);
+        const equivalencias = skip.size ? filterKeys(st.equivalenciasMap as any) : (st.equivalenciasMap as any);
+        const produtosBase = skip.size ? filterKeys(st.produtosMap as any) : (st.produtosMap as any);
+        const produtos = tombstones.length ? { ...(produtosBase as any), [TOMBSTONE_KEY]: Array.from(new Set(tombstones.map((x) => x.toUpperCase()))) } : (produtosBase as any);
+
         const { error } = await supabase
           .from("fornecedores_state")
-          .upsert({ id: stateId, info: st.infoMap, produtos: st.produtosMap, equivalencias: st.equivalenciasMap } as any, { onConflict: "id" });
+          .upsert({ id: stateId, info, produtos, equivalencias } as any, { onConflict: "id" });
         if (error) return json({ ok: false, error: `fornecedores_state:${error.message}`, stage }, { status: 500 });
       }
     }

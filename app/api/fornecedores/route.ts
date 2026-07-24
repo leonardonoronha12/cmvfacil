@@ -5,14 +5,33 @@ import { getUserIdFromRequest } from "../../lib/requestUserId";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
   return NextResponse.json(data, { ...init, headers });
 }
 
+function errJson(args: { status: number; traceId: string; stage: string; error: unknown; source?: "legacy" | "compat" }) {
+  const msg = args.error instanceof Error ? args.error.message : String(args.error ?? "");
+  return json(
+    { ok: false, error: msg || "unknown_error", stage: args.stage, traceId: args.traceId, ...(args.source ? { source: args.source } : null) },
+    { status: args.status },
+  );
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function safeObj(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  return input as Record<string, unknown>;
+}
+
+function safeArr(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
 }
 
 function parseCsvEnv(value: string | undefined) {
@@ -86,72 +105,117 @@ function resolveUserScopedId(req: NextRequest) {
   return { accessToken, id: null as string | null };
 }
 
-async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
+function normalizeFornecedoresRaw(raw: unknown, patch: { produtos?: string[]; equivalencias?: unknown }) {
+  const obj = safeObj(raw);
+  const fornecedores = safeObj(obj.fornecedores);
+  const nextFornecedores = { ...fornecedores } as any;
+  if (patch.produtos) nextFornecedores.produtos = patch.produtos;
+  if (typeof patch.equivalencias !== "undefined") nextFornecedores.equivalencias = patch.equivalencias;
+  return { ...obj, fornecedores: nextFornecedores };
+}
+
+function extractCompatTombstonesFromRaw(raw: unknown) {
+  const obj = safeObj(raw);
+  const fornecedores = safeObj(obj.fornecedores);
+  const system = safeObj(obj.system);
+  const a = safeArr((system as any).cmvfacil_deleted_suppliers).map((x) => String(x ?? "").trim()).filter(Boolean);
+  if (a.length) return a;
+  const b = safeArr((fornecedores as any).tombstones).map((x) => String(x ?? "").trim()).filter(Boolean);
+  return b;
+}
+
+function withCompatTombstonesRaw(raw: unknown, tombstones: string[]) {
+  const obj = safeObj(raw);
+  const system = safeObj(obj.system);
+  const nextSystem = { ...system, cmvfacil_deleted_suppliers: tombstones.length ? tombstones : [] } as any;
+  return { ...obj, system: nextSystem };
+}
+
+async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient> }) {
   const url = new URL(args.req.url);
-  const override = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
-  if (args.isAdmin) {
-    if (override === "compat") return true;
-    if (override === "legacy") return false;
-  }
+  const source = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
+  if (source === "legacy") return false;
+  if (source === "compat") return true;
+  try {
+    const { error } = await args.supabase.from("suppliers").select("id").limit(1);
+    if (error) {
+      const msg = String(error.message ?? "").toLowerCase();
+      if (msg.includes("does not exist") && msg.includes("suppliers")) return false;
+      if (msg.includes("relation") && msg.includes("suppliers")) return false;
+    }
+  } catch {}
+  return true;
+}
 
-  const enabled = String(process.env.BUBBLE_COMPAT_READ_FORNECEDORES ?? "").trim().toLowerCase();
-  if (!(enabled === "1" || enabled === "true" || enabled === "yes" || enabled === "on")) return false;
+function normalizeTombstoneKey(value: unknown) {
+  return String(value ?? "").trim().toUpperCase();
+}
 
-  const allowUsers = new Set(parseCsvEnv(process.env.BUBBLE_COMPAT_READ_FORNECEDORES_USER_IDS).map((x) => x.toLowerCase()));
-  const allowEmails = new Set(parseCsvEnv(process.env.BUBBLE_COMPAT_READ_FORNECEDORES_EMAILS).map((x) => x.toLowerCase()));
-  const hasAllowList = allowUsers.size > 0 || allowEmails.size > 0;
-  if (!hasAllowList) return true;
+function isDbPrefixed(value: string) {
+  return value.trim().toLowerCase().startsWith("db:");
+}
 
-  const uid = String(args.userId ?? "").trim().toLowerCase();
-  if (allowUsers.has(uid)) return true;
-
-  const { data, error } = await args.supabase.from("user_profiles").select("email").eq("user_id", args.userId).maybeSingle();
-  if (error) return false;
-  const email = String((data as any)?.email ?? "").trim().toLowerCase();
-  if (email && allowEmails.has(email)) return true;
-  return false;
+function dbIdFromKey(value: string) {
+  const s = value.trim();
+  if (!isDbPrefixed(s)) return "";
+  return s.slice(3);
 }
 
 export async function GET(req: NextRequest) {
+  const traceId = crypto.randomUUID();
   try {
     const { accessToken, id } = resolveUserScopedId(req);
-    if (!id) return json({ source: "legacy", readOnly: false, row: null }, { status: 200 });
+    if (!id) return json({ ok: true, traceId, source: "legacy", readOnly: false, row: null }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
     const userId = id.slice("user:".length);
 
     const { userId: rawUserId } = getUserIdFromRequest(req);
     const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
-    const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
+    const shouldUseCompat = await shouldUseCompatSource({ req, supabase });
     if (shouldUseCompat) {
       const { data: memberRows, error: memberErr } = await supabase
         .from("company_members")
         .select("company_id,role,permission_level")
         .eq("user_id", userId)
         .limit(50);
-      if (memberErr) return json({ error: memberErr.message }, { status: 500 });
+      if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-      if (!companyId) return json({ error: "missing_company" }, { status: 500 });
+      if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
 
       const { data: suppliersDb, error: suppliersErr } = await supabase
         .from("suppliers")
         .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
         .eq("company_id", companyId)
         .order("nome", { ascending: true });
-      if (suppliersErr) return json({ error: suppliersErr.message }, { status: 500 });
+      if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
 
       const info: Record<string, any> = {};
       const supplierKeyById = new Map<string, string>();
+      const rawProdutosByKey = new Map<string, string[]>();
+      const rawEquivByKey = new Map<string, unknown>();
+      let tombstones: string[] = [];
       for (const s of suppliersDb ?? []) {
         const nome = normalizeText((s as any)?.nome ?? "");
         const externalKey = normalizeText((s as any)?.external_key ?? "");
         const sys = ((s as any)?.raw as any)?.system ?? null;
         const isDefault = externalKey === "supplier:default:sem_fornecedor" || normalizeNameKey(nome) === "sem fornecedor" || Boolean(sys?.default);
-        if (isDefault) continue;
+        if (isDefault) {
+          const extracted = extractCompatTombstonesFromRaw((s as any)?.raw);
+          if (extracted.length) tombstones = extracted;
+          continue;
+        }
+        if (nome === TOMBSTONE_KEY) continue;
         const dbId = String((s as any)?.id ?? "").trim();
         const bubbleId = String((s as any)?.bubble_id ?? "").trim();
         const key = bubbleId || (dbId ? `db:${dbId}` : "");
         if (!key || !nome) continue;
         supplierKeyById.set(dbId, key);
+        const fornecedoresRaw = safeObj(((s as any)?.raw as any)?.fornecedores);
+        const rawProdutos = safeArr(fornecedoresRaw.produtos)
+          .map((x) => normalizeText(x))
+          .filter(Boolean);
+        if (rawProdutos.length) rawProdutosByKey.set(key, rawProdutos);
+        if (typeof fornecedoresRaw.equivalencias !== "undefined") rawEquivByKey.set(key, fornecedoresRaw.equivalencias);
         info[key] = {
           fornecedor: nome,
           vendedor: String((s as any)?.vendedor ?? "").trim(),
@@ -166,7 +230,7 @@ export async function GET(req: NextRequest) {
         .select("supplier_id,item:items(name),supplier:suppliers(id,bubble_id)")
         .eq("company_id", companyId)
         .limit(5000);
-      if (linksErr) return json({ error: linksErr.message }, { status: 500 });
+      if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
       for (const r of linksDb ?? []) {
         const supplier = (r as any)?.supplier ?? null;
         const supplierDbId = String(supplier?.id ?? "").trim();
@@ -179,35 +243,216 @@ export async function GET(req: NextRequest) {
         if (!prev.includes(itemName)) produtos[supplierKey] = [...prev, itemName];
       }
 
-      return json({ source: "compat", readOnly: true, row: { id, info, produtos, equivalencias: {} } }, { status: 200 });
+      for (const k of Object.keys(info)) {
+        const rawProdutos = rawProdutosByKey.get(k) ?? [];
+        if (rawProdutos.length) produtos[k] = rawProdutos;
+      }
+
+      const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
+      if (normalizedTombstones.length) produtos[TOMBSTONE_KEY] = normalizedTombstones;
+
+      const equivalencias: Record<string, any> = {};
+      for (const k of Object.keys(info)) {
+        const eq = rawEquivByKey.get(k);
+        if (typeof eq !== "undefined") equivalencias[k] = eq as any;
+      }
+
+      return json({ ok: true, traceId, source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
     }
 
     const { data, error } = await supabase.from("fornecedores_state").select("*").eq("id", id).maybeSingle();
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ source: "legacy", readOnly: false, row: data ?? null }, { status: 200 });
+    if (error) {
+      const msg = String(error.message ?? "");
+      if (msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("fornecedores_state")) {
+        return errJson({
+          status: 500,
+          traceId,
+          stage: "legacy.missing_table_fornecedores_state",
+          error: "missing_table_fornecedores_state (/setup-supabase)",
+          source: "legacy",
+        });
+      }
+      return errJson({ status: 500, traceId, stage: "legacy.fornecedores_state_select", error: msg, source: "legacy" });
+    }
+    return json({ ok: true, traceId, source: "legacy", readOnly: false, row: data ?? null }, { status: 200 });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return errJson({ status: 500, traceId, stage: "get.exception", error: err });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const traceId = crypto.randomUUID();
   try {
     const body = (await req.json().catch(() => null)) as unknown;
-    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
+    if (!body || typeof body !== "object") return errJson({ status: 400, traceId, stage: "post.invalid_body", error: "invalid_body" });
     const data = body as Record<string, unknown>;
     const { accessToken, id } = resolveUserScopedId(req);
-    if (!id) return json({ error: "unauthorized" }, { status: 401 });
+    if (!id) return errJson({ status: 401, traceId, stage: "post.unauthorized", error: "unauthorized" });
     const supabase = getSupabaseServerClient(accessToken);
-    const payload = {
-      id,
-      info: (data.info ?? {}) as any,
-      produtos: (data.produtos ?? {}) as any,
-      equivalencias: (data.equivalencias ?? {}) as any,
-    };
-    const { error } = await supabase.from("fornecedores_state").upsert(payload as any, { onConflict: "id" });
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    const shouldUseCompat = await shouldUseCompatSource({ req, supabase });
+    const userId = id.slice("user:".length);
+
+    if (!shouldUseCompat) {
+      const payload = {
+        id,
+        info: (data.info ?? {}) as any,
+        produtos: (data.produtos ?? {}) as any,
+        equivalencias: (data.equivalencias ?? {}) as any,
+      };
+      const { error } = await supabase.from("fornecedores_state").upsert(payload as any, { onConflict: "id" });
+      if (error) {
+        const msg = String(error.message ?? "");
+        if (msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("fornecedores_state")) {
+          return errJson({
+            status: 500,
+            traceId,
+            stage: "legacy.missing_table_fornecedores_state",
+            error: "missing_table_fornecedores_state (/setup-supabase)",
+            source: "legacy",
+          });
+        }
+        return errJson({ status: 500, traceId, stage: "legacy.fornecedores_state_upsert", error: msg, source: "legacy" });
+      }
+      return json({ ok: true, traceId }, { status: 200 });
+    }
+
+    const { data: memberRows, error: memberErr } = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
+
+    const infoMap = safeObj(data.info);
+    const produtosMap = safeObj(data.produtos);
+    const equivMap = safeObj(data.equivalencias);
+
+    const { data: suppliersDb, error: suppliersErr } = await supabase
+      .from("suppliers")
+      .select("id,bubble_id,external_key,nome,raw")
+      .eq("company_id", companyId)
+      .limit(5000);
+    if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
+
+    const supplierIdByBubbleId = new Map<string, string>();
+    const supplierIdByNameKey = new Map<string, string>();
+    const supplierRawById = new Map<string, unknown>();
+    const supplierIdByKeyUpper = new Map<string, string>();
+    let defaultSupplierId = "";
+    const reservedSupplierIds = new Set<string>();
+    for (const s of suppliersDb ?? []) {
+      const sid = String((s as any)?.id ?? "").trim();
+      if (!sid) continue;
+      const bubbleId = String((s as any)?.bubble_id ?? "").trim();
+      const externalKey = normalizeText((s as any)?.external_key ?? "");
+      const nome = normalizeText((s as any)?.nome ?? "");
+      const sys = ((s as any)?.raw as any)?.system ?? null;
+      const isDefault = externalKey === "supplier:default:sem_fornecedor" || normalizeNameKey(nome) === "sem fornecedor" || Boolean(sys?.default);
+      if (isDefault) defaultSupplierId = sid;
+      if (nome === TOMBSTONE_KEY) reservedSupplierIds.add(sid);
+      if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
+      if (nome) supplierIdByNameKey.set(normalizeNameKey(nome), sid);
+      supplierRawById.set(sid, (s as any)?.raw ?? {});
+      const key = bubbleId || `db:${sid}`;
+      supplierIdByKeyUpper.set(key.toUpperCase(), sid);
+    }
+
+    const tombstonesUpper = Array.from(new Set(safeArr(produtosMap[TOMBSTONE_KEY]).map(normalizeTombstoneKey).filter(Boolean)));
+    const keys = new Set<string>(
+      [...Object.keys(infoMap), ...Object.keys(produtosMap), ...Object.keys(equivMap)]
+        .map((k) => String(k ?? "").trim())
+        .filter((k) => Boolean(k) && k !== TOMBSTONE_KEY),
+    );
+    const keepKeysUpper = new Set<string>(Array.from(keys).map(normalizeTombstoneKey).filter(Boolean));
+
+    const updates: any[] = [];
+    const inserts: any[] = [];
+    for (const key of keys) {
+      const infoRow = safeObj(infoMap[key]);
+      const nomeFromInfo = normalizeText(infoRow.fornecedor ?? "");
+      const nameKey = normalizeNameKey(nomeFromInfo || key);
+      const rawProdutos = safeArr(produtosMap[key])
+        .map((x) => normalizeText(x))
+        .filter(Boolean);
+      const produtos = Array.from(new Set(rawProdutos));
+      const equivalencias = typeof equivMap[key] !== "undefined" ? equivMap[key] : undefined;
+
+      let supplierId = "";
+      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = dbIdFromKey(key);
+      if (!supplierId && isUuid(key)) supplierId = key;
+      if (!supplierId) supplierId = supplierIdByBubbleId.get(key) ?? "";
+      if (!supplierId && nameKey) supplierId = supplierIdByNameKey.get(nameKey) ?? "";
+
+      const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
+      const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
+
+      const vendedor = normalizeText(infoRow.vendedor ?? "");
+      const endereco = normalizeText(infoRow.endereco ?? "");
+      const whatsapp = normalizeText(infoRow.whatsapp ?? "");
+      const nome = nomeFromInfo || normalizeText(key);
+
+      const row = {
+        ...(supplierId ? { id: supplierId } : null),
+        company_id: companyId,
+        bubble_id: !supplierId && /^\d{8,}x\d{6,}$/i.test(key) ? key : null,
+        nome: nome || "-",
+        endereco,
+        vendedor,
+        whatsapp,
+        raw: nextRaw,
+      };
+
+      if (supplierId) updates.push(row);
+      else inserts.push(row);
+    }
+
+    if (updates.length) {
+      const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
+      if (upErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_upsert", error: upErr.message, source: "compat" });
+    }
+
+    if (inserts.length) {
+      const { error: insErr } = await supabase.from("suppliers").insert(inserts as any);
+      if (insErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_insert", error: insErr.message, source: "compat" });
+    }
+
+    if (defaultSupplierId) {
+      const rawBase = supplierRawById.get(defaultSupplierId) ?? {};
+      const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
+      const { error: defErr } = await supabase
+        .from("suppliers")
+        .update({ raw: nextRaw } as any)
+        .eq("company_id", companyId)
+        .eq("id", defaultSupplierId);
+      if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_default_raw", error: defErr.message, source: "compat" });
+    }
+
+    const deleteCandidateIds = new Set<string>();
+    for (const sid of reservedSupplierIds) {
+      if (sid && sid !== defaultSupplierId) deleteCandidateIds.add(sid);
+    }
+    for (const kUpper of tombstonesUpper) {
+      if (!kUpper || keepKeysUpper.has(kUpper)) continue;
+      let supplierId = "";
+      if (isDbPrefixed(kUpper) && isUuid(dbIdFromKey(kUpper))) supplierId = dbIdFromKey(kUpper);
+      else if (isUuid(kUpper)) supplierId = kUpper;
+      else supplierId = supplierIdByKeyUpper.get(kUpper) ?? "";
+      if (!supplierId || supplierId === defaultSupplierId) continue;
+      deleteCandidateIds.add(supplierId);
+    }
+
+    const deleteIds = Array.from(deleteCandidateIds).filter(Boolean);
+    if (deleteIds.length) {
+      const { error: linkDelErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
+      if (linkDelErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_delete", error: linkDelErr.message, source: "compat" });
+      const { error: supplierDelErr } = await supabase.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
+      if (supplierDelErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_delete", error: supplierDelErr.message, source: "compat" });
+    }
+
+    return json({ ok: true, traceId }, { status: 200 });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return errJson({ status: 500, traceId, stage: "post.exception", error: err });
   }
 }

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import styles from "./suporte.module.css";
 
@@ -76,8 +75,7 @@ export default function SuporteClient() {
   const [isOpen, setIsOpen] = useState(true);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="suporte" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           {!isOpen ? (
@@ -134,7 +132,6 @@ export default function SuporteClient() {
           </div>
         ) : null}
       </main>
-    </div>
+    </>
   );
 }
-

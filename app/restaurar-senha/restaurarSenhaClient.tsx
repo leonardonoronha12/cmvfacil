@@ -20,6 +20,9 @@ export default function RestaurarSenhaClient() {
   const code = useMemo(() => (search.get("code") ?? "").trim(), [search]);
   const sent = useMemo(() => (search.get("sent") ?? "").trim() === "1", [search]);
   const sentEmail = useMemo(() => (search.get("email") ?? "").trim(), [search]);
+  const invite = useMemo(() => (search.get("invite") ?? "").trim() === "1", [search]);
+  const inviteCompany = useMemo(() => (search.get("company") ?? "").trim(), [search]);
+  const inviteRole = useMemo(() => (search.get("role") ?? "").trim(), [search]);
 
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
@@ -120,16 +123,17 @@ export default function RestaurarSenhaClient() {
       <section className="cmv-reset-left">
         <div className="cmv-reset-wrap">
           <div className="cmv-reset-brand">
-            <img src="/resetar-senha/logo.svg" alt="CMV Fácil Logo" className="cmv-reset-logo" />
-            <p className="cmv-reset-brand-name">
-              <span>CMV&nbsp;</span>Fácil
-            </p>
+            <img src="/brand/logo-preto.svg" alt="CMV Fácil" className="cmv-reset-logo" />
           </div>
 
           <div className="cmv-reset-content">
             <div className="cmv-reset-header">
-              <h1 className="cmv-reset-title">Restaurar Senha</h1>
-              <p className="cmv-reset-subtitle">Defina sua nova senha abaixo.</p>
+              <h1 className="cmv-reset-title">{invite ? "Crie sua senha" : "Restaurar Senha"}</h1>
+              <p className="cmv-reset-subtitle">
+                {invite
+                  ? "Este é seu primeiro acesso ao CMV Fácil. Para entrar no sistema, crie uma senha agora (bem rápido)."
+                  : "Defina sua nova senha abaixo."}
+              </p>
             </div>
 
             {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
@@ -150,6 +154,31 @@ export default function RestaurarSenhaClient() {
               </div>
             ) : (
               <form className="cmv-reset-form" onSubmit={onSubmit}>
+              {invite ? (
+                <div className="cmv-reset-hint" style={{ marginBottom: 12 }}>
+                  <div style={{ marginBottom: 10 }}>
+                    {inviteCompany ? (
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Empresa:</strong> {inviteCompany}
+                      </div>
+                    ) : null}
+                    {inviteRole ? (
+                      <div style={{ marginBottom: 6 }}>
+                        <strong>Permissão:</strong> {inviteRole}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div style={{ fontWeight: 800, marginBottom: 6 }}>O que vai acontecer agora</div>
+                  <ol style={{ margin: 0, paddingLeft: 18, color: "#374151" }}>
+                    <li>Você cria uma senha (para entrar sempre que quiser).</li>
+                    <li>O sistema confirma seu acesso.</li>
+                    <li>Você será levado automaticamente para o painel da empresa.</li>
+                  </ol>
+                  <div style={{ color: "#6b7280", marginTop: 10 }}>
+                    Dica: use uma senha fácil para você lembrar, mas difícil para outras pessoas (8+ caracteres, com letras e números).
+                  </div>
+                </div>
+              ) : null}
               <div className="cmv-reset-field">
                 <label className="cmv-reset-label">Nova Senha</label>
                 <div className="cmv-reset-input">
@@ -187,7 +216,7 @@ export default function RestaurarSenhaClient() {
                     Salvando…
                   </span>
                 ) : ready ? (
-                  "Trocar Senha"
+                  invite ? "Criar senha e entrar" : "Trocar Senha"
                 ) : (
                   <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                     <LoadingSpinner size={16} />

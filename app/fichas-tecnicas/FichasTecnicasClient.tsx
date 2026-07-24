@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
-import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -318,10 +317,17 @@ function BcgIcon({ type }: { type: string }) {
   );
 }
 
-function RecipeThumb({ type }: { type: ThumbType }) {
+function RecipeThumb({ type, src }: { type: ThumbType; src?: string }) {
+  const url = String(src ?? "").trim();
   return (
     <div className={`${styles.thumb} ${type === "burger" ? styles.thumbBurger : type === "duplo" ? styles.thumbDuplo : styles.thumbTriplo}`}>
-      {type === "burger" ? <span className={styles.thumbBurgerIcon}>🍔</span> : <span className={styles.thumbText}>{type.toUpperCase()}</span>}
+      {url ? (
+        <img src={url} alt="" className={styles.thumbImg} />
+      ) : type === "burger" ? (
+        <span className={styles.thumbBurgerIcon}>🍔</span>
+      ) : (
+        <span className={styles.thumbText}>{type.toUpperCase()}</span>
+      )}
     </div>
   );
 }
@@ -1263,7 +1269,7 @@ export default function FichasTecnicasClient({
     return decorated.map(({ row }) => row);
   }, [query, quadrante, sortDir, sortKey, tableRows]);
 
-  const pageSize = 12;
+  const pageSize = 20;
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
@@ -1556,7 +1562,7 @@ export default function FichasTecnicasClient({
     if (column === "receita") {
       return (
         <div className={styles.recipeCell}>
-          <RecipeThumb type={row.thumb} />
+          <RecipeThumb type={row.thumb} src={row.recipeImage} />
           <div className={styles.recipeName}>{row.receita}</div>
         </div>
       );
@@ -2063,13 +2069,11 @@ export default function FichasTecnicasClient({
 
   return (
     <>
-      <div className={dash.dashboard}>
-        <AppSidebar active="fichas-tecnicas" />
-        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
-        {showCompatSplitView ? (
-          <main className={dash.content}>
-            <div className={styles.pageFrameWide}>
-              <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {showCompatSplitView ? (
+        <main className={dash.content}>
+          <div className={styles.pageFrameWide}>
+            <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
               <div
                 style={{
                   marginTop: 10,
@@ -2082,12 +2086,11 @@ export default function FichasTecnicasClient({
                   fontSize: 13,
                   fontWeight: 700,
                   display: "flex",
-                  justifyContent: "space-between",
+                  justifyContent: "flex-end",
                   gap: 12,
                   flexWrap: "wrap",
                 }}
               >
-                <span>Fonte: Banco compatível Bubble</span>
                 <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
               </div>
 
@@ -2200,11 +2203,11 @@ export default function FichasTecnicasClient({
                 </section>
               </div>
             </div>
-          </main>
-        ) : (
-          <main className={dash.content}>
-            <div className={styles.pageFrameWide}>
-            {detailsRecipe ? (
+        </main>
+      ) : (
+        <main className={dash.content}>
+          <div className={styles.pageFrameWide}>
+          {detailsRecipe ? (
             <section className={`${dash.itemDetails} ${styles.detailsPage}`}>
               <div className={`${dash.itemDetailsTop} ${styles.detailsHeader}`}>
                 <button type="button" className={`${dash.itemBack} ${styles.detailsBackBtn}`} onClick={() => setDetailsRecipe(null)}>
@@ -2619,12 +2622,11 @@ export default function FichasTecnicasClient({
                 fontSize: 13,
                 fontWeight: 700,
                 display: "flex",
-                justifyContent: "space-between",
+                justifyContent: "flex-end",
                 gap: 12,
                 flexWrap: "wrap",
               }}
             >
-              <span>Fonte: Banco compatível Bubble</span>
               <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
             </div>
           ) : null}
@@ -2909,8 +2911,7 @@ export default function FichasTecnicasClient({
           )}
           </div>
           </main>
-        )}
-      </div>
+      )}
 
       {mounted && isCreateOpen && !isReadOnly ? (
         createPortal(

@@ -381,6 +381,12 @@
   color: #95a8a6;
 }
 
+.planSavings {
+  font-size: 11px;
+  font-weight: 800;
+  color: #0ab86d;
+}
+
 .planSeat {
   font-size: 11px;
   color: #101214;
@@ -398,6 +404,13 @@
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
+}
+
+.planFootnote {
+  margin-top: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #95a8a6;
 }
 
 .planList {
@@ -510,4 +523,46 @@
   font-weight: 800;
   font-size: 10px;
   width: fit-content;
+}
+
+.blockedOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(1, 4, 14, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 9999;
+}
+
+.blockedCard {
+  width: 100%;
+  max-width: 520px;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e4e8e7;
+  padding: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+}
+
+.blockedTitle {
+  font-size: 14px;
+  font-weight: 900;
+  color: #101214;
+}
+
+.blockedText {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #2f3537;
+  line-height: 1.35;
+}
+
+.blockedActions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }

@@ -12,6 +12,11 @@ export type MeProfile = {
   avatarUrl: string;
   companyName: string;
   companyLogoUrl: string;
+  companyCnpj: string;
+  companyEmail: string;
+  companyWhatsapp: string;
+  companyIndustry: string;
+  role: "Administrador" | "Colaborador";
   planType: string;
   planStatus: string;
   cardLast4: string;
@@ -124,8 +129,9 @@ export async function loadMeFromApi() {
       const res = await fetch(`/api/me?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok) {
-        clearMeStore();
-        return null;
+        const keep = prev && prev.userId === sessionUserId ? prev : null;
+        if (!keep) clearMeStore();
+        return keep;
       }
       const next: MeProfile = {
         userId: String(j.userId ?? "").trim(),
@@ -137,6 +143,11 @@ export async function loadMeFromApi() {
         avatarUrl: String(j.avatarUrl ?? "").trim(),
         companyName: String(j.companyName ?? "").trim(),
         companyLogoUrl: String(j.companyLogoUrl ?? "").trim(),
+        companyCnpj: String(j.companyCnpj ?? "").trim(),
+        companyEmail: String(j.companyEmail ?? "").trim(),
+        companyWhatsapp: String(j.companyWhatsapp ?? "").trim(),
+        companyIndustry: String(j.companyIndustry ?? "").trim(),
+        role: String(j.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador",
         planType: String(j.plan?.type ?? j.planType ?? "").trim(),
         planStatus: String(j.plan?.status ?? j.planStatus ?? "").trim(),
         cardLast4: String(j.plan?.cardLast4 ?? j.cardLast4 ?? "").trim(),

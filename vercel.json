@@ -1,0 +1,14 @@
+{
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/billing-checkout-abandonment",
+      "schedule": "0 4 * * *"
+    }
+  ]
+}

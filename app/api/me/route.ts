@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { normalizeKey as normalizeKeyFromLib, parseBubbleCsvToObjects, type CsvObjectRow } from "../../lib/bubbleCsv";
+import { getBillingAccessForCurrentCompany } from "../../lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,6 +18,109 @@ function json(data: unknown, init: ResponseInit = {}) {
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function safeEmail(input: unknown) {
+  const v = String(input ?? "").trim().toLowerCase();
+  if (!v || !v.includes("@")) return "";
+  return v;
+}
+
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = email.trim().toLowerCase();
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(error.message);
+    const users = (data?.users ?? []) as any[];
+    for (const u of users) {
+      const id = String(u?.id ?? "").trim();
+      const em = String(u?.email ?? "").trim().toLowerCase();
+      if (id && em === target) return id;
+    }
+    if (users.length < 1000) break;
+  }
+  return null;
+}
+
+async function resolveSupabaseUser(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+): Promise<{ uid: string | null; email: string | null; error: string | null }> {
+  const raw = String(userId ?? "").trim();
+  if (isUuid(raw)) {
+    const authUser = await supabase.auth.admin.getUserById(raw);
+    if (authUser.error) return { uid: null, email: null, error: `auth_get_user:${authUser.error.message}` };
+    const email = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+    if (!email) return { uid: null, email: null, error: "missing_supabase_email" };
+    return { uid: raw, email, error: null };
+  }
+
+  const email = safeEmail(raw);
+  if (!email) return { uid: null, email: null, error: "user_not_supabase_uuid" };
+
+  const { data: profileDb } = await supabase.from("user_profiles").select("user_id").ilike("email", email).maybeSingle();
+  const uid = String((profileDb as any)?.user_id ?? "").trim();
+  if (uid && isUuid(uid)) return { uid, email, error: null };
+
+  const fromAuth = await findAuthUserIdByEmail(supabase, email);
+  if (fromAuth && isUuid(fromAuth)) return { uid: fromAuth, email, error: null };
+
+  return { uid: null, email, error: "user_not_found" };
+}
+
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function normalizePhoneBR(value: string) {
+  const trimmed = String(value ?? "").trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("+")) return trimmed;
+  const d = digitsOnly(trimmed);
+  if (!d) return null;
+  if (d.startsWith("55")) return `+${d}`;
+  return `+55${d}`;
+}
+
+function parsePermissionLevel(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
+}
+
+function isAdminMemberRow(row: any) {
+  const roleRaw = String(row?.role ?? "").trim().toLowerCase();
+  if (roleRaw.includes("owner") || roleRaw.includes("admin") || roleRaw.includes("administrador") || roleRaw.includes("propriet")) return true;
+  const permRaw = String(row?.permission_level ?? "").trim().toLowerCase();
+  if (permRaw.includes("owner") || permRaw.includes("admin") || permRaw.includes("administrador")) return true;
+  const permNum = parsePermissionLevel(row?.permission_level);
+  return Number.isFinite(permNum) && permNum >= 1;
+}
+
+function scoreRole(role: unknown) {
+  const r = String(role ?? "").trim().toLowerCase();
+  if (!r) return 0;
+  if (r.includes("owner") || r.includes("propriet")) return 30;
+  if (r.includes("admin")) return 20;
+  if (r.includes("manager") || r.includes("gerente")) return 10;
+  return 0;
+}
+
+function pickBestCompanyId(memberRows: unknown[]) {
+  let bestCompanyId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const companyId = String(r?.company_id ?? "").trim();
+    if (!companyId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCompanyId = companyId;
+    }
+  }
+  return bestCompanyId;
 }
 
 function normalizeKey(input: string) {
@@ -115,6 +219,13 @@ async function downloadBytes(supabase: ReturnType<typeof getSupabaseAdmin>, buck
   const dl = await supabase.storage.from(bucket).download(path);
   if (dl.error || !dl.data) throw new Error(dl.error?.message || "download_failed");
   return await dl.data.arrayBuffer();
+}
+
+async function uploadJson(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string, path: string, obj: unknown) {
+  const raw = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(raw);
+  const up = await supabase.storage.from(bucket).upload(path, bytes, { upsert: true, contentType: "application/json" } as any);
+  if (up.error) throw new Error(up.error.message || "upload_failed");
 }
 
 function parseBubbleXlsxToObjects(buf: ArrayBuffer) {
@@ -657,8 +768,6 @@ export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    const uid = String(userId ?? "").trim();
-    if (!isUuid(uid)) return json({ ok: false, error: "user_not_supabase_uuid" }, { status: 400 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -667,10 +776,144 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const authUser = await supabase.auth.admin.getUserById(uid);
-    if (authUser.error) return json({ ok: false, error: `auth_get_user:${authUser.error.message}` }, { status: 400 });
-    const email = String(authUser.data?.user?.email ?? "").trim().toLowerCase();
+    const resolved = await resolveSupabaseUser(supabase, String(userId ?? ""));
+    if (!resolved.uid) return json({ ok: false, error: resolved.error ?? "user_not_found" }, { status: 400 });
+    const uid = resolved.uid;
+    const email = String(resolved.email ?? "").trim().toLowerCase();
     if (!email) return json({ ok: false, error: "missing_supabase_email" }, { status: 400 });
+
+    const { data: profileDb } = await supabase
+      .from("user_profiles")
+      .select("user_id,bubble_user_id,email,nome,sobrenome,nome_completo,whatsapp")
+      .eq("user_id", uid)
+      .maybeSingle();
+
+    const bubbleUserId = String((profileDb as any)?.bubble_user_id ?? "").trim();
+    let { data: memberRows } = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).limit(50);
+    if ((!memberRows || !memberRows.length) && bubbleUserId) {
+      const fallback = await supabase.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", bubbleUserId).limit(50);
+      memberRows = fallback.data ?? [];
+    }
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
+
+    if (companyId) {
+      let outNome = String((profileDb as any)?.nome ?? "").trim();
+      let outSobrenome = String((profileDb as any)?.sobrenome ?? "").trim();
+      let outNomeCompleto = String((profileDb as any)?.nome_completo ?? "").trim();
+      let outWhatsapp = String((profileDb as any)?.whatsapp ?? "").trim();
+      let outEmail = String((profileDb as any)?.email ?? email ?? "").trim();
+
+      if ((!outNome && !outSobrenome && !outNomeCompleto && !outWhatsapp) || !outEmail) {
+        try {
+          const authUser = await supabase.auth.admin.getUserById(uid);
+          const meta = ((authUser.data as any)?.user?.user_metadata ?? {}) as any;
+          const metaFirst = String(meta?.first_name ?? meta?.nome ?? "").trim();
+          const metaLast = String(meta?.last_name ?? meta?.sobrenome ?? "").trim();
+          const metaFull = String(meta?.full_name ?? meta?.nome_completo ?? meta?.nomeCompleto ?? "").trim();
+          const metaWhatsapp = String(meta?.whatsapp ?? "").trim();
+          const metaEmail = String((authUser.data as any)?.user?.email ?? email ?? "").trim().toLowerCase();
+
+          const nextNome = outNome || metaFirst;
+          const nextSobrenome = outSobrenome || metaLast;
+          const nextNomeCompleto = outNomeCompleto || metaFull || `${nextNome} ${nextSobrenome}`.replace(/\s+/g, " ").trim();
+          const nextWhatsapp = outWhatsapp || metaWhatsapp;
+          const nextEmail = outEmail || metaEmail;
+
+          if (nextEmail || nextNome || nextSobrenome || nextNomeCompleto || nextWhatsapp) {
+            const patch: any = {};
+            if (nextEmail) patch.email = nextEmail;
+            if (nextNome) patch.nome = nextNome;
+            if (nextSobrenome) patch.sobrenome = nextSobrenome;
+            if (nextNomeCompleto) patch.nome_completo = nextNomeCompleto;
+            if (nextWhatsapp) patch.whatsapp = nextWhatsapp;
+            try {
+              await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+            } catch {}
+          }
+
+          outNome = nextNome;
+          outSobrenome = nextSobrenome;
+          outNomeCompleto = nextNomeCompleto;
+          outWhatsapp = nextWhatsapp;
+          outEmail = nextEmail;
+        } catch {}
+      }
+
+      const { data: companyDb } = companyId
+        ? await supabase
+            .from("companies")
+            .select("id,fantasy_name,legal_name,cnpj,email,phone_e164,industry,logo_url")
+            .eq("id", companyId)
+            .maybeSingle()
+        : { data: null as any };
+
+      const permissionRole = isAdminMemberRow(membershipForCompany) ? "Administrador" : "Colaborador";
+      let plan: { type: string; status: string; cardLast4: string } | null = null;
+      try {
+        const live = await getBillingAccessForCurrentCompany(req);
+        const status = String(live.access.subscription.status ?? "").trim();
+        const planKey = String(live.access.subscription.plan ?? "").trim().toLowerCase();
+        const reason = String(live.access.reason ?? "").trim().toLowerCase();
+        const type =
+          planKey === "pro_monthly"
+            ? "PRO Mensal"
+            : planKey === "pro_yearly"
+              ? "PRO Anual"
+              : reason === "trial_internal"
+                ? "Período de teste ativo"
+                : reason === "active" || reason === "trialing" || reason === "past_due" || reason === "canceling"
+                  ? "PRO"
+                  : "";
+        plan = {
+          type: type || "—",
+          status: status || "",
+          cardLast4: String((live.access as any)?.cardLast4 ?? "").trim(),
+        };
+      } catch {
+        plan = { type: "—", status: "", cardLast4: "" };
+      }
+
+      const { data: companyMembers } = companyId
+        ? await supabase.from("company_members").select("user_id,role,permission_level").eq("company_id", companyId).limit(500)
+        : { data: [] as any[] };
+      const userIds = Array.from(new Set((companyMembers ?? []).map((r: any) => String(r?.user_id ?? "").trim()).filter(Boolean)));
+      const { data: memberProfiles } = userIds.length
+        ? await supabase.from("user_profiles").select("user_id,email,nome,nome_completo").in("user_id", userIds)
+        : { data: [] as any[] };
+      const profileById = new Map<string, any>((memberProfiles ?? []).map((r: any) => [String(r?.user_id ?? ""), r]));
+      const members = (companyMembers ?? []).map((m: any) => {
+        const mid = String(m?.user_id ?? "").trim();
+        const p = profileById.get(mid) ?? {};
+        const role = isAdminMemberRow(m) ? "Administrador" : "Colaborador";
+        const nomeCompleto = String(p?.nome_completo ?? p?.nomeCompleto ?? "").trim() || String(p?.nome ?? "").trim() || String(p?.email ?? "").trim() || "—";
+        return { name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
+      });
+
+      return json(
+        {
+          ok: true,
+          userId: uid,
+          email: outEmail,
+          nome: outNome,
+          sobrenome: outSobrenome,
+          nomeCompleto: outNomeCompleto,
+          whatsapp: outWhatsapp,
+          avatarUrl: "",
+          companyName: String(companyDb?.fantasy_name ?? companyDb?.legal_name ?? "").trim(),
+          companyLogoUrl: String(companyDb?.logo_url ?? "").trim(),
+          companyCnpj: String(companyDb?.cnpj ?? "").trim(),
+          companyEmail: String(companyDb?.email ?? "").trim(),
+          companyWhatsapp: String(companyDb?.phone_e164 ?? "").trim(),
+          companyIndustry: String(companyDb?.industry ?? "").trim(),
+          role: permissionRole,
+          plan,
+          members,
+          source: { db: true, companyId: companyId || null },
+        },
+        { status: 200 },
+      );
+    }
 
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
@@ -702,11 +945,26 @@ export async function GET(req: NextRequest) {
     const bubbleRowNorm = ctx.bubbleRowNorm;
     const usersAllRows = ctx.usersAllRows;
 
-    const nameParts = bubbleRowNorm ? guessUserNameParts(bubbleRowNorm) : { first: "", last: "", full: "" };
+    let nameParts = bubbleRowNorm ? guessUserNameParts(bubbleRowNorm) : { first: "", last: "", full: "" };
+    const profileNome = String((profileDb as any)?.nome ?? "").trim();
+    const profileSobrenome = String((profileDb as any)?.sobrenome ?? "").trim();
+    const profileNomeCompleto = String((profileDb as any)?.nome_completo ?? "").trim();
+    if ((!nameParts.first || !nameParts.last || !nameParts.full) && (profileNome || profileSobrenome || profileNomeCompleto)) {
+      const full = profileNomeCompleto || `${profileNome} ${profileSobrenome}`.replace(/\s+/g, " ").trim();
+      nameParts = {
+        first: nameParts.first || profileNome,
+        last: nameParts.last || profileSobrenome,
+        full: nameParts.full || full,
+      };
+    }
     const whatsappRaw = bubbleRowNorm
       ? pickFirst(bubbleRowNorm, ["whatsapp", "telefone", "celular", "fone", "phone", "phone_number"]) || pickKeyLike(bubbleRowNorm, ["whatsapp", "telefone", "celular", "phone"], ["id", "uuid"])
       : "";
-    const whatsapp = whatsappRaw ? normalizePhone(whatsappRaw) : "";
+    let whatsapp = whatsappRaw ? normalizePhone(whatsappRaw) : "";
+    if (!whatsapp) {
+      const profileWhats = String((profileDb as any)?.whatsapp ?? "").trim();
+      if (profileWhats) whatsapp = normalizePhone(profileWhats) || "";
+    }
     const avatarUrl = bubbleRowNorm ? guessUserAvatar(bubbleRowNorm) : "";
 
     const bubbleUserIdToEmail = new Map<string, string>();
@@ -828,16 +1086,86 @@ export async function GET(req: NextRequest) {
 
     const currentCompanyId = bubbleRowNorm && knownCompanyIds.size ? guessCurrentCompanyId(bubbleRowNorm) : "";
     const primaryCompanyId = currentCompanyId && knownCompanyIds.has(currentCompanyId) ? currentCompanyId : companies[0]?.id ?? "";
-    const companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
-    const companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
-    const plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
+    let companyName = primaryCompanyId ? String(companyIdToName.get(primaryCompanyId) ?? "").trim() : companies[0]?.name ?? "";
+    const companyRowNorm = primaryCompanyId ? companyRowNormById.get(primaryCompanyId) ?? null : null;
+    let companyLogoUrl = primaryCompanyId ? guessCompanyLogo(companyRowNormById.get(primaryCompanyId) ?? {}) : "";
+    const companyWhatsappRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["whatsapp", "telefone", "celular", "fone", "phone_e164", "phone", "phone_number"]) ||
+        pickKeyLike(companyRowNorm, ["whatsapp", "telefone", "celular", "phone"], ["id", "uuid", "cnpj", "email", "nome", "name"])
+      : "";
+    const companyEmailRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["email", "mail", "e_mail", "company_email", "contato_email", "email_corporativo"]) ||
+        pickKeyLike(companyRowNorm, ["email", "mail"], ["id", "uuid", "cnpj", "telefone", "whatsapp", "nome", "name"])
+      : "";
+    const companyIndustryRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["ramo", "industry", "segmento", "tipo", "categoria"]) ||
+        pickKeyLike(companyRowNorm, ["ramo", "industry", "segmento"], ["id", "uuid", "cnpj", "email", "nome", "name"])
+      : "";
+    const companyCnpjRaw = companyRowNorm
+      ? pickFirst(companyRowNorm, ["cnpj", "cpf_cnpj", "cnpj_cpf"]) || pickKeyLike(companyRowNorm, ["cnpj"], ["id", "uuid", "email", "nome", "name"])
+      : "";
+
+    let companyWhatsapp = companyWhatsappRaw ? normalizePhone(companyWhatsappRaw) : "";
+    let companyEmail = companyEmailRaw ? (extractEmail(companyEmailRaw) ?? companyEmailRaw.trim().toLowerCase()) : "";
+    let companyIndustry = String(companyIndustryRaw ?? "").trim();
+    let companyCnpj = digitsOnly(String(companyCnpjRaw ?? "").trim());
+    if (companyCnpj && companyCnpj.length !== 14) companyCnpj = "";
+
+    let role: "Administrador" | "Colaborador" = "Administrador";
+    const ownerEmails = primaryCompanyId ? companyOwnerEmailsById.get(primaryCompanyId) ?? new Set<string>() : new Set<string>();
+    if (email && ownerEmails.size) role = ownerEmails.has(email) ? "Administrador" : "Colaborador";
+
+    let companyOverrides: any = null;
+    try {
+      const overridesRaw = await downloadText(supabase, bucket, `user:${uid}/profile/overrides.json`);
+      companyOverrides = JSON.parse(overridesRaw) as any;
+    } catch {}
+    if (companyOverrides && typeof companyOverrides === "object") {
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyName")) companyName = String(companyOverrides.companyName ?? "").trim();
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyEmail")) companyEmail = String(companyOverrides.companyEmail ?? "").trim().toLowerCase();
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyWhatsapp")) companyWhatsapp = String(companyOverrides.companyWhatsapp ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyIndustry")) companyIndustry = String(companyOverrides.companyIndustry ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyCnpj")) companyCnpj = digitsOnly(String(companyOverrides.companyCnpj ?? ""));
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "companyLogoUrl")) companyLogoUrl = String(companyOverrides.companyLogoUrl ?? "");
+      if (Object.prototype.hasOwnProperty.call(companyOverrides, "role")) role = String(companyOverrides.role ?? "") === "Administrador" ? "Administrador" : role;
+      const oNome = Object.prototype.hasOwnProperty.call(companyOverrides, "nome") ? String(companyOverrides.nome ?? "").trim() : "";
+      const oSobrenome = Object.prototype.hasOwnProperty.call(companyOverrides, "sobrenome") ? String(companyOverrides.sobrenome ?? "").trim() : "";
+      const oNomeCompleto = Object.prototype.hasOwnProperty.call(companyOverrides, "nomeCompleto")
+        ? String(companyOverrides.nomeCompleto ?? "").trim()
+        : "";
+      const oWhatsapp = Object.prototype.hasOwnProperty.call(companyOverrides, "whatsapp") ? String(companyOverrides.whatsapp ?? "").trim() : "";
+      if (oNome && !nameParts.first) nameParts = { ...nameParts, first: oNome };
+      if (oSobrenome && !nameParts.last) nameParts = { ...nameParts, last: oSobrenome };
+      if ((oNomeCompleto || (oNome && oSobrenome)) && !nameParts.full) {
+        const full = oNomeCompleto || `${oNome} ${oSobrenome}`.replace(/\s+/g, " ").trim();
+        nameParts = { ...nameParts, full };
+      }
+      if (oWhatsapp && !whatsapp) whatsapp = normalizePhone(oWhatsapp) || "";
+    }
+    let plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
+    try {
+      const live = await getBillingAccessForCurrentCompany(req);
+      const status = String(live.access.subscription.status ?? "").trim();
+      const planKey = String(live.access.subscription.plan ?? "").trim().toLowerCase();
+      const reason = String(live.access.reason ?? "").trim().toLowerCase();
+      const type =
+        planKey === "pro_monthly"
+          ? "PRO Mensal"
+          : planKey === "pro_yearly"
+            ? "PRO Anual"
+            : reason === "trial_internal"
+              ? "Período de teste ativo"
+              : reason === "active" || reason === "trialing" || reason === "past_due" || reason === "canceling"
+                ? "PRO"
+                : plan.type || "—";
+      plan = { ...plan, type: String(type ?? "").trim() || plan.type || "—", status: status || plan.status };
+    } catch {}
 
     const members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }> = [];
     if (usersAllRows.length) {
       const memberEmails =
         primaryCompanyId && membershipEmailsByCompanyId.get(primaryCompanyId) ? Array.from(membershipEmailsByCompanyId.get(primaryCompanyId) ?? []) : [];
       const memberEmailSet = new Set(memberEmails.map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean));
-      const ownerEmails = primaryCompanyId ? companyOwnerEmailsById.get(primaryCompanyId) ?? new Set<string>() : new Set<string>();
       for (const e of ownerEmails) memberEmailSet.add(String(e ?? "").trim().toLowerCase());
       if (!memberEmailSet.size && email) memberEmailSet.add(email);
 
@@ -915,6 +1243,11 @@ export async function GET(req: NextRequest) {
       avatarUrl: avatarUrl || "",
       companyName,
       companyLogoUrl,
+      companyCnpj,
+      companyEmail,
+      companyWhatsapp,
+      companyIndustry,
+      role,
       companies,
       plan,
       members,
@@ -929,6 +1262,153 @@ export async function GET(req: NextRequest) {
         userBubbleId: userBubbleId || null,
       },
     });
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
+export async function POST(req: NextRequest) {
+  let body: unknown;
+  try {
+    body = (await req.json()) as unknown;
+  } catch {
+    return json({ ok: false, error: "invalid_json" }, { status: 400 });
+  }
+
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+
+    let supabase: ReturnType<typeof getSupabaseAdmin>;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch {
+      return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
+    }
+
+    const resolved = await resolveSupabaseUser(supabase, String(userId ?? ""));
+    if (!resolved.uid) return json({ ok: false, error: resolved.error ?? "user_not_found" }, { status: 400 });
+    const uid = resolved.uid;
+    const emailFromAuth = String(resolved.email ?? "").trim().toLowerCase();
+
+    const input = (body ?? {}) as any;
+    const nome = typeof input.nome === "string" ? input.nome.trim() : null;
+    const sobrenome = typeof input.sobrenome === "string" ? input.sobrenome.trim() : null;
+    const nomeCompleto = typeof input.nomeCompleto === "string" ? input.nomeCompleto.trim() : null;
+    const whatsapp = typeof input.whatsapp === "string" ? input.whatsapp.trim() : null;
+    const permissao = typeof input.permissao === "string" ? input.permissao.trim() : null;
+
+    const companyName = typeof input.companyName === "string" ? input.companyName.trim() : null;
+    const companyEmail = typeof input.companyEmail === "string" ? input.companyEmail.trim() : null;
+    const companyWhatsRaw = typeof input.companyWhatsapp === "string" ? input.companyWhatsapp.trim() : null;
+    const companyIndustry = typeof input.companyIndustry === "string" ? input.companyIndustry.trim() : null;
+    const companyCnpjRaw = typeof input.companyCnpj === "string" ? input.companyCnpj.trim() : null;
+    const companyLogoUrlRaw = typeof input.companyLogoUrl === "string" ? input.companyLogoUrl.trim() : null;
+
+    if (nome != null || sobrenome != null || nomeCompleto != null || whatsapp != null || emailFromAuth) {
+      const patch: any = {};
+      if (emailFromAuth) patch.email = emailFromAuth;
+      if (nome != null) patch.nome = nome || null;
+      if (sobrenome != null) patch.sobrenome = sobrenome || null;
+      if (nomeCompleto != null) patch.nome_completo = nomeCompleto || null;
+      if (whatsapp != null) patch.whatsapp = whatsapp || null;
+      const up = await supabase.from("user_profiles").upsert({ user_id: uid, ...patch } as any, { onConflict: "user_id" });
+      if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
+    }
+
+    const { data: profileDb } = await supabase.from("user_profiles").select("bubble_user_id").eq("user_id", uid).maybeSingle();
+    const bubbleUserId = String((profileDb as any)?.bubble_user_id ?? "").trim();
+    let { data: memberRows } = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("user_id", uid).limit(50);
+    if ((!memberRows || !memberRows.length) && bubbleUserId) {
+      const fallback = await supabase.from("company_members").select("id,company_id,role,permission_level").eq("bubble_user_id", bubbleUserId).limit(50);
+      memberRows = fallback.data ?? [];
+    }
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    const memberRow = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
+
+    const canAdminWrite = isAdminMemberRow(memberRow);
+
+    if (
+      companyId &&
+      (companyName != null || companyEmail != null || companyWhatsRaw != null || companyIndustry != null || companyCnpjRaw != null || companyLogoUrlRaw != null)
+    ) {
+      if (!canAdminWrite) {
+      } else {
+        const patch: any = {};
+        if (companyName != null) {
+          const nm = companyName.trim();
+          patch.fantasy_name = nm || null;
+          patch.legal_name = nm || null;
+        }
+        if (companyEmail != null) patch.email = companyEmail.trim().toLowerCase() || null;
+        if (companyWhatsRaw != null) patch.phone_e164 = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) : null;
+        if (companyIndustry != null) patch.industry = companyIndustry || null;
+        if (companyCnpjRaw != null) {
+          const digits = digitsOnly(companyCnpjRaw);
+          patch.cnpj = digits ? digits : null;
+        }
+        if (companyLogoUrlRaw != null) patch.logo_url = companyLogoUrlRaw ? companyLogoUrlRaw : null;
+        const up = await supabase.from("companies").update(patch).eq("id", companyId);
+        if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
+      }
+    }
+
+    if (companyId && permissao != null) {
+      if (canAdminWrite) {
+        const desiredIsAdmin = permissao.toLowerCase().includes("admin");
+        const desiredRole = desiredIsAdmin ? "admin" : "member";
+        const permValue = (() => {
+          const raw = (memberRow as any)?.permission_level;
+          if (typeof raw === "number") return desiredIsAdmin ? Math.max(1, parsePermissionLevel(raw)) : 0;
+          const s = String(raw ?? "").trim();
+          if (/^\d+$/.test(s)) return desiredIsAdmin ? Math.max(1, parsePermissionLevel(s)) : 0;
+          return desiredIsAdmin ? "Administrador" : "Colaborador";
+        })();
+        const up = await supabase
+          .from("company_members")
+          .update({ role: desiredRole, permission_level: permValue } as any)
+          .eq("id", String(memberRow?.id ?? "").trim());
+        if (up.error) return json({ ok: false, error: up.error.message }, { status: 500 });
+      }
+    }
+
+    if (
+      nome != null ||
+      sobrenome != null ||
+      nomeCompleto != null ||
+      whatsapp != null ||
+      companyName != null ||
+      companyEmail != null ||
+      companyWhatsRaw != null ||
+      companyIndustry != null ||
+      companyCnpjRaw != null ||
+      companyLogoUrlRaw != null ||
+      (permissao != null && !companyId)
+    ) {
+      const bucket = "bubble-imports";
+      await ensureBucket(supabase, bucket);
+      let prev: any = {};
+      try {
+        const raw = await downloadText(supabase, bucket, `user:${uid}/profile/overrides.json`);
+        const parsed = JSON.parse(raw) as any;
+        if (parsed && typeof parsed === "object") prev = parsed;
+      } catch {}
+      const next: any = { ...prev, updatedAt: new Date().toISOString() };
+      if (nome != null) next.nome = nome || "";
+      if (sobrenome != null) next.sobrenome = sobrenome || "";
+      if (nomeCompleto != null) next.nomeCompleto = nomeCompleto || "";
+      if (whatsapp != null) next.whatsapp = whatsapp || "";
+      if (companyName != null) next.companyName = companyName || "";
+      if (companyEmail != null) next.companyEmail = companyEmail.trim().toLowerCase() || "";
+      if (companyWhatsRaw != null) next.companyWhatsapp = companyWhatsRaw ? normalizePhoneBR(companyWhatsRaw) ?? "" : "";
+      if (companyIndustry != null) next.companyIndustry = companyIndustry || "";
+      if (companyCnpjRaw != null) next.companyCnpj = digitsOnly(companyCnpjRaw);
+      if (companyLogoUrlRaw != null) next.companyLogoUrl = companyLogoUrlRaw || "";
+      if (permissao != null && !companyId) next.role = permissao.toLowerCase().includes("admin") ? "Administrador" : "Colaborador";
+      await uploadJson(supabase, bucket, `user:${uid}/profile/overrides.json`, next);
+    }
+
+    return json({ ok: true }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

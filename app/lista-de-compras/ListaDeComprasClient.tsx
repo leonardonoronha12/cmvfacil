@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppSidebar from "../components/AppSidebar";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SystemToast from "../components/SystemToast";
 import dash from "../dashboard/dashboard.module.css";
@@ -41,6 +40,7 @@ type CompraRow = {
   custoMedio: number;
   custoMedioLabel: string;
   fornecedor: string;
+  fornecedores?: string[];
   fornecedorMedida: string;
   fornecedorFator: number;
   consumoDiario: number;
@@ -408,8 +408,11 @@ export default function ListaDeComprasClient() {
     return raw === "compat" || raw === "legacy" ? raw : "";
   })();
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const toastTimerRef = useRef<number | null>(null);
   const compatFetchKeyRef = useRef<string>("");
+  const estoqueFinalAutoKeyRef = useRef<string>("");
+  const estoqueFinalIsManualRef = useRef(false);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
@@ -441,10 +444,10 @@ export default function ListaDeComprasClient() {
   const [sortKey, setSortKey] = useState<CompraTableColumn | null>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
-  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
+  const [pageIndex, setPageIndex] = useState(0);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -466,6 +469,7 @@ export default function ListaDeComprasClient() {
     const unsubs: Array<() => void> = [];
 
     setIsLoadingTable(true);
+    setLoadError("");
     setCompat(null);
     setBubbleListaRows([]);
 
@@ -476,26 +480,16 @@ export default function ListaDeComprasClient() {
       const json = res ? ((await res.json().catch(() => null)) as any) : null;
       if (cancelled) return;
 
+      if (!res?.ok || !json || !json?.ok) {
+        const msgRaw = String(json?.error ?? json?.details ?? "").trim();
+        const msg = msgRaw || (res ? `Não foi possível carregar a Lista de Compras (${res.status}).` : "Não foi possível carregar a Lista de Compras.");
+        setLoadError(msg);
+      }
+
       const isCompat = Boolean(res?.ok && json?.ok && json?.source === "compat" && Array.isArray(json?.rows));
       if (isCompat) {
-        setCompat(null);
-        const rows = ((json.rows as any[]) ?? [])
-          .map((r: any) => {
-            const bubbleListaId = String(r?.id ?? "").trim();
-            if (!bubbleListaId) return null;
-            return {
-              bubbleListaId,
-              bubbleItemId: String(r?.bubble_id ?? "").trim(),
-              empresaId: "",
-              itemNome: String(r?.itemNome ?? "").trim(),
-              itemMedida: String(r?.unidade ?? "").trim(),
-              qtdSugestao: typeof r?.quantidadeSugerida === "number" ? r.quantidadeSugerida : Number(r?.quantidadeSugerida ?? 0) || 0,
-              qtdCompra: typeof r?.quantidadeCompra === "number" ? r.quantidadeCompra : Number(r?.quantidadeCompra ?? 0) || 0,
-              tipo: "itens",
-            } satisfies BubbleListaComprasRow;
-          })
-          .filter(Boolean) as BubbleListaComprasRow[];
-        setBubbleListaRows(rows);
+        setCompat(json as CompatListaComprasResponse);
+        setBubbleListaRows([]);
       }
 
       const rows = (res?.ok && json?.ok && Array.isArray(json?.rows) ? (json.rows as any[]) : []) as BubbleListaComprasRow[];
@@ -648,6 +642,12 @@ export default function ListaDeComprasClient() {
         const medida = String(r.unidade ?? "").trim() || "Und";
         const custoMedioValue = Number(r.custoMedio ?? 0) || 0;
         const fornecedorLabel = String(r.fornecedor ?? "-").trim() || "-";
+        const fornecedores = Array.isArray(r.fornecedores)
+          ? (r.fornecedores as any[])
+              .map((x) => String(x ?? "").trim())
+              .filter(Boolean)
+              .filter((x) => x !== "-")
+          : [];
         return {
           id: String(r.id),
           item: itemName,
@@ -658,6 +658,7 @@ export default function ListaDeComprasClient() {
           custoMedio: custoMedioValue,
           custoMedioLabel: formatMoney(custoMedioValue),
           fornecedor: fornecedorLabel,
+          fornecedores,
           fornecedorMedida: medida,
           fornecedorFator: 1,
           consumoDiario: Number(r.calc?.consumoDiario ?? 0) || 0,
@@ -666,33 +667,109 @@ export default function ListaDeComprasClient() {
         } satisfies CompraRow;
       });
     }
+    const contagemByIso = new Map<string, InventarioContagem>();
+    const contagemOptions: Array<{ iso: string; t: number }> = [];
+    const scoreContagem = (inv: InventarioContagem) => {
+      let s = 0;
+      for (const cat of inv.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if ((it as any)?.removido) continue;
+          const raw = String((it as any)?.estoqueFinal ?? "").trim();
+          if (!raw) continue;
+          const n = parsePtNumber(raw);
+          if (n > 0) s += 2;
+          else s += 1;
+        }
+      }
+      return s;
+    };
+    for (const c of contagens) {
+      const t = parseDateLoose(c.data);
+      if (!t) continue;
+      const date = new Date(t);
+      const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      const prev = contagemByIso.get(iso) ?? null;
+      if (!prev) contagemByIso.set(iso, c);
+      else if (scoreContagem(c) > scoreContagem(prev)) contagemByIso.set(iso, c);
+      contagemOptions.push({ iso, t });
+    }
 
-    const insumoByBubbleId = new Map<string, InsumoStoreItem>();
-    for (const r of insumos) {
-      const id = String(r.id ?? "");
-      const bubbleId = id.includes("insumo:") ? id.split("insumo:", 2)[1] : "";
-      if (!bubbleId || insumoByBubbleId.has(bubbleId)) continue;
-      insumoByBubbleId.set(bubbleId, r);
+    contagemOptions.sort((a, b) => b.t - a.t);
+    const availableIsos = new Set(contagemOptions.map((x) => x.iso));
+    const endIso = (endDate && availableIsos.has(endDate) ? endDate : contagemOptions[0]?.iso) ?? "";
+    const startIso = (startDate && availableIsos.has(startDate) ? startDate : contagemOptions[contagemOptions.length - 1]?.iso) ?? endIso;
+
+    const startContagem = startIso ? contagemByIso.get(startIso) ?? null : null;
+    const endContagem = endIso ? contagemByIso.get(endIso) ?? null : null;
+
+    const sumInventory = (inv: InventarioContagem | null) => {
+      const out = new Map<string, { qty: number; unit: string }>();
+      if (!inv) return out;
+      for (const cat of inv.categorias ?? []) {
+        for (const it of cat.itens ?? []) {
+          if (it.removido) continue;
+          const key = normalizeText(it.item);
+          if (!key) continue;
+          const qty = parsePtNumber(String(it.estoqueFinal ?? ""));
+          const unit = normalizeUnit(String(it.unidade ?? ""));
+          const cur = out.get(key);
+          out.set(key, { qty: (cur?.qty ?? 0) + qty, unit: cur?.unit || unit });
+        }
+      }
+      return out;
+    };
+
+    const estoqueInicialByKey = sumInventory(startContagem);
+    const estoqueFinalByKey = sumInventory(endContagem);
+
+    const startT = startIso ? Date.parse(startIso) : NaN;
+    const endT = endIso ? Date.parse(endIso) : NaN;
+    const diasCorridos = Number.isFinite(startT) && Number.isFinite(endT) ? Math.max(Math.round((endT - startT) / 86_400_000), 0) : 0;
+
+    const entradasByKey = new Map<string, { qty: number; unit: string }>();
+    for (const entrada of entradas) {
+      const t = parseDateLoose(entrada.dataLancamento);
+      if (!t) continue;
+      if (Number.isFinite(startT) && t < startT) continue;
+      if (Number.isFinite(endT) && t > endT + 86_399_000) continue;
+      for (const item of entrada.itensNota ?? []) {
+        const key = normalizeText(item.nome);
+        if (!key) continue;
+        const parsed = parseQtyLabel(item.quantidadeLabel);
+        if (!parsed.qty) continue;
+        const cur = entradasByKey.get(key);
+        entradasByKey.set(key, { qty: (cur?.qty ?? 0) + parsed.qty, unit: cur?.unit || parsed.unit });
+      }
     }
 
     const rows: CompraRow[] = [];
-    for (const r of bubbleListaRows) {
-      if (String(r.tipo ?? "").trim() && String(r.tipo).trim() !== "itens") continue;
-      const ins = r.bubbleItemId ? insumoByBubbleId.get(r.bubbleItemId) ?? null : null;
-      const itemName = String(ins?.item ?? r.itemNome ?? "").trim() || "Item";
-      const medida = String(ins?.medida ?? r.itemMedida ?? "").trim() || "Und";
-      const categoria = String(ins?.categoria ?? "").trim() || "-";
-      const custoMedioValue = ins ? parseMoney(String(ins.custoMedio ?? "")) : 0;
-      const qtdCompra = Number(r.qtdCompra ?? 0) || 0;
-      const qtdSugestao = Number(r.qtdSugestao ?? 0) || 0;
-      const comprarValue = Math.max(qtdCompra > 0 ? qtdCompra : qtdSugestao, 0);
-      const itemKey = normalizeText(itemName);
-      const fornecedorFromLatest = itemKey ? latestEntriesIndex.get(itemKey)?.fornecedor ?? "" : "";
-      const fornecedorFromFallback = itemKey ? fornecedorFallbackIndex.get(itemKey) ?? "" : "";
+    for (const ins of insumos) {
+      const itemName = String(ins.item ?? "").trim() || "Item";
+      const key = normalizeText(itemName);
+      if (!key) continue;
+
+      const medida = String(ins.medida ?? "").trim() || "Und";
+      const categoria = String(ins.categoria ?? "").trim() || "-";
+      const custoMedioValue = parseMoney(String(ins.custoMedio ?? ""));
+
+      const startInv = estoqueInicialByKey.get(key);
+      const endInv = estoqueFinalByKey.get(key);
+      const entradasAgg = entradasByKey.get(key);
+
+      const estoqueInicial = startInv ? convertUnitQty(startInv.qty, startInv.unit, medida) : 0;
+      const estoqueFinal = endInv ? convertUnitQty(endInv.qty, endInv.unit, medida) : 0;
+      const entradasQty = entradasAgg ? convertUnitQty(entradasAgg.qty, entradasAgg.unit, medida) : 0;
+
+      const saidas = estoqueInicial + (entradasQty - estoqueFinal);
+      const consumoDiario = diasCorridos > 0 ? Math.max(saidas / diasCorridos, 0) : 0;
+
+      const fornecedorFromLatest = key ? latestEntriesIndex.get(key)?.fornecedor ?? "" : "";
+      const fornecedorFromFallback = key ? fornecedorFallbackIndex.get(key) ?? "" : "";
       const fornecedorCandidate = String(fornecedorFromLatest || fornecedorFromFallback || "-").trim() || "-";
       const fornecedorLabel = normalizeText(fornecedorCandidate) === "sem fornecedor" ? "-" : fornecedorCandidate;
+
       rows.push({
-        id: String(r.bubbleListaId),
+        id: String(ins.id),
         item: itemName,
         displayItem: itemName,
         itemMetaLabel: `${categoria}${fornecedorLabel && fornecedorLabel !== "-" ? ` • ${fornecedorLabel}` : ""}`,
@@ -703,13 +780,30 @@ export default function ListaDeComprasClient() {
         fornecedor: fornecedorLabel,
         fornecedorMedida: medida,
         fornecedorFator: 1,
-        consumoDiario: 0,
-        estoqueFinal: 0,
-        comprar: comprarValue,
+        consumoDiario,
+        estoqueFinal,
+        comprar: 0,
       });
     }
+    rows.sort((a, b) => a.item.localeCompare(b.item, "pt-BR", { sensitivity: "base", numeric: true }));
     return rows;
-  }, [bubbleListaRows, compat, fornecedorFallbackIndex, insumos, latestEntriesIndex]);
+  }, [compat, contagens, endDate, entradas, fornecedorFallbackIndex, insumos, latestEntriesIndex, startDate]);
+
+  useEffect(() => {
+    if (compat?.source === "compat") return;
+    const key = `start=${startDate}|end=${endDate}`;
+    const keyChanged = estoqueFinalAutoKeyRef.current !== key;
+    if (keyChanged) {
+      estoqueFinalAutoKeyRef.current = key;
+      estoqueFinalIsManualRef.current = false;
+    }
+    if (estoqueFinalIsManualRef.current) return;
+    setEstoqueFinalMap(() => {
+      const next: Record<string, string> = {};
+      for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
+      return next;
+    });
+  }, [baseRows, compat, endDate, startDate]);
 
   const categorias = useMemo(() => {
     const seen = new Set<string>();
@@ -764,6 +858,7 @@ export default function ListaDeComprasClient() {
     const out: Array<{ value: string; iso: string; label: string; t: number }> = [];
 
     if (compat?.source === "compat" && Array.isArray(compat.inventories)) {
+      const seenIso = new Set<string>();
       for (const inv of compat.inventories) {
         const id = String(inv?.id ?? "").trim();
         const d = String(inv?.data_contagem ?? "").trim();
@@ -771,8 +866,13 @@ export default function ListaDeComprasClient() {
         const t = Date.parse(d);
         if (!Number.isFinite(t)) continue;
         const date = new Date(t);
-        const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-        const label = date.toLocaleDateString("pt-BR");
+        const y = date.getUTCFullYear();
+        const m = date.getUTCMonth() + 1;
+        const day = date.getUTCDate();
+        const iso = `${y}-${String(m).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+        if (seenIso.has(iso)) continue;
+        seenIso.add(iso);
+        const label = `${String(day).padStart(2, "0")}/${String(m).padStart(2, "0")}/${y}`;
         out.push({ value: id, iso, label, t });
       }
       out.sort((a, b) => b.t - a.t);
@@ -874,9 +974,13 @@ export default function ListaDeComprasClient() {
     const search = query.trim().toLowerCase();
     const mapped = baseRows.filter((row) => {
       if (mode === "categoria" && categoriaFilter !== "Categoria" && row.categoria !== categoriaFilter) return false;
-      if (mode === "fornecedor" && fornecedorFilter === "Fornecedor") return false;
+      if (mode === "fornecedor" && fornecedorFilter !== "Fornecedor") {
+        const extra = Array.isArray(row.fornecedores) ? row.fornecedores : [];
+        if (row.fornecedor !== fornecedorFilter && !extra.includes(fornecedorFilter)) return false;
+      }
       if (!search) return true;
-      return `${row.displayItem} ${row.item} ${row.categoria} ${row.fornecedor}`.toLowerCase().includes(search);
+      const suppliers = [row.fornecedor, ...(Array.isArray(row.fornecedores) ? row.fornecedores : [])].join(" ");
+      return `${row.displayItem} ${row.item} ${row.categoria} ${suppliers}`.toLowerCase().includes(search);
     });
 
     const decorated = mapped.map((row, index) => ({ row, index }));
@@ -932,31 +1036,23 @@ export default function ListaDeComprasClient() {
     return decorated.map((entry) => entry.row);
   }, [baseRows, categoriaFilter, diasEntrega, diasEstoque, estoqueFinalMap, fornecedorFilter, mode, query, sortDir, sortKey]);
 
-  const groupedRows = useMemo(() => {
-    const out: Array<{ key: string; rows: CompraRow[] }> = [];
-    const getKey = (row: CompraRow) => {
-      if (mode === "fornecedor") return String(row.fornecedor ?? "").trim() || "-";
-      return String(row.categoria ?? "").trim() || "Sem categoria";
-    };
-    for (const row of rows) {
-      const k = getKey(row);
-      const last = out[out.length - 1] ?? null;
-      if (!last || last.key !== k) {
-        out.push({ key: k, rows: [row] });
-      } else {
-        last.rows.push(row);
-      }
-    }
-    return out;
-  }, [mode, rows]);
+  const PAGE_SIZE = 12;
+  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const safePageIndex = Math.max(0, Math.min(pageIndex, totalPages - 1));
+  const pageRows = useMemo(() => {
+    const start = safePageIndex * PAGE_SIZE;
+    return rows.slice(start, start + PAGE_SIZE);
+  }, [rows, safePageIndex]);
 
   useEffect(() => {
-    const next: Record<string, string> = {};
-    for (const row of baseRows) next[row.id] = formatDecimal3(row.estoqueFinal);
-    setEstoqueFinalMap(next);
-  }, [baseRows]);
+    setPageIndex(0);
+  }, [mode, categoriaFilter, fornecedorFilter, query, startDate, endDate]);
 
-  const allVisibleSelected = rows.length > 0 && rows.every((row) => selectedIds[row.id]);
+  useEffect(() => {
+    if (pageIndex !== safePageIndex) setPageIndex(safePageIndex);
+  }, [pageIndex, safePageIndex]);
+
+  const allVisibleSelected = pageRows.length > 0 && pageRows.every((row) => selectedIds[row.id]);
   const isPeriodReady = inventoryOptions.length > 0 && Boolean(selectedStartOption) && Boolean(selectedEndOption);
 
   const hasAnySelected = useMemo(() => {
@@ -1203,9 +1299,9 @@ export default function ListaDeComprasClient() {
     setSelectedIds((prev) => {
       const next = { ...prev };
       if (allVisibleSelected) {
-        for (const row of rows) delete next[row.id];
+        for (const row of pageRows) delete next[row.id];
       } else {
-        for (const row of rows) next[row.id] = true;
+        for (const row of pageRows) next[row.id] = true;
       }
       return next;
     });
@@ -1261,6 +1357,7 @@ export default function ListaDeComprasClient() {
   function updateEstoqueFinal(id: string, value: string) {
     if (isReadOnly) return;
     const cleaned = value.replace(/[^\d,]/g, "");
+    estoqueFinalIsManualRef.current = true;
     setEstoqueFinalMap((prev) => ({ ...prev, [id]: cleaned }));
   }
   const isCompatMode = compat?.source === "compat";
@@ -1333,8 +1430,7 @@ export default function ListaDeComprasClient() {
   ]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="lista-compras" />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       <main className={dash.content}>
         <div className={styles.pageFrameWide}>
@@ -1350,10 +1446,24 @@ export default function ListaDeComprasClient() {
             </div>
 
             <div className={styles.modeSwitch}>
-              <button type="button" className={mode === "categoria" ? styles.modeActive : styles.modeBtn} onClick={() => setMode("categoria")}>
+              <button
+                type="button"
+                className={mode === "categoria" ? styles.modeActive : styles.modeBtn}
+                onClick={() => {
+                  setMode("categoria");
+                  setCategoriaFilter("Categoria");
+                }}
+              >
                 Por Categoria
               </button>
-              <button type="button" className={mode === "fornecedor" ? styles.modeActive : styles.modeBtn} onClick={() => setMode("fornecedor")}>
+              <button
+                type="button"
+                className={mode === "fornecedor" ? styles.modeActive : styles.modeBtn}
+                onClick={() => {
+                  setMode("fornecedor");
+                  setFornecedorFilter("Fornecedor");
+                }}
+              >
                 Por Fornecedor
               </button>
             </div>
@@ -1367,7 +1477,7 @@ export default function ListaDeComprasClient() {
             </span>
             <span>
               {isCompatMode
-                ? compat?.banner || "Fonte: Banco compatível Bubble"
+                ? compat?.banner || "Modo somente leitura."
                 : inventoryOptions.length
                   ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
                   : "Cadastre inventários para liberar o período e montar sua lista."}
@@ -1472,6 +1582,8 @@ export default function ListaDeComprasClient() {
             </article>
           </section>
 
+          {loadError ? <div className="cmv-alert cmv-alert-error">{loadError}</div> : null}
+
           <section className={styles.tableCard} style={{ position: "relative" }}>
             {isLoadingTable ? (
               <div className={dash.loadingOverlay}>
@@ -1517,99 +1629,87 @@ export default function ListaDeComprasClient() {
 
             <div className={styles.tableBody} data-qa-grid="lista-de-compras">
               {rows.length ? (
-                groupedRows.map((group) => {
-                  const collapsed = Boolean(collapsedGroups[group.key]);
+                pageRows.map((row) => {
+                  const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
+                  const consumoFornecedor = row.consumoDiario / fornecedorFactor;
+                  const custoFornecedor = row.custoMedio * fornecedorFactor;
+                  const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
+                  const comprarValue = (() => {
+                    if (isCompatMode) {
+                      const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
+                      return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
+                    }
+                    const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
+                    const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
+                    const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
+                    const compraFornecedor = comprarCalculado / fornecedorFactor;
+                    return formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
+                  })();
                   return (
-                    <div key={group.key} className={styles.groupBlock} data-qa-group-key={group.key}>
-                      <button
-                        type="button"
-                        className={styles.groupHeaderBtn}
-                        onClick={() => setCollapsedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                      >
-                        <span className={styles.groupTitle}>{group.key}</span>
-                        <span className={styles.groupMeta}>{collapsed ? "Expandir" : "Recolher"}</span>
-                      </button>
-                      {collapsed
-                        ? null
-                        : group.rows.map((row) => {
-                            const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
-                            const consumoFornecedor = row.consumoDiario / fornecedorFactor;
-                            const custoFornecedor = row.custoMedio * fornecedorFactor;
-                            const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
-                            const comprarValue = (() => {
-                              if (isCompatMode) {
-                                const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
-                                return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
-                              }
-                              const estoqueFinalNum = parseDecimalInput(estoqueFinalValue);
-                              const demanda = row.consumoDiario * (diasEstoqueNum + diasEntregaNum);
-                              const comprarCalculado = Math.max(demanda - estoqueFinalNum, 0);
-                              const compraFornecedor = comprarCalculado / fornecedorFactor;
-                              return formatDecimalUpTo3(mode === "fornecedor" ? compraFornecedor : comprarCalculado);
-                            })();
-                            return (
-                              <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={row.id}>
-                                <label className={styles.checkCell}>
-                                  <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} disabled={isReadOnly} />
-                                </label>
-                                {columnOrder.map((column) => {
-                                  if (column === "item") {
-                                    return (
-                                      <div key={column} className={styles.itemCell}>
-                                        {isCompatMode ? (
-                                          <div className={styles.itemName}>{row.displayItem}</div>
-                                        ) : (
-                                          <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                            {row.displayItem}
-                                          </Link>
-                                        )}
-                                        <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
-                                      </div>
-                                    );
-                                  }
-                                  if (column === "custoMedio") {
-                                    return (
-                                      <div key={column} className={styles.costCell}>
-                                        <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
-                                        {mode === "fornecedor" ? <div className={styles.costSub}>{row.custoMedioLabel}</div> : null}
-                                      </div>
-                                    );
-                                  }
-                                  if (column === "consumoDiario") {
-                                    return (
-                                      <div key={column} className={styles.measureStack}>
-                                        <div className={styles.measureCell}>
-                                          <span className={styles.valuePlain}>{formatDecimalUpTo3(mode === "fornecedor" ? consumoFornecedor : row.consumoDiario)}</span>
-                                          <span className={styles.unitPlain}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
-                                        </div>
-                                        {mode === "fornecedor" ? <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div> : null}
-                                      </div>
-                                    );
-                                  }
-                                  if (column === "estoqueFinal") {
-                                    return (
-                                      <div key={column} className={styles.measureCell}>
-                                        <input
-                                          className={styles.stockInput}
-                                          value={estoqueFinalValue}
-                                          onChange={(e) => updateEstoqueFinal(row.id, e.target.value)}
-                                          inputMode="decimal"
-                                          readOnly={isCompatMode || isReadOnly}
-                                        />
-                                        <span className={styles.unitTag}>{row.medida}</span>
-                                      </div>
-                                    );
-                                  }
-                                  return (
-                                    <div key={column} className={styles.measureCell}>
-                                      <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
-                                      <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
-                                    </div>
-                                  );
-                                })}
+                    <div key={row.id} className={styles.tableRow} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={row.id}>
+                      <label className={styles.checkCell}>
+                        <input type="checkbox" checked={Boolean(selectedIds[row.id])} onChange={() => toggleRow(row.id)} disabled={isReadOnly} />
+                      </label>
+                      {columnOrder.map((column) => {
+                        if (column === "item") {
+                          return (
+                            <div key={column} className={styles.itemCell}>
+                              {isCompatMode ? (
+                                <div className={styles.itemName}>{row.displayItem}</div>
+                              ) : (
+                                <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
+                                  {row.displayItem}
+                                </Link>
+                              )}
+                              <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                            </div>
+                          );
+                        }
+                        if (column === "custoMedio") {
+                          return (
+                            <div key={column} className={styles.costCell}>
+                              <div className={styles.costMain}>{mode === "fornecedor" ? formatMoney(custoFornecedor) : row.custoMedioLabel}</div>
+                              {mode === "fornecedor" ? <div className={styles.costSub}>{row.custoMedioLabel}</div> : null}
+                            </div>
+                          );
+                        }
+                        if (column === "consumoDiario") {
+                          const consumoDiasManter = row.consumoDiario * diasEstoqueNum;
+                          return (
+                            <div key={column} className={styles.measureStack}>
+                              <div className={styles.measureCell}>
+                                <span className={styles.valuePlain}>{formatDecimalUpTo3(mode === "fornecedor" ? consumoFornecedor : row.consumoDiario)}</span>
+                                <span className={styles.unitPlain}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
                               </div>
-                            );
-                          })}
+                              {mode === "fornecedor" ? (
+                                <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div>
+                              ) : (
+                                <div className={styles.measureSub}>{`${formatDecimalUpTo3(consumoDiasManter)} ${row.medida} (${diasEstoqueNum}D)`}</div>
+                              )}
+                            </div>
+                          );
+                        }
+                        if (column === "estoqueFinal") {
+                          return (
+                            <div key={column} className={styles.measureCell}>
+                              <input
+                                className={styles.stockInput}
+                                value={estoqueFinalValue}
+                                onChange={(e) => updateEstoqueFinal(row.id, e.target.value)}
+                                inputMode="decimal"
+                                readOnly={isCompatMode || isReadOnly}
+                              />
+                              <span className={styles.unitTag}>{row.medida}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={column} className={styles.measureCell}>
+                            <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
+                            <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })
@@ -1623,9 +1723,32 @@ export default function ListaDeComprasClient() {
                 </div>
               )}
             </div>
+            <div className={styles.tableFooter}>
+              <div className={styles.tableFooterLeft}>{`${rows.length} resultado(s) encontrado(s)`}</div>
+              <div className={styles.tableFooterRight}>
+                <button type="button" className={styles.pagerBtn} onClick={() => setPageIndex(0)} disabled={safePageIndex <= 0}>
+                  «
+                </button>
+                <button type="button" className={styles.pagerBtn} onClick={() => setPageIndex((p) => Math.max(0, p - 1))} disabled={safePageIndex <= 0}>
+                  ‹
+                </button>
+                <div className={styles.pagerPage}>{`${safePageIndex + 1} de ${totalPages}`}</div>
+                <button
+                  type="button"
+                  className={styles.pagerBtn}
+                  onClick={() => setPageIndex((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={safePageIndex >= totalPages - 1}
+                >
+                  ›
+                </button>
+                <button type="button" className={styles.pagerBtn} onClick={() => setPageIndex(totalPages - 1)} disabled={safePageIndex >= totalPages - 1}>
+                  »
+                </button>
+              </div>
+            </div>
           </section>
         </div>
       </main>
-    </div>
+    </>
   );
 }

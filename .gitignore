@@ -12,6 +12,7 @@ node_modules
 .sbhome
 tsconfig.tsbuildinfo
 supabase/.temp
+.dbg
 .appdata/
 .localappdata/
 AGENTS.md

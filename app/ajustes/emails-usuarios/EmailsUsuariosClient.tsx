@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import AppSidebar from "../../components/AppSidebar";
 import dash from "../../dashboard/dashboard.module.css";
 import styles from "../ajustes.module.css";
 
@@ -141,8 +140,7 @@ export default function EmailsUsuariosClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <div className={styles.pageWrap}>
@@ -325,6 +323,6 @@ export default function EmailsUsuariosClient() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }

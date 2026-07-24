@@ -296,7 +296,46 @@
 
 .tableWrap {
   align-self: stretch;
-  overflow-x: auto;
+  overflow: auto;
+  max-height: calc(100vh - 360px);
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+  color: #95a8a6;
+  font-size: 12px;
+}
+
+.pagination {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pageBtn {
+  width: 30px;
+  height: 30px;
+  border: 1px solid #e1e5e4;
+  background: #ffffff;
+  border-radius: 10px;
+  color: #01040e;
+  font-weight: 900;
+}
+
+.pageBtn:disabled {
+  opacity: 0.5;
+}
+
+.pageInfo {
+  min-width: 70px;
+  text-align: center;
+  color: #01040e;
+  font-weight: 800;
+  font-size: 12px;
 }
 
 .table {

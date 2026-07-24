@@ -129,9 +129,15 @@ export async function loadFornecedoresStateFromSupabase(userId?: string) {
   const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
   const res = await fetch(`/api/fornecedores?ts=${Date.now()}${qp}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as
-    | { row?: FornecedoresStateDbRow | null; source?: string; readOnly?: boolean; error?: string }
+    | { row?: FornecedoresStateDbRow | null; source?: string; readOnly?: boolean; error?: string; stage?: string; traceId?: string }
     | null;
-  if (!res.ok || !json) throw new Error(json?.error || "failed_to_load");
+  if (!json) throw new Error("failed_to_load");
+  if (!res.ok) {
+    const stage = String((json as any)?.stage ?? "").trim();
+    const traceId = String((json as any)?.traceId ?? "").trim();
+    const suffix = [stage ? `stage=${stage}` : "", traceId ? `trace=${traceId}` : ""].filter(Boolean).join(" ");
+    throw new Error(`${json?.error || "failed_to_load"}${suffix ? ` (${suffix})` : ""}`);
+  }
   const row = json.row;
   const sourceLabel = String(json.source ?? "").trim() === "compat" ? "compat" : "legacy";
   persistPageSource(sourceLabel);
@@ -156,6 +162,11 @@ export async function saveFornecedoresStateToSupabase(payload: { info: Fornecedo
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
   });
-  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; stage?: string; traceId?: string } | null;
+  if (!res.ok || !json?.ok) {
+    const stage = String(json?.stage ?? "").trim();
+    const traceId = String(json?.traceId ?? "").trim();
+    const suffix = [stage ? `stage=${stage}` : "", traceId ? `trace=${traceId}` : ""].filter(Boolean).join(" ");
+    throw new Error(`${json?.error || "failed_to_save"}${suffix ? ` (${suffix})` : ""}`);
+  }
 }

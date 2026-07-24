@@ -408,6 +408,25 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function parseCsvEnv(value: string | undefined) {
+  return String(value ?? "")
+    .split(/[,\n;]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function isAdminUserId(userId: string) {
+  const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
+  const emails = new Set(
+    [...parseCsvEnv(process.env.ADMIN_USER_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS), ...parseCsvEnv(process.env.ADMIN_EMAILS_LEGACY)].map((x) => x.toLowerCase()),
+  );
+  const raw = userId.toLowerCase();
+  if (!isUuid(userId) && raw.includes("@") && process.env.ADMIN_SECRET) return true;
+  if (ids.size && ids.has(raw)) return true;
+  if (emails.size && emails.has(raw)) return true;
+  return false;
+}
+
 function extractUuidFromText(input: string) {
   const s = String(input ?? "").trim();
   if (!s) return null;
@@ -514,6 +533,7 @@ export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
     const body = (await req.json().catch(() => null)) as any;
     const statePath = String(body?.statePath ?? "").trim();
@@ -1653,6 +1673,20 @@ export async function POST(req: NextRequest) {
                     );
                   }
                   const stateId = `user:${uid}`;
+                  const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+                  let tombstones: string[] = [];
+                  try {
+                    const { data } = await supabase.from("fornecedores_state").select("produtos").eq("id", stateId).maybeSingle();
+                    const raw = (data as any)?.produtos?.[TOMBSTONE_KEY];
+                    tombstones = Array.isArray(raw) ? raw.map((x: any) => String(x ?? "").trim()).filter(Boolean) : [];
+                  } catch {}
+                  const skip = new Set(tombstones.map((x) => x.toUpperCase()));
+                  if (skip.size) {
+                    for (const k of Object.keys(cleanedInfo)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedInfo[k];
+                    for (const k of Object.keys(cleanedProdutos)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedProdutos[k];
+                    for (const k of Object.keys(cleanedEq)) if (skip.has(String(k ?? "").trim().toUpperCase())) delete cleanedEq[k];
+                  }
+                  if (tombstones.length) cleanedProdutos[TOMBSTONE_KEY] = Array.from(new Set(tombstones.map((x) => x.toUpperCase())));
                   const { error } = await supabase
                     .from("fornecedores_state")
                     .upsert(
@@ -1720,7 +1754,7 @@ export async function POST(req: NextRequest) {
               for (let i = 0; i < allRows.length; i += 500) {
                 const chunk = allRows.slice(i, i + 500);
                 if (!chunk.length) continue;
-                const { error } = await supabase.from("inventario").upsert(chunk as any, { onConflict: "id" });
+                const { error } = await supabase.from("inventario").upsert(chunk as any, { onConflict: "id", ignoreDuplicates: true });
                 if (error) throw new Error(`inventario:${error.message}`);
                 ops += 1;
                 if (ops >= maxOps || Date.now() - startMs >= hardMs) {

@@ -2,14 +2,21 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { createPortal, flushSync } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import useCappedLoading from "../components/useCappedLoading";
+import usePagination from "../components/usePagination";
 import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { deleteInsumoFromSupabase, deleteInsumosBatchFromSupabase, loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
+import {
+  deleteInsumoFromSupabase,
+  deleteInsumosBatchFromSupabase,
+  loadInsumosStateFromSupabase,
+  saveInsumosStateToSupabase,
+  type InsumosStatePayload,
+} from "../lib/insumosSupabase";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
@@ -67,13 +74,36 @@ function toMoney(value: unknown) {
 
 function normalizeHeader(value: unknown) {
   return String(value ?? "")
+    .replace(/^\uFEFF/, "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function parseCsvLine(line: string) {
+function detectCsvDelimiter(line: string) {
+  let inQuotes = false;
+  let commas = 0;
+  let semis = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] ?? "";
+    if (ch === '"') {
+      const next = line[i + 1] ?? "";
+      if (inQuotes && next === '"') {
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (inQuotes) continue;
+    if (ch === ",") commas++;
+    else if (ch === ";") semis++;
+  }
+  return semis >= commas ? ";" : ",";
+}
+
+function parseCsvLine(line: string, delimiter: "," | ";" = ",") {
   const out: string[] = [];
   let cur = "";
   let inQuotes = false;
@@ -89,7 +119,7 @@ function parseCsvLine(line: string) {
       }
       continue;
     }
-    if (ch === "," && !inQuotes) {
+    if (ch === delimiter && !inQuotes) {
       out.push(cur);
       cur = "";
       continue;
@@ -127,7 +157,7 @@ function parseRowsFromTable(table: unknown[][]) {
   const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
   const startIndex = hasHeader ? 1 : 0;
 
-  const fallback = { ocultar: 0, item: 1, medida: 2, custoMedio: 3, categoria: 4, especificacao: 5 };
+  const fallback = { item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
   const getIndex = (key: keyof typeof fallback) => (map[key] != null ? map[key]! : fallback[key]);
 
   const out: InsumoRow[] = [];
@@ -315,9 +345,11 @@ function IconCheck() {
 }
 
 export default function InsumosClient() {
-  const toastTimerRef = useRef<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isDeletingItem, setIsDeletingItem] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
@@ -340,7 +372,13 @@ export default function InsumosClient() {
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const categoriesReadyRef = useRef(false);
-  const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
+  const [toast, setToast] = useState<{
+    title: string;
+    message: string;
+    tone: "success" | "error";
+    durationMs?: number;
+    icon?: "success" | "error" | "loading";
+  } | null>(null);
 
   const [newItemName, setNewItemName] = useState("");
   const [newCategory, setNewCategory] = useState("");
@@ -355,13 +393,8 @@ export default function InsumosClient() {
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
-  function showToast(message: string, type: "success" | "error", durationMs = 4500) {
-    setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, durationMs);
+  function showToast(message: string, type: "success" | "error", durationMs = 4500, title?: string, icon?: "success" | "error" | "loading") {
+    setToast({ title: title ?? (type === "success" ? "Sucesso" : "Erro"), message, tone: type, durationMs, icon });
   }
 
   function saveErrorMessage(err: unknown) {
@@ -370,6 +403,14 @@ export default function InsumosClient() {
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.includes("insumos_state") && msg.toLowerCase().includes("does not exist")) return "Tabela insumos_state não existe no Supabase.";
     return `Não foi possível salvar no Supabase (${msg}).`;
+  }
+
+  function deleteErrorMessage(err: unknown) {
+    const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
+    if (!msg) return "Não foi possível excluir o insumo.";
+    if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
+    if (msg === "compat_required") return "Sua sessão ainda não está no modo compat. Atualize a página e tente novamente.";
+    return `Não foi possível excluir o insumo (${msg}).`;
   }
 
   function isBootstrapRunning() {
@@ -400,59 +441,61 @@ export default function InsumosClient() {
     void meta;
   }
 
+  function applyLoadedState(state: InsumosStatePayload) {
+    const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
+    setSourceMeta(meta);
+
+    const mapped = (state.rows ?? []).map((s, idx) => ({
+      id: String(s.id || idx + 1),
+      ocultar: Boolean(s.ocultar),
+      item: String(s.item ?? "").trim(),
+      medida: String(s.medida ?? "").trim() || "Und",
+      custoMedio: String(s.custoMedio ?? "").trim() || "-",
+      categoria: String(s.categoria ?? "").trim() || "-",
+      especificacao: String(s.especificacao ?? "").trim() || "-",
+    }));
+    rowsReadyRef.current = true;
+    setDataRows(mapped);
+
+    const fromRows = getUniqueCategoriesFromRows(mapped);
+    const merged: string[] = [];
+    const seen = new Set<string>();
+    for (const c of [...(state.categories ?? []), ...fromRows]) {
+      const name = normalizeCategoryName(c);
+      if (!name || name === "-") continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.push(name);
+    }
+    setCategories(merged);
+    categoriesReadyRef.current = true;
+
+    writeInsumosToStore(state.rows ?? []);
+    writeInsumoCategoriasToStore(merged);
+
+    return { mapped, meta };
+  }
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   useEffect(() => {
-    return () => {
-      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    };
-  }, []);
-
-  useEffect(() => {
     (async () => {
       try {
+        setLoadError(null);
         const state = await loadInsumosStateFromSupabase();
-        const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
-        setSourceMeta(meta);
-        const mapped = (state.rows ?? []).map((s, idx) => ({
-          id: String(s.id || idx + 1),
-          ocultar: Boolean(s.ocultar),
-          item: String(s.item ?? "").trim(),
-          medida: String(s.medida ?? "").trim() || "Und",
-          custoMedio: String(s.custoMedio ?? "").trim() || "-",
-          categoria: String(s.categoria ?? "").trim() || "-",
-          especificacao: String(s.especificacao ?? "").trim() || "-",
-        }));
-        rowsReadyRef.current = true;
-        setDataRows(mapped);
-
-        const fromRows = getUniqueCategoriesFromRows(mapped);
-        const merged: string[] = [];
-        const seen = new Set<string>();
-        for (const c of [...(state.categories ?? []), ...fromRows]) {
-          const name = normalizeCategoryName(c);
-          if (!name || name === "-") continue;
-          const key = name.toLowerCase();
-          if (seen.has(key)) continue;
-          seen.add(key);
-          merged.push(name);
-        }
-        setCategories(merged);
-        categoriesReadyRef.current = true;
-
-        writeInsumosToStore(state.rows ?? []);
-        writeInsumoCategoriasToStore(merged);
+        applyLoadedState(state);
       } catch (err) {
         rowsReadyRef.current = true;
         setDataRows([]);
         setCategories([]);
         categoriesReadyRef.current = true;
         const msg = err instanceof Error ? err.message : String(err);
-        window.alert(
-          `Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.\n\nDetalhes: ${msg}`,
-        );
+        const message = `Não foi possível carregar os insumos do Supabase. Detalhes: ${msg}`;
+        setLoadError(message);
+        showToast(message, "error", 9000);
       } finally {
         setIsLoadingTable(false);
       }
@@ -668,7 +711,8 @@ export default function InsumosClient() {
       if (name.endsWith(".csv")) {
         const text = await selectedFile.text();
         const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        table = lines.map(parseCsvLine);
+        const delim = detectCsvDelimiter(lines[0] ?? "");
+        table = lines.map((l) => parseCsvLine(l, delim));
       } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
         const XLSX = await import("xlsx");
         const buf = await selectedFile.arrayBuffer();
@@ -687,10 +731,9 @@ export default function InsumosClient() {
         ...row,
         id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${idx}`,
       }));
-      setDataRows(imported);
-      setCategories((prev) => {
-        const seen = new Set(prev.map((c) => c.toLowerCase()));
-        const next = [...prev];
+      const mergedCategories = (() => {
+        const seen = new Set(categories.map((c) => c.toLowerCase()));
+        const next = [...categories];
         for (const r of imported) {
           const name = normalizeCategoryName(r.categoria ?? "");
           if (!name || name === "-") continue;
@@ -701,13 +744,35 @@ export default function InsumosClient() {
           }
         }
         return next;
-      });
+      })();
+      setDataRows(imported);
+      setCategories(mergedCategories);
       setIsImportOpen(false);
       setSelectedFile(null);
       setSelectedFileName(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      if (!isReadOnly && !isBootstrapRunning()) {
+        try {
+          await saveInsumosStateToSupabase({
+            rows: imported.map((r) => ({
+              id: r.id,
+              item: r.item,
+              medida: r.medida,
+              custoMedio: r.custoMedio,
+              categoria: r.categoria,
+              especificacao: r.especificacao,
+              ocultar: r.ocultar,
+            })) as any,
+            categories: mergedCategories,
+          });
+          saveErrorShownRef.current = false;
+          showToast(`Importação concluída: ${imported.length} item(ns).`, "success");
+        } catch (err) {
+          showToast(saveErrorMessage(err), "error");
+        }
+      }
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : String(err));
+      showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
       setImporting(false);
     }
@@ -926,7 +991,7 @@ export default function InsumosClient() {
     setIsDeleteItemOpen(true);
   }
 
-  function confirmDeleteItem() {
+  async function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
     if (isCompatSource) {
@@ -1013,6 +1078,7 @@ export default function InsumosClient() {
     setIsDeleteItemOpen(false);
     setDeletingItemId(null);
     setDeletingItemName("");
+    showToast("Item excluído.", "success");
   }
 
   function saveEditItem() {
@@ -1291,9 +1357,64 @@ export default function InsumosClient() {
     setIsBulkDeleteOpen(true);
   }
 
-  function confirmBulkDelete() {
-    deleteSelected();
-    setIsBulkDeleteOpen(false);
+  async function confirmBulkDelete() {
+    if (!isCompatSource) {
+      flushSync(() => {
+        deleteSelected();
+        setIsBulkDeleteOpen(false);
+        showToast("Insumos excluídos com sucesso.", "success");
+      });
+      return;
+    }
+    if (!selectedIds.size) return;
+    if (isBulkDeleting) return;
+    setIsBulkDeleting(true);
+    try {
+      const rawIds = Array.from(selectedIds);
+      const idsSet = new Set(rawIds);
+      flushSync(() => {
+        showToast(rawIds.length === 1 ? "Excluindo 1 item…" : `Excluindo ${rawIds.length} itens…`, "success", 12000, "Excluindo…", "loading");
+        setIsBulkDeleteOpen(false);
+        setSelectedIds(new Set());
+        setBulkDeleteMode(false);
+        setDataRows((prev) => prev.filter((r) => !idsSet.has(r.id)));
+      });
+
+      const ids: string[] = [];
+      const bubbleIds: string[] = [];
+      for (const raw of rawIds) {
+        const s = String(raw ?? "").trim();
+        if (!s) continue;
+        if (s.startsWith("db:")) {
+          const v = s.slice("db:".length);
+          if (isUuidValue(v)) ids.push(v);
+          continue;
+        }
+        if (/^\d{6,}x\d{6,}$/.test(s)) bubbleIds.push(s);
+      }
+
+      const res = await deleteInsumosBatchFromSupabase({ ids, bubbleIds, source: "compat" });
+      const okCount = typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0;
+      const failures = Array.isArray((res as any)?.results) ? (res as any).results.filter((r: any) => !r?.ok) : [];
+      if (failures.length) showToast("Alguns itens não puderam ser excluídos. A lista foi atualizada.", "error");
+      else showToast(rawIds.length === 1 ? "Insumo deletado com sucesso." : `${okCount} insumos deletados com sucesso.`, "success");
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
+          applyLoadedState(state);
+        } catch {}
+      })();
+    } catch (err) {
+      showToast(deleteErrorMessage(err), "error");
+      void (async () => {
+        try {
+          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
+          applyLoadedState(state);
+        } catch {}
+      })();
+    } finally {
+      setIsBulkDeleting(false);
+    }
   }
 
   useEffect(() => {
@@ -1431,6 +1552,14 @@ export default function InsumosClient() {
     return decorated.map((d) => d.r);
   }, [categoryFilter, dataRows, displayCostLabelById, searchQuery, sortDir, sortKey]);
 
+  const pagination = usePagination({
+    items: visibleRows,
+    pageSize: 20,
+    resetKey: `${searchQuery}|${categoryFilter}|${sortKey}|${sortDir}|${dataRows.length}`,
+  });
+
+  const tableLoading = useCappedLoading(isLoadingTable);
+
   const gridTemplateColumns = useMemo(() => {
     const widths: Record<"ocultar" | "item" | "medida" | "custoMedio" | "categoria" | "especificacao" | "acoes", string> = {
       ocultar: "84px",
@@ -1448,7 +1577,7 @@ export default function InsumosClient() {
   const totalOcultados = useMemo(() => dataRows.filter((r) => Boolean(r.ocultar)).length, [dataRows]);
 
   const qaUi = useMemo(() => {
-    const renderedRows = visibleRows.map((r) => {
+    const renderedRows = pagination.pageItems.map((r) => {
       const custoLabel = displayCostLabelById.get(r.id) ?? r.custoMedio;
       return {
         id: r.id,
@@ -1466,7 +1595,7 @@ export default function InsumosClient() {
       filters: { searchQuery, categoryFilter },
       sort: { sortKey, sortDir, columnOrder },
       selection: { bulkDeleteMode, selectedCount, allSelected },
-      rendered: { visibleRowsCount: visibleRows.length, rows: renderedRows },
+      rendered: { visibleRowsCount: pagination.totalItems, rows: renderedRows },
     };
   }, [
     allSelected,
@@ -1475,6 +1604,8 @@ export default function InsumosClient() {
     categoryFilter,
     columnOrder,
     displayCostLabelById,
+    pagination.pageItems,
+    pagination.totalItems,
     searchQuery,
     selectedCount,
     selectedIds,
@@ -1482,13 +1613,20 @@ export default function InsumosClient() {
     sortKey,
     totalItens,
     totalOcultados,
-    visibleRows,
   ]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="insumos" />
-      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+    <>
+      {toast ? (
+        <SystemToast
+          title={toast.title}
+          message={toast.message}
+          tone={toast.tone}
+          icon={toast.icon}
+          durationMs={toast.durationMs}
+          onClose={() => setToast(null)}
+        />
+      ) : null}
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
@@ -1503,6 +1641,8 @@ export default function InsumosClient() {
           </div>
         </section>
 
+        {loadError ? <div className="cmv-alert cmv-alert-error">{loadError}</div> : null}
+
         {isCompatSource ? (
           <div
             style={{
@@ -1516,12 +1656,11 @@ export default function InsumosClient() {
               fontSize: 13,
               fontWeight: 700,
               display: "flex",
-              justifyContent: "space-between",
+              justifyContent: "flex-end",
               gap: 12,
               flexWrap: "wrap",
             }}
           >
-            <span>Fonte: Banco migrado</span>
             <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
           </div>
         ) : null}
@@ -1658,7 +1797,7 @@ export default function InsumosClient() {
         <div className={styles.tableWrap}>
           {null}
           <section className={styles.table} style={{ position: "relative" }} data-qa-grid="insumos">
-            {isLoadingTable ? (
+            {tableLoading.show ? (
               <div className={dash.loadingOverlay}>
                 <LoadingSpinner />
               </div>
@@ -1710,13 +1849,22 @@ export default function InsumosClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {!visibleRows.length ? (
-              <div className={styles.emptyState}>
-                <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
-                <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
-              </div>
+            {!pagination.pageItems.length ? (
+              isLoadingTable ? (
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>{tableLoading.timedOut ? "Carregamento em andamento" : "Carregando insumos..."}</div>
+                  <div className={styles.emptyText}>
+                    {tableLoading.timedOut ? "Ainda estamos carregando os insumos. Aguarde mais alguns segundos." : "Aguarde enquanto buscamos seus dados."}
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
+                  <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
+                </div>
+              )
             ) : (
-              visibleRows.map((r) => (
+              pagination.pageItems.map((r) => (
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   <div className={styles.tdSmall}>
                     <label className={styles.toggle}>
@@ -1791,6 +1939,45 @@ export default function InsumosClient() {
           </section>
         </div>
 
+        <div className={styles.footer}>
+          <div>{`${pagination.totalItems} resultado(s) encontrado(s)`}</div>
+          <div className={styles.pagination}>
+            <button type="button" className={styles.pageBtn} disabled={pagination.page <= 1} aria-label="Primeira página" onClick={() => pagination.setPage(1)}>
+              «
+            </button>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page <= 1}
+              aria-label="Página anterior"
+              onClick={() => pagination.setPage(Math.max(1, pagination.page - 1))}
+            >
+              ‹
+            </button>
+            <div className={styles.pageInfo}>
+              {pagination.page} de {pagination.totalPages}
+            </div>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Próxima página"
+              onClick={() => pagination.setPage(Math.min(pagination.totalPages, pagination.page + 1))}
+            >
+              ›
+            </button>
+            <button
+              type="button"
+              className={styles.pageBtn}
+              disabled={pagination.page >= pagination.totalPages}
+              aria-label="Última página"
+              onClick={() => pagination.setPage(pagination.totalPages)}
+            >
+              »
+            </button>
+          </div>
+        </div>
+
         {mounted && isDeleteItemOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteItemOpen(false)}>
@@ -1812,7 +1999,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem} disabled={isDeletingItem}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteItemOpen(false)}>
@@ -1847,7 +2034,7 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmBulkDelete} disabled={isBulkDeleting}>
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={() => setIsBulkDeleteOpen(false)}>
@@ -2265,6 +2452,6 @@ export default function InsumosClient() {
         ) : null}
         </div>
       </main>
-    </div>
+    </>
   );
 }

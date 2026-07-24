@@ -58,7 +58,13 @@ export async function GET(req: NextRequest) {
     }
 
     const auth = await supabase.auth.admin.getUserById(String(userId));
-    const email = auth.error ? null : String((auth.data as any)?.user?.email ?? "").trim().toLowerCase() || null;
+    const user = auth.error ? null : ((auth.data as any)?.user ?? null);
+    const email = user ? String(user?.email ?? "").trim().toLowerCase() || null : null;
+    const meta = user && typeof user === "object" ? (((user as any).user_metadata ?? null) as any) : null;
+    const firstName = String(meta?.first_name ?? meta?.firstName ?? "").trim();
+    const lastName = String(meta?.last_name ?? meta?.lastName ?? "").trim();
+    const nameFromMeta = String(meta?.full_name ?? meta?.fullName ?? meta?.name ?? "").trim();
+    const fullName = (nameFromMeta || `${firstName} ${lastName}`.trim()).replace(/\s+/g, " ").trim() || null;
 
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
@@ -93,7 +99,7 @@ export async function GET(req: NextRequest) {
     return json(
       {
         ok: true,
-        user: { userId: String(userId), email },
+        user: { userId: String(userId), email, fullName },
         bubbleApi: {
           env: { baseUrl: envBaseUrl || null, hasToken: envHasToken },
           state: { baseUrl: credsBaseUrl || null, hasToken: credsHasToken },
