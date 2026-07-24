@@ -30,6 +30,14 @@ function normName(value: string) {
   return value.trim();
 }
 
+function isStableSupplierKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return false;
+  if (s.toLowerCase().startsWith("db:")) return true;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/i.test(s);
+}
+
 function normalizeInfoMap(input: unknown): FornecedorInfoMap {
   if (!input || typeof input !== "object") return {};
   const obj = input as Record<string, unknown>;
@@ -47,10 +55,10 @@ function normalizeInfoMap(input: unknown): FornecedorInfoMap {
       whatsapp: String(row.whatsapp ?? "").trim(),
       endereco: String(row.endereco ?? "").trim(),
     };
-    const fornecedorKey = fornecedorLabel.toUpperCase();
-    out[fornecedorKey] = normalizedRow;
-    const idKey = normName(String(k ?? "")).toUpperCase();
-    if (idKey && idKey !== fornecedorKey) out[idKey] = normalizedRow;
+    const inputKey = normName(String(k ?? ""));
+    const primaryKey = (isStableSupplierKey(inputKey) ? inputKey : fornecedorLabel).toUpperCase();
+    if (!primaryKey) continue;
+    out[primaryKey] = normalizedRow;
   }
   return out;
 }

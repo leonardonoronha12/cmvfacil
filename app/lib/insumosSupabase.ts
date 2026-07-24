@@ -8,6 +8,10 @@ export type InsumosStatePayload = {
   meta?: { source: "legacy" | "compat"; readOnly: boolean };
 };
 
+export type DeleteInsumosResponse =
+  | { ok: true; source: "compat"; deletedCount: number; deletedIds: string[]; results?: any[] }
+  | { ok: false; source?: "compat" | "legacy"; deletedCount?: number; deletedIds?: string[]; error?: string; links?: any };
+
 function getQaOverridesFromLocation() {
   if (typeof window === "undefined") return { userId: "", source: "" };
   const params = new URLSearchParams(window.location.search);
@@ -73,10 +77,10 @@ export async function loadInsumosFromSupabase(userId?: string) {
   return state.rows;
 }
 
-export async function loadInsumosStateFromSupabase(userId?: string): Promise<InsumosStatePayload> {
+export async function loadInsumosStateFromSupabase(userId?: string, opts?: { source?: "legacy" | "compat" }): Promise<InsumosStatePayload> {
   const override = getQaOverridesFromLocation();
   const u = String(userId ?? "").trim() || override.userId;
-  const source = override.source;
+  const source = opts?.source ? opts.source : override.source;
   const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}${source ? `&source=${encodeURIComponent(source)}` : ""}`;
   const res = await fetch(`/api/insumos?ts=${Date.now()}${qp}`, { method: "GET", cache: "no-store" });
   const json = (await res.json().catch(() => null)) as
@@ -102,33 +106,50 @@ export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreIte
   }
 }
 
-export type DeleteInsumosCompatResponse =
-  | {
-      ok: true;
-      source: "compat";
-      deletedItemCount: number;
-      deletedIds: string[];
-      results?: Array<{ status?: number; ok?: boolean; error?: string; deletedItemCount?: number; deletedIds?: string[] }>;
-    }
-  | { ok: false; error: string; source?: string };
-
-export async function deleteInsumosCompat(args: { ids?: string[]; id?: string; bubbleIds?: string[]; bubbleId?: string }) {
+function buildQaQuery(args: { userId?: string; source?: string }) {
   const override = getQaOverridesFromLocation();
-  const u = override.userId;
-  const qp = `${u ? `&userId=${encodeURIComponent(u)}` : ""}&source=compat`;
-  const res = await fetch(`/api/insumos?ts=${Date.now()}${qp}`, {
-    method: "DELETE",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ids: Array.isArray(args.ids) ? args.ids : args.id ? [args.id] : [],
-      bubbleIds: Array.isArray(args.bubbleIds) ? args.bubbleIds : args.bubbleId ? [args.bubbleId] : [],
-    }),
-  });
+  const u = String(args.userId ?? "").trim() || override.userId;
+  const src = String(args.source ?? "").trim() || override.source;
+  return `${u ? `&userId=${encodeURIComponent(u)}` : ""}${src ? `&source=${encodeURIComponent(src)}` : ""}`;
+}
+
+export async function deleteInsumoFromSupabase(args: { id?: string; bubbleId?: string; source?: "compat" | "legacy"; userId?: string }) {
+  const source = args.source ?? "compat";
+  const qp = buildQaQuery({ userId: args.userId, source });
+  const url = new URL(`/api/insumos?ts=${Date.now()}${qp}`, window.location.origin);
+  if (args.id) url.searchParams.set("id", String(args.id));
+  if (args.bubbleId) url.searchParams.set("bubbleId", String(args.bubbleId));
+  const res = await fetch(url.toString(), { method: "DELETE", cache: "no-store" });
   const text = await res.text().catch(() => "");
-  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosCompatResponse | null;
-  if (!res.ok || !json?.ok) {
+  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosResponse | null;
+  if (!res.ok || !json || !(json as any).ok) {
     const msg = String((json as any)?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_delete_${res.status}`;
-    throw new Error(msg);
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.payload = json;
+    throw err;
   }
   return json;
+}
+
+export async function deleteInsumosBatchFromSupabase(args: { ids?: string[]; bubbleIds?: string[]; source?: "compat" | "legacy"; userId?: string }) {
+  const source = args.source ?? "compat";
+  const qp = buildQaQuery({ userId: args.userId, source });
+  const url = `/api/insumos?ts=${Date.now()}${qp}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids: args.ids ?? [], bubbleIds: args.bubbleIds ?? [] }),
+    cache: "no-store",
+  });
+  const text = await res.text().catch(() => "");
+  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosResponse | null;
+  if (!res.ok || !json || !(json as any).ok) {
+    const msg = String((json as any)?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_delete_${res.status}`;
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.payload = json;
+    throw err;
+  }
+  return json as any;
 }
