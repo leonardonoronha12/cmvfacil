@@ -13,6 +13,14 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+function errJson(args: { status: number; traceId: string; stage: string; error: unknown; source?: "legacy" | "compat" }) {
+  const msg = args.error instanceof Error ? args.error.message : String(args.error ?? "");
+  return json(
+    { ok: false, error: msg || "unknown_error", stage: args.stage, traceId: args.traceId, ...(args.source ? { source: args.source } : null) },
+    { status: args.status },
+  );
+}
+
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -154,9 +162,10 @@ function dbIdFromKey(value: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const traceId = crypto.randomUUID();
   try {
     const { accessToken, id } = resolveUserScopedId(req);
-    if (!id) return json({ source: "legacy", readOnly: false, row: null }, { status: 200 });
+    if (!id) return json({ ok: true, traceId, source: "legacy", readOnly: false, row: null }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
     const userId = id.slice("user:".length);
 
@@ -169,16 +178,16 @@ export async function GET(req: NextRequest) {
         .select("company_id,role,permission_level")
         .eq("user_id", userId)
         .limit(50);
-      if (memberErr) return json({ error: memberErr.message }, { status: 500 });
+      if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-      if (!companyId) return json({ error: "missing_company" }, { status: 500 });
+      if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
 
       const { data: suppliersDb, error: suppliersErr } = await supabase
         .from("suppliers")
         .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
         .eq("company_id", companyId)
         .order("nome", { ascending: true });
-      if (suppliersErr) return json({ error: suppliersErr.message }, { status: 500 });
+      if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
 
       const info: Record<string, any> = {};
       const supplierKeyById = new Map<string, string>();
@@ -221,7 +230,7 @@ export async function GET(req: NextRequest) {
         .select("supplier_id,item:items(name),supplier:suppliers(id,bubble_id)")
         .eq("company_id", companyId)
         .limit(5000);
-      if (linksErr) return json({ error: linksErr.message }, { status: 500 });
+      if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
       for (const r of linksDb ?? []) {
         const supplier = (r as any)?.supplier ?? null;
         const supplierDbId = String(supplier?.id ?? "").trim();
@@ -248,30 +257,37 @@ export async function GET(req: NextRequest) {
         if (typeof eq !== "undefined") equivalencias[k] = eq as any;
       }
 
-      return json({ source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
+      return json({ ok: true, traceId, source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
     }
 
     const { data, error } = await supabase.from("fornecedores_state").select("*").eq("id", id).maybeSingle();
     if (error) {
       const msg = String(error.message ?? "");
       if (msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("fornecedores_state")) {
-        return json({ error: "missing_table_fornecedores_state (/setup-supabase)" }, { status: 500 });
+        return errJson({
+          status: 500,
+          traceId,
+          stage: "legacy.missing_table_fornecedores_state",
+          error: "missing_table_fornecedores_state (/setup-supabase)",
+          source: "legacy",
+        });
       }
-      return json({ error: msg }, { status: 500 });
+      return errJson({ status: 500, traceId, stage: "legacy.fornecedores_state_select", error: msg, source: "legacy" });
     }
-    return json({ source: "legacy", readOnly: false, row: data ?? null }, { status: 200 });
+    return json({ ok: true, traceId, source: "legacy", readOnly: false, row: data ?? null }, { status: 200 });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return errJson({ status: 500, traceId, stage: "get.exception", error: err });
   }
 }
 
 export async function POST(req: NextRequest) {
+  const traceId = crypto.randomUUID();
   try {
     const body = (await req.json().catch(() => null)) as unknown;
-    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
+    if (!body || typeof body !== "object") return errJson({ status: 400, traceId, stage: "post.invalid_body", error: "invalid_body" });
     const data = body as Record<string, unknown>;
     const { accessToken, id } = resolveUserScopedId(req);
-    if (!id) return json({ error: "unauthorized" }, { status: 401 });
+    if (!id) return errJson({ status: 401, traceId, stage: "post.unauthorized", error: "unauthorized" });
     const supabase = getSupabaseServerClient(accessToken);
     const shouldUseCompat = await shouldUseCompatSource({ req, supabase });
     const userId = id.slice("user:".length);
@@ -287,11 +303,17 @@ export async function POST(req: NextRequest) {
       if (error) {
         const msg = String(error.message ?? "");
         if (msg.toLowerCase().includes("does not exist") && msg.toLowerCase().includes("fornecedores_state")) {
-          return json({ error: "missing_table_fornecedores_state (/setup-supabase)" }, { status: 500 });
+          return errJson({
+            status: 500,
+            traceId,
+            stage: "legacy.missing_table_fornecedores_state",
+            error: "missing_table_fornecedores_state (/setup-supabase)",
+            source: "legacy",
+          });
         }
-        return json({ error: msg }, { status: 500 });
+        return errJson({ status: 500, traceId, stage: "legacy.fornecedores_state_upsert", error: msg, source: "legacy" });
       }
-      return json({ ok: true }, { status: 200 });
+      return json({ ok: true, traceId }, { status: 200 });
     }
 
     const { data: memberRows, error: memberErr } = await supabase
@@ -299,9 +321,9 @@ export async function POST(req: NextRequest) {
       .select("company_id,role,permission_level")
       .eq("user_id", userId)
       .limit(50);
-    if (memberErr) return json({ error: memberErr.message }, { status: 500 });
+    if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-    if (!companyId) return json({ error: "missing_company" }, { status: 500 });
+    if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
 
     const infoMap = safeObj(data.info);
     const produtosMap = safeObj(data.produtos);
@@ -312,7 +334,7 @@ export async function POST(req: NextRequest) {
       .select("id,bubble_id,external_key,nome,raw")
       .eq("company_id", companyId)
       .limit(5000);
-    if (suppliersErr) return json({ error: suppliersErr.message }, { status: 500 });
+    if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
 
     const supplierIdByBubbleId = new Map<string, string>();
     const supplierIdByNameKey = new Map<string, string>();
@@ -388,12 +410,12 @@ export async function POST(req: NextRequest) {
 
     if (updates.length) {
       const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
-      if (upErr) return json({ error: upErr.message }, { status: 500 });
+      if (upErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_upsert", error: upErr.message, source: "compat" });
     }
 
     if (inserts.length) {
       const { error: insErr } = await supabase.from("suppliers").insert(inserts as any);
-      if (insErr) return json({ error: insErr.message }, { status: 500 });
+      if (insErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_insert", error: insErr.message, source: "compat" });
     }
 
     if (defaultSupplierId) {
@@ -404,7 +426,7 @@ export async function POST(req: NextRequest) {
         .update({ raw: nextRaw } as any)
         .eq("company_id", companyId)
         .eq("id", defaultSupplierId);
-      if (defErr) return json({ error: defErr.message }, { status: 500 });
+      if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_default_raw", error: defErr.message, source: "compat" });
     }
 
     const deleteCandidateIds = new Set<string>();
@@ -424,13 +446,13 @@ export async function POST(req: NextRequest) {
     const deleteIds = Array.from(deleteCandidateIds).filter(Boolean);
     if (deleteIds.length) {
       const { error: linkDelErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
-      if (linkDelErr) return json({ error: linkDelErr.message }, { status: 500 });
+      if (linkDelErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_delete", error: linkDelErr.message, source: "compat" });
       const { error: supplierDelErr } = await supabase.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
-      if (supplierDelErr) return json({ error: supplierDelErr.message }, { status: 500 });
+      if (supplierDelErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_delete", error: supplierDelErr.message, source: "compat" });
     }
 
-    return json({ ok: true }, { status: 200 });
+    return json({ ok: true, traceId }, { status: 200 });
   } catch (err) {
-    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+    return errJson({ status: 500, traceId, stage: "post.exception", error: err });
   }
 }

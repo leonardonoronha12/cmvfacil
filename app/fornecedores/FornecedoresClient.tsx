@@ -407,14 +407,11 @@ export default function FornecedoresClient() {
           nextProdutos = db.produtos;
           nextEq = db.equivalencias;
         }
-      } catch {
+      } catch (err) {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          showToast(
-            "Não foi possível carregar fornecedores do Supabase. Verifique login e se as tabelas necessárias existem (fornecedores_state no modo legacy, ou suppliers/supplier_items no modo compat). (/setup-supabase)",
-            "error",
-            9000,
-          );
+          const msg = err instanceof Error ? err.message : String(err ?? "");
+          showToast(`Não foi possível carregar fornecedores do Supabase. ${msg || ""}`.trim(), "error", 9000);
         }
       }
 
@@ -443,14 +440,11 @@ export default function FornecedoresClient() {
     if (isReadOnly) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {
+      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch((err) => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        showToast(
-          "Não foi possível salvar fornecedores no Supabase. Verifique login e se as tabelas necessárias existem (fornecedores_state no modo legacy, ou suppliers/supplier_items no modo compat). (/setup-supabase)",
-          "error",
-          9000,
-        );
+        const msg = err instanceof Error ? err.message : String(err ?? "");
+        showToast(`Não foi possível salvar fornecedores no Supabase. ${msg || ""}`.trim(), "error", 9000);
       });
     }, 450);
   }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
