@@ -41,7 +41,7 @@ export default function BillingReturnClient() {
   const origin = effectiveOrigin ?? originParam;
   const successTarget = origin === "signup" ? "/cadastro-empresa?onboarding=1&checkout=success" : "/ajustes?tab=planos&checkout=success";
   const processingTarget = origin === "signup" ? "/cadastro-empresa?onboarding=1&checkout=processing" : "/ajustes?tab=planos&checkout=processing";
-  const cancelTarget = origin === "signup" ? "/cadastro-usuario?checkout=cancel" : "/ajustes?tab=planos&checkout=cancel";
+  const cancelTarget = origin === "signup" ? "/cadastro-empresa?onboarding=1&checkout=cancel" : "/ajustes?tab=planos&checkout=cancel";
 
   useEffect(() => {
     if (effectiveOrigin !== null) return;
