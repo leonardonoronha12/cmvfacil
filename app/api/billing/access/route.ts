@@ -103,7 +103,7 @@ async function reconcileStripeCompanyState(ctx: Awaited<ReturnType<typeof getBil
   const shouldSync =
     checkoutStatusLower === "open" ||
     (!shouldConsiderSubscriptionActive(subStatusLower) &&
-      (isStale || (subStatusLower === "trial_internal" && !existingSubId)));
+      (isStale || subStatusLower === "trial_internal" || Boolean(existingSubId)));
   if (!shouldSync) return false;
 
   let subscription: any = null;

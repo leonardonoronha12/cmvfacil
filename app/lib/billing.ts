@@ -317,7 +317,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
   const trialStartedAt = toIsoOrNull(company?.trial_started_at);
   const trialEndsAt = toIsoOrNull(company?.trial_ends_at);
   const trialEndsMs = trialEndsAt ? Date.parse(trialEndsAt) : NaN;
-  const hasTrial = Boolean(trialStartedAt && trialEndsAt && Number.isFinite(trialEndsMs));
+  const hasTrial = Boolean(trialEndsAt && Number.isFinite(trialEndsMs));
   const daysRemaining =
     hasTrial && Number.isFinite(trialEndsMs)
       ? Math.max(0, Math.ceil((trialEndsMs - nowMs) / (1000 * 60 * 60 * 24)))
