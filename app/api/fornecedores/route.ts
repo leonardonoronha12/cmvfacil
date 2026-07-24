@@ -361,7 +361,7 @@ export async function POST(req: NextRequest) {
       if (isDefault) defaultSupplierId = sid;
       if (nome === TOMBSTONE_KEY) reservedSupplierIds.add(sid);
       if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
-      if (nome) supplierIdByNameKey.set(normalizeNameKey(nome), sid);
+      if (nome) supplierIdByNameKey.set(normalizeLookupKey(nome), sid);
       supplierRawById.set(sid, (s as any)?.raw ?? {});
       const key = bubbleId || `db:${sid}`;
       supplierIdByKeyUpper.set(key.toUpperCase(), sid);
@@ -375,12 +375,12 @@ export async function POST(req: NextRequest) {
     );
     const keepKeysUpper = new Set<string>(Array.from(keys).map(normalizeTombstoneKey).filter(Boolean));
 
-    const updates: any[] = [];
-    const inserts: any[] = [];
+    const updatesById = new Map<string, any>();
+    const insertsByKey = new Map<string, any>();
     for (const key of keys) {
       const infoRow = safeObj(infoMap[key]);
       const nomeFromInfo = normalizeText(infoRow.fornecedor ?? "");
-      const nameKey = normalizeNameKey(nomeFromInfo || key);
+      const nameKey = normalizeLookupKey(nomeFromInfo || key);
       const rawProdutos = safeArr(produtosMap[key])
         .map((x) => normalizeText(x))
         .filter(Boolean);
@@ -412,9 +412,16 @@ export async function POST(req: NextRequest) {
         raw: nextRaw,
       };
 
-      if (supplierId) updates.push(row);
-      else inserts.push(row);
+      if (supplierId) {
+        updatesById.set(supplierId, row);
+      } else {
+        const insertKey = row.bubble_id ? `bubble:${row.bubble_id}` : `name:${normalizeLookupKey(row.nome)}`;
+        if (insertKey && !insertsByKey.has(insertKey)) insertsByKey.set(insertKey, row);
+      }
     }
+
+    const updates = Array.from(updatesById.values());
+    const inserts = Array.from(insertsByKey.values());
 
     if (updates.length) {
       const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
@@ -442,7 +449,7 @@ export async function POST(req: NextRequest) {
       const bubbleId = String((s as any)?.bubble_id ?? "").trim();
       const nome = normalizeText((s as any)?.nome ?? "");
       if (bubbleId) supplierIdByBubbleId2.set(bubbleId, sid);
-      if (nome) supplierIdByNameKey2.set(normalizeNameKey(nome), sid);
+      if (nome) supplierIdByNameKey2.set(normalizeLookupKey(nome), sid);
       const key = bubbleId || `db:${sid}`;
       supplierIdByKeyUpper2.set(key.toUpperCase(), sid);
     }
@@ -486,7 +493,7 @@ export async function POST(req: NextRequest) {
         .map((x) => normalizeText(x))
         .filter(Boolean);
       const produtos = Array.from(new Set(rawProdutos));
-      const nameKey = normalizeNameKey(normalizeText(safeObj(infoMap[key]).fornecedor ?? "") || key);
+      const nameKey = normalizeLookupKey(normalizeText(safeObj(infoMap[key]).fornecedor ?? "") || key);
 
       let supplierId = "";
       if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = dbIdFromKey(key);
