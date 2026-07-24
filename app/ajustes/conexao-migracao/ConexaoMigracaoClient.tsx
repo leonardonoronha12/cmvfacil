@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppSidebar from "../../components/AppSidebar";
 import dash from "../../dashboard/dashboard.module.css";
 import styles from "../importar-bubble/importar-bubble.module.css";
 
@@ -445,8 +444,7 @@ export default function ConexaoMigracaoClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <div className={styles.pageWrap}>
@@ -508,6 +506,6 @@ export default function ConexaoMigracaoClient() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }

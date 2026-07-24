@@ -4,7 +4,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import styles from "./dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
@@ -3050,8 +3049,7 @@ export default function DashboardClient() {
   ]);
 
   return (
-    <div className={styles.dashboard}>
-      <AppSidebar active={historyItem ? "insumos" : "dashboard"} />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       {debugMode ? (
         <div
@@ -4073,6 +4071,6 @@ export default function DashboardClient() {
         <div style={{ height: 72, width: "100%" }} />
         </div>
       </main>
-    </div>
+    </>
   );
 }

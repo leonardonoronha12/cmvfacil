@@ -3,6 +3,7 @@ import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { normalizeKey as normalizeKeyFromLib, parseBubbleCsvToObjects, type CsvObjectRow } from "../../lib/bubbleCsv";
+import { getBillingAccessForCurrentCompany } from "../../lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -806,6 +807,30 @@ export async function GET(req: NextRequest) {
         : { data: null as any };
 
       const permissionRole = isAdminMemberRow(membershipForCompany) ? "Administrador" : "Colaborador";
+      let plan: { type: string; status: string; cardLast4: string } | null = null;
+      try {
+        const live = await getBillingAccessForCurrentCompany(req);
+        const status = String(live.access.subscription.status ?? "").trim();
+        const planKey = String(live.access.subscription.plan ?? "").trim().toLowerCase();
+        const reason = String(live.access.reason ?? "").trim().toLowerCase();
+        const type =
+          planKey === "pro_monthly"
+            ? "PRO Mensal"
+            : planKey === "pro_yearly"
+              ? "PRO Anual"
+              : reason === "trial_internal"
+                ? "Período de teste ativo"
+                : reason === "active" || reason === "trialing" || reason === "past_due" || reason === "canceling"
+                  ? "PRO"
+                  : "";
+        plan = {
+          type: type || "—",
+          status: status || "",
+          cardLast4: String((live.access as any)?.cardLast4 ?? "").trim(),
+        };
+      } catch {
+        plan = { type: "—", status: "", cardLast4: "" };
+      }
 
       const { data: companyMembers } = companyId
         ? await supabase.from("company_members").select("user_id,role,permission_level").eq("company_id", companyId).limit(500)
@@ -840,7 +865,7 @@ export async function GET(req: NextRequest) {
           companyWhatsapp: String(companyDb?.phone_e164 ?? "").trim(),
           companyIndustry: String(companyDb?.industry ?? "").trim(),
           role: permissionRole,
-          plan: null,
+          plan,
           members,
           source: { db: true, companyId: companyId || null },
         },
@@ -1075,7 +1100,24 @@ export async function GET(req: NextRequest) {
       }
       if (oWhatsapp && !whatsapp) whatsapp = normalizePhone(oWhatsapp) || "";
     }
-    const plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
+    let plan = primaryCompanyId ? planByCompanyId.get(primaryCompanyId) ?? { type: "", status: "", cardLast4: "" } : { type: "", status: "", cardLast4: "" };
+    try {
+      const live = await getBillingAccessForCurrentCompany(req);
+      const status = String(live.access.subscription.status ?? "").trim();
+      const planKey = String(live.access.subscription.plan ?? "").trim().toLowerCase();
+      const reason = String(live.access.reason ?? "").trim().toLowerCase();
+      const type =
+        planKey === "pro_monthly"
+          ? "PRO Mensal"
+          : planKey === "pro_yearly"
+            ? "PRO Anual"
+            : reason === "trial_internal"
+              ? "Período de teste ativo"
+              : reason === "active" || reason === "trialing" || reason === "past_due" || reason === "canceling"
+                ? "PRO"
+                : plan.type || "—";
+      plan = { ...plan, type: String(type ?? "").trim() || plan.type || "—", status: status || plan.status };
+    } catch {}
 
     const members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }> = [];
     if (usersAllRows.length) {

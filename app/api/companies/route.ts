@@ -35,6 +35,10 @@ export async function POST(req: NextRequest) {
     return json({ error: "invalid_json" }, { status: 400 });
   }
 
+  const { userId } = getUserIdFromRequest(req);
+  const uid = String(userId ?? "").trim();
+  if (!uid) return json({ error: "unauthorized" }, { status: 401 });
+
   const data = body as Record<string, unknown>;
   const fantasyName = String(data.fantasyName ?? "").trim();
   const legalName = String(data.legalName ?? "").trim();
@@ -78,21 +82,17 @@ export async function POST(req: NextRequest) {
     return json({ error: "supabase_error", details: error.message }, { status: 500 });
   }
 
-  const { userId } = getUserIdFromRequest(req);
-  const uid = String(userId ?? "").trim();
-  if (uid) {
-    const up = await supabase.from("company_members").upsert(
-      {
-        company_id: companyId,
-        user_id: uid,
-        role: "owner",
-        permission_level: "3",
-      } as any,
-      { onConflict: "company_id,user_id" },
-    );
-    if (up.error) {
-      return json({ error: "company_member_failed", details: up.error.message }, { status: 500 });
-    }
+  const up = await supabase.from("company_members").upsert(
+    {
+      company_id: companyId,
+      user_id: uid,
+      role: "owner",
+      permission_level: "3",
+    } as any,
+    { onConflict: "company_id,user_id" },
+  );
+  if (up.error) {
+    return json({ error: "company_member_failed", details: up.error.message }, { status: 500 });
   }
 
   return json({ ok: true, company_id: companyId }, { status: 200 });

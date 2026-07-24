@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { createPortal } from "react-dom";
-import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -2070,13 +2069,11 @@ export default function FichasTecnicasClient({
 
   return (
     <>
-      <div className={dash.dashboard}>
-        <AppSidebar active="fichas-tecnicas" />
-        {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
-        {showCompatSplitView ? (
-          <main className={dash.content}>
-            <div className={styles.pageFrameWide}>
-              <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
+      {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {showCompatSplitView ? (
+        <main className={dash.content}>
+          <div className={styles.pageFrameWide}>
+            <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
               <div
                 style={{
                   marginTop: 10,
@@ -2207,11 +2204,11 @@ export default function FichasTecnicasClient({
                 </section>
               </div>
             </div>
-          </main>
-        ) : (
-          <main className={dash.content}>
-            <div className={styles.pageFrameWide}>
-            {detailsRecipe ? (
+        </main>
+      ) : (
+        <main className={dash.content}>
+          <div className={styles.pageFrameWide}>
+          {detailsRecipe ? (
             <section className={`${dash.itemDetails} ${styles.detailsPage}`}>
               <div className={`${dash.itemDetailsTop} ${styles.detailsHeader}`}>
                 <button type="button" className={`${dash.itemBack} ${styles.detailsBackBtn}`} onClick={() => setDetailsRecipe(null)}>
@@ -2916,8 +2913,7 @@ export default function FichasTecnicasClient({
           )}
           </div>
           </main>
-        )}
-      </div>
+      )}
 
       {mounted && isCreateOpen && !isReadOnly ? (
         createPortal(

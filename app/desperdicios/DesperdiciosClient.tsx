@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import {
@@ -540,6 +539,7 @@ export default function DesperdiciosClient({
   });
   const [compatRows, setCompatRows] = useState<DesperdicioCompatRow[]>([]);
   const rowsReadyRef = useRef(false);
+  const etiquetasSyncRunRef = useRef(0);
   const [userScopePrefix, setUserScopePrefix] = useState<string>("");
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [query, setQuery] = useState("");
@@ -551,6 +551,22 @@ export default function DesperdiciosClient({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
+  // #region debug-point A:reporter
+  const __dbg = (hypothesisId: string, msg: string, data?: Record<string, unknown>) => {
+    fetch("http://127.0.0.1:7777/event", {
+      method: "POST",
+      body: JSON.stringify({
+        sessionId: "desperdicios-sidebar-freeze",
+        runId: "post",
+        hypothesisId,
+        location: "DesperdiciosClient",
+        msg: `[DEBUG] ${msg}`,
+        data: data ?? {},
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  };
+  // #endregion
 
   useEffect(() => {
     try {
@@ -610,14 +626,64 @@ export default function DesperdiciosClient({
   }
 
   useEffect(() => {
+    // #region debug-point B:mount
+    __dbg("B", "mount", { href: window.location.href });
+    // #endregion
     setMounted(true);
   }, []);
 
   useEffect(() => {
     return () => {
+      // #region debug-point B:unmount
+      __dbg("B", "unmount", { href: window.location.href });
+      // #endregion
       if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     };
   }, []);
+
+  // #region debug-point A:input-capture
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      try {
+        const target = e.target as Element | null;
+        const isInSidebar = Boolean(target?.closest?.(`.${dash.menuLateral}`));
+        const nearSidebar = e.clientX <= 240;
+        if (!isInSidebar && !nearSidebar) return;
+        const top = document.elementFromPoint(e.clientX, e.clientY) as Element | null;
+        const topStyle = top ? window.getComputedStyle(top) : null;
+        __dbg("A", "pointerdown", {
+          x: e.clientX,
+          y: e.clientY,
+          isInSidebar,
+          topTag: top?.tagName ?? "",
+          topId: (top as any)?.id ?? "",
+          topClass: (top as any)?.className ? String((top as any)?.className).slice(0, 200) : "",
+          topPos: topStyle?.position ?? "",
+          topZ: topStyle?.zIndex ?? "",
+          topPointer: topStyle?.pointerEvents ?? "",
+        });
+      } catch {}
+    };
+
+    const onError = (ev: ErrorEvent) => {
+      __dbg("D", "window-error", { message: String(ev.message ?? ""), filename: String(ev.filename ?? ""), lineno: ev.lineno, colno: ev.colno });
+    };
+
+    const onRejection = (ev: PromiseRejectionEvent) => {
+      const reason = (ev as any)?.reason;
+      __dbg("D", "unhandledrejection", { reason: reason instanceof Error ? reason.message : String(reason ?? "") });
+    };
+
+    window.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection as any);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection as any);
+    };
+  }, []);
+  // #endregion
 
   useEffect(() => {
     void requireUserScopePrefix()
@@ -948,82 +1014,149 @@ export default function DesperdiciosClient({
 
   useEffect(() => {
     if (isReadOnly) return;
-    setInsumosStore(readInsumosFromStore());
-    void (async () => {
-      try {
-        const dbRows = await loadInsumosFromSupabase();
-        if (dbRows.length) writeInsumosToStore(dbRows);
-      } catch {}
-    })();
-    return subscribeInsumos((rows) => setInsumosStore(rows));
+    const initial = readInsumosFromStore();
+    setInsumosStore(initial);
+    let cancelled = false;
+    const timer = !initial.length
+      ? window.setTimeout(() => {
+          void (async () => {
+            try {
+              const dbRows = await loadInsumosFromSupabase();
+              if (!cancelled && dbRows.length) writeInsumosToStore(dbRows);
+            } catch {}
+          })();
+        }, 900)
+      : null;
+    const unsub = subscribeInsumos((rows) => setInsumosStore(rows));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
     if (isReadOnly) return;
-    setEntradasRows(readEntradasFromStore([]));
-    void (async () => {
-      try {
-        const db = await loadEntradasFromSupabase();
-        if (db.length) writeEntradasToStore(db);
-      } catch {}
-      setEntradasRows(readEntradasFromStore([]));
-    })();
-    return subscribeEntradas((rows) => setEntradasRows(rows));
+    const initial = readEntradasFromStore([]);
+    setEntradasRows(initial);
+    let cancelled = false;
+    const timer = !initial.length
+      ? window.setTimeout(() => {
+          void (async () => {
+            try {
+              const db = await loadEntradasFromSupabase();
+              if (!cancelled && db.length) writeEntradasToStore(db);
+            } catch {}
+            if (!cancelled) setEntradasRows(readEntradasFromStore([]));
+          })();
+        }, 1100)
+      : null;
+    const unsub = subscribeEntradas((rows) => setEntradasRows(rows));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
     if (isReadOnly) return;
-    setEquivalenciasMap(readFornecedorEquivalenciasMap());
-    void (async () => {
-      let nextEq: FornecedorEquivalenciasMap = {};
-      try {
-        const db = await loadFornecedoresStateFromSupabase();
-        const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
-        if (hasDb) nextEq = db.equivalencias;
-      } catch {}
-      writeFornecedorEquivalenciasMap(nextEq);
-      setEquivalenciasMap(nextEq);
-    })();
-    return subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+    const initial = readFornecedorEquivalenciasMap();
+    setEquivalenciasMap(initial);
+    let cancelled = false;
+    const timer = Object.keys(initial).length
+      ? null
+      : window.setTimeout(() => {
+          void (async () => {
+            let nextEq: FornecedorEquivalenciasMap = {};
+            try {
+              const db = await loadFornecedoresStateFromSupabase();
+              const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
+              if (hasDb) nextEq = db.equivalencias;
+            } catch {}
+            if (cancelled) return;
+            writeFornecedorEquivalenciasMap(nextEq);
+            setEquivalenciasMap(nextEq);
+          })();
+        }, 1400);
+    const unsub = subscribeFornecedorEquivalencias((m) => setEquivalenciasMap(m));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
     if (isReadOnly) return;
-    setFichasTecnicas(readFichasTecnicasFromStore([]));
-    void (async () => {
-      try {
-        const db = await loadFichasTecnicasFromSupabase();
-        if (db.length) writeFichasTecnicasToStore(db);
-      } catch {}
-      setFichasTecnicas(readFichasTecnicasFromStore([]));
-    })();
-    return subscribeFichasTecnicas((rows) => setFichasTecnicas(rows));
+    const initial = readFichasTecnicasFromStore([]);
+    setFichasTecnicas(initial);
+    let cancelled = false;
+    const timer = !initial.length
+      ? window.setTimeout(() => {
+          void (async () => {
+            try {
+              const db = await loadFichasTecnicasFromSupabase();
+              if (!cancelled && db.length) writeFichasTecnicasToStore(db);
+            } catch {}
+            if (!cancelled) setFichasTecnicas(readFichasTecnicasFromStore([]));
+          })();
+        }, 1100)
+      : null;
+    const unsub = subscribeFichasTecnicas((rows) => setFichasTecnicas(rows));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
     if (isReadOnly) return;
-    setPrePreparoStore(readPrePreparoFromStore());
-    void (async () => {
-      try {
-        const db = await loadPrePreparoFromSupabase();
-        if (db.length) writePrePreparoToStore(db as any);
-      } catch {}
-      setPrePreparoStore(readPrePreparoFromStore());
-    })();
-    return subscribePrePreparo((rows) => setPrePreparoStore(rows));
+    const initial = readPrePreparoFromStore();
+    setPrePreparoStore(initial);
+    let cancelled = false;
+    const timer = !initial.length
+      ? window.setTimeout(() => {
+          void (async () => {
+            try {
+              const db = await loadPrePreparoFromSupabase();
+              if (!cancelled && db.length) writePrePreparoToStore(db as any);
+            } catch {}
+            if (!cancelled) setPrePreparoStore(readPrePreparoFromStore());
+          })();
+        }, 1400)
+      : null;
+    const unsub = subscribePrePreparo((rows) => setPrePreparoStore(rows));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
     if (isReadOnly) return;
-    setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
-    void (async () => {
-      try {
-        const db = await loadPrePreparoEtiquetasFromSupabase();
-        if (db.length) writePrePreparoEtiquetasToStore(db);
-      } catch {}
-      setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
-    })();
-    return subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
+    const initial = readPrePreparoEtiquetasFromStore();
+    setPrePreparoEtiquetas(initial);
+    let cancelled = false;
+    const timer = !initial.length
+      ? window.setTimeout(() => {
+          void (async () => {
+            try {
+              const db = await loadPrePreparoEtiquetasFromSupabase();
+              if (!cancelled && db.length) writePrePreparoEtiquetasToStore(db);
+            } catch {}
+            if (!cancelled) setPrePreparoEtiquetas(readPrePreparoEtiquetasFromStore());
+          })();
+        }, 1600)
+      : null;
+    const unsub = subscribePrePreparoEtiquetas((rows) => setPrePreparoEtiquetas(rows));
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+      unsub();
+    };
   }, [isReadOnly]);
 
   useEffect(() => {
@@ -1155,63 +1288,69 @@ export default function DesperdiciosClient({
   }, [draftItem, avgUnitCostCentsByInsumoId, fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const db = await loadDesperdiciosStateFromSupabase();
-        if (db.meta) setSourceMeta(db.meta);
-        if (db.meta?.source === "compat") {
-          const wastes = (db.compat as any)?.wastes ?? [];
-          setCompatRows(Array.isArray(wastes) ? (wastes as DesperdicioCompatRow[]) : []);
-          setRows(db.rows ?? []);
-          rowsReadyRef.current = true;
-          setIsLoadingTable(false);
-          return;
-        }
-        if ((db.rows ?? [])[0]) {
-          setRows(db.rows);
-          rowsReadyRef.current = true;
-          setIsLoadingTable(false);
-          return;
-        }
-      } catch (err) {
-        if (!loadErrorShownRef.current) {
-          loadErrorShownRef.current = true;
-        }
-      }
-      const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
-      if (forcedCompat) {
-        setSourceMeta({ source: "compat", readOnly: true });
-        setCompatRows([]);
-        setRows([]);
-        rowsReadyRef.current = true;
-        setIsLoadingTable(false);
-        return;
-      }
-      setRows(readDesperdiciosFromStore([]));
+    let cancelled = false;
+    const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
+    if (forcedCompat) {
+      setSourceMeta({ source: "compat", readOnly: true });
+      setCompatRows([]);
+      setRows([]);
       rowsReadyRef.current = true;
       setIsLoadingTable(false);
-    })();
+      return;
+    }
+    setRows(readDesperdiciosFromStore([]));
+    rowsReadyRef.current = true;
+    setIsLoadingTable(false);
+    const timer = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const db = await loadDesperdiciosStateFromSupabase();
+          if (cancelled) return;
+          if (db.meta) setSourceMeta(db.meta);
+          if (db.meta?.source === "compat") {
+            const wastes = (db.compat as any)?.wastes ?? [];
+            setCompatRows(Array.isArray(wastes) ? (wastes as DesperdicioCompatRow[]) : []);
+            setRows(db.rows ?? []);
+            return;
+          }
+          if ((db.rows ?? [])[0]) {
+            setRows(db.rows);
+            return;
+          }
+        } catch (err) {
+          if (!loadErrorShownRef.current) {
+            loadErrorShownRef.current = true;
+          }
+        }
+      })();
+    }, 900);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, []);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
     if (isReadOnly) return;
     setMotivosStore((prev) => {
-      const base = prev;
-      const seen = new Set(base.map((m) => m.nome.toLowerCase()));
+      const base = Array.isArray(prev) ? prev : [];
+      const seen = new Set(base.map((m) => String(m.nome ?? "").toLowerCase()));
       const next = [...base];
+      let changed = false;
       for (const r of rows) {
         const nome = normalizeMotivoOptionName(r.motivo);
         if (!nome) continue;
         const key = nome.toLowerCase();
         if (seen.has(key)) continue;
         seen.add(key);
+        changed = true;
         next.push({ id: String(Date.now() + next.length), nome });
       }
-      writeDesperdicioMotivosToStore(next);
-      return next;
+      if (changed) writeDesperdicioMotivosToStore(next);
+      return changed ? next : prev;
     });
-  }, [isReadOnly, motivos, rows]);
+  }, [isReadOnly, rows]);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
@@ -1255,20 +1394,32 @@ export default function DesperdiciosClient({
       });
     if (!changed) return;
     setRows(sync.merged);
-    for (const row of sync.upserts) {
-      void upsertDesperdicioToSupabase(row).catch((err) => {
-        if (!saveErrorShownRef.current) {
-          saveErrorShownRef.current = true;
+    etiquetasSyncRunRef.current += 1;
+    const runId = etiquetasSyncRunRef.current;
+    void (async () => {
+      for (const row of sync.upserts) {
+        if (etiquetasSyncRunRef.current !== runId) return;
+        try {
+          await upsertDesperdicioToSupabase(row);
+        } catch (err) {
+          if (!saveErrorShownRef.current) {
+            saveErrorShownRef.current = true;
+          }
         }
-      });
-    }
-    for (const row of sync.deletes) {
-      void deleteDesperdicioFromSupabase(row.id).catch((err) => {
-        if (!deleteErrorShownRef.current) {
-          deleteErrorShownRef.current = true;
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+      }
+      for (const row of sync.deletes) {
+        if (etiquetasSyncRunRef.current !== runId) return;
+        try {
+          await deleteDesperdicioFromSupabase(row.id);
+        } catch (err) {
+          if (!deleteErrorShownRef.current) {
+            deleteErrorShownRef.current = true;
+          }
         }
-      });
-    }
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 30));
+      }
+    })();
   }, [isCompatSource, prePreparoEtiquetas, rows, userScopePrefix]);
 
   useEffect(() => {
@@ -1629,8 +1780,7 @@ export default function DesperdiciosClient({
   }, [draftQty, draftUnitCost]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="desperdicios" />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={dash.content}>
@@ -1681,7 +1831,7 @@ export default function DesperdiciosClient({
                 </div>
               ) : null}
 
-              <div style={{ overflow: "auto" }}>
+              <div className={styles.tableBodyScroll}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr>
@@ -2060,51 +2210,53 @@ export default function DesperdiciosClient({
             <div style={{ textAlign: "right" }}>Ações</div>
           </div>
 
-          {!visible.length ? (
-            <div className={styles.emptyState}>
-              <div className={styles.emptyTitle}>Nenhum desperdício lançado</div>
-              <div className={styles.emptyText}>Clique em “Novo Lançamento” para começar.</div>
-            </div>
-          ) : (
-            visible.map((r) => {
-              const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
-              return (
-                <div
-                  key={r.id}
-                  className={styles.row}
-                  style={{ gridTemplateColumns: tableGridTemplateColumns }}
-                  data-qa-grid-row
-                  data-qa-row-id={r.id}
-                >
-                  {columnOrder.map((column) => (
-                    <div key={column} className={styles.tableCellWrap}>
-                      {renderTableCell(r, column)}
+          <div className={styles.tableBodyScroll}>
+            {!visible.length ? (
+              <div className={styles.emptyState}>
+                <div className={styles.emptyTitle}>Nenhum desperdício lançado</div>
+                <div className={styles.emptyText}>Clique em “Novo Lançamento” para começar.</div>
+              </div>
+            ) : (
+              visible.map((r) => {
+                const isAutoEtiqueta = isPrePreparoEtiquetaWasteId(r.id);
+                return (
+                  <div
+                    key={r.id}
+                    className={styles.row}
+                    style={{ gridTemplateColumns: tableGridTemplateColumns }}
+                    data-qa-grid-row
+                    data-qa-row-id={r.id}
+                  >
+                    {columnOrder.map((column) => (
+                      <div key={column} className={styles.tableCellWrap}>
+                        {renderTableCell(r, column)}
+                      </div>
+                    ))}
+                    <div className={styles.actionsCell}>
+                      <button
+                        type="button"
+                        className={styles.iconBtn}
+                        aria-label="Editar"
+                        onClick={() => openEdit(r)}
+                        title={isAutoEtiqueta ? "Editar etiqueta vencida" : ""}
+                      >
+                        <IconPencil />
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.iconBtn}
+                        aria-label="Excluir"
+                        onClick={() => openConfirmDeleteDesperdicio(r)}
+                        title={isAutoEtiqueta ? "Excluir etiqueta vencida" : ""}
+                      >
+                        <IconTrash />
+                      </button>
                     </div>
-                  ))}
-                  <div className={styles.actionsCell}>
-                    <button
-                      type="button"
-                      className={styles.iconBtn}
-                      aria-label="Editar"
-                      onClick={() => openEdit(r)}
-                      title={isAutoEtiqueta ? "Editar etiqueta vencida" : ""}
-                    >
-                      <IconPencil />
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.iconBtn}
-                      aria-label="Excluir"
-                      onClick={() => openConfirmDeleteDesperdicio(r)}
-                      title={isAutoEtiqueta ? "Excluir etiqueta vencida" : ""}
-                    >
-                      <IconTrash />
-                    </button>
                   </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </section>
 
         {mounted && isFormOpen ? (
@@ -2561,6 +2713,6 @@ export default function DesperdiciosClient({
         )}
         </div>
       </main>
-    </div>
+    </>
   );
 }

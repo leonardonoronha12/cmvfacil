@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
-import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
+import SystemToast from "../components/SystemToast";
 import useCappedLoading from "../components/useCappedLoading";
 import usePagination from "../components/usePagination";
 import {
@@ -32,6 +31,7 @@ import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
 import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import { QaModePanel } from "../lib/qaMode";
+import { maskPhoneBR } from "../lib/masks";
 import styles from "./entradas.module.css";
 
 type EntradaRow = {
@@ -1070,7 +1070,7 @@ export default function EntradasClient() {
       } catch {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          window.alert("Não foi possível carregar fornecedores do Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
         }
       }
 
@@ -1101,7 +1101,7 @@ export default function EntradasClient() {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
       });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
@@ -1472,8 +1472,7 @@ export default function EntradasClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="entradas" />
+    <>
       {isMounted && toast
         ? createPortal(
             <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
@@ -2843,7 +2842,7 @@ export default function EntradasClient() {
                         className={styles.phoneInput}
                         placeholder="(00) 00000-0000"
                         value={addFornecedorWhatsapp}
-                        onChange={(e) => setAddFornecedorWhatsapp(e.target.value)}
+                        onChange={(e) => setAddFornecedorWhatsapp(maskPhoneBR(e.target.value))}
                       />
                     </div>
                   </div>
@@ -3075,6 +3074,6 @@ export default function EntradasClient() {
           : null}
         </div>
       </main>
-    </div>
+    </>
   );
 }

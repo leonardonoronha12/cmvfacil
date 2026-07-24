@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal, flushSync } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import useCappedLoading from "../components/useCappedLoading";
@@ -315,6 +314,7 @@ function IconCheck() {
 export default function InsumosClient() {
   const [mounted, setMounted] = useState(false);
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
@@ -451,6 +451,7 @@ export default function InsumosClient() {
   useEffect(() => {
     (async () => {
       try {
+        setLoadError(null);
         const state = await loadInsumosStateFromSupabase();
         applyLoadedState(state);
       } catch (err) {
@@ -459,9 +460,9 @@ export default function InsumosClient() {
         setCategories([]);
         categoriesReadyRef.current = true;
         const msg = err instanceof Error ? err.message : String(err);
-        window.alert(
-          `Não foi possível carregar os insumos do Supabase. Verifique se as tabelas/políticas estão configuradas.\n\nDetalhes: ${msg}`,
-        );
+        const message = `Não foi possível carregar os insumos do Supabase. Detalhes: ${msg}`;
+        setLoadError(message);
+        showToast(message, "error", 9000);
       } finally {
         setIsLoadingTable(false);
       }
@@ -1408,8 +1409,7 @@ export default function InsumosClient() {
   ]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="insumos" />
+    <>
       {toast ? (
         <SystemToast
           title={toast.title}
@@ -1433,6 +1433,8 @@ export default function InsumosClient() {
             <p className={styles.subtitle}>Aqui você cadastra e gerencia todos os insumos do seu estoque.</p>
           </div>
         </section>
+
+        {loadError ? <div className="cmv-alert cmv-alert-error">{loadError}</div> : null}
 
         {isCompatSource ? (
           <div
@@ -1642,10 +1644,19 @@ export default function InsumosClient() {
             </div>
 
             {!pagination.pageItems.length ? (
-              <div className={styles.emptyState}>
-                <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
-                <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
-              </div>
+              isLoadingTable ? (
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>{tableLoading.timedOut ? "Carregamento em andamento" : "Carregando insumos..."}</div>
+                  <div className={styles.emptyText}>
+                    {tableLoading.timedOut ? "Ainda estamos carregando os insumos. Aguarde mais alguns segundos." : "Aguarde enquanto buscamos seus dados."}
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.emptyState}>
+                  <div className={styles.emptyTitle}>Nenhum insumo cadastrado</div>
+                  <div className={styles.emptyText}>Clique em “Novo Item” ou “Importar” para começar.</div>
+                </div>
+              )
             ) : (
               pagination.pageItems.map((r) => (
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
@@ -2235,6 +2246,6 @@ export default function InsumosClient() {
         ) : null}
         </div>
       </main>
-    </div>
+    </>
   );
 }

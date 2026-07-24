@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dash from "../../dashboard/dashboard.module.css";
-import AppSidebar from "../../components/AppSidebar";
 import styles from "./importar-bubble.module.css";
 
 type UploadRow = {
@@ -708,8 +707,7 @@ export default function ImportarBubbleClient() {
   }, [monitorAutoRefresh, monitorExpanded, syncRunning]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <div className={styles.pageWrap}>
@@ -1173,6 +1171,6 @@ export default function ImportarBubbleClient() {
           </div>
         </div>
       </main>
-    </div>
+    </>
   );
 }

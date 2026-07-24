@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import AppSidebar from "../../components/AppSidebar";
 import dash from "../../dashboard/dashboard.module.css";
 import styles from "../importar-bubble/importar-bubble.module.css";
 
@@ -313,13 +312,12 @@ export function BubbleGlobalPanel(props?: { compact?: boolean; onApi?: (api: Bub
 
 export default function BubbleGlobalClient() {
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <BubbleGlobalPanel />
         </div>
       </main>
-    </div>
+    </>
   );
 }

@@ -141,8 +141,6 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/login/") ||
     pathname === "/cadastro-usuario" ||
     pathname.startsWith("/cadastro-usuario/") ||
-    pathname === "/cadastro-empresa" ||
-    pathname.startsWith("/cadastro-empresa/") ||
     pathname === "/billing/return" ||
     pathname.startsWith("/billing/return/") ||
     pathname === "/resetar-senha" ||
@@ -172,9 +170,17 @@ export async function middleware(req: NextRequest) {
   }
 
   if (await isAuthenticated(req)) {
+    if (pathname === "/") {
+      const url = req.nextUrl.clone();
+      url.pathname = "/dashboard";
+      url.search = "";
+      return NextResponse.redirect(url);
+    }
     if (
       pathname === "/ajustes" ||
       pathname.startsWith("/ajustes/") ||
+      pathname === "/cadastro-empresa" ||
+      pathname.startsWith("/cadastro-empresa/") ||
       pathname === "/api/me" ||
       pathname.startsWith("/api/billing/") ||
       pathname === "/api/stripe/webhook"
@@ -205,6 +211,7 @@ export async function middleware(req: NextRequest) {
       url.pathname = "/ajustes";
       url.searchParams.set("tab", "planos");
       url.searchParams.set("blocked", "1");
+      url.searchParams.set("from", pathname);
       return NextResponse.redirect(url);
     } catch {
       if (pathname.startsWith("/api/")) {
@@ -215,6 +222,7 @@ export async function middleware(req: NextRequest) {
       url.searchParams.set("tab", "planos");
       url.searchParams.set("blocked", "1");
       url.searchParams.set("reason", "billing_check_failed");
+      url.searchParams.set("from", pathname);
       return NextResponse.redirect(url);
     }
   }

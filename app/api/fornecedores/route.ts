@@ -15,6 +15,15 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function safeObj(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  return input as Record<string, unknown>;
+}
+
+function safeArr(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
+}
+
 function parseCsvEnv(value: string | undefined) {
   return String(value ?? "")
     .split(/[,\n;]/g)
@@ -86,8 +95,21 @@ function resolveUserScopedId(req: NextRequest) {
   return { accessToken, id: null as string | null };
 }
 
-async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  return false;
+async function shouldUseCompatSource(args: { req: NextRequest }) {
+  const url = new URL(args.req.url);
+  const source = String(url.searchParams.get("source") ?? "").trim().toLowerCase();
+  if (source === "legacy") return false;
+  if (source === "compat") return true;
+  return true;
+}
+
+function normalizeFornecedoresRaw(raw: unknown, patch: { produtos?: string[]; equivalencias?: unknown }) {
+  const obj = safeObj(raw);
+  const fornecedores = safeObj(obj.fornecedores);
+  const nextFornecedores = { ...fornecedores } as any;
+  if (patch.produtos) nextFornecedores.produtos = patch.produtos;
+  if (typeof patch.equivalencias !== "undefined") nextFornecedores.equivalencias = patch.equivalencias;
+  return { ...obj, fornecedores: nextFornecedores };
 }
 
 export async function GET(req: NextRequest) {
@@ -99,7 +121,7 @@ export async function GET(req: NextRequest) {
 
     const { userId: rawUserId } = getUserIdFromRequest(req);
     const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
-    const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
+    const shouldUseCompat = await shouldUseCompatSource({ req });
     if (shouldUseCompat) {
       const { data: memberRows, error: memberErr } = await supabase
         .from("company_members")
@@ -119,6 +141,8 @@ export async function GET(req: NextRequest) {
 
       const info: Record<string, any> = {};
       const supplierKeyById = new Map<string, string>();
+      const rawProdutosByKey = new Map<string, string[]>();
+      const rawEquivByKey = new Map<string, unknown>();
       for (const s of suppliersDb ?? []) {
         const nome = normalizeText((s as any)?.nome ?? "");
         const externalKey = normalizeText((s as any)?.external_key ?? "");
@@ -130,6 +154,12 @@ export async function GET(req: NextRequest) {
         const key = bubbleId || (dbId ? `db:${dbId}` : "");
         if (!key || !nome) continue;
         supplierKeyById.set(dbId, key);
+        const fornecedoresRaw = safeObj(((s as any)?.raw as any)?.fornecedores);
+        const rawProdutos = safeArr(fornecedoresRaw.produtos)
+          .map((x) => normalizeText(x))
+          .filter(Boolean);
+        if (rawProdutos.length) rawProdutosByKey.set(key, rawProdutos);
+        if (typeof fornecedoresRaw.equivalencias !== "undefined") rawEquivByKey.set(key, fornecedoresRaw.equivalencias);
         info[key] = {
           fornecedor: nome,
           vendedor: String((s as any)?.vendedor ?? "").trim(),
@@ -157,7 +187,18 @@ export async function GET(req: NextRequest) {
         if (!prev.includes(itemName)) produtos[supplierKey] = [...prev, itemName];
       }
 
-      return json({ source: "compat", readOnly: true, row: { id, info, produtos, equivalencias: {} } }, { status: 200 });
+      for (const k of Object.keys(info)) {
+        const rawProdutos = rawProdutosByKey.get(k) ?? [];
+        if (rawProdutos.length) produtos[k] = rawProdutos;
+      }
+
+      const equivalencias: Record<string, any> = {};
+      for (const k of Object.keys(info)) {
+        const eq = rawEquivByKey.get(k);
+        if (typeof eq !== "undefined") equivalencias[k] = eq as any;
+      }
+
+      return json({ source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
     }
 
     const { data, error } = await supabase.from("fornecedores_state").select("*").eq("id", id).maybeSingle();
@@ -176,14 +217,103 @@ export async function POST(req: NextRequest) {
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
-    const payload = {
-      id,
-      info: (data.info ?? {}) as any,
-      produtos: (data.produtos ?? {}) as any,
-      equivalencias: (data.equivalencias ?? {}) as any,
-    };
-    const { error } = await supabase.from("fornecedores_state").upsert(payload as any, { onConflict: "id" });
-    if (error) return json({ error: error.message }, { status: 500 });
+    const shouldUseCompat = await shouldUseCompatSource({ req });
+    const userId = id.slice("user:".length);
+
+    if (!shouldUseCompat) {
+      const payload = {
+        id,
+        info: (data.info ?? {}) as any,
+        produtos: (data.produtos ?? {}) as any,
+        equivalencias: (data.equivalencias ?? {}) as any,
+      };
+      const { error } = await supabase.from("fornecedores_state").upsert(payload as any, { onConflict: "id" });
+      if (error) return json({ error: error.message }, { status: 500 });
+      return json({ ok: true }, { status: 200 });
+    }
+
+    const { data: memberRows, error: memberErr } = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return json({ error: memberErr.message }, { status: 500 });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return json({ error: "missing_company" }, { status: 500 });
+
+    const infoMap = safeObj(data.info);
+    const produtosMap = safeObj(data.produtos);
+    const equivMap = safeObj(data.equivalencias);
+
+    const { data: suppliersDb, error: suppliersErr } = await supabase.from("suppliers").select("id,bubble_id,nome,raw").eq("company_id", companyId).limit(5000);
+    if (suppliersErr) return json({ error: suppliersErr.message }, { status: 500 });
+
+    const supplierIdByBubbleId = new Map<string, string>();
+    const supplierIdByNameKey = new Map<string, string>();
+    const supplierRawById = new Map<string, unknown>();
+    for (const s of suppliersDb ?? []) {
+      const sid = String((s as any)?.id ?? "").trim();
+      if (!sid) continue;
+      const bubbleId = String((s as any)?.bubble_id ?? "").trim();
+      const nome = normalizeText((s as any)?.nome ?? "");
+      if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
+      if (nome) supplierIdByNameKey.set(normalizeNameKey(nome), sid);
+      supplierRawById.set(sid, (s as any)?.raw ?? {});
+    }
+
+    const keys = new Set<string>([...Object.keys(infoMap), ...Object.keys(produtosMap), ...Object.keys(equivMap)].map((k) => String(k ?? "").trim()).filter(Boolean));
+
+    const updates: any[] = [];
+    const inserts: any[] = [];
+    for (const key of keys) {
+      const infoRow = safeObj(infoMap[key]);
+      const nomeFromInfo = normalizeText(infoRow.fornecedor ?? "");
+      const nameKey = normalizeNameKey(nomeFromInfo || key);
+      const rawProdutos = safeArr(produtosMap[key])
+        .map((x) => normalizeText(x))
+        .filter(Boolean);
+      const produtos = Array.from(new Set(rawProdutos));
+      const equivalencias = typeof equivMap[key] !== "undefined" ? equivMap[key] : undefined;
+
+      let supplierId = "";
+      if (key.startsWith("db:") && isUuid(key.slice(3))) supplierId = key.slice(3);
+      if (!supplierId && isUuid(key)) supplierId = key;
+      if (!supplierId) supplierId = supplierIdByBubbleId.get(key) ?? "";
+      if (!supplierId && nameKey) supplierId = supplierIdByNameKey.get(nameKey) ?? "";
+
+      const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
+      const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
+
+      const vendedor = normalizeText(infoRow.vendedor ?? "");
+      const endereco = normalizeText(infoRow.endereco ?? "");
+      const whatsapp = normalizeText(infoRow.whatsapp ?? "");
+      const nome = nomeFromInfo || normalizeText(key);
+
+      const row = {
+        ...(supplierId ? { id: supplierId } : null),
+        company_id: companyId,
+        bubble_id: !supplierId && /^\d{8,}x\d{6,}$/i.test(key) ? key : null,
+        nome: nome || "-",
+        endereco,
+        vendedor,
+        whatsapp,
+        raw: nextRaw,
+      };
+
+      if (supplierId) updates.push(row);
+      else inserts.push(row);
+    }
+
+    if (updates.length) {
+      const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
+      if (upErr) return json({ error: upErr.message }, { status: 500 });
+    }
+
+    if (inserts.length) {
+      const { error: insErr } = await supabase.from("suppliers").insert(inserts as any);
+      if (insErr) return json({ error: insErr.message }, { status: 500 });
+    }
+
     return json({ ok: true }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });

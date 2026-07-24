@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppSidebar from "../../components/AppSidebar";
 import dash from "../../dashboard/dashboard.module.css";
 
 type ModuleKey = "insumos" | "fornecedores" | "entradas" | "inventario" | "desperdicios" | "fichas-tecnicas" | "pre-preparo";
@@ -3808,10 +3807,8 @@ export default function ImportacaoManualClient() {
   }, [analysis]);
 
   return (
-    <div className={dash.page}>
-      <AppSidebar active="ajustes" />
-      <main className={dash.main}>
-        <div className={dash.content}>
+    <main className={dash.content}>
+      <div className={dash.pageFrame}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
             <div>
               <h1 style={{ margin: 0, fontSize: 20 }}>Importação manual assistida</h1>
@@ -5436,8 +5433,7 @@ export default function ImportacaoManualClient() {
               </div>
             ) : null}
           </section>
-        </div>
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

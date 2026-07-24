@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
+import LoadingSpinner from "../components/LoadingSpinner";
 import { loadInsumosStateFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
@@ -173,6 +173,7 @@ const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
   const [mounted, setMounted] = useState(false);
+  const [isLoadingInventario, setIsLoadingInventario] = useState(true);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
@@ -430,7 +431,10 @@ export default function InventarioClient() {
   }, [selectedContagemId]);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+    const startedAt = Date.now();
+    void (async () => {
+      setIsLoadingInventario(true);
       try {
         const db = await loadInventarioStateFromSupabase();
         if (db.meta) setSourceMeta(db.meta);
@@ -466,7 +470,22 @@ export default function InventarioClient() {
       setContagens(sortedStored);
       setSelectedContagemId(sortedStored[0]?.id ?? null);
       contagensReadyRef.current = true;
-    })();
+    })()
+      .catch(() => {})
+      .finally(() => {
+        const elapsed = Date.now() - startedAt;
+        const remaining = Math.max(0, 350 - elapsed);
+        if (remaining) {
+          window.setTimeout(() => {
+            if (!cancelled) setIsLoadingInventario(false);
+          }, remaining);
+          return;
+        }
+        if (!cancelled) setIsLoadingInventario(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -955,9 +974,7 @@ export default function InventarioClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="inventario" />
-
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="inventario" ui={qaUi} />
@@ -1090,6 +1107,11 @@ export default function InventarioClient() {
           </div>
 
           <div className={styles.right}>
+            {isLoadingInventario ? (
+              <div className={dash.loadingOverlay}>
+                <LoadingSpinner />
+              </div>
+            ) : null}
             <div className={styles.rightHeader}>
               <div className={styles.rightTitleRow}>
                 <div className={styles.rightTitle}>
@@ -1541,6 +1563,6 @@ export default function InventarioClient() {
           : null}
         </div>
       </main>
-    </div>
+    </>
   );
 }

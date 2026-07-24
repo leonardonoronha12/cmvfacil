@@ -22,6 +22,7 @@
   position: fixed;
   left: 0;
   top: 0;
+  z-index: 90;
   background: #f3f5f4;
   padding: 10px 10px 14px;
   width: 194px;

@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import useCappedLoading from "../components/useCappedLoading";
@@ -27,6 +26,7 @@ import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./fornecedores.module.css";
+import { maskPhoneBR } from "../lib/masks";
 
 type FornecedorRow = {
   id: string;
@@ -410,7 +410,7 @@ export default function FornecedoresClient() {
       } catch {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          window.alert("Não foi possível carregar fornecedores do Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
         }
       }
 
@@ -442,7 +442,7 @@ export default function FornecedoresClient() {
       void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        window.alert("Não foi possível salvar fornecedores no Supabase. Verifique se a tabela fornecedores_state existe e se você está logado.");
+        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
       });
     }, 450);
   }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
@@ -1006,9 +1006,7 @@ export default function FornecedoresClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="fornecedores" />
-
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="fornecedores" ui={qaUi} />
@@ -1282,7 +1280,7 @@ export default function FornecedoresClient() {
                           placeholder="(00) 00000-0000"
                           inputMode="tel"
                           value={draftWhatsapp}
-                          onChange={(e) => setDraftWhatsapp(e.target.value)}
+                          onChange={(e) => setDraftWhatsapp(maskPhoneBR(e.target.value))}
                         />
                       </div>
                     </div>
@@ -1692,6 +1690,6 @@ export default function FornecedoresClient() {
             )
           : null}
       </main>
-    </div>
+    </>
   );
 }

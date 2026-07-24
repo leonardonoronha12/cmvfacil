@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppSidebar from "../components/AppSidebar";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SystemToast from "../components/SystemToast";
 import dash from "../dashboard/dashboard.module.css";
@@ -409,6 +408,7 @@ export default function ListaDeComprasClient() {
     return raw === "compat" || raw === "legacy" ? raw : "";
   })();
   const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const toastTimerRef = useRef<number | null>(null);
   const compatFetchKeyRef = useRef<string>("");
   const estoqueFinalAutoKeyRef = useRef<string>("");
@@ -469,6 +469,7 @@ export default function ListaDeComprasClient() {
     const unsubs: Array<() => void> = [];
 
     setIsLoadingTable(true);
+    setLoadError("");
     setCompat(null);
     setBubbleListaRows([]);
 
@@ -478,6 +479,12 @@ export default function ListaDeComprasClient() {
       const res = await fetch(`/api/lista-de-compras?ts=${Date.now()}${qp}${sp}`, { method: "GET", cache: "no-store" }).catch(() => null);
       const json = res ? ((await res.json().catch(() => null)) as any) : null;
       if (cancelled) return;
+
+      if (!res?.ok || !json || !json?.ok) {
+        const msgRaw = String(json?.error ?? json?.details ?? "").trim();
+        const msg = msgRaw || (res ? `Não foi possível carregar a Lista de Compras (${res.status}).` : "Não foi possível carregar a Lista de Compras.");
+        setLoadError(msg);
+      }
 
       const isCompat = Boolean(res?.ok && json?.ok && json?.source === "compat" && Array.isArray(json?.rows));
       if (isCompat) {
@@ -1423,8 +1430,7 @@ export default function ListaDeComprasClient() {
   ]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="lista-compras" />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
       <main className={dash.content}>
         <div className={styles.pageFrameWide}>
@@ -1575,6 +1581,8 @@ export default function ListaDeComprasClient() {
               </div>
             </article>
           </section>
+
+          {loadError ? <div className="cmv-alert cmv-alert-error">{loadError}</div> : null}
 
           <section className={styles.tableCard} style={{ position: "relative" }}>
             {isLoadingTable ? (
@@ -1741,6 +1749,6 @@ export default function ListaDeComprasClient() {
           </section>
         </div>
       </main>
-    </div>
+    </>
   );
 }

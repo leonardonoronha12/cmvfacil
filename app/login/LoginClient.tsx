@@ -84,10 +84,7 @@ export default function LoginClient() {
       <section className="cmv-login-left">
         <div className="cmv-login-card">
           <div className="cmv-login-brand">
-            <img src="/login/logo.svg" alt="CMV Fácil Logo" className="cmv-login-logo-img" />
-            <p className="cmv-login-brand-name">
-              <span>CMV&nbsp;</span>Fácil
-            </p>
+            <img src="/brand/logo-preto.svg" alt="CMV Fácil" className="cmv-login-logo-img" />
           </div>
 
           <div className="cmv-login-content">

@@ -2,12 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SystemToast from "../components/SystemToast";
+import { maskCpf, maskPhoneBR } from "../lib/masks";
 
 export default function CadastroUsuarioClient() {
-  const router = useRouter();
   const [showPassword, setShowPassword] = useState(false);
   const [showPassword2, setShowPassword2] = useState(false);
   const [firstName, setFirstName] = useState("");
@@ -71,13 +70,21 @@ export default function CadastroUsuarioClient() {
           sessionStorage.removeItem("cmv_onboarding_checkout_pending");
         } catch {}
         try {
-          await fetch("/api/auth/supabase-login", {
+          const lr = await fetch("/api/auth/supabase-login", {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ email, password, remember: true }),
           });
-        } catch {}
-        router.push("/cadastro-empresa");
+          const lj = (await lr.json().catch(() => null)) as any;
+          if (!lr.ok || !lj?.ok) {
+            setError(lj?.details ?? lj?.error ?? "Não foi possível entrar automaticamente. Faça login.");
+            return;
+          }
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Não foi possível entrar automaticamente. Faça login.");
+          return;
+        }
+        window.location.replace("/cadastro-empresa");
       }
     } catch {
       setError("Erro ao criar conta.");
@@ -91,10 +98,7 @@ export default function CadastroUsuarioClient() {
       <section className="cmv-signup-left">
         <div className="cmv-signup-wrap">
           <div className="cmv-signup-brand">
-            <img src="/cadastro/logo.svg" alt="CMV Fácil Logo" className="cmv-signup-logo-img" />
-            <p className="cmv-signup-brand-name">
-              <span>CMV&nbsp;</span>Fácil
-            </p>
+            <img src="/brand/logo-preto.svg" alt="CMV Fácil" className="cmv-signup-logo-img" />
           </div>
 
           <div className="cmv-signup-content">
@@ -167,7 +171,7 @@ export default function CadastroUsuarioClient() {
                       placeholder="000.000.000-00"
                       inputMode="numeric"
                       value={cpf}
-                      onChange={(e) => setCpf(e.target.value)}
+                        onChange={(e) => setCpf(maskCpf(e.target.value))}
                     />
                   </div>
                 </div>
@@ -182,7 +186,7 @@ export default function CadastroUsuarioClient() {
                         inputMode="tel"
                         autoComplete="tel"
                         value={whatsapp}
-                        onChange={(e) => setWhatsapp(e.target.value)}
+                        onChange={(e) => setWhatsapp(maskPhoneBR(e.target.value))}
                       />
                     </div>
                   </div>

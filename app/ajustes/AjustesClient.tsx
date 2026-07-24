@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import AppSidebar from "../components/AppSidebar";
 import dash from "../dashboard/dashboard.module.css";
 import styles from "./ajustes.module.css";
 import { clearMeStore, loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
+import { maskCnpj, maskPhoneBR } from "../lib/masks";
 
 function IconGearSmall() {
   return (
@@ -52,7 +52,7 @@ type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios" | "
 export default function AjustesClient() {
   const searchParams = useSearchParams();
   const router = useRouter();
-  const tab = useMemo(() => {
+  const tabFromUrl = useMemo((): TabKey => {
     const raw = String(searchParams.get("tab") ?? "").trim().toLowerCase();
     if (raw === "alterar-senha") return "alterar-senha";
     if (raw === "minha-empresa") return "minha-empresa";
@@ -60,6 +60,29 @@ export default function AjustesClient() {
     if (raw === "planos") return "planos";
     return "minha-conta";
   }, [searchParams]);
+  const [tab, setTab] = useState<TabKey>(tabFromUrl);
+
+  useEffect(() => {
+    setTab(tabFromUrl);
+  }, [tabFromUrl]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      try {
+        const params = new URLSearchParams(window.location.search);
+        const raw = String(params.get("tab") ?? "").trim().toLowerCase();
+        if (raw === "alterar-senha") return setTab("alterar-senha");
+        if (raw === "minha-empresa") return setTab("minha-empresa");
+        if (raw === "usuarios") return setTab("usuarios");
+        if (raw === "planos") return setTab("planos");
+        return setTab("minha-conta");
+      } catch {
+        setTab("minha-conta");
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const [nome, setNome] = useState(() => String(readMeFromStore()?.nome ?? "").trim());
   const [sobrenome, setSobrenome] = useState(() => String(readMeFromStore()?.sobrenome ?? "").trim());
@@ -86,6 +109,12 @@ export default function AjustesClient() {
   const [billingWorking, setBillingWorking] = useState(false);
   const [billingAction, setBillingAction] = useState<"" | "portal" | "checkout_monthly" | "checkout_yearly" | "cancel_pending">("");
   const [members, setMembers] = useState(() => readMeFromStore()?.members ?? []);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"Administrador" | "Colaborador">("Colaborador");
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -101,9 +130,17 @@ export default function AjustesClient() {
     return key === tab ? `${styles.tab} ${styles.tabActive}` : styles.tab;
   }
 
+  function goTab(next: TabKey) {
+    setTab(next);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set("tab", next);
+      window.history.pushState({}, "", url.toString());
+    } catch {}
+  }
+
   const [avatarUrl, setAvatarUrl] = useState(() => String(readMeFromStore()?.avatarUrl ?? "").trim());
   const [companyLogoUrl, setCompanyLogoUrl] = useState(() => String(readMeFromStore()?.companyLogoUrl ?? "").trim());
-  const companyLogoInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const apply = () => {
@@ -120,7 +157,7 @@ export default function AjustesClient() {
       setNome((prev) => (prev.trim() ? prev : String(me.nome ?? "").trim()));
       setSobrenome((prev) => (prev.trim() ? prev : String(me.sobrenome ?? "").trim()));
       setEmail((prev) => (prev.trim() ? prev : String(me.email ?? "").trim()));
-      setWhatsapp((prev) => (prev.trim() ? prev : whatsappLocal));
+      setWhatsapp((prev) => (prev.trim() ? prev : maskPhoneBR(whatsappLocal)));
       setPermissao((prev) => {
         const desired = String((me as any).role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador";
         return prev === "Colaborador" ? desired : prev;
@@ -128,7 +165,7 @@ export default function AjustesClient() {
       setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
       setCnpj((prev) => (prev.trim() ? prev : String((me as any).companyCnpj ?? "").trim()));
       setEmailCorp((prev) => (prev.trim() ? prev : String((me as any).companyEmail ?? "").trim()));
-      setEmpresaWhats((prev) => (prev.trim() ? prev : companyWhatsLocal));
+      setEmpresaWhats((prev) => (prev.trim() ? prev : maskPhoneBR(companyWhatsLocal)));
       setRamo((prev) => {
         const next = String((me as any).companyIndustry ?? "").trim();
         return prev === "Hamburgueria" && next ? next : prev.trim() ? prev : next;
@@ -240,7 +277,21 @@ export default function AjustesClient() {
     }
   }
 
-  const blockedParam = String(searchParams.get("blocked") ?? "").trim() === "1";
+  const [blockedMeta] = useState(() => {
+    try {
+      const p = new URLSearchParams(window.location.search);
+      return {
+        blocked: String(p.get("blocked") ?? "").trim() === "1",
+        from: String(p.get("from") ?? "").trim(),
+        reason: String(p.get("reason") ?? "").trim().toLowerCase(),
+      };
+    } catch {
+      return { blocked: false, from: "", reason: "" };
+    }
+  });
+  const blockedParam = blockedMeta.blocked;
+  const blockedFrom = blockedMeta.from;
+  const blockedReasonParam = blockedMeta.reason;
   const accessAllowed = billingAccess ? Boolean(billingAccess.allowed) : true;
   const accessReason = String(billingAccess?.reason ?? "").trim();
   const subStatus = String(billingAccess?.subscription?.status ?? "").trim();
@@ -253,15 +304,29 @@ export default function AjustesClient() {
   const checkoutStatus = String(billingAccess?.checkout?.status ?? "").trim();
   const checkoutUrl = String(billingAccess?.checkout?.url ?? "").trim();
   const checkoutPlan = String(billingAccess?.checkout?.plan ?? "").trim();
-  const checkoutOpen = checkoutStatus.trim().toLowerCase() === "open";
+  const checkoutOpenRaw = checkoutStatus.trim().toLowerCase() === "open";
 
   const showBlocked = !accessAllowed && (blockedParam || accessReason === "expired" || accessReason === "payment_required");
+
+  useEffect(() => {
+    if (!billingAccess) return;
+    if (!blockedParam) return;
+    if (!billingAccess.allowed) return;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("blocked");
+      url.searchParams.delete("reason");
+      url.searchParams.delete("from");
+      router.replace(`${url.pathname}?${url.searchParams.toString()}`);
+    } catch {}
+  }, [billingAccess, blockedParam, router]);
 
   const subStatusLower = subStatus.trim().toLowerCase();
   const periodEndMs = periodEnd ? Date.parse(periodEnd) : NaN;
   const periodActive = periodEnd && Number.isFinite(periodEndMs) ? Date.now() < periodEndMs : false;
   const hasRecognizedSubscription =
     subStatusLower === "active" || subStatusLower === "trialing" || subStatusLower === "past_due" || (cancelAtPeriodEnd && periodActive);
+  const checkoutOpen = checkoutOpenRaw && !hasRecognizedSubscription;
   const checkoutPlanLower = checkoutPlan.trim().toLowerCase();
   const checkoutMonthly = checkoutOpen && checkoutPlanLower === "pro_monthly";
   const checkoutYearly = checkoutOpen && checkoutPlanLower === "pro_yearly";
@@ -277,6 +342,28 @@ export default function AjustesClient() {
     if (s === "pro_monthly") return "PRO Mensal";
     return "";
   }
+
+  function blockedFromLabel(raw: string) {
+    const p = raw.trim().toLowerCase();
+    if (!p) return "";
+    if (p === "/dashboard") return "CMV Real";
+    if (p === "/lista-de-compras") return "Lista de Compras";
+    if (p === "/fichas-tecnicas") return "Fichas Técnicas";
+    if (p === "/insumos") return "Insumos";
+    if (p === "/pre-preparo") return "Pré-Preparo";
+    if (p === "/fornecedores") return "Fornecedores";
+    if (p === "/entradas") return "Entradas";
+    if (p === "/inventario") return "Inventário";
+    if (p === "/desperdicios") return "Desperdícios";
+    if (p === "/suporte") return "Suporte";
+    return raw;
+  }
+
+  const blockedFromText = blockedFromLabel(blockedFrom);
+  const blockedOverlayText =
+    blockedReasonParam === "billing_check_failed"
+      ? "Não foi possível verificar sua assinatura no momento. Tente novamente em alguns instantes."
+      : "Seu período gratuito terminou. Assine o Plano PRO para continuar utilizando todas as funções do CMV Fácil.";
 
   function formatDateBR(value: string) {
     const ms = Date.parse(value);
@@ -394,7 +481,7 @@ export default function AjustesClient() {
       const res = await fetch("/api/billing/access", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "checkout_abandoned" }),
+        body: JSON.stringify({ action: "checkout_cancel" }),
       });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "billing_access_failed"));
@@ -428,8 +515,7 @@ export default function AjustesClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           <div className={styles.pageWrap}>
@@ -441,19 +527,54 @@ export default function AjustesClient() {
             </div>
 
             <div className={styles.tabs}>
-              <a className={tabClass("minha-conta")} href="/ajustes?tab=minha-conta">
+              <a
+                className={tabClass("minha-conta")}
+                href="/ajustes?tab=minha-conta"
+                onClick={(e) => {
+                  e.preventDefault();
+                  goTab("minha-conta");
+                }}
+              >
                 Minha Conta
               </a>
-              <a className={tabClass("alterar-senha")} href="/ajustes?tab=alterar-senha">
+              <a
+                className={tabClass("alterar-senha")}
+                href="/ajustes?tab=alterar-senha"
+                onClick={(e) => {
+                  e.preventDefault();
+                  goTab("alterar-senha");
+                }}
+              >
                 Alterar Senha
               </a>
-              <a className={tabClass("minha-empresa")} href="/ajustes?tab=minha-empresa">
+              <a
+                className={tabClass("minha-empresa")}
+                href="/ajustes?tab=minha-empresa"
+                onClick={(e) => {
+                  e.preventDefault();
+                  goTab("minha-empresa");
+                }}
+              >
                 Minha Empresa
               </a>
-              <a className={tabClass("usuarios")} href="/ajustes?tab=usuarios">
+              <a
+                className={tabClass("usuarios")}
+                href="/ajustes?tab=usuarios"
+                onClick={(e) => {
+                  e.preventDefault();
+                  goTab("usuarios");
+                }}
+              >
                 Usuários
               </a>
-              <a className={tabClass("planos")} href="/ajustes?tab=planos">
+              <a
+                className={tabClass("planos")}
+                href="/ajustes?tab=planos"
+                onClick={(e) => {
+                  e.preventDefault();
+                  goTab("planos");
+                }}
+              >
                 Planos
               </a>
             </div>
@@ -492,7 +613,7 @@ export default function AjustesClient() {
                       <span className={styles.label}>WhatsApp</span>
                       <div className={styles.phoneRow}>
                         <div className={styles.phonePrefix}>+55</div>
-                        <input className={styles.input} value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+                        <input className={styles.input} inputMode="tel" value={whatsapp} onChange={(e) => setWhatsapp(maskPhoneBR(e.target.value))} />
                       </div>
                     </label>
 
@@ -623,22 +744,10 @@ export default function AjustesClient() {
                       )}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", rowGap: 6 }}>
-                      <button
-                        type="button"
-                        className={styles.btnGhost}
-                        disabled={savingCompany}
-                        onClick={() => {
-                          if (savingCompany) return;
-                          companyLogoInputRef.current?.click();
-                        }}
-                      >
-                        Enviar Imagem
-                      </button>
                       <input
-                        ref={companyLogoInputRef}
                         type="file"
                         accept="image/*"
-                        style={{ display: "none" }}
+                        disabled={savingCompany}
                         onChange={(e) => {
                           const file = e.target.files && e.target.files[0];
                           e.target.value = "";
@@ -646,33 +755,35 @@ export default function AjustesClient() {
                           void uploadCompanyLogo(file);
                         }}
                       />
-                      <button
-                        type="button"
-                        className={styles.btnGhost}
-                        disabled={savingCompany}
-                        onClick={async () => {
-                          if (savingCompany) return;
-                          setCompanySaveError("");
-                          setSavingCompany(true);
-                          try {
-                            setCompanyLogoUrl("");
-                            const res = await fetch("/api/me", {
-                              method: "POST",
-                              headers: { "content-type": "application/json" },
-                              body: JSON.stringify({ companyLogoUrl: "" }),
-                            });
-                            const j = (await res.json().catch(() => null)) as any;
-                            if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
-                            await loadMeFromApi();
-                          } catch (err) {
-                            setCompanySaveError(err instanceof Error ? err.message : String(err));
-                          } finally {
-                            setSavingCompany(false);
-                          }
-                        }}
-                      >
-                        Apagar
-                      </button>
+                      {companyLogoUrl ? (
+                        <button
+                          type="button"
+                          className={styles.btnGhost}
+                          disabled={savingCompany}
+                          onClick={async () => {
+                            if (savingCompany) return;
+                            setCompanySaveError("");
+                            setSavingCompany(true);
+                            try {
+                              setCompanyLogoUrl("");
+                              const res = await fetch("/api/me", {
+                                method: "POST",
+                                headers: { "content-type": "application/json" },
+                                body: JSON.stringify({ companyLogoUrl: "" }),
+                              });
+                              const j = (await res.json().catch(() => null)) as any;
+                              if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "failed_to_save"));
+                              await loadMeFromApi();
+                            } catch (err) {
+                              setCompanySaveError(err instanceof Error ? err.message : String(err));
+                            } finally {
+                              setSavingCompany(false);
+                            }
+                          }}
+                        >
+                          Remover imagem
+                        </button>
+                      ) : null}
                       <div className={styles.avatarHint}>Tamanho recomendado: 600 x 600 px</div>
                     </div>
                   </div>
@@ -685,7 +796,7 @@ export default function AjustesClient() {
                     </label>
                     <label className={styles.field}>
                       <span className={styles.label}>CNPJ</span>
-                      <input className={styles.input} value={cnpj} onChange={(e) => setCnpj(e.target.value)} />
+                      <input className={styles.input} inputMode="numeric" value={cnpj} onChange={(e) => setCnpj(maskCnpj(e.target.value))} />
                     </label>
                     <label className={styles.field}>
                       <span className={styles.label}>Email Corporativo</span>
@@ -695,7 +806,7 @@ export default function AjustesClient() {
                       <span className={styles.label}>WhatsApp Empresa</span>
                       <div className={styles.phoneRow}>
                         <div className={styles.phonePrefix}>+55</div>
-                        <input className={styles.input} value={empresaWhats} onChange={(e) => setEmpresaWhats(e.target.value)} />
+                        <input className={styles.input} inputMode="tel" value={empresaWhats} onChange={(e) => setEmpresaWhats(maskPhoneBR(e.target.value))} />
                       </div>
                     </label>
                     <label className={styles.field} style={{ gridColumn: "span 1" }}>
@@ -780,6 +891,112 @@ export default function AjustesClient() {
 
               {tab === "usuarios" ? (
                 <div>
+                  <div className={styles.actions} style={{ marginTop: 0 }}>
+                    <button
+                      type="button"
+                      className={styles.btnPrimary}
+                      onClick={() => {
+                        setInviteError("");
+                        setInviteLink("");
+                        setInviteEmail("");
+                        setInviteRole("Colaborador");
+                        setInviteOpen(true);
+                      }}
+                    >
+                      Cadastrar novo usuário
+                    </button>
+                  </div>
+
+                  {inviteOpen ? (
+                    <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "#ffffff" }}>
+                      <div style={{ fontWeight: 900, color: "#111827" }}>Novo usuário</div>
+                      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr", gap: 10, maxWidth: 520 }}>
+                        <label style={{ fontSize: 13, fontWeight: 800, color: "#374151" }}>
+                          Email
+                          <input
+                            className={styles.input}
+                            value={inviteEmail}
+                            onChange={(e) => setInviteEmail(e.target.value)}
+                            placeholder="email@exemplo.com"
+                            inputMode="email"
+                            autoComplete="off"
+                            style={{ marginTop: 6 }}
+                          />
+                        </label>
+                        <label style={{ fontSize: 13, fontWeight: 800, color: "#374151" }}>
+                          Permissão
+                          <select className={styles.input} value={inviteRole} onChange={(e) => setInviteRole(e.target.value === "Administrador" ? "Administrador" : "Colaborador")} style={{ marginTop: 6 }}>
+                            <option value="Colaborador">Colaborador</option>
+                            <option value="Administrador">Administrador</option>
+                          </select>
+                        </label>
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                          <button
+                            type="button"
+                            className={styles.btnPrimary}
+                            disabled={inviteLoading || !inviteEmail.trim()}
+                            onClick={async () => {
+                              if (inviteLoading) return;
+                              setInviteLoading(true);
+                              setInviteError("");
+                              setInviteLink("");
+                              try {
+                                const res = await fetch("/api/company-members/invite", {
+                                  method: "POST",
+                                  headers: { "content-type": "application/json" },
+                                  body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+                                });
+                                const j = (await res.json().catch(() => null)) as any;
+                                if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "invite_failed"));
+                                const link = String(j?.actionLink ?? "").trim();
+                                setInviteLink(link);
+                                await loadMeFromApi();
+                              } catch (err) {
+                                setInviteError(err instanceof Error ? err.message : String(err));
+                              } finally {
+                                setInviteLoading(false);
+                              }
+                            }}
+                          >
+                            {inviteLoading ? "Gerando link…" : "Gerar convite"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.btnGhost}
+                            disabled={inviteLoading}
+                            onClick={() => {
+                              setInviteOpen(false);
+                              setInviteError("");
+                              setInviteLink("");
+                            }}
+                          >
+                            Fechar
+                          </button>
+                        </div>
+                        {inviteError ? <div style={{ color: "#b42318", fontSize: 13, fontWeight: 800 }}>{inviteError}</div> : null}
+                        {inviteLink ? (
+                          <div style={{ marginTop: 6 }}>
+                            <div style={{ fontSize: 13, fontWeight: 900, color: "#111827" }}>Link do convite</div>
+                            <div style={{ marginTop: 6, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                              <input className={styles.input} value={inviteLink} readOnly style={{ flex: "1 1 380px" }} />
+                              <button
+                                type="button"
+                                className={styles.btnPrimary}
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(inviteLink);
+                                  } catch {}
+                                }}
+                              >
+                                Copiar
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+                  ) : null}
+
                   <div className={styles.table}>
                     <div className={styles.trHead}>
                       <div>Membro</div>
@@ -864,6 +1081,24 @@ export default function AjustesClient() {
                     </div>
                   </div>
 
+                  {blockedParam && (blockedFromText || blockedReasonParam) ? (
+                    <div
+                      style={{
+                        marginTop: 12,
+                        padding: "10px 12px",
+                        borderRadius: 10,
+                        border: "1px solid #f5c542",
+                        background: "#fffbeb",
+                        color: "#7a5200",
+                        fontSize: 13,
+                        fontWeight: 800,
+                      }}
+                    >
+                      {blockedFromText ? `A tela ${blockedFromText} está bloqueada porque seu plano não está ativo.` : "Algumas telas estão bloqueadas porque seu plano não está ativo."}
+                      {blockedReasonParam === "billing_check_failed" ? " Não foi possível verificar sua assinatura agora." : ""}
+                    </div>
+                  ) : null}
+
                   {billingLoading ? (
                     <div className={styles.planMiniMuted} style={{ marginTop: 10 }}>
                       Carregando assinatura…
@@ -917,7 +1152,9 @@ export default function AjustesClient() {
                           : checkoutMonthly
                             ? "Continuar pagamento"
                             : subPlan === "pro_monthly" && hasRecognizedSubscription
-                              ? "Plano Atual"
+                              ? subStatus.trim().toLowerCase() === "active" || subStatus.trim().toLowerCase() === "trialing" || (cancelAtPeriodEnd && periodActive)
+                                ? "Cancelar plano"
+                                : "Plano Atual"
                               : hasRecognizedSubscription
                                 ? "Alterar no Portal"
                                 : checkoutOpen
@@ -982,7 +1219,9 @@ export default function AjustesClient() {
                           : checkoutYearly
                             ? "Continuar pagamento"
                             : subPlan === "pro_yearly" && hasRecognizedSubscription
-                              ? "Plano Atual"
+                              ? subStatus.trim().toLowerCase() === "active" || subStatus.trim().toLowerCase() === "trialing" || (cancelAtPeriodEnd && periodActive)
+                                ? "Cancelar plano"
+                                : "Plano Atual"
                               : hasRecognizedSubscription
                                 ? "Alterar no Portal"
                                 : checkoutOpen
@@ -1028,8 +1267,9 @@ export default function AjustesClient() {
         <div className={styles.blockedOverlay}>
           <div className={styles.blockedCard}>
             <div className={styles.blockedTitle}>Assinatura necessária</div>
+            {blockedFromText ? <div className={styles.blockedText}>A tela {blockedFromText} está bloqueada porque seu plano não está ativo.</div> : null}
             <div className={styles.blockedText}>
-              Seu período gratuito terminou. Assine o Plano PRO para continuar utilizando todas as funções do CMV Fácil.
+              {blockedOverlayText}
             </div>
             <div className={styles.blockedActions}>
               <button type="button" className={styles.btnPrimary} disabled={billingWorking} onClick={async () => startCheckout("pro_monthly")}>
@@ -1045,6 +1285,6 @@ export default function AjustesClient() {
           </div>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

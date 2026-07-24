@@ -120,10 +120,7 @@ export default function RestaurarSenhaClient() {
       <section className="cmv-reset-left">
         <div className="cmv-reset-wrap">
           <div className="cmv-reset-brand">
-            <img src="/resetar-senha/logo.svg" alt="CMV Fácil Logo" className="cmv-reset-logo" />
-            <p className="cmv-reset-brand-name">
-              <span>CMV&nbsp;</span>Fácil
-            </p>
+            <img src="/brand/logo-preto.svg" alt="CMV Fácil" className="cmv-reset-logo" />
           </div>
 
           <div className="cmv-reset-content">

@@ -330,6 +330,14 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
   const currentPeriodEndMs = currentPeriodEnd ? Date.parse(currentPeriodEnd) : NaN;
   const cancelAtPeriodEnd = Boolean(company?.cancel_at_period_end);
   const periodActive = currentPeriodEnd && Number.isFinite(currentPeriodEndMs) ? nowMs < currentPeriodEndMs : false;
+  const statusLower = String(status ?? "").toLowerCase();
+  const hideTrial =
+    (cancelAtPeriodEnd && periodActive) ||
+    statusLower === "active" ||
+    statusLower === "trialing" ||
+    statusLower === "past_due" ||
+    statusLower === "unpaid";
+  const trialOut = hideTrial ? { startedAt: null, endsAt: null, daysRemaining: null } : { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining };
 
   const checkoutStatus = String(company?.checkout_status ?? "").trim() || null;
   const checkoutUrl = String(company?.checkout_url ?? "").trim() || null;
@@ -340,18 +348,17 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     return {
       allowed: true,
       reason: "legacy_untracked",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      trial: trialOut,
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
   }
 
-  const statusLower = String(status ?? "").toLowerCase();
   if (cancelAtPeriodEnd && periodActive) {
     return {
       allowed: true,
       reason: "canceling",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      trial: trialOut,
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
@@ -360,7 +367,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     return {
       allowed: true,
       reason: "active",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      trial: trialOut,
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
@@ -369,7 +376,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     return {
       allowed: true,
       reason: "trialing",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      trial: trialOut,
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
@@ -378,7 +385,7 @@ export function computeBillingAccess(company: BillingCompany | null): BillingAcc
     return {
       allowed: true,
       reason: "past_due",
-      trial: { startedAt: trialStartedAt, endsAt: trialEndsAt, daysRemaining },
+      trial: trialOut,
       subscription: { status, plan, priceId, currentPeriodEnd, cancelAtPeriodEnd },
       checkout: { status: checkoutStatus, url: checkoutUrl, plan: checkoutPlan },
     };
@@ -459,6 +466,7 @@ export async function createOrReuseCheckoutUrl(params: {
   userId: string;
   planKey: PlanKey;
   origin: CheckoutOrigin;
+  appUrl?: string;
 }) {
   const { supabase, company, companyId, userId, planKey, origin } = params;
 
@@ -474,7 +482,7 @@ export async function createOrReuseCheckoutUrl(params: {
   const customerId = await ensureStripeCustomerId({ supabase, stripe, company, companyId, userId });
   const priceId = getAllowedPriceId(planKey);
 
-  const appUrl = getAppUrl();
+  const appUrl = String(params.appUrl ?? "").trim() || getAppUrl();
   const returnUrl = `${appUrl}/billing/return`;
   const successUrl = `${returnUrl}?checkout=success&origin=${origin}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${returnUrl}?checkout=cancel&origin=${origin}`;

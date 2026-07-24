@@ -696,6 +696,10 @@
   overflow: hidden;
   width: 100%;
   overflow-x: auto;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 320px);
+  min-height: 0;
 }
 
 .tableHead {
@@ -707,6 +711,13 @@
   padding: 10px 12px;
   font-size: 11px;
   font-weight: 700;
+  flex: 0 0 auto;
+}
+
+.tableBodyScroll {
+  overflow: auto;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .tableHeadDrag {

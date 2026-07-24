@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "../components/AppSidebar";
 import SystemToast from "../components/SystemToast";
 import { QaModePanel } from "../lib/qaMode";
 import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type EntradaStoreRow } from "../lib/entradasStore";
@@ -2548,8 +2547,7 @@ export default function PrePreparoClient() {
   }
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="pre-preparo" />
+    <>
       {isMounted && toast
         ? createPortal(
             <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} />,
@@ -4282,6 +4280,6 @@ export default function PrePreparoClient() {
         ) : null}
 
       </main>
-    </div>
+    </>
   );
 }

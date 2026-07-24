@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import AppSidebar from "../../components/AppSidebar";
 import LoadingSpinner from "../../components/LoadingSpinner";
 import SystemToast from "../../components/SystemToast";
 import dash from "../../dashboard/dashboard.module.css";
@@ -138,8 +137,7 @@ export default function ModelosImportacaoClient() {
   const xlsxStatus = useMemo(() => (xlsxMeta ? xlsxMeta.name : "Nenhum modelo salvo (usa o padrão)."), [xlsxMeta]);
 
   return (
-    <div className={dash.dashboard}>
-      <AppSidebar active="ajustes" />
+    <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
 
       <main className={dash.content}>
@@ -229,6 +227,6 @@ export default function ModelosImportacaoClient() {
           </section>
         </div>
       </main>
-    </div>
+    </>
   );
 }

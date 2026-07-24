@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getBillingAccessForCurrentCompany } from "../../../lib/billing";
+import { getBillingAccessForCurrentCompany, updateCompanyFromSubscription } from "../../../lib/billing";
 import { getStripe } from "../../../lib/stripeServer";
 
 export const runtime = "nodejs";
@@ -65,11 +65,97 @@ async function fetchCardLast4(company: any) {
   return null;
 }
 
+function shouldConsiderSubscriptionActive(statusLower: string) {
+  if (!statusLower) return false;
+  return statusLower === "active" || statusLower === "trialing" || statusLower === "past_due" || statusLower === "unpaid";
+}
+
+function subscriptionSortScore(statusLower: string) {
+  if (statusLower === "active") return 5;
+  if (statusLower === "trialing") return 4;
+  if (statusLower === "past_due") return 3;
+  if (statusLower === "unpaid") return 2;
+  if (statusLower === "canceled") return 0;
+  return 1;
+}
+
+async function reconcileStripeCompanyState(ctx: Awaited<ReturnType<typeof getBillingAccessForCurrentCompany>>) {
+  const company = ctx.company as any;
+  const companyId = asString(ctx.companyId);
+  if (!company || !companyId) return false;
+
+  const customerId = asString(company?.stripe_customer_id);
+  if (!customerId) return false;
+
+  const stripe = tryGetStripe();
+  if (!stripe) return false;
+
+  const subStatusLower = String(company?.subscription_status ?? "").trim().toLowerCase();
+  const checkoutStatusLower = String(company?.checkout_status ?? "").trim().toLowerCase();
+  const existingSubId = asString(company?.stripe_subscription_id);
+  const updatedAtIso = asString(company?.subscription_updated_at);
+  const updatedAtMs = updatedAtIso ? Date.parse(updatedAtIso) : NaN;
+  const isStale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > 60_000;
+  const shouldSync =
+    checkoutStatusLower === "open" ||
+    (!shouldConsiderSubscriptionActive(subStatusLower) &&
+      (isStale || (subStatusLower === "trial_internal" && !existingSubId)));
+  if (!shouldSync) return false;
+
+  let subscription: any = null;
+  const subId = asString(company?.stripe_subscription_id);
+  if (subId) {
+    try {
+      subscription = await stripe.subscriptions.retrieve(subId, { expand: ["items.data.price"] });
+    } catch {}
+  }
+  if (!subscription) {
+    try {
+      const list = await stripe.subscriptions.list({
+        customer: customerId,
+        status: "all",
+        limit: 5,
+        expand: ["data.items.data.price"],
+      });
+      const subs = (list?.data ?? []) as any[];
+      if (subs.length) {
+        subscription =
+          subs
+            .slice()
+            .sort((a, b) => subscriptionSortScore(String(b?.status ?? "").trim().toLowerCase()) - subscriptionSortScore(String(a?.status ?? "").trim().toLowerCase()))[0] ??
+          null;
+      }
+    } catch {}
+  }
+  if (!subscription) return false;
+
+  await updateCompanyFromSubscription({ supabase: ctx.supabase, customerId, subscription });
+
+  const newStatusLower = String(subscription?.status ?? "").trim().toLowerCase();
+  if (checkoutStatusLower === "open" && shouldConsiderSubscriptionActive(newStatusLower)) {
+    await ctx.supabase
+      .from("companies")
+      .update({
+        checkout_status: null,
+        checkout_plan: null,
+        checkout_url: null,
+        stripe_checkout_session_id: null,
+        checkout_started_at: null,
+        subscription_updated_at: new Date().toISOString(),
+      } as any)
+      .eq("id", companyId);
+  }
+
+  return true;
+}
+
 export async function GET(req: NextRequest) {
   try {
-    const { access, company } = await getBillingAccessForCurrentCompany(req);
-    const cardLast4 = await fetchCardLast4(company);
-    return json({ ok: true, access: { ...access, cardLast4 } }, { status: 200 });
+    let ctx = await getBillingAccessForCurrentCompany(req);
+    const didReconcile = await reconcileStripeCompanyState(ctx);
+    if (didReconcile) ctx = await getBillingAccessForCurrentCompany(req);
+    const cardLast4 = await fetchCardLast4(ctx.company);
+    return json({ ok: true, access: { ...ctx.access, cardLast4 } }, { status: 200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     const status = msg === "unauthorized" ? 401 : 500;
@@ -140,7 +226,9 @@ export async function POST(req: NextRequest) {
 
     if (Object.keys(patch).length > 1) await supabase.from("companies").update(patch).eq("id", companyId);
 
-    const refreshed = await getBillingAccessForCurrentCompany(req);
+    let refreshed = await getBillingAccessForCurrentCompany(req);
+    const didReconcile = await reconcileStripeCompanyState(refreshed);
+    if (didReconcile) refreshed = await getBillingAccessForCurrentCompany(req);
     const cardLast4 = await fetchCardLast4(refreshed.company);
     return json({ ok: true, access: { ...refreshed.access, cardLast4 } }, { status: 200 });
   } catch (err) {

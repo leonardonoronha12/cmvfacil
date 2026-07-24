@@ -409,9 +409,10 @@ a {
 }
 
 .cmv-login-logo-img {
-  width: 40px;
   height: 40px;
-  border-radius: 8px;
+  width: auto;
+  max-width: 240px;
+  border-radius: 0;
   flex-shrink: 0;
 }
 
@@ -659,9 +660,10 @@ a {
 }
 
 .cmv-signup-logo-img {
-  width: 40px;
   height: 40px;
-  border-radius: 8px;
+  width: auto;
+  max-width: 240px;
+  border-radius: 0;
   flex-shrink: 0;
 }
 
@@ -900,9 +902,10 @@ a {
 }
 
 .cmv-reset-logo {
-  width: 40px;
   height: 40px;
-  border-radius: 8px;
+  width: auto;
+  max-width: 240px;
+  border-radius: 0;
   flex-shrink: 0;
 }
 
@@ -1081,9 +1084,10 @@ a {
 
 .cmv-company-brand-icon {
   flex-shrink: 0;
-  border-radius: 8px;
-  width: 40px;
   height: 40px;
+  width: auto;
+  max-width: 240px;
+  border-radius: 0;
 }
 
 .cmv-company-brand-name {

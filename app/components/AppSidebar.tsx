@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -796,15 +797,28 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   useEffect(() => {
     setMe(readMeFromStore());
     const unsub = subscribeMe(() => setMe(readMeFromStore()));
-    void loadMeFromApi().then((next) => {
+    void (async () => {
+      try {
+        const key = "cmvfacil:me:loadedAtMs:v1";
+        const last = Number(window.sessionStorage.getItem(key) ?? "0");
+        if (Number.isFinite(last) && last > 0 && Date.now() - last < 30_000) return;
+        window.sessionStorage.setItem(key, String(Date.now()));
+      } catch {}
+      const next = await loadMeFromApi().catch(() => null);
       if (next) setMe(next);
-    });
+    })();
     return () => unsub();
   }, []);
 
   useEffect(() => {
     void (async () => {
       try {
+        try {
+          const key = "cmvfacil:etiquetas:loadedAtMs:v1";
+          const last = Number(window.sessionStorage.getItem(key) ?? "0");
+          if (Number.isFinite(last) && last > 0 && Date.now() - last < 60_000) return;
+          window.sessionStorage.setItem(key, String(Date.now()));
+        } catch {}
         const dbRows = await loadPrePreparoEtiquetasFromSupabase();
         setEtiquetas(dbRows);
         writePrePreparoEtiquetasToStore(dbRows);
@@ -816,11 +830,43 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
   useEffect(() => {
     try {
-      if (window.sessionStorage.getItem(bootstrapRunningKey) === "1") return;
+      const key = "cmvfacil:sidebarBootstrap:lastStartMs:v1";
+      const last = Number(window.sessionStorage.getItem(key) ?? "0");
+      if (Number.isFinite(last) && last > 0 && Date.now() - last < 5 * 60_000) return;
+      window.sessionStorage.setItem(key, String(Date.now()));
     } catch {}
-    if (bootstrap.status === "running") return;
-    void bootstrapUserDataOnce();
-  }, [bootstrap.status]);
+    const id = window.setTimeout(() => {
+      void bootstrapUserDataOnce();
+    }, 250);
+    return () => window.clearTimeout(id);
+  }, []);
+
+  useEffect(() => {
+    try {
+      const key = "cmvfacil:sidebarPrefetch:lastAtMs:v1";
+      const last = Number(window.sessionStorage.getItem(key) ?? "0");
+      if (Number.isFinite(last) && last > 0 && Date.now() - last < 5 * 60_000) return;
+      window.sessionStorage.setItem(key, String(Date.now()));
+    } catch {}
+
+    const id = window.setTimeout(() => {
+      try {
+        if (document.visibilityState !== "visible") return;
+      } catch {}
+
+      void (async () => {
+        const routes = ["/lista-de-compras", "/insumos", "/fichas-tecnicas", "/entradas", "/inventario"];
+        for (const r of routes) {
+          try {
+            await router.prefetch(r);
+          } catch {}
+          await sleep(80);
+        }
+      })();
+    }, 900);
+
+    return () => window.clearTimeout(id);
+  }, [router]);
 
   useEffect(() => {
     if (isCompatInsumosMode()) return;
@@ -985,6 +1031,11 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     if (isMobile) setIsDrawerOpen(false);
   };
 
+  const handleSidebarNavClick = (e: any) => {
+    closeDrawer();
+    if (e?.metaKey || e?.ctrlKey || e?.shiftKey || e?.altKey) return;
+  };
+
   const companyName = String(me?.companyName ?? "").trim() || "—";
   const userLabel =
     String(me?.nome ?? "").trim() ||
@@ -1022,59 +1073,109 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Relatórios</p>
-          <a className={navClass(active, "dashboard")} href="/dashboard" onClick={closeDrawer}>
+          <Link
+            className={navClass(active, "dashboard")}
+            href="/dashboard"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconCmv /></span>
             CMV Real
-          </a>
-          <a className={navClass(active, "lista-compras")} href="/lista-de-compras" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "lista-compras")}
+            href="/lista-de-compras"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconChecklist /></span>
             Lista de Compras
-          </a>
-          <a className={navClass(active, "fichas-tecnicas")} href="/fichas-tecnicas" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "fichas-tecnicas")}
+            href="/fichas-tecnicas"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconClipboard /></span>
             Fichas Técnicas
-          </a>
+          </Link>
         </div>
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Cadastros</p>
-          <a className={navClass(active, "insumos")} href="/insumos" onClick={closeDrawer}>
+          <Link
+            className={navClass(active, "insumos")}
+            href="/insumos"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconCube /></span>
             Insumos
-          </a>
-          <a className={navClass(active, "pre-preparo")} href="/pre-preparo" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "pre-preparo")}
+            href="/pre-preparo"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconBowl /></span>
             Pré-Preparo
-          </a>
-          <a className={navClass(active, "fornecedores")} href="/fornecedores" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "fornecedores")}
+            href="/fornecedores"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconStore /></span>
             Fornecedores
-          </a>
+          </Link>
         </div>
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Rotina</p>
-          <a className={navClass(active, "entradas")} href="/entradas" onClick={closeDrawer}>
+          <Link
+            className={navClass(active, "entradas")}
+            href="/entradas"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconBasket /></span>
             Entradas
-          </a>
-          <a className={navClass(active, "inventario")} href="/inventario" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "inventario")}
+            href="/inventario"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconLayers /></span>
             Inventário
-          </a>
-          <a className={navClass(active, "desperdicios")} href="/desperdicios" onClick={closeDrawer}>
+          </Link>
+          <Link
+            className={navClass(active, "desperdicios")}
+            href="/desperdicios"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
             {etiquetasVencidasPendentes > 0 ? <span className={dash.navBadge}>{etiquetasVencidasPendentes}</span> : null}
-          </a>
+          </Link>
         </div>
 
         <div className={dash.group}>
           <p className={dash.groupTitle}>Configurações</p>
-          <a className={navClass(active, "ajustes")} href="/ajustes" onClick={closeDrawer}>
+          <Link
+            className={navClass(active, "ajustes")}
+            href="/ajustes"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
             <span className={dash.navIcon}><IconGear /></span>
             Ajustes
-          </a>
+          </Link>
           <a
             className={navClass(active, "suporte")}
             href="/suporte"
@@ -1091,7 +1192,12 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       </div>
 
       <div className={dash.menuBottom}>
-        <a className={dash.userDropdown} href="/ajustes?tab=minha-conta" onClick={closeDrawer}>
+        <Link
+          className={dash.userDropdown}
+          href="/ajustes?tab=minha-conta"
+          data-sidebar-nav="1"
+          onClick={handleSidebarNavClick}
+        >
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>
               {userAvatarUrl ? <img src={userAvatarUrl} alt="" style={{ width: "100%", height: "100%", borderRadius: "inherit", objectFit: "cover" }} /> : <IconBurgerBadge />}
@@ -1101,7 +1207,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           <span className={dash.userChevron} aria-hidden>
             <IconChevronRight />
           </span>
-        </a>
+        </Link>
       </div>
     </>
   );
