@@ -17,6 +17,20 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function digitsOnly(value: string) {
+  return value.replace(/\D/g, "");
+}
+
+function normalizePhoneBR(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("+")) return trimmed;
+  const d = digitsOnly(trimmed);
+  if (!d) return null;
+  if (d.startsWith("55")) return `+${d}`;
+  return `+55${d}`;
+}
+
 function parsePlanKey(value: unknown): PlanKey | null {
   const v = String(value ?? "").trim().toLowerCase();
   if (v === "pro_monthly") return "pro_monthly";
@@ -85,6 +99,8 @@ export async function POST(req: NextRequest) {
       .insert({
         fantasy_name: "Minha Empresa",
         legal_name: "Minha Empresa",
+        email: null,
+        phone_e164: null,
         raw: { source: "onboarding_start" },
       })
       .select("*")
@@ -99,6 +115,19 @@ export async function POST(req: NextRequest) {
       { onConflict: "company_id,user_id" },
     );
     if (up.error) throw new Error(up.error.message);
+
+    try {
+      const au = await supabase.auth.admin.getUserById(userId);
+      const email = String((au.data as any)?.user?.email ?? "").trim().toLowerCase() || null;
+      const meta = ((au.data as any)?.user?.user_metadata ?? {}) as any;
+      const phoneRaw = String(meta?.whatsapp ?? "").trim();
+      const phoneE164 = phoneRaw ? normalizePhoneBR(phoneRaw) : null;
+      if (email || phoneE164) {
+        await (supabase.from("companies") as any)
+          .update({ ...(email ? { email } : {}), ...(phoneE164 ? { phone_e164: phoneE164 } : {}), subscription_updated_at: new Date().toISOString() })
+          .eq("id", companyId);
+      }
+    } catch {}
 
     const url = await createOrReuseCheckoutUrl({
       supabase,
@@ -116,4 +145,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: msg }, { status });
   }
 }
-

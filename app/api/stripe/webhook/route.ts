@@ -3,6 +3,7 @@ import type Stripe from "stripe";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { planKeyFromPriceId, updateCompanyFromSubscription } from "../../../lib/billing";
 import { getStripe } from "../../../lib/stripeServer";
+import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -42,6 +43,36 @@ function isStripeObject(value: unknown): value is Record<string, unknown> {
 
 function isValidE164(value: string) {
   return /^\+\d{10,15}$/.test(value.trim());
+}
+
+async function bestEffortTriggerSync(supabase: ReturnType<typeof getSupabaseAdmin>) {
+  let supabaseUrl = "";
+  try {
+    supabaseUrl = getSupabaseAuthConfig().url;
+  } catch {
+    supabaseUrl = "";
+  }
+  if (!supabaseUrl) return;
+
+  const envSecret = String(process.env.WORKER_SECRET ?? "").trim();
+  let appSecret = "";
+  try {
+    const r = await supabase.rpc("get_app_secret", { p_name: "sync_worker_secret" });
+    appSecret = String((r as any)?.data ?? "").trim();
+  } catch {
+    appSecret = "";
+  }
+  const secret = appSecret || envSecret;
+  if (!secret) return;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 2500);
+  try {
+    const url = `${supabaseUrl.replace(/\/+$/, "")}/functions/v1/sync-bravo`;
+    await fetch(url, { method: "POST", headers: { "x-worker-secret": secret }, signal: controller.signal }).catch(() => {});
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function extractCustomerId(event: Stripe.Event): string | null {
@@ -241,6 +272,99 @@ async function maybeEnqueueCheckoutAbandoned(params: {
   await supabase.from("companies").update(patch).eq("id", companyId);
 }
 
+async function maybeEnqueueSubscriptionActive(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  companyId: string;
+  customerId: string;
+  userId: string | null;
+  checkoutSessionId: string | null;
+  planKey: string | null;
+  origin: string | null;
+}) {
+  const enabled = String(process.env.BILLING_WHATSAPP_AUTOMATION_ENABLED ?? "").trim().toLowerCase() === "true";
+  if (!enabled) return;
+
+  const { supabase, companyId, customerId, userId, checkoutSessionId, planKey, origin } = params;
+  const companyRes = await supabase
+    .from("companies")
+    .select("id,fantasy_name,legal_name,email,phone_e164,whatsapp_automation_triggered_at,whatsapp_automation_status,subscription_status,subscription_plan")
+    .eq("id", companyId)
+    .maybeSingle();
+  if (companyRes.error || !companyRes.data) return;
+
+  const already = String((companyRes.data as any)?.whatsapp_automation_triggered_at ?? "").trim();
+  if (already) return;
+
+  const statusLower = String((companyRes.data as any)?.subscription_status ?? "").trim().toLowerCase();
+  if (!(statusLower === "active" || statusLower === "trialing")) return;
+
+  const phone = String((companyRes.data as any)?.phone_e164 ?? "").trim();
+  if (!phone) {
+    await supabase
+      .from("companies")
+      .update({ whatsapp_automation_triggered_at: new Date().toISOString(), whatsapp_automation_status: "paid_skipped_missing_phone", subscription_updated_at: new Date().toISOString() } as any)
+      .eq("id", companyId);
+    return;
+  }
+  if (!isValidE164(phone)) {
+    await supabase
+      .from("companies")
+      .update({ whatsapp_automation_triggered_at: new Date().toISOString(), whatsapp_automation_status: "paid_skipped_invalid_phone", subscription_updated_at: new Date().toISOString() } as any)
+      .eq("id", companyId);
+    return;
+  }
+
+  const email = String((companyRes.data as any)?.email ?? "").trim() || null;
+  const name = String((companyRes.data as any)?.fantasy_name ?? (companyRes.data as any)?.legal_name ?? "").trim();
+  const firstName = name.split(/\s+/).filter(Boolean)[0] ?? null;
+  const lastName = name.split(/\s+/).slice(1).filter(Boolean).join(" ") || null;
+  const effectivePlanKey = planKey || asString((companyRes.data as any)?.subscription_plan);
+
+  const { data: contactId } = await supabase.rpc("upsert_contact", {
+    p_source: "billing",
+    p_external_id: companyId,
+    p_email: email,
+    p_phone_e164: phone,
+    p_first_name: firstName,
+    p_last_name: lastName,
+    p_consent_email: false,
+    p_consent_whatsapp: true,
+    p_raw: { company_id: companyId, stripe_customer_id: customerId, origin: origin || null },
+  });
+  if (!contactId) {
+    await supabase
+      .from("companies")
+      .update({ whatsapp_automation_triggered_at: new Date().toISOString(), whatsapp_automation_status: "paid_skipped_no_contact", subscription_updated_at: new Date().toISOString() } as any)
+      .eq("id", companyId);
+    return;
+  }
+
+  const payload = {
+    company_id: companyId,
+    user_id: userId,
+    name,
+    phone_e164: phone,
+    stripe_customer_id: customerId,
+    checkout_session_id: checkoutSessionId,
+    plan_key: effectivePlanKey,
+    origin,
+    subscription_status: statusLower,
+  };
+
+  const { data: outboxId } = await supabase.rpc("enqueue_bravo_event", {
+    p_contact_id: contactId,
+    p_event_type: "billing.subscription_active",
+    p_payload: { contact: { id: contactId, source: "billing", external_id: companyId, email, phone_e164: phone, first_name: firstName, last_name: lastName, consent_email: false, consent_whatsapp: true }, raw: payload },
+  });
+
+  await supabase
+    .from("companies")
+    .update({ whatsapp_automation_triggered_at: new Date().toISOString(), whatsapp_automation_status: outboxId ? "paid_enqueued" : "paid_enqueue_failed", subscription_updated_at: new Date().toISOString() } as any)
+    .eq("id", companyId);
+
+  await bestEffortTriggerSync(supabase);
+}
+
 export async function POST(req: NextRequest) {
   let payload = "";
   try {
@@ -350,6 +474,9 @@ export async function POST(req: NextRequest) {
       const session = event.data.object as any;
       const sessionId = asString(session?.id);
       const subscriptionId = extractSubscriptionId(event);
+      const origin = asString(session?.metadata?.origin);
+      const planKey = asString(session?.metadata?.plan_key);
+      const userId = asString(session?.metadata?.user_id);
       const patch: any = {
         stripe_customer_id: customerId,
         checkout_status: "completed",
@@ -366,6 +493,15 @@ export async function POST(req: NextRequest) {
         const sub = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["items.data.price"] });
         await updateCompanyFromSubscription({ supabase, customerId, subscription: sub });
       }
+      await maybeEnqueueSubscriptionActive({
+        supabase,
+        companyId: company.id,
+        customerId,
+        userId,
+        checkoutSessionId: sessionId,
+        planKey,
+        origin,
+      });
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });
@@ -375,6 +511,15 @@ export async function POST(req: NextRequest) {
       const sub = event.data.object as Stripe.Subscription;
       const cid = asString((sub as any)?.customer) ?? customerId;
       await updateCompanyFromSubscription({ supabase, customerId: cid, subscription: sub });
+      await maybeEnqueueSubscriptionActive({
+        supabase,
+        companyId: company.id,
+        customerId: cid,
+        userId: asString((sub as any)?.metadata?.user_id),
+        checkoutSessionId: null,
+        planKey: asString((sub as any)?.metadata?.plan_key),
+        origin: asString((sub as any)?.metadata?.origin),
+      });
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });
@@ -387,6 +532,15 @@ export async function POST(req: NextRequest) {
         const sub = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["items.data.price"] });
         const cid = asString(sub.customer) ?? customerId;
         await updateCompanyFromSubscription({ supabase, customerId: cid, subscription: sub });
+        await maybeEnqueueSubscriptionActive({
+          supabase,
+          companyId: company.id,
+          customerId: cid,
+          userId: asString((sub as any)?.metadata?.user_id),
+          checkoutSessionId: null,
+          planKey: asString((sub as any)?.metadata?.plan_key),
+          origin: asString((sub as any)?.metadata?.origin),
+        });
       } else {
         const priceId = asString(invoice?.lines?.data?.[0]?.price?.id) ?? null;
         const planKey = planKeyFromPriceId(priceId);

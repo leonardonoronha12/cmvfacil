@@ -721,7 +721,7 @@ a {
 
 .cmv-signup-row2 {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 24px;
 }
 
@@ -729,6 +729,7 @@ a {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .cmv-signup-label {
