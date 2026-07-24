@@ -410,7 +410,11 @@ export default function FornecedoresClient() {
       } catch {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+          showToast(
+            "Não foi possível carregar fornecedores do Supabase. Verifique login e se as tabelas necessárias existem (fornecedores_state no modo legacy, ou suppliers/supplier_items no modo compat). (/setup-supabase)",
+            "error",
+            9000,
+          );
         }
       }
 
@@ -442,7 +446,11 @@ export default function FornecedoresClient() {
       void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+        showToast(
+          "Não foi possível salvar fornecedores no Supabase. Verifique login e se as tabelas necessárias existem (fornecedores_state no modo legacy, ou suppliers/supplier_items no modo compat). (/setup-supabase)",
+          "error",
+          9000,
+        );
       });
     }, 450);
   }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
