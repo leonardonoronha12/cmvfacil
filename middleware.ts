@@ -159,6 +159,7 @@ export async function middleware(req: NextRequest) {
     pathname === "/sitemap.xml" ||
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
+    pathname.startsWith("/api/onboarding/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version" ||
     pathname === "/api/health/supabase-config" ||

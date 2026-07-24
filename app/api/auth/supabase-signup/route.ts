@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { sendWelcomeEmail } from "../../../lib/email";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -37,6 +38,9 @@ export async function POST(req: NextRequest) {
   const email = (body.email ?? "").trim();
   const password = (body.password ?? "").trim();
   if (!email || !password) return json({ error: "missing_fields" }, { status: 400 });
+  const firstName = (body.first_name ?? "").trim();
+  const lastName = (body.last_name ?? "").trim();
+  const siteUrl = requestOrigin(req) || (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim() || "https://cmvfacil.app";
 
   try {
     const admin = getSupabaseAdmin();
@@ -45,8 +49,8 @@ export async function POST(req: NextRequest) {
       password,
       email_confirm: true,
       user_metadata: {
-        first_name: (body.first_name ?? "").trim() || null,
-        last_name: (body.last_name ?? "").trim() || null,
+        first_name: firstName || null,
+        last_name: lastName || null,
         cpf: (body.cpf ?? "").trim() || null,
         whatsapp: (body.whatsapp ?? "").trim() || null,
       },
@@ -54,7 +58,32 @@ export async function POST(req: NextRequest) {
     if (created.error) {
       return json({ error: "signup_failed", details: created.error.message }, { status: 400 });
     }
-    return json({ ok: true, emailConfirmationRequired: false }, { status: 200 });
+
+    const welcome = await sendWelcomeEmail({
+      to: email,
+      firstName,
+      lastName,
+      siteUrl,
+      emailConfirmationRequired: false,
+    });
+    if (welcome.ok) {
+      const uid = String((created.data as any)?.user?.id ?? "").trim();
+      if (uid) {
+        const meta = {
+          first_name: firstName || null,
+          last_name: lastName || null,
+          cpf: (body.cpf ?? "").trim() || null,
+          whatsapp: (body.whatsapp ?? "").trim() || null,
+          welcome_email_sent_at: new Date().toISOString(),
+        };
+        await admin.auth.admin.updateUserById(uid, { user_metadata: meta } as any).catch(() => {});
+      }
+    }
+
+    return json(
+      { ok: true, emailConfirmationRequired: false, welcomeEmailSent: welcome.ok, ...(welcome.ok ? {} : { welcomeEmailError: welcome.error }) },
+      { status: 200 },
+    );
   } catch {
     // fall back to anon signup
   }
@@ -70,8 +99,6 @@ export async function POST(req: NextRequest) {
     auth: { persistSession: false, autoRefreshToken: false, flowType: "implicit" },
   });
 
-  const baseSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
-  const siteUrl = requestOrigin(req) || baseSiteUrl;
   const emailRedirectTo = siteUrl ? `${siteUrl.replace(/\/+$/, "")}/login` : undefined;
 
   const { data, error } = await supabase.auth.signUp({
@@ -93,5 +120,15 @@ export async function POST(req: NextRequest) {
   }
 
   const emailConfirmationRequired = !data.session;
-  return json({ ok: true, emailConfirmationRequired }, { status: 200 });
+  const welcome = await sendWelcomeEmail({
+    to: email,
+    firstName,
+    lastName,
+    siteUrl,
+    emailConfirmationRequired,
+  });
+  return json(
+    { ok: true, emailConfirmationRequired, welcomeEmailSent: welcome.ok, ...(welcome.ok ? {} : { welcomeEmailError: welcome.error }) },
+    { status: 200 },
+  );
 }

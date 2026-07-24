@@ -52,7 +52,14 @@ export default function CadastroUsuarioClient() {
         }),
       });
       const data = (await res.json().catch(() => null)) as
-        | { ok?: boolean; error?: string; details?: string; emailConfirmationRequired?: boolean }
+        | {
+            ok?: boolean;
+            error?: string;
+            details?: string;
+            emailConfirmationRequired?: boolean;
+            welcomeEmailSent?: boolean;
+            welcomeEmailError?: string;
+          }
         | null;
       if (!res.ok || !data?.ok) {
         setError(data?.details ?? data?.error ?? "Erro ao criar conta.");
@@ -60,9 +67,11 @@ export default function CadastroUsuarioClient() {
       }
       const required = typeof data.emailConfirmationRequired === "boolean" ? data.emailConfirmationRequired : null;
       setEmailConfirmationRequired(required);
+      const welcomeSent = typeof data.welcomeEmailSent === "boolean" ? data.welcomeEmailSent : null;
+      const welcomeSuffix = welcomeSent === false ? " (E-mail de boas-vindas não enviado)" : "";
       setToast({
         title: "Conta criada",
-        message: required === false ? "Você já pode fazer login." : "Verifique seu email para confirmar o cadastro.",
+        message: required === false ? `Você já pode fazer login.${welcomeSuffix}` : `Verifique seu email para confirmar o cadastro.${welcomeSuffix}`,
         tone: "success",
       });
       if (required === false) {
