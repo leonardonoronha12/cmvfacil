@@ -205,7 +205,7 @@ export async function middleware(req: NextRequest) {
       const authorization = req.headers.get("authorization") ?? "";
       const res = await fetchWithTimeout(
         checkUrl.toString(),
-        { method: "GET", headers: { ...(cookie ? { cookie } : {}), ...(authorization ? { authorization } : {}) } },
+        { method: "GET", headers: { ...(cookie ? { cookie } : {}), ...(authorization ? { authorization } : {}), "x-cmv-middleware": "1" } },
         2500,
       );
       const data = (await res.json().catch(() => null)) as { access?: { allowed?: boolean } } | null;

@@ -173,10 +173,11 @@ async function reconcileStripeCompanyState(ctx: Awaited<ReturnType<typeof getBil
 
 export async function GET(req: NextRequest) {
   try {
+    const isMiddlewareCheck = String(req.headers.get("x-cmv-middleware") ?? "").trim() === "1";
     let ctx = await getBillingAccessForCurrentCompany(req);
-    const didReconcile = await reconcileStripeCompanyState(ctx);
+    const didReconcile = isMiddlewareCheck ? false : await reconcileStripeCompanyState(ctx);
     if (didReconcile) ctx = await getBillingAccessForCurrentCompany(req);
-    const cardLast4 = await fetchCardLast4(ctx.company);
+    const cardLast4 = isMiddlewareCheck ? null : await fetchCardLast4(ctx.company);
     return json({ ok: true, access: { ...ctx.access, cardLast4 } }, { status: 200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
