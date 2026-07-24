@@ -8,6 +8,10 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 function digitsOnly(value: string) {
   return value.replace(/\D/g, "");
 }
@@ -48,6 +52,7 @@ export async function POST(req: NextRequest) {
   const industry = String(data.industry ?? "").trim();
   const desiredStore = String(data.desiredStore ?? "").trim();
   const logoUrl = String(data.logoUrl ?? "").trim();
+  const companyIdOverride = String((data as any).company_id ?? (data as any).companyId ?? "").trim();
 
   if (!fantasyName) return json({ error: "fantasy_name_required" }, { status: 400 });
   if (!legalName) return json({ error: "legal_name_required" }, { status: 400 });
@@ -64,6 +69,48 @@ export async function POST(req: NextRequest) {
     supabase = getSupabaseAdmin();
   } catch {
     return json({ error: "server_not_configured" }, { status: 500 });
+  }
+
+  if (companyIdOverride && isUuid(companyIdOverride)) {
+    const membership = await supabase
+      .from("company_members")
+      .select("company_id")
+      .eq("company_id", companyIdOverride)
+      .eq("user_id", uid)
+      .limit(1)
+      .maybeSingle();
+    if (membership.error) return json({ error: "supabase_error", details: membership.error.message }, { status: 500 });
+    if (!membership.data?.company_id) return json({ error: "company_forbidden" }, { status: 403 });
+
+    const { error: updateErr } = await (supabase.from("companies") as any)
+      .update({
+        fantasy_name: fantasyName,
+        legal_name: legalName,
+        cnpj,
+        email,
+        phone_e164: phoneE164,
+        industry: industry || null,
+        logo_url: logoUrl || null,
+        desired_store: desiredStore || null,
+        raw: { source: "cadastro-empresa" },
+      })
+      .eq("id", companyIdOverride);
+    if (updateErr) return json({ error: "supabase_error", details: updateErr.message }, { status: 500 });
+
+    const up = await supabase.from("company_members").upsert(
+      {
+        company_id: companyIdOverride,
+        user_id: uid,
+        role: "owner",
+        permission_level: "3",
+      } as any,
+      { onConflict: "company_id,user_id" },
+    );
+    if (up.error) {
+      return json({ error: "company_member_failed", details: up.error.message }, { status: 500 });
+    }
+
+    return json({ ok: true, company_id: companyIdOverride }, { status: 200 });
   }
 
   const { data: companyId, error } = await supabase.rpc("upsert_company", {

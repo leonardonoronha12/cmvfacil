@@ -115,6 +115,14 @@ export async function middleware(req: NextRequest) {
   const isPublicFile = /\.[^/]+$/.test(pathname);
   const host = String(req.headers.get("host") ?? "").toLowerCase();
   const isLocalhost = host.includes("localhost") || host.includes("127.0.0.1");
+  const vercelEnv = String(process.env.VERCEL_ENV ?? "").trim().toLowerCase();
+
+  if (vercelEnv === "production" && host.endsWith(".vercel.app") && host !== "cmvfacil.app") {
+    const url = req.nextUrl.clone();
+    url.host = "cmvfacil.app";
+    url.protocol = "https:";
+    return NextResponse.redirect(url, 308);
+  }
 
   if (
     isLocalhost &&

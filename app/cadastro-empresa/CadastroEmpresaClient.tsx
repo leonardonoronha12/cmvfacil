@@ -5,7 +5,6 @@ import LoadingSpinner from "../components/LoadingSpinner";
 import { maskCnpj, maskPhoneBR } from "../lib/masks";
 
 export default function CadastroEmpresaClient() {
-  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
   const [fantasyName, setFantasyName] = useState("");
   const [legalName, setLegalName] = useState("");
   const [cnpj, setCnpj] = useState("");
@@ -13,17 +12,22 @@ export default function CadastroEmpresaClient() {
   const [whatsapp, setWhatsapp] = useState("");
   const [industry, setIndustry] = useState("Hamburgueria");
   const [desiredStore, setDesiredStore] = useState("");
-  const [logoUrl, setLogoUrl] = useState<string | null>(null);
-  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [createdCompanyId, setCreatedCompanyId] = useState<string | null>(null);
+  const [onboardingMode, setOnboardingMode] = useState(false);
   const didRedirectRef = useRef(false);
   const didAutoOpenCheckoutRef = useRef(false);
 
   useEffect(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      setOnboardingMode(params.get("onboarding") === "1");
+    } catch {
+      setOnboardingMode(false);
+    }
     const pending = (() => {
       try {
         return sessionStorage.getItem("cmv_onboarding_checkout_pending") === "1";
@@ -146,6 +150,7 @@ export default function CadastroEmpresaClient() {
               method: "POST",
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
+                company_id: onboardingMode ? createdCompanyId : undefined,
                 fantasyName,
                 legalName,
                 cnpj,
@@ -153,7 +158,6 @@ export default function CadastroEmpresaClient() {
                 whatsapp,
                 industry,
                 desiredStore,
-                logoUrl,
               }),
             });
             const json = (await res.json().catch(() => null)) as { ok?: boolean; company_id?: string; error?: string; details?: string } | null;
@@ -164,6 +168,14 @@ export default function CadastroEmpresaClient() {
             setSuccess(true);
             const newCompanyId = String(json?.company_id ?? "").trim();
             setCreatedCompanyId(newCompanyId || null);
+            if (onboardingMode) {
+              try {
+                sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+                sessionStorage.removeItem("cmv_onboarding_company_id");
+              } catch {}
+              window.location.replace("/dashboard");
+              return;
+            }
             const ok = await openCheckout(newCompanyId);
             if (ok) return;
           } catch {
@@ -179,68 +191,6 @@ export default function CadastroEmpresaClient() {
         </header>
 
         <div className="cmv-company-divider" />
-
-        <div className="cmv-company-field">
-          <label className="cmv-company-label">Logo (opcional)</label>
-          <div className="cmv-company-input">
-            <input
-              className="cmv-company-inputEl"
-              type="file"
-              accept="image/*"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                if (!file) return;
-                const url = URL.createObjectURL(file);
-                setLogoPreviewUrl(url);
-                setError(null);
-                setIsUploadingLogo(true);
-                const form = new FormData();
-                form.set("file", file);
-                fetch("/api/companies/logo", { method: "POST", body: form })
-                  .then(async (r) => {
-                    const j = (await r.json().catch(() => null)) as
-                      | { ok?: boolean; publicUrl?: string; error?: string; details?: string }
-                      | null;
-                    if (!r.ok) {
-                      setError(j?.details ?? j?.error ?? "Erro ao enviar imagem.");
-                      return;
-                    }
-                    setLogoUrl(j?.publicUrl ?? null);
-                  })
-                  .catch(() => {
-                    setError("Erro ao enviar imagem.");
-                  })
-                  .finally(() => {
-                    setIsUploadingLogo(false);
-                  });
-              }}
-            />
-          </div>
-          {isUploadingLogo ? (
-            <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 8 }}>
-              <LoadingSpinner size={16} />
-              <span>Enviando…</span>
-            </div>
-          ) : null}
-          {logoPreviewUrl ? <img src={logoPreviewUrl} alt="" style={{ marginTop: 10, width: 86, height: 86, objectFit: "cover", borderRadius: 12 }} /> : null}
-          {logoPreviewUrl ? (
-            <button
-              type="button"
-              className="cmv-company-btn cmv-company-btnDanger"
-              style={{ marginTop: 10, width: "fit-content" }}
-              onClick={() => {
-                setLogoPreviewUrl(null);
-                setLogoUrl(null);
-              }}
-            >
-              Remover imagem
-            </button>
-          ) : null}
-          <div className="cmv-company-logoHint" style={{ marginTop: 8 }}>
-            Tamanho recomendado: 600 x 600 px
-          </div>
-        </div>
 
         <div className="cmv-company-field">
           <label className="cmv-company-label">Nome Fantasia</label>
@@ -343,7 +293,7 @@ export default function CadastroEmpresaClient() {
         {error ? <div className="cmv-company-error">{error}</div> : null}
         {success ? <div className="cmv-company-success">Empresa cadastrada com sucesso.</div> : null}
 
-        <button type="submit" className="cmv-company-submit" disabled={isSubmitting || isUploadingLogo}>
+        <button type="submit" className="cmv-company-submit" disabled={isSubmitting}>
           Salvar e Continuar
         </button>
       </form>

@@ -532,7 +532,7 @@ export default function DesperdiciosClient({
   const loadErrorShownRef = useRef(false);
   const saveErrorShownRef = useRef(false);
   const deleteErrorShownRef = useRef(false);
-  const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isLoadingTable, setIsLoadingTable] = useState(false);
   const [rows, setRows] = useState<DesperdicioRow[]>([]);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
     return initialSourceMeta ?? { source: "legacy", readOnly: false };
@@ -1289,6 +1289,7 @@ export default function DesperdiciosClient({
 
   useEffect(() => {
     let cancelled = false;
+    let done = false;
     const forcedCompat = typeof window !== "undefined" && String(new URLSearchParams(window.location.search).get("source") ?? "").trim().toLowerCase() === "compat";
     if (forcedCompat) {
       setSourceMeta({ source: "compat", readOnly: true });
@@ -1301,6 +1302,10 @@ export default function DesperdiciosClient({
     setRows(readDesperdiciosFromStore([]));
     rowsReadyRef.current = true;
     setIsLoadingTable(false);
+    const showTimer = window.setTimeout(() => {
+      if (cancelled || done) return;
+      setIsLoadingTable(true);
+    }, 350);
     const timer = window.setTimeout(() => {
       void (async () => {
         try {
@@ -1321,12 +1326,17 @@ export default function DesperdiciosClient({
           if (!loadErrorShownRef.current) {
             loadErrorShownRef.current = true;
           }
+        } finally {
+          done = true;
+          window.clearTimeout(showTimer);
+          if (!cancelled) setIsLoadingTable(false);
         }
       })();
-    }, 900);
+    }, 50);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.clearTimeout(showTimer);
     };
   }, []);
 

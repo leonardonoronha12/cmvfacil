@@ -84,7 +84,33 @@ export default function CadastroUsuarioClient() {
           setError(err instanceof Error ? err.message : "Não foi possível entrar automaticamente. Faça login.");
           return;
         }
-        window.location.replace("/cadastro-empresa");
+        try {
+          const start = await fetch("/api/onboarding/start", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ plan_key: "pro_monthly" }),
+          });
+          const sj = (await start.json().catch(() => null)) as { ok?: boolean; url?: string; company_id?: string; error?: string } | null;
+          if (start.ok && sj?.ok && sj?.url) {
+            const companyId = String(sj.company_id ?? "").trim();
+            if (companyId) {
+              sessionStorage.setItem("cmv_onboarding_company_id", companyId);
+              sessionStorage.setItem("cmv_onboarding_checkout_pending", "1");
+            }
+            window.location.assign(String(sj.url));
+            return;
+          }
+          if (start.status === 409 && String(sj?.error ?? "") === "subscription_already_active") {
+            window.location.replace("/cadastro-empresa?onboarding=1");
+            return;
+          }
+          const status = start.status ? ` (HTTP ${start.status})` : "";
+          setError(sj?.error ? `Não foi possível abrir o Checkout${status}: ${sj.error}` : `Não foi possível abrir o Checkout${status}.`);
+          return;
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Não foi possível abrir o Checkout.");
+          return;
+        }
       }
     } catch {
       setError("Erro ao criar conta.");
