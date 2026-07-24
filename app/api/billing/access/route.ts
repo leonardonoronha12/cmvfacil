@@ -96,6 +96,10 @@ async function reconcileStripeCompanyState(ctx: Awaited<ReturnType<typeof getBil
   const updatedAtIso = asString(company?.subscription_updated_at);
   const updatedAtMs = updatedAtIso ? Date.parse(updatedAtIso) : NaN;
   const isStale = !Number.isFinite(updatedAtMs) || Date.now() - updatedAtMs > 60_000;
+  const startedAtIso = asString(company?.checkout_started_at);
+  const startedAtMs = startedAtIso ? Date.parse(startedAtIso) : NaN;
+  const shouldAutoAbandonCheckout =
+    checkoutStatusLower === "open" && Number.isFinite(startedAtMs) && Date.now() - startedAtMs > 10 * 60 * 1000;
   const shouldSync =
     checkoutStatusLower === "open" ||
     (!shouldConsiderSubscriptionActive(subStatusLower) &&
@@ -127,7 +131,25 @@ async function reconcileStripeCompanyState(ctx: Awaited<ReturnType<typeof getBil
       }
     } catch {}
   }
-  if (!subscription) return false;
+  if (!subscription) {
+    if (shouldAutoAbandonCheckout) {
+      const nowIso = new Date().toISOString();
+      await ctx.supabase
+        .from("companies")
+        .update({
+          checkout_status: "abandoned",
+          checkout_plan: null,
+          checkout_url: null,
+          stripe_checkout_session_id: null,
+          checkout_started_at: null,
+          checkout_abandoned_at: String(company?.checkout_abandoned_at ?? "").trim() ? company.checkout_abandoned_at : nowIso,
+          subscription_updated_at: nowIso,
+        } as any)
+        .eq("id", companyId);
+      return true;
+    }
+    return false;
+  }
 
   await updateCompanyFromSubscription({ supabase: ctx.supabase, customerId, subscription });
 
@@ -190,10 +212,7 @@ export async function POST(req: NextRequest) {
         if (stripe) {
           try {
             await stripe.checkout.sessions.expire(sessionId);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
-          }
+          } catch {}
         }
       }
       patch.checkout_status = "canceled";
@@ -210,10 +229,7 @@ export async function POST(req: NextRequest) {
         if (stripe) {
           try {
             await stripe.checkout.sessions.expire(sessionId);
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            if (!msg.toLowerCase().includes("only open sessions")) throw new Error("stripe_expire_failed");
-          }
+          } catch {}
         }
       }
       patch.checkout_status = "abandoned";

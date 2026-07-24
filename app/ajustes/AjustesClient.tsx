@@ -758,6 +758,32 @@ export default function AjustesClient() {
                         <IconUserPlaceholder />
                       )}
                     </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <input
+                        id="cmv-company-logo-input"
+                        type="file"
+                        accept="image/*"
+                        style={{ display: "none" }}
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (!f) return;
+                          void uploadCompanyLogo(f);
+                          e.target.value = "";
+                        }}
+                      />
+                      <button
+                        type="button"
+                        className={styles.btnGhost}
+                        disabled={savingCompany}
+                        onClick={() => {
+                          const el = document.getElementById("cmv-company-logo-input") as HTMLInputElement | null;
+                          el?.click();
+                        }}
+                      >
+                        {savingCompany ? "Enviando…" : "Enviar imagem"}
+                      </button>
+                      <div className={styles.avatarHint}>Imagem da empresa (PNG/JPG/WebP)</div>
+                    </div>
                   </div>
 
                   <div className={styles.sectionTitle}>Informações da Empresa</div>
