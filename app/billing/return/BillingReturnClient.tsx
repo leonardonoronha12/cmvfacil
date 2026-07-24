@@ -33,15 +33,30 @@ export default function BillingReturnClient() {
   const didRunRef = useRef(false);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
   const [error, setError] = useState("");
+  const [effectiveOrigin, setEffectiveOrigin] = useState<Origin | null>(null);
 
-  const origin = useMemo(() => parseOrigin(params.get("origin")), [params]);
+  const originParam = useMemo(() => parseOrigin(params.get("origin")), [params]);
   const checkout = useMemo(() => parseCheckout(params.get("checkout")), [params]);
 
+  const origin = effectiveOrigin ?? originParam;
   const successTarget = origin === "signup" ? "/cadastro-empresa?onboarding=1&checkout=success" : "/ajustes?tab=planos&checkout=success";
   const processingTarget = origin === "signup" ? "/cadastro-empresa?onboarding=1&checkout=processing" : "/ajustes?tab=planos&checkout=processing";
   const cancelTarget = origin === "signup" ? "/cadastro-usuario?checkout=cancel" : "/ajustes?tab=planos&checkout=cancel";
 
   useEffect(() => {
+    if (effectiveOrigin !== null) return;
+    try {
+      const pending = sessionStorage.getItem("cmv_onboarding_checkout_pending");
+      if (pending === "1") {
+        setEffectiveOrigin("signup");
+        return;
+      }
+    } catch {}
+    setEffectiveOrigin(originParam);
+  }, [effectiveOrigin, originParam]);
+
+  useEffect(() => {
+    if (effectiveOrigin === null) return;
     if (didRunRef.current) return;
     didRunRef.current = true;
 
@@ -97,7 +112,7 @@ export default function BillingReturnClient() {
       setStatus("error");
       setError(err instanceof Error ? err.message : String(err));
     });
-  }, [cancelTarget, checkout, processingTarget, successTarget]);
+  }, [cancelTarget, checkout, effectiveOrigin, processingTarget, successTarget]);
 
   return (
     <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>

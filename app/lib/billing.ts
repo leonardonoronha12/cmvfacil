@@ -473,7 +473,7 @@ export async function createOrReuseCheckoutUrl(params: {
   const checkoutUrl = String(company.checkout_url ?? "").trim();
   const startedAt = String(company.checkout_started_at ?? "").trim();
   const startedMs = startedAt ? Date.parse(startedAt) : NaN;
-  if (checkoutUrl && startedAt && Number.isFinite(startedMs) && Date.now() - startedMs < 30 * 60 * 1000) {
+  if (origin !== "signup" && checkoutUrl && startedAt && Number.isFinite(startedMs) && Date.now() - startedMs < 30 * 60 * 1000) {
     const status = String(company.checkout_status ?? "").trim().toLowerCase();
     if (status === "open" || !status) return checkoutUrl;
   }
