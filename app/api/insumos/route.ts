@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 
 export const runtime = "nodejs";
@@ -58,6 +58,15 @@ function parseCsvEnv(value: string | undefined) {
     .filter(Boolean);
 }
 
+function parseEnvBool(value: unknown) {
+  const v = String(value ?? "")
+    .trim()
+    .toLowerCase();
+  if (!v) return false;
+  if (v === "1" || v === "true" || v === "yes" || v === "on") return true;
+  return false;
+}
+
 function parsePermissionLevel(v: unknown) {
   if (typeof v === "number" && Number.isFinite(v)) return v;
   const n = Number(String(v ?? "").trim());
@@ -88,6 +97,23 @@ function pickBestCompanyId(memberRows: unknown[]) {
     }
   }
   return bestCompanyId;
+}
+
+function pickBestMemberUserId(memberRows: unknown[]) {
+  let bestUserId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const userId = String(r?.user_id ?? "").trim();
+    if (!userId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestUserId = userId;
+    }
+  }
+  return bestUserId;
 }
 
 function isAdminUserId(userId: string) {
@@ -144,12 +170,275 @@ function looksLikeBubbleId(v: unknown) {
   return /^\d{6,}x\d{6,}$/.test(s);
 }
 
+async function seedCompanyItemsFromLegacy(args: { supabase: ReturnType<typeof getSupabaseServerClient>; companyId: string; diag?: boolean }) {
+  const { supabase, companyId } = args;
+  let supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+  try {
+    supabaseAdmin = getSupabaseAdmin();
+  } catch {
+    supabaseAdmin = null;
+  }
+  const db = supabaseAdmin ?? supabase;
+
+  const diagOut = args.diag ? ({ attempts: [] as any[], chosen: null as any }) : null;
+
+  const { data: members, error: mErr } = await db
+    .from("company_members")
+    .select("user_id,bubble_user_id,role,permission_level")
+    .eq("company_id", companyId)
+    .limit(80);
+  if (mErr) return { ok: false, diag: diagOut };
+  const memberRows = (members ?? []) as any[];
+  if (!memberRows.length) return { ok: false, diag: diagOut };
+
+  const memberUserIds = Array.from(new Set(memberRows.map((r) => String(r?.user_id ?? "").trim()).filter((x) => isUuid(x))));
+  const { data: memberProfiles } = memberUserIds.length
+    ? await db.from("user_profiles").select("user_id,email,bubble_user_id").in("user_id", memberUserIds).limit(200)
+    : { data: [] as any[] };
+  const emailByUserId = new Map<string, string>();
+  const bubbleUserIdByUserId = new Map<string, string>();
+  for (const p of memberProfiles ?? []) {
+    const uid = String((p as any)?.user_id ?? "").trim();
+    const email = String((p as any)?.email ?? "").trim().toLowerCase();
+    if (uid && email) emailByUserId.set(uid, email);
+    const bub = String((p as any)?.bubble_user_id ?? "").trim();
+    if (uid && bub) bubbleUserIdByUserId.set(uid, bub);
+  }
+
+  const sorted = memberRows.slice().sort((a, b) => parsePermissionLevel(b?.permission_level) * 100 + scoreRole(b?.role) - (parsePermissionLevel(a?.permission_level) * 100 + scoreRole(a?.role)));
+
+  let legacyRows: any[] = [];
+  let legacyCategories: any[] = [];
+  let foundFrom: "insumos_state" | "insumos" | "inventario" | null = null;
+  let legacyKey: string | null = null;
+  let chosenUserId: string | null = null;
+  for (const m of sorted.slice(0, 12)) {
+    const candidateUserId = String(m?.user_id ?? "").trim();
+    if (!candidateUserId || !isUuid(candidateUserId)) continue;
+    const email = String(emailByUserId.get(candidateUserId) ?? "").trim().toLowerCase();
+    const bubbleUserId = String(m?.bubble_user_id ?? bubbleUserIdByUserId.get(candidateUserId) ?? "").trim();
+    const stateIds = [`user:${candidateUserId}`, email ? `user:${email}` : "", bubbleUserId ? `user:${bubbleUserId}` : ""].filter(Boolean);
+    for (const legacyId of stateIds) {
+      if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "insumos_state", legacyId, candidateUserId });
+      const { data, error } = await db.from("insumos_state").select("*").eq("id", legacyId).maybeSingle();
+      if (!error && data) {
+        const payload = (data as any)?.payload;
+        const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+        const categories = Array.isArray(payload?.categories) ? (payload.categories as any[]) : [];
+        if (rows.length) {
+          legacyRows = rows;
+          legacyCategories = categories;
+          foundFrom = "insumos_state";
+          legacyKey = legacyId;
+          chosenUserId = candidateUserId;
+          break;
+        }
+      }
+    }
+    if (legacyRows.length) break;
+
+    const prefixes = [`user:${candidateUserId}:`, email ? `user:${email}:` : "", bubbleUserId ? `user:${bubbleUserId}:` : ""].filter(Boolean);
+    for (const prefix of prefixes) {
+      if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "insumos", prefix, candidateUserId });
+      const { data: rowsDb, error: rowsErr } = await db
+        .from("insumos")
+        .select("id,item,medida,custo_medio,categoria,especificacao,ocultar")
+        .like("id", `${prefix}%`)
+        .order("item", { ascending: true })
+        .limit(8000);
+      if (!rowsErr && (rowsDb ?? []).length) {
+        legacyRows = (rowsDb ?? []).map((r: any) => ({
+          id: String(r?.id ?? "").trim(),
+          item: String(r?.item ?? "").trim(),
+          medida: String(r?.medida ?? "").trim() || "Und",
+          custoMedio: String(r?.custo_medio ?? "").trim() || undefined,
+          categoria: String(r?.categoria ?? "").trim() || undefined,
+          especificacao: String(r?.especificacao ?? "").trim() || undefined,
+          ocultar: typeof r?.ocultar === "boolean" ? Boolean(r.ocultar) : undefined,
+        }));
+        legacyCategories = [];
+        foundFrom = "insumos";
+        legacyKey = `${prefix}%`;
+        chosenUserId = candidateUserId;
+        break;
+      }
+    }
+    if (legacyRows.length) break;
+  }
+
+  if (!legacyRows.length) {
+    for (const m of sorted.slice(0, 12)) {
+      const candidateUserId = String(m?.user_id ?? "").trim();
+      if (!candidateUserId || !isUuid(candidateUserId)) continue;
+      const email = String(emailByUserId.get(candidateUserId) ?? "").trim().toLowerCase();
+      const bubbleUserId = String(m?.bubble_user_id ?? bubbleUserIdByUserId.get(candidateUserId) ?? "").trim();
+      const prefixes = [`user:${candidateUserId}:`, email ? `user:${email}:` : "", bubbleUserId ? `user:${bubbleUserId}:` : ""].filter(Boolean);
+      for (const prefix of prefixes) {
+        if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "inventario", prefix, candidateUserId });
+        const { data: invRows, error: invErr } = await db
+          .from("inventario")
+          .select("id,categorias,created_at")
+          .like("id", `${prefix}%`)
+          .order("created_at", { ascending: false })
+          .limit(25);
+        if (invErr) continue;
+        const inv = (invRows ?? [])[0] as any;
+        const categorias = Array.isArray(inv?.categorias) ? (inv.categorias as any[]) : [];
+        const byNameKey = new Map<string, any>();
+        const catNames = new Set<string>();
+        for (const c of categorias) {
+          const catName = String((c as any)?.nome ?? (c as any)?.name ?? "").trim();
+          if (catName) catNames.add(catName);
+          const itens = Array.isArray((c as any)?.itens) ? ((c as any).itens as any[]) : [];
+          for (const it of itens) {
+            const name = String(it?.item ?? it?.name ?? "").trim();
+            if (!name) continue;
+            const key = normalizeNameKey(name);
+            if (!key || byNameKey.has(key)) continue;
+            byNameKey.set(key, {
+              id: String(it?.id ?? "").trim() || name,
+              item: name,
+              medida: String(it?.unidade ?? it?.unidade_medida ?? it?.medida ?? "").trim() || "Und",
+              categoria: catName || undefined,
+              especificacao: undefined,
+              custoMedio: undefined,
+              ocultar: undefined,
+            });
+          }
+        }
+        legacyRows = Array.from(byNameKey.values());
+        legacyCategories = Array.from(catNames.values());
+        foundFrom = "inventario";
+        legacyKey = `${prefix}%`;
+        chosenUserId = candidateUserId;
+        break;
+      }
+      if (legacyRows.length) break;
+    }
+  }
+
+  if (!legacyRows.length) return { ok: false, diag: diagOut };
+
+  const { data: categoriesDb, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
+  if (catErr) return { ok: false, diag: diagOut };
+  const categoryIdByKey = new Map<string, string>();
+  for (const c of categoriesDb ?? []) {
+    const id0 = String((c as any)?.id ?? "").trim();
+    const name0 = String((c as any)?.name ?? "").trim();
+    if (!id0 || !name0) continue;
+    categoryIdByKey.set(normalizeNameKey(name0), id0);
+  }
+
+  const categoryNames = new Set<string>();
+  for (const c of legacyCategories ?? []) {
+    const name0 = String(c ?? "").trim();
+    if (!name0 || name0 === "-") continue;
+    categoryNames.add(name0);
+  }
+  for (const r of legacyRows) {
+    const name0 = String((r as any)?.categoria ?? "").trim();
+    if (!name0 || name0 === "-") continue;
+    categoryNames.add(name0);
+  }
+
+  const toCreate: { company_id: string; name: string }[] = [];
+  for (const name0 of categoryNames) {
+    const key = normalizeNameKey(name0);
+    if (!key || categoryIdByKey.has(key)) continue;
+    toCreate.push({ company_id: companyId, name: name0 });
+  }
+  if (toCreate.length) {
+    const { data: created, error: createErr } = await db.from("categories").insert(toCreate as any).select("id,name");
+    if (createErr) return { ok: false, diag: diagOut };
+    for (const c of created ?? []) {
+      const id0 = String((c as any)?.id ?? "").trim();
+      const name0 = String((c as any)?.name ?? "").trim();
+      if (!id0 || !name0) continue;
+      categoryIdByKey.set(normalizeNameKey(name0), id0);
+    }
+  }
+
+  const bubbleIds = Array.from(new Set(legacyRows.map((r) => String((r as any)?.id ?? "").trim()).filter((x) => looksLikeBubbleId(x))));
+  const existingIdByBubbleId = new Map<string, string>();
+  if (bubbleIds.length) {
+    const { data, error } = await db.from("items").select("id,bubble_id").eq("company_id", companyId).in("bubble_id", bubbleIds);
+    if (error) return { ok: false, diag: diagOut };
+    for (const it of data ?? []) {
+      const id0 = String((it as any)?.id ?? "").trim();
+      const bid = String((it as any)?.bubble_id ?? "").trim();
+      if (id0 && bid) existingIdByBubbleId.set(bid, id0);
+    }
+  }
+
+  const upsertByBubble: any[] = [];
+  const upsertById: any[] = [];
+  for (const r of legacyRows) {
+    const rawId = String((r as any)?.id ?? "").trim();
+    const name = String((r as any)?.item ?? "").trim();
+    if (!name) continue;
+    const categoria = String((r as any)?.categoria ?? "").trim();
+    const categoriaKey = categoria && categoria !== "-" ? normalizeNameKey(categoria) : "";
+    const categoryId = categoriaKey ? categoryIdByKey.get(categoriaKey) ?? null : null;
+    const bubbleId = looksLikeBubbleId(rawId) ? rawId : null;
+    const existingId = bubbleId ? existingIdByBubbleId.get(bubbleId) ?? "" : "";
+    const patch = {
+      company_id: companyId,
+      id: existingId || crypto.randomUUID(),
+      bubble_id: bubbleId,
+      name,
+      unidade_medida: String((r as any)?.medida ?? "").trim() || null,
+      custo_medio: parseBrlNumber((r as any)?.custoMedio),
+      descricao: String((r as any)?.especificacao ?? "").trim() || "",
+      ocultar_cmv: typeof (r as any)?.ocultar === "boolean" ? Boolean((r as any).ocultar) : false,
+      category_id: categoryId,
+      item_receita: false,
+      item_do_cardapio: false,
+    };
+    if (bubbleId) upsertByBubble.push(patch);
+    else upsertById.push(patch);
+  }
+
+  if (upsertByBubble.length) {
+    const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+    if (error) return { ok: false, diag: diagOut };
+  }
+  if (upsertById.length) {
+    const { error } = await db.from("items").upsert(upsertById as any, { onConflict: "id" });
+    if (error) return { ok: false, diag: diagOut };
+  }
+
+  if (diagOut) {
+    diagOut.chosen = {
+      companyId,
+      chosenUserId,
+      legacyKey,
+      foundFrom,
+      legacyRows: legacyRows.length,
+      legacyCategories: legacyCategories.length,
+      createdCategories: toCreate.length,
+      upsertByBubble: upsertByBubble.length,
+      upsertById: upsertById.length,
+    };
+  }
+  return { ok: true, diag: diagOut };
+}
+
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  return false;
+  const url = new URL(args.req.url);
+  const source = String(url.searchParams.get("source") ?? "")
+    .trim()
+    .toLowerCase();
+  if (source === "legacy") return false;
+
+  const enabled = parseEnvBool(process.env.BUBBLE_COMPAT_READ_INSUMOS) || parseEnvBool(process.env.BUBBLE_COMPAT_READ_INSOMOS);
+  if (source === "compat") return args.isAdmin ? true : enabled;
+  return enabled;
 }
 
 export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
@@ -168,6 +457,14 @@ export async function GET(req: NextRequest) {
       },
     });
     if (shouldUseCompat) {
+      let supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+      try {
+        supabaseAdmin = getSupabaseAdmin();
+      } catch {
+        supabaseAdmin = null;
+      }
+      const db = supabaseAdmin ?? supabase;
+
       const { data: memberRows, error: memberErr } = await supabase
         .from("company_members")
         .select("company_id,role,permission_level")
@@ -177,35 +474,69 @@ export async function GET(req: NextRequest) {
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
-      const { data: categoriesDb, error: catErr } = await supabase.from("categories").select("id,name").eq("company_id", companyId);
+      const { data: categoriesDbRaw, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
       if (catErr) return json({ error: catErr.message }, { status: 500 });
+      let categoriesDb = (categoriesDbRaw ?? []) as any[];
+
+      const { data: itemsDbRaw, error: itemsErr } = await db
+        .from("items")
+        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
+        .eq("company_id", companyId)
+        .or("item_receita.is.null,item_receita.eq.false")
+        .order("name", { ascending: true });
+      if (itemsErr) return json({ error: itemsErr.message }, { status: 500 });
+      let itemsDb = (itemsDbRaw ?? []) as any[];
+      const diagCompat: any = diag ? { companyId, before: { categories: categoriesDb.length, items: itemsDb.length } } : null;
+
+      if (!itemsDb.length) {
+        const seedRes = await seedCompanyItemsFromLegacy({ supabase, companyId, diag });
+        const seeded = Boolean(seedRes?.ok);
+        if (diagCompat) diagCompat.seed = seedRes?.diag ?? { ok: seeded };
+        if (seeded) {
+          const { data: categoriesDb2, error: catErr2 } = await db.from("categories").select("id,name").eq("company_id", companyId);
+          if (!catErr2) categoriesDb = (categoriesDb2 ?? []) as any[];
+
+          const { data: itemsDb2, error: itemsErr2 } = await db
+            .from("items")
+            .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
+            .eq("company_id", companyId)
+            .or("item_receita.is.null,item_receita.eq.false")
+            .order("name", { ascending: true });
+          if (!itemsErr2) itemsDb = (itemsDb2 ?? []) as any[];
+        }
+        if (diagCompat) diagCompat.after = { categories: categoriesDb.length, items: itemsDb.length };
+      }
+
+      if (!itemsDb.length) {
+        const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
+        if (!error) {
+          const payload = (data as any)?.payload;
+          const rows = Array.isArray(payload?.rows) ? (payload.rows as unknown[]) : [];
+          const categories = Array.isArray(payload?.categories) ? (payload.categories as unknown[]) : [];
+          if (diagCompat) diagCompat.fallbackLegacyState = { rows: rows.length, categories: categories.length };
+          if (rows.length) return json({ source: "legacy", readOnly: false, rows, categories, ...(diagCompat ? { diag: diagCompat } : {}) }, { status: 200 });
+        }
+      }
+
       const categoryNameById = new Map<string, string>();
-      for (const c of categoriesDb ?? []) {
+      for (const c of categoriesDb) {
         const cid = String((c as any)?.id ?? "").trim();
         const name = String((c as any)?.name ?? "").trim();
         if (cid) categoryNameById.set(cid, name);
       }
 
-      const { data: itemsDb, error: itemsErr } = await supabase
-        .from("items")
-        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
-        .eq("company_id", companyId)
-        .eq("item_receita", false)
-        .order("name", { ascending: true });
-      if (itemsErr) return json({ error: itemsErr.message }, { status: 500 });
-
       await dbg("A", "api/insumos", "compat_items_loaded", {
         companyId,
-        totalItemsDb: (itemsDb ?? []).length,
-        sampleNames: (itemsDb ?? []).slice(0, 20).map((r: any) => String(r?.name ?? "").trim()),
+        totalItemsDb: itemsDb.length,
+        sampleNames: itemsDb.slice(0, 20).map((r: any) => String(r?.name ?? "").trim()),
         flagsTrueCounts: {
-          item_receita_true: (itemsDb ?? []).filter((r: any) => Boolean(r?.item_receita)).length,
-          item_do_cardapio_true: (itemsDb ?? []).filter((r: any) => Boolean(r?.item_do_cardapio)).length,
+          item_receita_true: itemsDb.filter((r: any) => Boolean(r?.item_receita)).length,
+          item_do_cardapio_true: itemsDb.filter((r: any) => Boolean(r?.item_do_cardapio)).length,
         },
-        containsCarreteiro: (itemsDb ?? []).some((r: any) => String(r?.name ?? "").trim().toLowerCase() === "carreteiro"),
+        containsCarreteiro: itemsDb.some((r: any) => String(r?.name ?? "").trim().toLowerCase() === "carreteiro"),
       });
 
-      const rows = (itemsDb ?? [])
+      const rows = itemsDb
         .map((r: any) => {
           const bubbleId = String(r?.bubble_id ?? "").trim();
           const dbId = String(r?.id ?? "").trim();
@@ -236,7 +567,7 @@ export async function GET(req: NextRequest) {
         categories: categories.length,
         containsCarreteiro: rows.some((r: any) => String(r?.item ?? "").trim().toLowerCase() === "carreteiro"),
       });
-      return json({ source: "compat", readOnly: false, rows, categories }, { status: 200 });
+      return json({ source: "compat", readOnly: false, rows, categories, ...(diagCompat ? { diag: diagCompat } : {}) }, { status: 200 });
     }
 
     const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();

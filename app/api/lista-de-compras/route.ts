@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -93,6 +94,276 @@ function normalizeNameKey(value: unknown) {
     .toLowerCase();
 }
 
+function looksLikeBubbleId(v: unknown) {
+  const s = String(v ?? "").trim();
+  return /^\d{6,}x\d{6,}$/.test(s);
+}
+
+async function seedCompanyItemsFromLegacy(args: { supabaseServer: ReturnType<typeof getSupabaseServerClient>; companyId: string; diag?: boolean }) {
+  const { supabaseServer, companyId } = args;
+  let supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+  try {
+    supabaseAdmin = getSupabaseAdmin();
+  } catch {
+    supabaseAdmin = null;
+  }
+  const db = supabaseAdmin ?? supabaseServer;
+
+  const diagOut = args.diag ? ({ attempts: [] as any[], chosen: null as any }) : null;
+
+  const { data: members, error: mErr } = await db
+    .from("company_members")
+    .select("user_id,bubble_user_id,role,permission_level")
+    .eq("company_id", companyId)
+    .limit(80);
+  if (mErr) return { ok: false, diag: diagOut };
+  const memberRows = (members ?? []) as any[];
+  if (!memberRows.length) return { ok: false, diag: diagOut };
+
+  const memberUserIds = Array.from(new Set(memberRows.map((r) => String(r?.user_id ?? "").trim()).filter((x) => isUuid(x))));
+  const { data: memberProfiles } = memberUserIds.length
+    ? await db.from("user_profiles").select("user_id,email,bubble_user_id").in("user_id", memberUserIds).limit(200)
+    : { data: [] as any[] };
+  const emailByUserId = new Map<string, string>();
+  const bubbleUserIdByUserId = new Map<string, string>();
+  for (const p of memberProfiles ?? []) {
+    const uid = String((p as any)?.user_id ?? "").trim();
+    const email = String((p as any)?.email ?? "").trim().toLowerCase();
+    if (uid && email) emailByUserId.set(uid, email);
+    const bub = String((p as any)?.bubble_user_id ?? "").trim();
+    if (uid && bub) bubbleUserIdByUserId.set(uid, bub);
+  }
+
+  const scoreRow = (r: any) => parsePermissionLevel(r?.permission_level) * 100 + scoreRole(r?.role);
+  const sorted = memberRows.slice().sort((a, b) => scoreRow(b) - scoreRow(a)).filter((r) => isUuid(String(r?.user_id ?? "").trim()));
+
+  let legacyRows: any[] = [];
+  let legacyCategories: any[] = [];
+  let foundFrom: "insumos_state" | "insumos" | "inventario" | null = null;
+  let legacyKey: string | null = null;
+  let chosenUserId: string | null = null;
+
+  for (const m of sorted.slice(0, 12)) {
+    const uid = String(m?.user_id ?? "").trim();
+    if (!uid || !isUuid(uid)) continue;
+    const email = String(emailByUserId.get(uid) ?? "").trim().toLowerCase();
+    const bubbleUserId = String(m?.bubble_user_id ?? bubbleUserIdByUserId.get(uid) ?? "").trim();
+
+    const stateIds = [`user:${uid}`, email ? `user:${email}` : "", bubbleUserId ? `user:${bubbleUserId}` : ""].filter(Boolean);
+    for (const legacyId of stateIds) {
+      if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "insumos_state", legacyId, uid });
+      const { data, error } = await db.from("insumos_state").select("*").eq("id", legacyId).maybeSingle();
+      if (!error && data) {
+        const payload = (data as any)?.payload;
+        const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
+        const categories = Array.isArray(payload?.categories) ? (payload.categories as any[]) : [];
+        if (rows.length) {
+          legacyRows = rows;
+          legacyCategories = categories;
+          foundFrom = "insumos_state";
+          legacyKey = legacyId;
+          chosenUserId = uid;
+          break;
+        }
+      }
+    }
+    if (legacyRows.length) break;
+
+    const prefixes = [`user:${uid}:`, email ? `user:${email}:` : "", bubbleUserId ? `user:${bubbleUserId}:` : ""].filter(Boolean);
+    for (const prefix of prefixes) {
+      if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "insumos", prefix, uid });
+      const { data: rowsDb, error: rowsErr } = await db
+        .from("insumos")
+        .select("id,item,medida,custo_medio,categoria,especificacao,ocultar")
+        .like("id", `${prefix}%`)
+        .order("item", { ascending: true })
+        .limit(8000);
+      if (!rowsErr && (rowsDb ?? []).length) {
+        legacyRows = (rowsDb ?? []).map((r: any) => ({
+          id: String(r?.id ?? "").trim(),
+          item: String(r?.item ?? "").trim(),
+          medida: String(r?.medida ?? "").trim() || "Und",
+          custoMedio: String(r?.custo_medio ?? "").trim() || undefined,
+          categoria: String(r?.categoria ?? "").trim() || undefined,
+          especificacao: String(r?.especificacao ?? "").trim() || undefined,
+          ocultar: typeof r?.ocultar === "boolean" ? Boolean(r.ocultar) : undefined,
+        }));
+        legacyCategories = [];
+        foundFrom = "insumos";
+        legacyKey = `${prefix}%`;
+        chosenUserId = uid;
+        break;
+      }
+    }
+    if (legacyRows.length) break;
+  }
+
+  if (!legacyRows.length) {
+    for (const m of sorted.slice(0, 12)) {
+      const uid = String(m?.user_id ?? "").trim();
+      if (!uid || !isUuid(uid)) continue;
+      const email = String(emailByUserId.get(uid) ?? "").trim().toLowerCase();
+      const bubbleUserId = String(m?.bubble_user_id ?? bubbleUserIdByUserId.get(uid) ?? "").trim();
+      const prefixes = [`user:${uid}:`, email ? `user:${email}:` : "", bubbleUserId ? `user:${bubbleUserId}:` : ""].filter(Boolean);
+      for (const prefix of prefixes) {
+        if (diagOut && diagOut.attempts.length < 60) diagOut.attempts.push({ source: "inventario", prefix, uid });
+        const { data: invRows, error: invErr } = await db
+          .from("inventario")
+          .select("id,categorias,created_at")
+          .like("id", `${prefix}%`)
+          .order("created_at", { ascending: false })
+          .limit(25);
+        if (invErr) continue;
+        const inv = (invRows ?? [])[0] as any;
+        const categorias = Array.isArray(inv?.categorias) ? (inv.categorias as any[]) : [];
+        const byNameKey = new Map<string, any>();
+        const catNames = new Set<string>();
+        for (const c of categorias) {
+          const catName = String((c as any)?.nome ?? (c as any)?.name ?? "").trim();
+          if (catName) catNames.add(catName);
+          const itens = Array.isArray((c as any)?.itens) ? ((c as any).itens as any[]) : [];
+          for (const it of itens) {
+            const name = String(it?.item ?? it?.name ?? "").trim();
+            if (!name) continue;
+            const key = normalizeNameKey(name);
+            if (!key || byNameKey.has(key)) continue;
+            byNameKey.set(key, {
+              id: String(it?.id ?? "").trim() || name,
+              item: name,
+              medida: String(it?.unidade ?? it?.unidade_medida ?? it?.medida ?? "").trim() || "Und",
+              categoria: catName || undefined,
+              especificacao: undefined,
+              custoMedio: undefined,
+              ocultar: undefined,
+            });
+          }
+        }
+        legacyRows = Array.from(byNameKey.values());
+        legacyCategories = Array.from(catNames.values());
+        foundFrom = "inventario";
+        legacyKey = `${prefix}%`;
+        chosenUserId = uid;
+        break;
+      }
+      if (legacyRows.length) break;
+    }
+  }
+
+  if (!legacyRows.length) return { ok: false, diag: diagOut };
+
+  const { data: categoriesDb, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
+  if (catErr) return { ok: false, diag: diagOut };
+  const categoryIdByKey = new Map<string, string>();
+  for (const c of categoriesDb ?? []) {
+    const id0 = String((c as any)?.id ?? "").trim();
+    const name0 = String((c as any)?.name ?? "").trim();
+    if (!id0 || !name0) continue;
+    categoryIdByKey.set(normalizeNameKey(name0), id0);
+  }
+
+  const categoryNames = new Set<string>();
+  for (const c of legacyCategories ?? []) {
+    const name0 = String(c ?? "").trim();
+    if (!name0 || name0 === "-") continue;
+    categoryNames.add(name0);
+  }
+  for (const r of legacyRows) {
+    const name0 = String((r as any)?.categoria ?? "").trim();
+    if (!name0 || name0 === "-") continue;
+    categoryNames.add(name0);
+  }
+
+  const toCreate: { company_id: string; name: string }[] = [];
+  for (const name0 of categoryNames) {
+    const key = normalizeNameKey(name0);
+    if (!key || categoryIdByKey.has(key)) continue;
+    toCreate.push({ company_id: companyId, name: name0 });
+  }
+  if (toCreate.length) {
+    const { data: created, error: createErr } = await db.from("categories").insert(toCreate as any).select("id,name");
+    if (createErr) return { ok: false, diag: diagOut };
+    for (const c of created ?? []) {
+      const id0 = String((c as any)?.id ?? "").trim();
+      const name0 = String((c as any)?.name ?? "").trim();
+      if (!id0 || !name0) continue;
+      categoryIdByKey.set(normalizeNameKey(name0), id0);
+    }
+  }
+
+  const bubbleIds = Array.from(new Set(legacyRows.map((r) => String((r as any)?.id ?? "").trim()).filter((x) => looksLikeBubbleId(x))));
+  const existingIdByBubbleId = new Map<string, string>();
+  if (bubbleIds.length) {
+    const { data, error } = await db.from("items").select("id,bubble_id").eq("company_id", companyId).in("bubble_id", bubbleIds);
+    if (error) return { ok: false, diag: diagOut };
+    for (const it of data ?? []) {
+      const id0 = String((it as any)?.id ?? "").trim();
+      const bid = String((it as any)?.bubble_id ?? "").trim();
+      if (id0 && bid) existingIdByBubbleId.set(bid, id0);
+    }
+  }
+
+  const upsertByBubble: any[] = [];
+  const upsertById: any[] = [];
+
+  for (const r of legacyRows) {
+    const rawId = String((r as any)?.id ?? "").trim();
+    const name = String((r as any)?.item ?? "").trim();
+    if (!name) continue;
+    const categoria = String((r as any)?.categoria ?? "").trim();
+    const categoryId = categoria ? categoryIdByKey.get(normalizeNameKey(categoria)) ?? null : null;
+    const unidade = String((r as any)?.medida ?? "").trim() || "Und";
+    const custo = parseNumber((r as any)?.custoMedio ?? (r as any)?.custo_medio);
+    const descricao = String((r as any)?.especificacao ?? "").trim() || null;
+    const ocultar = typeof (r as any)?.ocultar === "boolean" ? Boolean((r as any).ocultar) : null;
+    const bubbleId = looksLikeBubbleId(rawId) ? rawId : "";
+
+    const patch: any = {
+      company_id: companyId,
+      name,
+      unidade_medida: unidade,
+      custo_medio: Number.isFinite(custo) ? custo : null,
+      descricao,
+      category_id: categoryId,
+      ocultar_cmv: ocultar,
+      item_receita: false,
+    };
+
+    if (bubbleId) {
+      patch.bubble_id = bubbleId;
+      const existingId = existingIdByBubbleId.get(bubbleId) ?? "";
+      if (existingId) patch.id = existingId;
+      upsertByBubble.push(patch);
+      continue;
+    }
+
+    upsertById.push({ ...patch, id: crypto.randomUUID() });
+  }
+
+  if (upsertByBubble.length) {
+    const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+    if (error) return { ok: false, diag: diagOut };
+  }
+  if (upsertById.length) {
+    const { error } = await db.from("items").upsert(upsertById as any, { onConflict: "id" });
+    if (error) return { ok: false, diag: diagOut };
+  }
+
+  if (diagOut) {
+    diagOut.chosen = {
+      companyId,
+      chosenUserId,
+      legacyKey,
+      foundFrom,
+      legacyRows: legacyRows.length,
+      legacyCategories: legacyCategories.length,
+      createdCategories: toCreate.length,
+      upsertByBubble: upsertByBubble.length,
+      upsertById: upsertById.length,
+    };
+  }
+  return { ok: true, diag: diagOut };
+}
+
 function isAdminUserId(userId: string) {
   const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
   const emails = new Set(
@@ -124,8 +395,15 @@ async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnT
 
   const enabled = parseEnvBool(process.env.BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS);
   if (source === "compat") return args.isAdmin ? true : enabled;
+  if (enabled) return true;
 
-  return enabled;
+  const { data, error } = await args.supabase.from("company_members").select("company_id").eq("user_id", args.userId).limit(1);
+  if (!error && (data ?? []).length) return true;
+
+  const { data: companiesRows, error: compErr } = await args.supabase.from("companies").select("id").eq("created_by_user_id", args.userId).limit(1);
+  if (!compErr && (companiesRows ?? []).length) return true;
+
+  return false;
 }
 
 function extractBubbleId(input: unknown) {
@@ -206,8 +484,10 @@ function parseDateOnlyLoose(value: unknown) {
 
 export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const diagEnabled = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
-    if (!id) return json({ ok: true, source: "legacy", readOnly: false, rows: [] }, { status: 200 });
+    if (!id) return json({ ok: true, source: "legacy", readOnly: false, rows: [], ...(diagEnabled ? { diag: { reason: "unauthorized" } } : {}) }, { status: 200 });
     const supabaseServer = getSupabaseServerClient(accessToken);
     const userId = id.slice("user:".length);
 
@@ -220,8 +500,6 @@ export async function GET(req: NextRequest) {
       flags: { BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS: process.env.BUBBLE_COMPAT_READ_LISTA_DE_COMPRAS ?? null },
     });
     if (useCompat) {
-      const url = new URL(req.url);
-      const diagEnabled = String(url.searchParams.get("diag") ?? "").trim() === "1";
       const startInventoryId = String(url.searchParams.get("startInventoryId") ?? "").trim();
       const endInventoryId = String(url.searchParams.get("endInventoryId") ?? "").trim();
       const diasEstoqueParam = String(url.searchParams.get("diasEstoque") ?? "").trim();
@@ -413,14 +691,32 @@ export async function GET(req: NextRequest) {
         .from("items")
         .select("id,bubble_id,name,unidade_medida,custo_medio,category_id,item_receita")
         .eq("company_id", companyId)
-        .eq("item_receita", false)
+        .or("item_receita.is.null,item_receita.eq.false")
         .order("name", { ascending: true })
         .limit(50_000);
       if (itemsErr) return json({ ok: false, error: itemsErr.message, source: "compat", readOnly: true }, { status: 500 });
+      let itemsRowsSafe = (itemsRows ?? []) as any[];
+      let seedDiag: any = null;
+      if (!itemsRowsSafe.length) {
+        const seedRes = await seedCompanyItemsFromLegacy({ supabaseServer, companyId, diag: diagEnabled });
+        const seeded = Boolean(seedRes?.ok);
+        seedDiag = seedRes?.diag ?? null;
+        if (seeded) {
+          const { data: itemsRows2, error: itemsErr2 } = await supabaseServer
+            .from("items")
+            .select("id,bubble_id,name,unidade_medida,custo_medio,category_id,item_receita")
+            .eq("company_id", companyId)
+            .or("item_receita.is.null,item_receita.eq.false")
+            .order("name", { ascending: true })
+            .limit(50_000);
+          if (!itemsErr2) itemsRowsSafe = (itemsRows2 ?? []) as any[];
+        }
+      }
+      if (!itemsRowsSafe.length) return json({ ok: true, source: "legacy", readOnly: false, rows: [] }, { status: 200 });
 
       const itemUuidByBubbleId = new Map<string, string>();
       const itemUuidByNameKey = new Map<string, string>();
-      for (const it of (itemsRows ?? []) as any[]) {
+      for (const it of itemsRowsSafe) {
         const id = String(it?.id ?? "").trim();
         if (!id) continue;
         const b = String(it?.bubble_id ?? "").trim();
@@ -429,7 +725,7 @@ export async function GET(req: NextRequest) {
         if (nameKey && !itemUuidByNameKey.has(nameKey)) itemUuidByNameKey.set(nameKey, id);
       }
 
-      const categoryIds = Array.from(new Set((itemsRows ?? []).map((r: any) => String(r?.category_id ?? "").trim()).filter(Boolean)));
+      const categoryIds = Array.from(new Set(itemsRowsSafe.map((r: any) => String(r?.category_id ?? "").trim()).filter(Boolean)));
       const { data: catRows, error: catErr } = categoryIds.length
         ? await supabaseServer.from("categories").select("id,name").eq("company_id", companyId).in("id", categoryIds)
         : { data: [], error: null as any };
@@ -494,7 +790,7 @@ export async function GET(req: NextRequest) {
         supplierNamesByItemId.set(itemId, uniq);
       }
 
-      const itemsById = new Map<string, any>((itemsRows ?? []).map((r: any) => [String(r?.id ?? "").trim(), r]));
+      const itemsById = new Map<string, any>(itemsRowsSafe.map((r: any) => [String(r?.id ?? "").trim(), r]));
 
       const estoqueInicialByItemId = new Map<string, number>();
       const estoqueFinalByItemId = new Map<string, number>();
@@ -582,7 +878,7 @@ export async function GET(req: NextRequest) {
 
       const diasCorridosBubble = startDate && endDate ? daysBetweenDateOnly(startDate, endDate) : 0;
 
-      const rowsCompat = (itemsRows ?? [])
+      const rowsCompat = itemsRowsSafe
         .map((item: any) => {
           const itemId = String(item?.id ?? "").trim();
           if (!itemId) return null;
@@ -711,6 +1007,7 @@ export async function GET(req: NextRequest) {
         return {
           useCompat,
           companyId,
+          seed: seedDiag,
           startInvId,
           endInvId,
           startDate,
@@ -749,7 +1046,27 @@ export async function GET(req: NextRequest) {
         { status: 200 },
       );
     }
-    return json({ ok: true, source: "legacy", readOnly: false, rows: [] }, { status: 200 });
+    let diagLegacy: any = null;
+    if (diagEnabled) {
+      let supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+      try {
+        supabaseAdmin = getSupabaseAdmin();
+      } catch {
+        supabaseAdmin = null;
+      }
+      const db = supabaseAdmin ?? supabaseServer;
+      const { data: memberRows, error: memberErr } = await db.from("company_members").select("company_id").eq("user_id", userId).limit(3);
+      const { data: createdRows, error: createdErr } = await db.from("companies").select("id").eq("created_by_user_id", userId).limit(3);
+      diagLegacy = {
+        useCompat,
+        userId,
+        companyMembersCount: memberErr ? null : (memberRows ?? []).length,
+        createdCompaniesCount: createdErr ? null : (createdRows ?? []).length,
+        memberErr: memberErr ? memberErr.message : null,
+        createdErr: createdErr ? createdErr.message : null,
+      };
+    }
+    return json({ ok: true, source: "legacy", readOnly: false, rows: [], ...(diagLegacy ? { diag: diagLegacy } : {}) }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
