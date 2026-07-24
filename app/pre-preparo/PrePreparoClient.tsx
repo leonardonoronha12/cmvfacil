@@ -1478,7 +1478,8 @@ export default function PrePreparoClient() {
     setDraftCategory(match);
     setDraftImageUrl(String(row.recipeImage ?? "").trim());
     setDraftSpec("");
-    setDraftUnit("Kg");
+    const parsedYield = parseQtyLabel(String(row.rendimento ?? ""));
+    setDraftUnit((parsedYield.unit || "Und").trim() || "Und");
     setDraftValidity("7");
     setDraftValidityUnit("Dia(s)");
     setIsEditOpen(true);
@@ -3541,9 +3542,23 @@ export default function PrePreparoClient() {
                     if (!editingId) return;
                     const name = draftName.trim();
                     if (!name) return;
+                    const nextUnit = draftUnit.trim() || "Und";
                     setRows((prev) =>
                       prev.map((r) =>
-                        r.id === editingId ? { ...r, receita: name, categoria: draftCategory, recipeImage: draftImageUrl ? draftImageUrl : undefined } : r,
+                        r.id === editingId
+                          ? (() => {
+                              const parsed = parseQtyLabel(String(r.rendimento ?? ""));
+                              const qty = parsed.qty;
+                              const rendimento = `${formatPtQty(qty)} ${nextUnit}`;
+                              return recomputeRowMetrics({
+                                ...r,
+                                receita: name,
+                                categoria: draftCategory,
+                                recipeImage: draftImageUrl ? draftImageUrl : undefined,
+                                rendimento,
+                              });
+                            })()
+                          : r,
                       ),
                     );
                     setIsEditOpen(false);
@@ -3874,7 +3889,15 @@ export default function PrePreparoClient() {
 
                       <div className={styles.formField}>
                         <div className={styles.formLabel}>Unidade de Medida</div>
-                        <select className={styles.formSelect} value={newRecipeUnit} onChange={(e) => setNewRecipeUnit(e.target.value)}>
+                        <select
+                          className={styles.formSelect}
+                          value={newRecipeUnit}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            setNewRecipeUnit(v);
+                            if (v) setNewRecipeYieldUnit(v);
+                          }}
+                        >
                           <option value="">Selecione</option>
                           <option value="Und">Und</option>
                           <option value="Kg">Kg</option>
