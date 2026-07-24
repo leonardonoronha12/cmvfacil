@@ -695,8 +695,7 @@ export async function POST(req: NextRequest) {
         new Set(
           (rows as any[])
             .map((r) => String(r?.id ?? "").trim())
-            .filter((x) => x.startsWith("db:"))
-            .map((x) => x.slice("db:".length))
+            .map((x) => (x.startsWith("db:") ? x.slice("db:".length) : x))
             .filter((x) => isUuid(x)),
         ),
       );
@@ -735,12 +734,12 @@ export async function POST(req: NextRequest) {
         const categoryId = categoriaKey ? categoryIdByKey.get(categoriaKey) ?? null : null;
 
         const bubbleId = looksLikeBubbleId(rawId) ? rawId : null;
-        const dbId = rawId.startsWith("db:") ? rawId.slice("db:".length) : "";
+        const dbId = rawId.startsWith("db:") ? rawId.slice("db:".length) : isUuid(rawId) ? rawId : "";
         const existingId = bubbleId ? existingIdByBubbleId.get(bubbleId) ?? "" : dbId && existingIdById.has(dbId) ? dbId : "";
 
         const patch = {
           company_id: companyId,
-          id: existingId || crypto.randomUUID(),
+          id: existingId || dbId || crypto.randomUUID(),
           bubble_id: bubbleId,
           name,
           unidade_medida: String(r?.medida ?? "").trim() || null,

@@ -64,13 +64,36 @@ function toMoney(value: unknown) {
 
 function normalizeHeader(value: unknown) {
   return String(value ?? "")
+    .replace(/^\uFEFF/, "")
     .trim()
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
 
-function parseCsvLine(line: string) {
+function detectCsvDelimiter(line: string) {
+  let inQuotes = false;
+  let commas = 0;
+  let semis = 0;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i] ?? "";
+    if (ch === '"') {
+      const next = line[i + 1] ?? "";
+      if (inQuotes && next === '"') {
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+    if (inQuotes) continue;
+    if (ch === ",") commas++;
+    else if (ch === ";") semis++;
+  }
+  return semis >= commas ? ";" : ",";
+}
+
+function parseCsvLine(line: string, delimiter: "," | ";" = ",") {
   const out: string[] = [];
   let cur = "";
   let inQuotes = false;
@@ -86,7 +109,7 @@ function parseCsvLine(line: string) {
       }
       continue;
     }
-    if (ch === "," && !inQuotes) {
+    if (ch === delimiter && !inQuotes) {
       out.push(cur);
       cur = "";
       continue;
@@ -124,7 +147,7 @@ function parseRowsFromTable(table: unknown[][]) {
   const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
   const startIndex = hasHeader ? 1 : 0;
 
-  const fallback = { ocultar: 0, item: 1, medida: 2, custoMedio: 3, categoria: 4, especificacao: 5 };
+  const fallback = { item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
   const getIndex = (key: keyof typeof fallback) => (map[key] != null ? map[key]! : fallback[key]);
 
   const out: InsumoRow[] = [];
@@ -678,7 +701,8 @@ export default function InsumosClient() {
       if (name.endsWith(".csv")) {
         const text = await selectedFile.text();
         const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-        table = lines.map(parseCsvLine);
+        const delim = detectCsvDelimiter(lines[0] ?? "");
+        table = lines.map((l) => parseCsvLine(l, delim));
       } else if (name.endsWith(".xlsx") || name.endsWith(".xls")) {
         const XLSX = await import("xlsx");
         const buf = await selectedFile.arrayBuffer();
@@ -697,10 +721,9 @@ export default function InsumosClient() {
         ...row,
         id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${idx}`,
       }));
-      setDataRows(imported);
-      setCategories((prev) => {
-        const seen = new Set(prev.map((c) => c.toLowerCase()));
-        const next = [...prev];
+      const mergedCategories = (() => {
+        const seen = new Set(categories.map((c) => c.toLowerCase()));
+        const next = [...categories];
         for (const r of imported) {
           const name = normalizeCategoryName(r.categoria ?? "");
           if (!name || name === "-") continue;
@@ -711,13 +734,35 @@ export default function InsumosClient() {
           }
         }
         return next;
-      });
+      })();
+      setDataRows(imported);
+      setCategories(mergedCategories);
       setIsImportOpen(false);
       setSelectedFile(null);
       setSelectedFileName(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
+      if (!isReadOnly && !isBootstrapRunning()) {
+        try {
+          await saveInsumosStateToSupabase({
+            rows: imported.map((r) => ({
+              id: r.id,
+              item: r.item,
+              medida: r.medida,
+              custoMedio: r.custoMedio,
+              categoria: r.categoria,
+              especificacao: r.especificacao,
+              ocultar: r.ocultar,
+            })) as any,
+            categories: mergedCategories,
+          });
+          saveErrorShownRef.current = false;
+          showToast(`Importação concluída: ${imported.length} item(ns).`, "success");
+        } catch (err) {
+          showToast(saveErrorMessage(err), "error");
+        }
+      }
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : String(err));
+      showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
       setImporting(false);
     }
