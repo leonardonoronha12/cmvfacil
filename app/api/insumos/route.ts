@@ -465,7 +465,7 @@ export async function GET(req: NextRequest) {
       }
       const db = supabaseAdmin ?? supabase;
 
-      const { data: memberRows, error: memberErr } = await supabase
+      const { data: memberRows, error: memberErr } = await db
         .from("company_members")
         .select("company_id,role,permission_level")
         .eq("user_id", userId)
@@ -628,6 +628,14 @@ export async function POST(req: NextRequest) {
     let categories: unknown[] = Array.isArray(categoriesProvided) ? (categoriesProvided as unknown[]) : [];
 
     if (shouldUseCompat) {
+      let supabaseAdmin: ReturnType<typeof getSupabaseAdmin> | null = null;
+      try {
+        supabaseAdmin = getSupabaseAdmin();
+      } catch {
+        supabaseAdmin = null;
+      }
+      const db = supabaseAdmin ?? supabase;
+
       const { data: memberRows, error: memberErr } = await supabase
         .from("company_members")
         .select("company_id,role,permission_level")
@@ -637,7 +645,7 @@ export async function POST(req: NextRequest) {
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
-      const { data: categoriesDb, error: catErr } = await supabase.from("categories").select("id,name").eq("company_id", companyId);
+      const { data: categoriesDb, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
       if (catErr) return json({ error: catErr.message }, { status: 500 });
       const categoryIdByKey = new Map<string, string>();
       for (const c of categoriesDb ?? []) {
@@ -666,7 +674,7 @@ export async function POST(req: NextRequest) {
         toCreate.push({ company_id: companyId, name: name0 });
       }
       if (toCreate.length) {
-        const { data: created, error: createErr } = await supabase.from("categories").insert(toCreate as any).select("id,name");
+        const { data: created, error: createErr } = await db.from("categories").insert(toCreate as any).select("id,name");
         if (createErr) return json({ error: createErr.message }, { status: 500 });
         for (const c of created ?? []) {
           const id0 = String((c as any)?.id ?? "").trim();
@@ -695,7 +703,7 @@ export async function POST(req: NextRequest) {
 
       const existingIdByBubbleId = new Map<string, string>();
       if (bubbleIds.length) {
-        const { data, error } = await supabase.from("items").select("id,bubble_id").eq("company_id", companyId).in("bubble_id", bubbleIds);
+        const { data, error } = await db.from("items").select("id,bubble_id").eq("company_id", companyId).in("bubble_id", bubbleIds);
         if (error) return json({ error: error.message }, { status: 500 });
         for (const it of data ?? []) {
           const id0 = String((it as any)?.id ?? "").trim();
@@ -706,7 +714,7 @@ export async function POST(req: NextRequest) {
 
       const existingIdById = new Map<string, string>();
       if (dbIds.length) {
-        const { data, error } = await supabase.from("items").select("id").eq("company_id", companyId).in("id", dbIds);
+        const { data, error } = await db.from("items").select("id").eq("company_id", companyId).in("id", dbIds);
         if (error) return json({ error: error.message }, { status: 500 });
         for (const it of data ?? []) {
           const id0 = String((it as any)?.id ?? "").trim();
@@ -748,11 +756,11 @@ export async function POST(req: NextRequest) {
       }
 
       if (upsertByBubble.length) {
-        const { error } = await supabase.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+        const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
         if (error) return json({ error: error.message }, { status: 500 });
       }
       if (upsertById.length) {
-        const { error } = await supabase.from("items").upsert(upsertById as any, { onConflict: "id" });
+        const { error } = await db.from("items").upsert(upsertById as any, { onConflict: "id" });
         if (error) return json({ error: error.message }, { status: 500 });
       }
 
