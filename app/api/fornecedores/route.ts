@@ -666,7 +666,14 @@ export async function POST(req: NextRequest) {
     }
 
     if (defaultSupplierId) {
-      const { data: defaultSupplierDb } = await supabase
+      const db = (() => {
+        try {
+          return getSupabaseAdmin();
+        } catch {
+          return supabase;
+        }
+      })();
+      const { data: defaultSupplierDb } = await db
         .from("suppliers")
         .select("raw")
         .eq("company_id", companyId)
@@ -675,7 +682,7 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       const rawBase = (defaultSupplierDb as any)?.raw ?? supplierRawById.get(defaultSupplierId) ?? {};
       const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
-      const { error: defErr } = await supabase
+      const { error: defErr } = await db
         .from("suppliers")
         .update({ raw: nextRaw } as any)
         .eq("company_id", companyId)
