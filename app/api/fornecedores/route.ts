@@ -1,11 +1,55 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
+import fs from "node:fs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+const DEBUG_ENV_PATH = ".dbg/supplier-items-persist.env";
+
+// #region debug-point reporter
+let __dbgCfg: null | { url: string; sessionId: string; runId: string } = null;
+function __getDbgCfg() {
+  if (__dbgCfg) return __dbgCfg;
+  let url = String(process.env.DEBUG_SERVER_URL ?? "").trim();
+  let sessionId = String(process.env.DEBUG_SESSION_ID ?? "").trim() || "supplier-items-persist";
+  const runId = String(process.env.DEBUG_RUN_ID ?? "").trim() || "pre-fix";
+  if (!url) {
+    try {
+      const raw = fs.readFileSync(DEBUG_ENV_PATH, "utf8");
+      url = String(raw.match(/^DEBUG_SERVER_URL=(.+)$/m)?.[1] ?? "").trim() || url;
+      sessionId = String(raw.match(/^DEBUG_SESSION_ID=(.+)$/m)?.[1] ?? "").trim() || sessionId;
+    } catch {}
+  }
+  __dbgCfg = { url, sessionId, runId };
+  return __dbgCfg;
+}
+function __dbgSend(args: { hypothesisId: string; traceId?: string; location: string; msg: string; data?: unknown }) {
+  try {
+    const cfg = __getDbgCfg();
+    if (!cfg.url) return;
+    const adminSecret = String(process.env.ADMIN_SECRET ?? "").trim();
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (adminSecret) headers["x-admin-secret"] = adminSecret;
+    void fetch(cfg.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sessionId: cfg.sessionId,
+        runId: cfg.runId,
+        hypothesisId: args.hypothesisId,
+        traceId: args.traceId,
+        location: args.location,
+        msg: args.msg,
+        data: args.data ?? null,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+// #endregion
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -263,6 +307,22 @@ export async function GET(req: NextRequest) {
         if (!cur.length && rawProdutos.length) produtos[k] = rawProdutos;
       }
 
+      // #region debug-point D:get-compat-shape
+      __dbgSend({
+        hypothesisId: "D",
+        traceId,
+        location: "app/api/fornecedores/route.ts:GET:compat",
+        msg: "[DEBUG] fornecedores GET compat: shape",
+        data: {
+          companyId,
+          suppliersDb: (suppliersDb ?? []).length,
+          infoKeys: Object.keys(info).length,
+          linksDb: (linksDb ?? []).length,
+          produtosKeys: Object.keys(produtos).length,
+        },
+      });
+      // #endregion
+
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
       if (normalizedTombstones.length) produtos[TOMBSTONE_KEY] = normalizedTombstones;
 
@@ -386,6 +446,51 @@ export async function POST(req: NextRequest) {
         .filter((k) => Boolean(k) && k !== TOMBSTONE_KEY),
     );
     const keepKeysUpper = new Set<string>(Array.from(keys).map(normalizeTombstoneKey).filter(Boolean));
+
+    // #region debug-point A:post-compat-payload
+    (() => {
+      let countHasProdutosKey = 0;
+      let countProdutosEmpty = 0;
+      let countProdutosOne = 0;
+      let maxProdutosLen = 0;
+      const emptyKeySamples: string[] = [];
+      const oneKeySamples: string[] = [];
+      for (const k of keys) {
+        const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, k);
+        if (!hasProdutosKey) continue;
+        countHasProdutosKey++;
+        const produtosLen = safeArr(produtosMap[k]).filter((x) => String(x ?? "").trim()).length;
+        if (!produtosLen) {
+          countProdutosEmpty++;
+          if (emptyKeySamples.length < 5) emptyKeySamples.push(k);
+        } else if (produtosLen === 1) {
+          countProdutosOne++;
+          if (oneKeySamples.length < 5) oneKeySamples.push(k);
+        }
+        if (produtosLen > maxProdutosLen) maxProdutosLen = produtosLen;
+      }
+      __dbgSend({
+        hypothesisId: "A",
+        traceId,
+        location: "app/api/fornecedores/route.ts:POST:compat",
+        msg: "[DEBUG] fornecedores POST compat: payload summary",
+        data: {
+          companyId,
+          infoKeys: Object.keys(infoMap).length,
+          produtosKeys: Object.keys(produtosMap).length,
+          equivKeys: Object.keys(equivMap).length,
+          unionKeys: keys.size,
+          hasProdutosKey: countHasProdutosKey,
+          produtosEmpty: countProdutosEmpty,
+          produtosOne: countProdutosOne,
+          produtosMax: maxProdutosLen,
+          tombstones: safeArr(produtosMap[TOMBSTONE_KEY]).length,
+          emptyKeySamples,
+          oneKeySamples,
+        },
+      });
+    })();
+    // #endregion
 
     const updatesById = new Map<string, any>();
     const insertsByKey = new Map<string, any>();
@@ -560,6 +665,22 @@ export async function POST(req: NextRequest) {
       }
       const desiredRows = Array.from(desiredByKey.values());
 
+      // #region debug-point B:post-compat-link-plan
+      __dbgSend({
+        hypothesisId: "B",
+        traceId,
+        location: "app/api/fornecedores/route.ts:POST:compat:links",
+        msg: "[DEBUG] fornecedores POST compat: link plan",
+        data: {
+          companyId,
+          supplierIdsForSync: supplierIdsForSync.length,
+          desiredRows: desiredRows.length,
+          missing: missing.length,
+          missingSample: missing.slice(0, 5),
+        },
+      });
+      // #endregion
+
       if (missing.length) {
         return errJson({
           status: 400,
@@ -572,6 +693,15 @@ export async function POST(req: NextRequest) {
 
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
       if (supplierIdsToClear.length) {
+        // #region debug-point B:post-compat-clear
+        __dbgSend({
+          hypothesisId: "B",
+          traceId,
+          location: "app/api/fornecedores/route.ts:POST:compat:clear",
+          msg: "[DEBUG] fornecedores POST compat: clearing supplier_items",
+          data: { supplierIdsToClear: supplierIdsToClear.length },
+        });
+        // #endregion
         const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
         if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
       }
@@ -583,6 +713,16 @@ export async function POST(req: NextRequest) {
         if (linkInsErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_insert", error: linkInsErr.message, source: "compat" });
       }
     }
+
+    // #region debug-point C:post-compat-ok
+    __dbgSend({
+      hypothesisId: "C",
+      traceId,
+      location: "app/api/fornecedores/route.ts:POST:compat:done",
+      msg: "[DEBUG] fornecedores POST compat: ok",
+      data: { ok: true },
+    });
+    // #endregion
 
     return json({ ok: true, traceId }, { status: 200 });
   } catch (err) {
