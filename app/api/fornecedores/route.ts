@@ -410,34 +410,6 @@ export async function POST(req: NextRequest) {
 
       const existing = supplierId ? supplierInfoById.get(supplierId) : null;
 
-      // #region debug-point A:missing-info-row
-      if (supplierId && isDbPrefixed(key) && !nomeFromInfo) {
-        (() => {
-          const fs = require("fs");
-          const p = ".dbg/supplier-sync-disappears.env";
-          let u = "http://127.0.0.1:7777/event",
-            s = "supplier-sync-disappears";
-          try {
-            const e = fs.readFileSync(p, "utf8");
-            u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u;
-            s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s;
-          } catch {}
-          fetch(u, {
-            method: "POST",
-            body: JSON.stringify({
-              sessionId: s,
-              runId: "pre-fix",
-              hypothesisId: "A",
-              location: "app/api/fornecedores/route.ts:POST",
-              msg: "[DEBUG] compat key db: sem fornecedor no infoMap",
-              data: { traceId, key, supplierId },
-              ts: Date.now(),
-            }),
-          }).catch(() => {});
-        })();
-      }
-      // #endregion
-
       const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
       const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
 
