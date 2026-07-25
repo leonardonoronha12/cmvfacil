@@ -540,7 +540,7 @@ export async function POST(req: NextRequest) {
         itemIdByKey.set(k, id);
       }
 
-      const desiredRows: Array<{ company_id: string; supplier_id: string; item_id: string }> = [];
+      const desiredByKey = new Map<string, { company_id: string; supplier_id: string; item_id: string }>();
       const missing: string[] = [];
       for (const [supplierId, produtos] of supplierProductsById.entries()) {
         for (const nome of produtos) {
@@ -549,9 +549,11 @@ export async function POST(req: NextRequest) {
             if (missing.length < 12) missing.push(nome);
             continue;
           }
-          desiredRows.push({ company_id: companyId, supplier_id: supplierId, item_id: itemId });
+          const k = `${supplierId}:${itemId}`;
+          if (!desiredByKey.has(k)) desiredByKey.set(k, { company_id: companyId, supplier_id: supplierId, item_id: itemId });
         }
       }
+      const desiredRows = Array.from(desiredByKey.values());
 
       if (missing.length) {
         return errJson({
@@ -567,7 +569,9 @@ export async function POST(req: NextRequest) {
       if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
 
       if (desiredRows.length) {
-        const { error: linkInsErr } = await supabase.from("supplier_items").insert(desiredRows as any);
+        const { error: linkInsErr } = await supabase
+          .from("supplier_items")
+          .upsert(desiredRows as any, { onConflict: "company_id,supplier_id,item_id", ignoreDuplicates: true });
         if (linkInsErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_insert", error: linkInsErr.message, source: "compat" });
       }
     }
