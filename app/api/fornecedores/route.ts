@@ -123,7 +123,7 @@ function normalizeFornecedoresRaw(raw: unknown, patch: { produtos?: string[]; eq
   const obj = safeObj(raw);
   const fornecedores = safeObj(obj.fornecedores);
   const nextFornecedores = { ...fornecedores } as any;
-  if (patch.produtos) nextFornecedores.produtos = patch.produtos;
+  if (typeof patch.produtos !== "undefined") nextFornecedores.produtos = patch.produtos;
   if (typeof patch.equivalencias !== "undefined") nextFornecedores.equivalencias = patch.equivalencias;
   return { ...obj, fornecedores: nextFornecedores };
 }
@@ -259,7 +259,8 @@ export async function GET(req: NextRequest) {
 
       for (const k of Object.keys(info)) {
         const rawProdutos = rawProdutosByKey.get(k) ?? [];
-        if (rawProdutos.length) produtos[k] = rawProdutos;
+        const cur = Array.isArray(produtos[k]) ? produtos[k] : [];
+        if (!cur.length && rawProdutos.length) produtos[k] = rawProdutos;
       }
 
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
@@ -546,6 +547,7 @@ export async function POST(req: NextRequest) {
       const desiredByKey = new Map<string, { company_id: string; supplier_id: string; item_id: string }>();
       const missing: string[] = [];
       for (const [supplierId, produtos] of supplierProductsById.entries()) {
+        if (!produtos.length) continue;
         for (const nome of produtos) {
           const itemId = itemIdByKey.get(normalizeLookupKey(nome)) ?? "";
           if (!itemId) {
@@ -568,8 +570,11 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsForSync);
-      if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
+      const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
+      if (supplierIdsToClear.length) {
+        const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
+        if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
+      }
 
       if (desiredRows.length) {
         const { error: linkInsErr } = await supabase

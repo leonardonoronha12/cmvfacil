@@ -606,7 +606,7 @@ export default function FornecedoresClient() {
       nomeNaNota,
       unidadeNaNota,
       insumoEquivalente,
-      equivalenteQuantidade: vincEqQtd.trim(),
+      equivalenteQuantidade: vincEqQtd.trim() || "1",
       equivalenteUnidade,
     };
     const oldName = originalName;
