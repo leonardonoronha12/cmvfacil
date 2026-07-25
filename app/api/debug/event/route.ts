@@ -60,9 +60,25 @@ export async function POST(req: NextRequest) {
       .limit(1)
       .maybeSingle();
     if (supplierErr) return json({ ok: false, error: supplierErr.message }, { status: 500 });
-    if (!defaultSupplier) return json({ ok: false, error: "default_supplier_not_found" }, { status: 404 });
+    let supplierRow = defaultSupplier as any;
+    if (!supplierRow) {
+      const { data: ins, error: insErr } = await supabase
+        .from("suppliers")
+        .insert({
+          company_id: companyId,
+          external_key: "supplier:default:sem_fornecedor",
+          nome: "Sem Fornecedor",
+          raw: { system: { default: true } },
+        } as any)
+        .select("id,raw")
+        .limit(1)
+        .maybeSingle();
+      if (insErr) return json({ ok: false, error: insErr.message }, { status: 500 });
+      supplierRow = ins as any;
+    }
+    if (!supplierRow) return json({ ok: false, error: "default_supplier_not_found" }, { status: 404 });
 
-    const raw = (defaultSupplier as any)?.raw ?? {};
+    const raw = supplierRow?.raw ?? {};
     const system = (raw as any)?.system ?? {};
     const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     const nextEvent = {
@@ -82,7 +98,7 @@ export async function POST(req: NextRequest) {
       .from("suppliers")
       .update({ raw: nextRaw } as any)
       .eq("company_id", companyId)
-      .eq("id", String((defaultSupplier as any).id ?? ""));
+      .eq("id", String(supplierRow?.id ?? ""));
     if (upErr) return json({ ok: false, error: upErr.message }, { status: 500 });
 
     return json({ ok: true }, { status: 200 });
