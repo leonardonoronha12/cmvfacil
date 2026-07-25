@@ -128,44 +128,43 @@ export async function GET(req: NextRequest) {
       }
     } catch {}
 
-    const { data: defaultSupplier, error: supplierErr } = await supabase
+    const { data: sysSupplier1, error: supplierErr1 } = await supabase
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", companyId)
-      .ilike("external_key", "supplier:default:sem_fornecedor")
+      .eq("external_key", "supplier:system:tombstones")
       .limit(1)
       .maybeSingle();
-    if (supplierErr) return json({ ok: false, traceId, error: supplierErr.message }, { status: 500 });
+    if (supplierErr1) return json({ ok: false, traceId, error: supplierErr1.message }, { status: 500 });
+    const { data: sysSupplier2, error: supplierErr2 } = sysSupplier1
+      ? ({ data: null, error: null } as any)
+      : await supabase.from("suppliers").select("id,raw").eq("company_id", companyId).eq("nome", "__CMVFACIL_DELETED_SUPPLIERS__").limit(1).maybeSingle();
+    if (supplierErr2) return json({ ok: false, traceId, error: supplierErr2.message }, { status: 500 });
 
-    let supplierRow = defaultSupplier as any;
+    let supplierRow = (sysSupplier1 as any) ?? (sysSupplier2 as any);
     if (seed) {
       if (!supplierRow) {
         const { data: ins, error: insErr } = await supabase
           .from("suppliers")
           .insert({
             company_id: companyId,
-            external_key: "supplier:default:sem_fornecedor",
-            nome: "Sem Fornecedor",
-            raw: { system: { default: true } },
+            external_key: "supplier:system:tombstones",
+            nome: "__CMVFACIL_DELETED_SUPPLIERS__",
+            raw: { system: { cmvfacil_deleted_suppliers: [] } },
           } as any)
           .select("id,raw")
           .limit(1)
           .maybeSingle();
         if (insErr) {
-          const msg = String(insErr.message ?? "");
-          if (msg.toLowerCase().includes("suppliers_company_external_key_uidx") || msg.toLowerCase().includes("duplicate key")) {
-            const { data: existing, error: reErr } = await supabase
-              .from("suppliers")
-              .select("id,raw")
-              .eq("company_id", companyId)
-              .ilike("external_key", "supplier:default:sem_fornecedor")
-              .limit(1)
-              .maybeSingle();
-            if (reErr) return json({ ok: false, traceId, error: reErr.message }, { status: 500 });
-            supplierRow = existing as any;
-          } else {
-            return json({ ok: false, traceId, error: msg }, { status: 500 });
-          }
+          const { data: existing, error: reErr } = await supabase
+            .from("suppliers")
+            .select("id,raw")
+            .eq("company_id", companyId)
+            .eq("nome", "__CMVFACIL_DELETED_SUPPLIERS__")
+            .limit(1)
+            .maybeSingle();
+          if (reErr) return json({ ok: false, traceId, error: reErr.message }, { status: 500 });
+          supplierRow = existing as any;
         } else {
           supplierRow = ins as any;
         }

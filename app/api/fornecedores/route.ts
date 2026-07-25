@@ -55,29 +55,44 @@ async function __dbgStore(args: {
       user_id: null,
     } as any);
     if (!tableErr) return;
-    const { data: defaultSupplier, error: supplierErr } = await supabase
+    const { data: sysSupplier1, error: supplierErr1 } = await supabase
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", args.companyId)
-      .ilike("external_key", "supplier:default:sem_fornecedor")
+      .eq("external_key", "supplier:system:tombstones")
       .limit(1)
       .maybeSingle();
-    if (supplierErr) return;
-    let supplierRow = defaultSupplier as any;
+    if (supplierErr1) return;
+    const { data: sysSupplier2, error: supplierErr2 } = sysSupplier1
+      ? ({ data: null, error: null } as any)
+      : await supabase.from("suppliers").select("id,raw").eq("company_id", args.companyId).eq("nome", TOMBSTONE_KEY).limit(1).maybeSingle();
+    if (supplierErr2) return;
+    let supplierRow = (sysSupplier1 as any) ?? (sysSupplier2 as any);
     if (!supplierRow) {
       const { data: ins, error: insErr } = await supabase
         .from("suppliers")
         .insert({
           company_id: args.companyId,
-          external_key: "supplier:default:sem_fornecedor",
-          nome: "Sem Fornecedor",
-          raw: { system: { default: true } },
+          external_key: "supplier:system:tombstones",
+          nome: TOMBSTONE_KEY,
+          raw: { system: { cmvfacil_deleted_suppliers: [] } },
         } as any)
         .select("id,raw")
         .limit(1)
         .maybeSingle();
-      if (insErr) return;
-      supplierRow = ins as any;
+      if (insErr) {
+        const { data: existing, error: reErr } = await supabase
+          .from("suppliers")
+          .select("id,raw")
+          .eq("company_id", args.companyId)
+          .eq("nome", TOMBSTONE_KEY)
+          .limit(1)
+          .maybeSingle();
+        if (reErr) return;
+        supplierRow = existing as any;
+      } else {
+        supplierRow = ins as any;
+      }
     }
     if (!supplierRow) return;
     const raw = supplierRow?.raw ?? {};
