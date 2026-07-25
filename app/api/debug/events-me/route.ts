@@ -69,7 +69,7 @@ export async function GET(req: NextRequest) {
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", companyId)
-      .eq("external_key", "supplier:default:sem_fornecedor")
+      .ilike("external_key", "supplier:default:sem_fornecedor")
       .limit(1)
       .maybeSingle();
     if (supplierErr) return json({ ok: false, traceId, error: supplierErr.message }, { status: 500 });
@@ -88,8 +88,24 @@ export async function GET(req: NextRequest) {
           .select("id,raw")
           .limit(1)
           .maybeSingle();
-        if (insErr) return json({ ok: false, traceId, error: insErr.message }, { status: 500 });
-        supplierRow = ins as any;
+        if (insErr) {
+          const msg = String(insErr.message ?? "");
+          if (msg.toLowerCase().includes("suppliers_company_external_key_uidx") || msg.toLowerCase().includes("duplicate key")) {
+            const { data: existing, error: reErr } = await supabase
+              .from("suppliers")
+              .select("id,raw")
+              .eq("company_id", companyId)
+              .ilike("external_key", "supplier:default:sem_fornecedor")
+              .limit(1)
+              .maybeSingle();
+            if (reErr) return json({ ok: false, traceId, error: reErr.message }, { status: 500 });
+            supplierRow = existing as any;
+          } else {
+            return json({ ok: false, traceId, error: msg }, { status: 500 });
+          }
+        } else {
+          supplierRow = ins as any;
+        }
       }
       const rawBase = (supplierRow as any)?.raw ?? {};
       const systemBase = (rawBase as any)?.system ?? {};

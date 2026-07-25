@@ -47,7 +47,7 @@ async function __dbgStore(args: {
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", args.companyId)
-      .eq("external_key", "supplier:default:sem_fornecedor")
+      .ilike("external_key", "supplier:default:sem_fornecedor")
       .limit(1)
       .maybeSingle();
     if (supplierErr) return;
