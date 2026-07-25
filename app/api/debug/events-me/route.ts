@@ -160,6 +160,11 @@ export async function GET(req: NextRequest) {
           .limit(1)
           .maybeSingle();
         if (insErr) {
+          const msg = String(insErr.message ?? "");
+          const m = msg.toLowerCase();
+          if (!m.includes("duplicate key") && !m.includes("suppliers_company_external_key_uidx")) {
+            return json({ ok: false, traceId, error: `system_supplier_insert_failed: ${msg || "unknown"}` }, { status: 500 });
+          }
           const { data: existing, error: reErr } = await supabase
             .from("suppliers")
             .select("id,raw")
