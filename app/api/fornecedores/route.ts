@@ -25,6 +25,12 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function canonicalUuid(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  return isUuid(s) ? s.toLowerCase() : s;
+}
+
 function safeObj(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object") return {};
   return input as Record<string, unknown>;
@@ -351,7 +357,7 @@ export async function POST(req: NextRequest) {
     let defaultSupplierId = "";
     const reservedSupplierIds = new Set<string>();
     for (const s of suppliersDb ?? []) {
-      const sid = String((s as any)?.id ?? "").trim();
+      const sid = canonicalUuid(String((s as any)?.id ?? ""));
       if (!sid) continue;
       const bubbleId = String((s as any)?.bubble_id ?? "").trim();
       const externalKey = normalizeText((s as any)?.external_key ?? "");
@@ -388,10 +394,10 @@ export async function POST(req: NextRequest) {
       const equivalencias = typeof equivMap[key] !== "undefined" ? equivMap[key] : undefined;
 
       let supplierId = "";
-      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = dbIdFromKey(key);
-      if (!supplierId && isUuid(key)) supplierId = key;
-      if (!supplierId) supplierId = supplierIdByBubbleId.get(key) ?? "";
-      if (!supplierId && nameKey) supplierId = supplierIdByNameKey.get(nameKey) ?? "";
+      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = canonicalUuid(dbIdFromKey(key));
+      if (!supplierId && isUuid(key)) supplierId = canonicalUuid(key);
+      if (!supplierId) supplierId = canonicalUuid(supplierIdByBubbleId.get(key) ?? "");
+      if (!supplierId && nameKey) supplierId = canonicalUuid(supplierIdByNameKey.get(nameKey) ?? "");
 
       const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
       const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
@@ -444,7 +450,7 @@ export async function POST(req: NextRequest) {
     const supplierIdByNameKey2 = new Map<string, string>();
     const supplierIdByKeyUpper2 = new Map<string, string>();
     for (const s of suppliersDb2 ?? []) {
-      const sid = String((s as any)?.id ?? "").trim();
+      const sid = canonicalUuid(String((s as any)?.id ?? ""));
       if (!sid) continue;
       const bubbleId = String((s as any)?.bubble_id ?? "").trim();
       const nome = normalizeText((s as any)?.nome ?? "");
@@ -472,9 +478,9 @@ export async function POST(req: NextRequest) {
     for (const kUpper of tombstonesUpper) {
       if (!kUpper || keepKeysUpper.has(kUpper)) continue;
       let supplierId = "";
-      if (isDbPrefixed(kUpper) && isUuid(dbIdFromKey(kUpper))) supplierId = dbIdFromKey(kUpper);
-      else if (isUuid(kUpper)) supplierId = kUpper;
-      else supplierId = supplierIdByKeyUpper.get(kUpper) ?? "";
+      if (isDbPrefixed(kUpper) && isUuid(dbIdFromKey(kUpper))) supplierId = canonicalUuid(dbIdFromKey(kUpper));
+      else if (isUuid(kUpper)) supplierId = canonicalUuid(kUpper);
+      else supplierId = canonicalUuid(supplierIdByKeyUpper.get(kUpper) ?? "");
       if (!supplierId || supplierId === defaultSupplierId) continue;
       deleteCandidateIds.add(supplierId);
     }
@@ -496,11 +502,11 @@ export async function POST(req: NextRequest) {
       const nameKey = normalizeLookupKey(normalizeText(safeObj(infoMap[key]).fornecedor ?? "") || key);
 
       let supplierId = "";
-      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = dbIdFromKey(key);
-      if (!supplierId && isUuid(key)) supplierId = key;
-      if (!supplierId) supplierId = supplierIdByBubbleId2.get(key) ?? "";
-      if (!supplierId && nameKey) supplierId = supplierIdByNameKey2.get(nameKey) ?? "";
-      if (!supplierId) supplierId = supplierIdByKeyUpper2.get(normalizeTombstoneKey(key)) ?? "";
+      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = canonicalUuid(dbIdFromKey(key));
+      if (!supplierId && isUuid(key)) supplierId = canonicalUuid(key);
+      if (!supplierId) supplierId = canonicalUuid(supplierIdByBubbleId2.get(key) ?? "");
+      if (!supplierId && nameKey) supplierId = canonicalUuid(supplierIdByNameKey2.get(nameKey) ?? "");
+      if (!supplierId) supplierId = canonicalUuid(supplierIdByKeyUpper2.get(normalizeTombstoneKey(key)) ?? "");
 
       if (!supplierId) continue;
       supplierProductsById.set(supplierId, produtos);
