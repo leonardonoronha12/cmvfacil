@@ -65,68 +65,75 @@ export async function GET(req: NextRequest) {
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     if (!companyId) return json({ ok: true, traceId, companyId: null, events: [] }, { status: 200 });
 
-    try {
-      const { count, error: countErr } = await supabase
-        .from("debug_events")
-        .select("id", { count: "exact", head: true })
-        .eq("company_id", companyId);
-      if (!countErr) {
-        if (seed) {
-          try {
-            await supabase.from("debug_events").insert({
-              session_id: "events-me",
-              run_id: "seed",
-              hypothesis_id: "seed",
-              trace_id: null,
-              location: "app/api/debug/events-me/route.ts",
-              msg: "seed",
-              data: { companyId },
-              company_id: companyId,
-              user_id: userId,
-            } as any);
-          } catch {}
-        }
-        const { data: rows, error: rowsErr } = await supabase
-          .from("debug_events")
-          .select("created_at,session_id,run_id,hypothesis_id,trace_id,location,msg,data")
-          .eq("company_id", companyId)
-          .order("created_at", { ascending: false })
-          .limit(limit);
-        if (!rowsErr) {
-          const mapped = (rows ?? [])
-            .map((r) => ({
-              ts: new Date(String((r as any)?.created_at ?? "")).getTime(),
-              msg: String((r as any)?.msg ?? ""),
-              data: (r as any)?.data ?? {},
-              runId: String((r as any)?.run_id ?? ""),
-              traceId: (r as any)?.trace_id ?? null,
-              location: String((r as any)?.location ?? ""),
-              sessionId: String((r as any)?.session_id ?? ""),
-              hypothesisId: String((r as any)?.hypothesis_id ?? ""),
-            }))
-            .reverse();
-          return json(
-            {
-              ok: true,
-              traceId,
-              companyId,
-              ...(diag
-                ? {
-                    diag: {
-                      hasDefaultSupplier: null,
-                      defaultSupplierId: null,
-                      eventsCount: count ?? 0,
-                      systemKeys: ["debug_events_table"],
-                    },
-                  }
-                : null),
-              events: mapped,
-            },
-            { status: 200 },
-          );
+    const diagDebugTable: any = diag ? { ok: false, count: null, countError: null, rowsError: null, seedError: null } : null;
+    const { count, error: countErr } = await supabase.from("debug_events").select("id", { count: "exact", head: true }).eq("company_id", companyId);
+    if (!countErr) {
+      if (diagDebugTable) {
+        diagDebugTable.ok = true;
+        diagDebugTable.count = count ?? 0;
+      }
+      if (seed) {
+        try {
+          const { error: seedErr } = await supabase.from("debug_events").insert({
+            session_id: "events-me",
+            run_id: "seed",
+            hypothesis_id: "seed",
+            trace_id: null,
+            location: "app/api/debug/events-me/route.ts",
+            msg: "seed",
+            data: { companyId },
+            company_id: companyId,
+            user_id: userId,
+          } as any);
+          if (seedErr && diagDebugTable) diagDebugTable.seedError = String(seedErr.message ?? "");
+        } catch (err) {
+          if (diagDebugTable) diagDebugTable.seedError = err instanceof Error ? err.message : String(err ?? "");
         }
       }
-    } catch {}
+      const { data: rows, error: rowsErr } = await supabase
+        .from("debug_events")
+        .select("created_at,session_id,run_id,hypothesis_id,trace_id,location,msg,data")
+        .eq("company_id", companyId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (!rowsErr) {
+        const mapped = (rows ?? [])
+          .map((r) => ({
+            ts: new Date(String((r as any)?.created_at ?? "")).getTime(),
+            msg: String((r as any)?.msg ?? ""),
+            data: (r as any)?.data ?? {},
+            runId: String((r as any)?.run_id ?? ""),
+            traceId: (r as any)?.trace_id ?? null,
+            location: String((r as any)?.location ?? ""),
+            sessionId: String((r as any)?.session_id ?? ""),
+            hypothesisId: String((r as any)?.hypothesis_id ?? ""),
+          }))
+          .reverse();
+        return json(
+          {
+            ok: true,
+            traceId,
+            companyId,
+            ...(diag
+              ? {
+                  diag: {
+                    hasDefaultSupplier: null,
+                    defaultSupplierId: null,
+                    eventsCount: count ?? 0,
+                    systemKeys: ["debug_events_table"],
+                    debugEventsTable: diagDebugTable,
+                  },
+                }
+              : null),
+            events: mapped,
+          },
+          { status: 200 },
+        );
+      }
+      if (diagDebugTable) diagDebugTable.rowsError = String(rowsErr?.message ?? "");
+    } else if (diagDebugTable) {
+      diagDebugTable.countError = String(countErr.message ?? "");
+    }
 
     const { data: sysSupplier1, error: supplierErr1 } = await supabase
       .from("suppliers")
@@ -213,6 +220,7 @@ export async function GET(req: NextRequest) {
                 defaultSupplierId: String((supplierRow as any)?.id ?? "").trim() || null,
                 eventsCount: events.length,
                 systemKeys: Object.keys(system ?? {}),
+                debugEventsTable: diagDebugTable,
               },
             }
           : null),
