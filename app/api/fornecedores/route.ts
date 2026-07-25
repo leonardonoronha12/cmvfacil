@@ -30,13 +30,15 @@ function __getDbgCfg() {
   __dbgCfg = { url, sessionId, runId };
   return __dbgCfg;
 }
-function __dbgSend(args: { hypothesisId: string; traceId?: string; location: string; msg: string; data?: unknown }) {
+function __dbgSend(args: { hypothesisId: string; traceId?: string; location: string; msg: string; data?: unknown; accessToken?: string }) {
   try {
     const cfg = __getDbgCfg();
     if (!cfg.url) return;
     const adminSecret = String(process.env.ADMIN_SECRET ?? process.env.DEBUG_SECRET ?? "").trim();
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (adminSecret) headers["x-admin-secret"] = adminSecret;
+    const accessToken = String(args.accessToken ?? "").trim();
+    if (accessToken) headers.authorization = `Bearer ${accessToken}`;
     void fetch(cfg.url, {
       method: "POST",
       headers,
@@ -324,6 +326,7 @@ export async function GET(req: NextRequest) {
           linksDb: (linksDb ?? []).length,
           produtosKeys: Object.keys(produtos).length,
         },
+        accessToken,
       });
       // #endregion
 
@@ -492,6 +495,7 @@ export async function POST(req: NextRequest) {
           emptyKeySamples,
           oneKeySamples,
         },
+        accessToken,
       });
     })();
     // #endregion
@@ -682,6 +686,7 @@ export async function POST(req: NextRequest) {
           missing: missing.length,
           missingSample: missing.slice(0, 5),
         },
+        accessToken,
       });
       // #endregion
 
@@ -704,6 +709,7 @@ export async function POST(req: NextRequest) {
           location: "app/api/fornecedores/route.ts:POST:compat:clear",
           msg: "[DEBUG] fornecedores POST compat: clearing supplier_items",
           data: { companyId, supplierIdsToClear: supplierIdsToClear.length },
+          accessToken,
         });
         // #endregion
         const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
@@ -725,6 +731,7 @@ export async function POST(req: NextRequest) {
       location: "app/api/fornecedores/route.ts:POST:compat:done",
       msg: "[DEBUG] fornecedores POST compat: ok",
       data: { companyId, ok: true },
+      accessToken,
     });
     // #endregion
 

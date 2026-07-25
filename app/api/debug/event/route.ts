@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,10 +29,10 @@ function getEnv(name: string) {
 
 export async function POST(req: NextRequest) {
   const requiredSecret = getEnv("ADMIN_SECRET") ?? getEnv("DEBUG_SECRET");
-  if (process.env.NODE_ENV === "production" && requiredSecret) {
-    const got = safeText(req.headers.get("x-admin-secret") ?? "");
-    if (!got || got !== requiredSecret) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-  }
+  const got = safeText(req.headers.get("x-admin-secret") ?? "");
+  const authz = safeText(req.headers.get("authorization") ?? "", 4096);
+  const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7).trim() : "";
+  const hasValidSecret = Boolean(requiredSecret && got && got === requiredSecret);
 
   const body = (await req.json().catch(() => null)) as any;
   const sessionId = safeText(body?.sessionId ?? body?.session_id ?? "", 120);
@@ -49,6 +51,28 @@ export async function POST(req: NextRequest) {
   const companyIdRaw = safeText(data?.companyId ?? data?.company_id ?? "", 80);
   const companyId = companyIdRaw && isUuid(companyIdRaw) ? companyIdRaw : null;
   if (!companyId) return json({ ok: false, error: "missing_company_id" }, { status: 400 });
+
+  if (process.env.NODE_ENV === "production" && requiredSecret && !hasValidSecret) {
+    if (!bearer) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    try {
+      const cfg = getSupabaseAuthConfig();
+      const authClient = createClient(cfg.url, cfg.anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
+      const { data: userData, error: userErr } = await authClient.auth.getUser(bearer);
+      const userId = String(userData?.user?.id ?? "").trim();
+      if (userErr || !userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+      const admin = getSupabaseAdmin();
+      const { data: member } = await admin
+        .from("company_members")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("user_id", userId)
+        .limit(1)
+        .maybeSingle();
+      if (!member) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    } catch {
+      return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    }
+  }
 
   try {
     const supabase = getSupabaseAdmin();
