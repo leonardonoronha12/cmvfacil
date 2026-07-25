@@ -43,6 +43,18 @@ async function __dbgStore(args: {
         return args.supabase;
       }
     })();
+    const { error: tableErr } = await supabase.from("debug_events").insert({
+      session_id: args.event.sessionId,
+      run_id: args.event.runId,
+      hypothesis_id: args.event.hypothesisId,
+      trace_id: args.event.traceId ?? null,
+      location: args.event.location ?? null,
+      msg: args.event.msg,
+      data: (args.event.data ?? {}) as any,
+      company_id: args.companyId,
+      user_id: null,
+    } as any);
+    if (!tableErr) return;
     const { data: defaultSupplier, error: supplierErr } = await supabase
       .from("suppliers")
       .select("id,raw")
