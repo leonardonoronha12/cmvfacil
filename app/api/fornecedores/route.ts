@@ -70,7 +70,7 @@ async function __dbgStore(args: {
   } catch {}
 }
 
-function __dbgSend(args: {
+async function __dbgSend(args: {
   hypothesisId: string;
   traceId?: string;
   location: string;
@@ -90,7 +90,7 @@ function __dbgSend(args: {
     if (accessToken) headers.authorization = `Bearer ${accessToken}`;
     const data = typeof args.data === "undefined" || args.data === null ? {} : args.data;
     if (cfg.url.includes("/api/debug/event") && args.companyId && args.supabase) {
-      void __dbgStore({
+      await __dbgStore({
         supabase: args.supabase,
         companyId: args.companyId,
         event: {
@@ -381,7 +381,7 @@ export async function GET(req: NextRequest) {
       }
 
       // #region debug-point D:get-compat-shape
-      __dbgSend({
+      await __dbgSend({
         hypothesisId: "D",
         traceId,
         location: "app/api/fornecedores/route.ts:GET:compat",
@@ -524,51 +524,49 @@ export async function POST(req: NextRequest) {
     const keepKeysUpper = new Set<string>(Array.from(keys).map(normalizeTombstoneKey).filter(Boolean));
 
     // #region debug-point A:post-compat-payload
-    (() => {
-      let countHasProdutosKey = 0;
-      let countProdutosEmpty = 0;
-      let countProdutosOne = 0;
-      let maxProdutosLen = 0;
-      const emptyKeySamples: string[] = [];
-      const oneKeySamples: string[] = [];
-      for (const k of keys) {
-        const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, k);
-        if (!hasProdutosKey) continue;
-        countHasProdutosKey++;
-        const produtosLen = safeArr(produtosMap[k]).filter((x) => String(x ?? "").trim()).length;
-        if (!produtosLen) {
-          countProdutosEmpty++;
-          if (emptyKeySamples.length < 5) emptyKeySamples.push(k);
-        } else if (produtosLen === 1) {
-          countProdutosOne++;
-          if (oneKeySamples.length < 5) oneKeySamples.push(k);
-        }
-        if (produtosLen > maxProdutosLen) maxProdutosLen = produtosLen;
+    let countHasProdutosKey = 0;
+    let countProdutosEmpty = 0;
+    let countProdutosOne = 0;
+    let maxProdutosLen = 0;
+    const emptyKeySamples: string[] = [];
+    const oneKeySamples: string[] = [];
+    for (const k of keys) {
+      const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, k);
+      if (!hasProdutosKey) continue;
+      countHasProdutosKey++;
+      const produtosLen = safeArr(produtosMap[k]).filter((x) => String(x ?? "").trim()).length;
+      if (!produtosLen) {
+        countProdutosEmpty++;
+        if (emptyKeySamples.length < 5) emptyKeySamples.push(k);
+      } else if (produtosLen === 1) {
+        countProdutosOne++;
+        if (oneKeySamples.length < 5) oneKeySamples.push(k);
       }
-      __dbgSend({
-        hypothesisId: "A",
-        traceId,
-        location: "app/api/fornecedores/route.ts:POST:compat",
-        msg: "[DEBUG] fornecedores POST compat: payload summary",
-        data: {
-          companyId,
-          infoKeys: Object.keys(infoMap).length,
-          produtosKeys: Object.keys(produtosMap).length,
-          equivKeys: Object.keys(equivMap).length,
-          unionKeys: keys.size,
-          hasProdutosKey: countHasProdutosKey,
-          produtosEmpty: countProdutosEmpty,
-          produtosOne: countProdutosOne,
-          produtosMax: maxProdutosLen,
-          tombstones: safeArr(produtosMap[TOMBSTONE_KEY]).length,
-          emptyKeySamples,
-          oneKeySamples,
-        },
-        accessToken,
+      if (produtosLen > maxProdutosLen) maxProdutosLen = produtosLen;
+    }
+    await __dbgSend({
+      hypothesisId: "A",
+      traceId,
+      location: "app/api/fornecedores/route.ts:POST:compat",
+      msg: "[DEBUG] fornecedores POST compat: payload summary",
+      data: {
         companyId,
-        supabase,
-      });
-    })();
+        infoKeys: Object.keys(infoMap).length,
+        produtosKeys: Object.keys(produtosMap).length,
+        equivKeys: Object.keys(equivMap).length,
+        unionKeys: keys.size,
+        hasProdutosKey: countHasProdutosKey,
+        produtosEmpty: countProdutosEmpty,
+        produtosOne: countProdutosOne,
+        produtosMax: maxProdutosLen,
+        tombstones: safeArr(produtosMap[TOMBSTONE_KEY]).length,
+        emptyKeySamples,
+        oneKeySamples,
+      },
+      accessToken,
+      companyId,
+      supabase,
+    });
     // #endregion
 
     const updatesById = new Map<string, any>();
@@ -745,7 +743,7 @@ export async function POST(req: NextRequest) {
       const desiredRows = Array.from(desiredByKey.values());
 
       // #region debug-point B:post-compat-link-plan
-      __dbgSend({
+      await __dbgSend({
         hypothesisId: "B",
         traceId,
         location: "app/api/fornecedores/route.ts:POST:compat:links",
@@ -776,7 +774,7 @@ export async function POST(req: NextRequest) {
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
       if (supplierIdsToClear.length) {
         // #region debug-point B:post-compat-clear
-        __dbgSend({
+        await __dbgSend({
           hypothesisId: "B",
           traceId,
           location: "app/api/fornecedores/route.ts:POST:compat:clear",
@@ -800,7 +798,7 @@ export async function POST(req: NextRequest) {
     }
 
     // #region debug-point C:post-compat-ok
-    __dbgSend({
+    await __dbgSend({
       hypothesisId: "C",
       traceId,
       location: "app/api/fornecedores/route.ts:POST:compat:done",
