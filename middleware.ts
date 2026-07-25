@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE } from "./app/lib/supabaseAuthCookies";
 import { getSupabaseAuthConfig } from "./app/lib/supabaseAuthConfig";
-import { shouldUseSecureCookies } from "./app/lib/cookieSecurity";
+import { getAuthCookieDomain, shouldUseSecureCookies } from "./app/lib/cookieSecurity";
 
 const COOKIE_NAME = "cmv_admin_session";
 
@@ -256,7 +256,16 @@ export async function middleware(req: NextRequest) {
       if (res.ok && data?.access_token) {
         const out = NextResponse.next();
         const secure = shouldUseSecureCookies(req);
-        out.cookies.set({ name: SUPABASE_AT_COOKIE, value: data.access_token, httpOnly: true, sameSite: "lax", secure, path: "/" });
+        const domain = getAuthCookieDomain(req);
+        out.cookies.set({
+          name: SUPABASE_AT_COOKIE,
+          value: data.access_token,
+          httpOnly: true,
+          sameSite: "lax",
+          secure,
+          path: "/",
+          ...(domain ? { domain } : {}),
+        });
         if (data.refresh_token) {
           out.cookies.set({
             name: SUPABASE_RT_COOKIE,
@@ -266,6 +275,7 @@ export async function middleware(req: NextRequest) {
             secure,
             path: "/",
             maxAge: 60 * 60 * 24 * 30,
+            ...(domain ? { domain } : {}),
           });
         }
         return out;

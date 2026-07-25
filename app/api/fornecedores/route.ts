@@ -59,27 +59,23 @@ async function __dbgStore(args: {
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", args.companyId)
-      .eq("external_key", "supplier:system:tombstones")
+      .ilike("external_key", "supplier:default:sem_fornecedor")
       .limit(1)
       .maybeSingle();
     if (supplierErr1) return;
-    const { data: sysSupplier2, error: supplierErr2 } = sysSupplier1
-      ? ({ data: null, error: null } as any)
-      : await supabase.from("suppliers").select("id,raw").eq("company_id", args.companyId).eq("nome", TOMBSTONE_KEY).limit(1).maybeSingle();
-    if (supplierErr2) return;
-    let supplierRow = (sysSupplier1 as any) ?? (sysSupplier2 as any);
+    let supplierRow = sysSupplier1 as any;
     if (!supplierRow) {
       const { data: ins, error: insErr } = await supabase
         .from("suppliers")
         .insert({
           company_id: args.companyId,
-          external_key: "supplier:system:tombstones",
-          nome: TOMBSTONE_KEY,
+          external_key: "supplier:default:sem_fornecedor",
+          nome: "Sem Fornecedor",
           endereco: "",
           vendedor: "",
           whatsapp: "",
           bubble_id: null,
-          raw: { system: { cmvfacil_deleted_suppliers: [] } },
+          raw: { system: { default: true } },
         } as any)
         .select("id,raw")
         .limit(1)
@@ -89,7 +85,7 @@ async function __dbgStore(args: {
           .from("suppliers")
           .select("id,raw")
           .eq("company_id", args.companyId)
-          .eq("nome", TOMBSTONE_KEY)
+          .ilike("external_key", "supplier:default:sem_fornecedor")
           .limit(1)
           .maybeSingle();
         if (reErr) return;
@@ -335,6 +331,8 @@ function dbIdFromKey(value: string) {
 export async function GET(req: NextRequest) {
   const traceId = crypto.randomUUID();
   try {
+    const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ ok: true, traceId, source: "legacy", readOnly: false, row: null }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
@@ -380,7 +378,7 @@ export async function GET(req: NextRequest) {
           if (extracted.length) tombstones = extracted;
           continue;
         }
-        const dbId = String((s as any)?.id ?? "").trim();
+        const dbId = canonicalUuid(String((s as any)?.id ?? ""));
         const bubbleId = String((s as any)?.bubble_id ?? "").trim();
         const key = bubbleId || (dbId ? `db:${dbId}` : "");
         if (!key || !nome) continue;
@@ -402,18 +400,40 @@ export async function GET(req: NextRequest) {
       const produtos: Record<string, string[]> = {};
       const { data: linksDb, error: linksErr } = await supabase
         .from("supplier_items")
-        .select("supplier_id,item:items(name),supplier:suppliers(id,bubble_id)")
+        .select("supplier_id,item:items(name)")
         .eq("company_id", companyId)
         .limit(5000);
       if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
+      let linksSupplierIdMissing = 0;
+      let linksSupplierKeyMissing = 0;
+      let linksSupplierNotInInfo = 0;
+      let linksItemNameMissing = 0;
+      const linksSupplierIdSamples: string[] = [];
+      const linksNotInInfoSamples: string[] = [];
+      const distinctSupplierIds = new Set<string>();
       for (const r of linksDb ?? []) {
-        const supplier = (r as any)?.supplier ?? null;
-        const supplierDbId = String(supplier?.id ?? "").trim();
-        const supplierBubbleId = String(supplier?.bubble_id ?? "").trim();
-        const supplierKey = supplierBubbleId || supplierKeyById.get(supplierDbId) || (supplierDbId ? `db:${supplierDbId}` : "");
-        if (!supplierKey || !(supplierKey in info)) continue;
+        const supplierDbId = canonicalUuid(String((r as any)?.supplier_id ?? ""));
+        const supplierKey = supplierKeyById.get(supplierDbId) || (supplierDbId ? `db:${supplierDbId}` : "");
+        if (!supplierDbId) {
+          linksSupplierIdMissing++;
+          continue;
+        }
+        distinctSupplierIds.add(supplierDbId);
+        if (!supplierKey) {
+          linksSupplierKeyMissing++;
+          if (linksSupplierIdSamples.length < 5) linksSupplierIdSamples.push(supplierDbId);
+          continue;
+        }
+        if (!(supplierKey in info)) {
+          linksSupplierNotInInfo++;
+          if (linksNotInInfoSamples.length < 5) linksNotInInfoSamples.push(supplierKey);
+          continue;
+        }
         const itemName = String((r as any)?.item?.name ?? "").trim();
-        if (!itemName) continue;
+        if (!itemName) {
+          linksItemNameMissing++;
+          continue;
+        }
         const prev = Array.isArray(produtos[supplierKey]) ? produtos[supplierKey] : [];
         if (!prev.includes(itemName)) produtos[supplierKey] = [...prev, itemName];
       }
@@ -443,6 +463,33 @@ export async function GET(req: NextRequest) {
       });
       // #endregion
 
+      // #region debug-point D2:get-compat-links-skip
+      await __dbgSend({
+        hypothesisId: "D2",
+        traceId,
+        location: "app/api/fornecedores/route.ts:GET:compat",
+        msg: "[DEBUG] fornecedores GET compat: links skip reasons",
+        data: {
+          companyId,
+          shouldUseCompat,
+          isAdmin,
+          suppliersDb: (suppliersDb ?? []).length,
+          infoKeys: Object.keys(info).length,
+          linksDb: (linksDb ?? []).length,
+          distinctSupplierIds: distinctSupplierIds.size,
+          linksSupplierIdMissing,
+          linksSupplierKeyMissing,
+          linksSupplierNotInInfo,
+          linksItemNameMissing,
+          linksSupplierIdSamples,
+          linksNotInInfoSamples,
+        },
+        accessToken,
+        companyId,
+        supabase,
+      });
+      // #endregion
+
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
       if (normalizedTombstones.length) produtos[TOMBSTONE_KEY] = normalizedTombstones;
 
@@ -452,7 +499,36 @@ export async function GET(req: NextRequest) {
         if (typeof eq !== "undefined") equivalencias[k] = eq as any;
       }
 
-      return json({ ok: true, traceId, source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
+      return json(
+        {
+          ok: true,
+          traceId,
+          source: "compat",
+          readOnly: false,
+          ...(diag
+            ? {
+                diag: {
+                  companyId,
+                  shouldUseCompat,
+                  isAdmin,
+                  suppliersDb: (suppliersDb ?? []).length,
+                  infoKeys: Object.keys(info).length,
+                  linksDb: (linksDb ?? []).length,
+                  produtosKeys: Object.keys(produtos).length,
+                  distinctSupplierIds: distinctSupplierIds.size,
+                  linksSupplierIdMissing,
+                  linksSupplierKeyMissing,
+                  linksSupplierNotInInfo,
+                  linksItemNameMissing,
+                  linksSupplierIdSamples,
+                  linksNotInInfoSamples,
+                },
+              }
+            : null),
+          row: { id, info, produtos, equivalencias },
+        },
+        { status: 200 },
+      );
     }
 
     const { data, error } = await supabase.from("fornecedores_state").select("*").eq("id", id).maybeSingle();

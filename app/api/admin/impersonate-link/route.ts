@@ -4,7 +4,7 @@ import * as XLSX from "xlsx";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 import { parseBubbleCsvToObjects, type CsvObjectRow, normalizeKey as normalizeKeyFromLib } from "../../../lib/bubbleCsv";
-import { shouldUseSecureCookies } from "../../../lib/cookieSecurity";
+import { getAuthCookieDomain, shouldUseSecureCookies } from "../../../lib/cookieSecurity";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -270,7 +270,8 @@ export async function GET(req: NextRequest) {
 
       const res = NextResponse.redirect(new URL("/dashboard", url.origin), { status: 302 });
       const secure = shouldUseSecureCookies(req);
-      const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/" };
+      const domain = getAuthCookieDomain(req);
+      const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/", ...(domain ? { domain } : {}) };
       res.cookies.set({ name: "cmv_at", value: accessToken, ...cookieBase, maxAge: 60 * 20 });
       if (refreshToken) res.cookies.set({ name: "cmv_rt", value: refreshToken, ...cookieBase, maxAge: 60 * 60 * 24 * 2 });
       return res;

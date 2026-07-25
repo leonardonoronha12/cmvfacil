@@ -44,6 +44,70 @@ function looksLikeItemId(value: string) {
   return /^\d{8,}x\d{6,}$/.test(s);
 }
 
+function isStableFornecedorKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return false;
+  if (s.toLowerCase().startsWith("db:")) return true;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/i.test(s);
+}
+
+function normalizeFornecedorKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return "";
+  if (s.toLowerCase().startsWith("db:")) return `db:${s.slice(3).trim().toLowerCase()}`;
+  return isStableFornecedorKey(s) ? s : s.toUpperCase();
+}
+
+function getProdutosForKey(map: FornecedorProdutos, key: string) {
+  const raw = String(key ?? "").trim();
+  if (!raw) return [];
+  const norm = normalizeFornecedorKey(raw);
+  return map[norm] ?? map[raw] ?? map[raw.toUpperCase()] ?? map[raw.toLowerCase()] ?? [];
+}
+
+function getEquivalenciasForKey(map: FornecedorEquivalenciasMap, key: string) {
+  const raw = String(key ?? "").trim();
+  if (!raw) return [];
+  const norm = normalizeFornecedorKey(raw);
+  return map[norm] ?? map[raw] ?? map[raw.toUpperCase()] ?? map[raw.toLowerCase()] ?? [];
+}
+
+function keyVariants(rawKey: string) {
+  const raw = String(rawKey ?? "").trim();
+  const norm = normalizeFornecedorKey(raw);
+  const s = new Set<string>();
+  for (const v of [raw, norm, raw.toUpperCase(), raw.toLowerCase(), norm.toUpperCase(), norm.toLowerCase()]) {
+    const t = String(v ?? "").trim();
+    if (t) s.add(t);
+  }
+  return { norm, variants: Array.from(s.values()) };
+}
+
+function setProdutosForKey(map: FornecedorProdutos, rawKey: string, list: string[]) {
+  const { norm, variants } = keyVariants(rawKey);
+  if (!norm) return map;
+  const next: FornecedorProdutos = { ...map };
+  for (const k of variants) {
+    if (k !== norm && Object.prototype.hasOwnProperty.call(next, k)) delete (next as any)[k];
+  }
+  if (list.length) next[norm] = list;
+  else if (Object.prototype.hasOwnProperty.call(next, norm)) delete (next as any)[norm];
+  return next;
+}
+
+function setEquivalenciasForKey(map: FornecedorEquivalenciasMap, rawKey: string, list: any[]) {
+  const { norm, variants } = keyVariants(rawKey);
+  if (!norm) return map;
+  const next: FornecedorEquivalenciasMap = { ...map };
+  for (const k of variants) {
+    if (k !== norm && Object.prototype.hasOwnProperty.call(next, k)) delete (next as any)[k];
+  }
+  if (list.length) next[norm] = list as any;
+  else if (Object.prototype.hasOwnProperty.call(next, norm)) delete (next as any)[norm];
+  return next;
+}
+
 function IconBox() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
@@ -453,7 +517,7 @@ export default function FornecedoresClient() {
     const nextList: FornecedorRow[] = [];
     for (const [key, info] of Object.entries(infoMap)) {
       const fornecedorLabel = info.fornecedor || key;
-      const itens = (produtosMap[key]?.length ?? 0) || 0;
+      const itens = getProdutosForKey(produtosMap, key).length || 0;
       nextList.push({
         id: key,
         fornecedor: fornecedorLabel,
@@ -489,7 +553,7 @@ export default function FornecedoresClient() {
     let changed = false;
     const next: FornecedorProdutos = {};
     for (const [k, listRaw] of Object.entries(produtosMap)) {
-      const key = String(k ?? "").trim().toUpperCase();
+      const key = normalizeFornecedorKey(k);
       const list = Array.isArray(listRaw) ? listRaw : [];
       const out: string[] = [];
       for (const raw of list) {
@@ -504,7 +568,7 @@ export default function FornecedoresClient() {
         if (!out.some((x) => x.toLowerCase() === label.toLowerCase())) out.push(label);
       }
       if (!key) continue;
-      if (key !== k) changed = true;
+      if (key !== String(k ?? "").trim()) changed = true;
       if (out.length) next[key] = out;
       if (!out.length && list.length) changed = true;
     }
@@ -556,7 +620,7 @@ export default function FornecedoresClient() {
   const produtosFornecedor = useMemo(() => {
     const key = (prodFornecedorKey ?? "").trim();
     if (!key) return [];
-    return produtosMap[key] ?? [];
+    return getProdutosForKey(produtosMap, key);
   }, [prodFornecedorKey, produtosMap]);
 
   const insumosByName = useMemo(() => {
@@ -577,12 +641,14 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
-    const existing = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const list = getEquivalenciasForKey(equivalenciasMap, keyRaw);
+    const existing = list.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    const defaultEq = name && insumosByName.get(name.toLowerCase()) ? name : insumosStore[0]?.item ?? "";
     setVincNomeOriginal(name);
     setVincNomeNota(name);
     setVincUnidadeNota(existing?.unidadeNaNota || "Und");
-    setVincInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? ""));
+    setVincInsumoEq(existing?.insumoEquivalente || defaultEq);
     setVincEqQtd(existing?.equivalenteQuantidade || "");
     setIsVincOpen(true);
   }
@@ -592,7 +658,8 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedorKey = (prodFornecedorKey ?? "").trim();
+    const fornecedorKeyRaw = (prodFornecedorKey ?? "").trim();
+    const fornecedorKey = normalizeFornecedorKey(fornecedorKeyRaw);
     if (!fornecedorKey) return;
     const nomeNaNota = vincNomeNota.trim();
     const unidadeNaNota = vincUnidadeNota.trim() || "Und";
@@ -600,7 +667,8 @@ export default function FornecedoresClient() {
     if (!nomeNaNota || !insumoEquivalente) return;
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
     const originalName = vincNomeOriginal.trim();
-    const existing = equivalenciasMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
+    const existingList = getEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw);
+    const existing = existingList.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
     const nextItem = {
       id: existing?.id ?? String(Date.now()),
       nomeNaNota,
@@ -611,13 +679,13 @@ export default function FornecedoresClient() {
     };
     const oldName = originalName;
 
-    const curProdutos = produtosMap[fornecedorKey] ?? [];
+    const curProdutos = getProdutosForKey(produtosMap, fornecedorKeyRaw);
     const hasNomeNaNota = curProdutos.some((x) => x.toLowerCase() === nomeNaNota.toLowerCase());
     let nextProdutos = produtosMap;
 
     if (!oldName && !hasNomeNaNota) {
       const nextList = [...curProdutos, nomeNaNota];
-      nextProdutos = { ...produtosMap, [fornecedorKey]: nextList };
+      nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, nextList);
       writeFornecedorProdutosMap(nextProdutos);
       setProdutosMap(nextProdutos);
     } else if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
@@ -626,16 +694,16 @@ export default function FornecedoresClient() {
       for (const n of replaced) {
         if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
       }
-      nextProdutos = { ...produtosMap, [fornecedorKey]: dedup };
+      nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, dedup);
       writeFornecedorProdutosMap(nextProdutos);
       setProdutosMap(nextProdutos);
     }
 
-    const curEq = equivalenciasMap[fornecedorKey] ?? [];
+    const curEq = existingList;
     const filtered = curEq.filter(
       (x) => x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
     );
-    const nextEq = { ...equivalenciasMap, [fornecedorKey]: [...filtered, nextItem] };
+    const nextEq = setEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw, [...filtered, nextItem] as any[]);
     writeFornecedorEquivalenciasMap(nextEq);
     setEquivalenciasMap(nextEq);
 
@@ -649,7 +717,7 @@ export default function FornecedoresClient() {
   function openProdutos(row: FornecedorRow) {
     const key = String(row.id ?? "").trim();
     if (!key) return;
-    setProdFornecedorKey(key);
+    setProdFornecedorKey(normalizeFornecedorKey(key));
     setProdFornecedorLabel(row.fornecedor);
     setProdVendedor(row.vendedorNome || "-");
     setProdEndereco(row.endereco || "-");
@@ -665,7 +733,8 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const key = normalizeFornecedorKey(keyRaw);
     const item = (produtoDraft || produtoQuery).trim();
     if (!key) return;
     if (!item) {
@@ -676,13 +745,13 @@ export default function FornecedoresClient() {
       openVinculacao("");
       return;
     }
-    const curList = produtosMap[key] ?? [];
+    const curList = getProdutosForKey(produtosMap, keyRaw);
     const has = curList.some((x) => x.toLowerCase() === item.toLowerCase());
     if (has) {
       openVinculacao(curList.find((x) => x.toLowerCase() === item.toLowerCase()) ?? item);
       return;
     }
-    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: [...curList, item] };
+    const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, [...curList, item]);
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
@@ -700,11 +769,12 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const key = normalizeFornecedorKey(keyRaw);
     if (!key) return;
-    const cur = produtosMap[key] ?? [];
+    const cur = getProdutosForKey(produtosMap, keyRaw);
     const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
-    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: nextList };
+    const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, nextList);
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>

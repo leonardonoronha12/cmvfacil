@@ -17,3 +17,15 @@ export function shouldUseSecureCookies(req: Request) {
   }
 }
 
+export function getAuthCookieDomain(req: Request) {
+  const xfHost = String(req.headers.get("x-forwarded-host") ?? "")
+    .split(",")[0]
+    ?.trim()
+    .toLowerCase();
+  const host = xfHost || String(req.headers.get("host") ?? "").trim().toLowerCase();
+  const cleanHost = host.split(":")[0] ?? host;
+  const isLocalhost = cleanHost.includes("localhost") || cleanHost.includes("127.0.0.1");
+  if (isLocalhost) return null;
+  if (cleanHost.endsWith("cmvfacil.app")) return ".cmvfacil.app";
+  return null;
+}

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE } from "../../../lib/supabaseAuthCookies";
+import { getAuthCookieDomain } from "../../../lib/cookieSecurity";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -30,8 +31,12 @@ export async function POST(req: NextRequest) {
   }
 
   const res = json({ ok: true });
+  const domain = getAuthCookieDomain(req);
   res.cookies.set({ name: SUPABASE_AT_COOKIE, value: "", path: "/", maxAge: 0 });
   res.cookies.set({ name: SUPABASE_RT_COOKIE, value: "", path: "/", maxAge: 0 });
+  if (domain) {
+    res.cookies.set({ name: SUPABASE_AT_COOKIE, value: "", path: "/", maxAge: 0, domain });
+    res.cookies.set({ name: SUPABASE_RT_COOKIE, value: "", path: "/", maxAge: 0, domain });
+  }
   return res;
 }
-

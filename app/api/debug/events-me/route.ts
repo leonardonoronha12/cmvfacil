@@ -135,33 +135,28 @@ export async function GET(req: NextRequest) {
       diagDebugTable.countError = String(countErr.message ?? "");
     }
 
-    const { data: sysSupplier1, error: supplierErr1 } = await supabase
+    const { data: defaultSupplier, error: supplierErr1 } = await supabase
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", companyId)
-      .eq("external_key", "supplier:system:tombstones")
+      .ilike("external_key", "supplier:default:sem_fornecedor")
       .limit(1)
       .maybeSingle();
     if (supplierErr1) return json({ ok: false, traceId, error: supplierErr1.message }, { status: 500 });
-    const { data: sysSupplier2, error: supplierErr2 } = sysSupplier1
-      ? ({ data: null, error: null } as any)
-      : await supabase.from("suppliers").select("id,raw").eq("company_id", companyId).eq("nome", "__CMVFACIL_DELETED_SUPPLIERS__").limit(1).maybeSingle();
-    if (supplierErr2) return json({ ok: false, traceId, error: supplierErr2.message }, { status: 500 });
-
-    let supplierRow = (sysSupplier1 as any) ?? (sysSupplier2 as any);
+    let supplierRow = defaultSupplier as any;
     if (seed) {
       if (!supplierRow) {
         const { data: ins, error: insErr } = await supabase
           .from("suppliers")
           .insert({
             company_id: companyId,
-            external_key: "supplier:system:tombstones",
-            nome: "__CMVFACIL_DELETED_SUPPLIERS__",
+            external_key: "supplier:default:sem_fornecedor",
+            nome: "Sem Fornecedor",
             endereco: "",
             vendedor: "",
             whatsapp: "",
             bubble_id: null,
-            raw: { system: { cmvfacil_deleted_suppliers: [] } },
+            raw: { system: { default: true } },
           } as any)
           .select("id,raw")
           .limit(1)
@@ -170,13 +165,13 @@ export async function GET(req: NextRequest) {
           const msg = String(insErr.message ?? "");
           const m = msg.toLowerCase();
           if (!m.includes("duplicate key") && !m.includes("suppliers_company_external_key_uidx")) {
-            return json({ ok: false, traceId, error: `system_supplier_insert_failed: ${msg || "unknown"}` }, { status: 500 });
+            return json({ ok: false, traceId, error: `default_supplier_insert_failed: ${msg || "unknown"}` }, { status: 500 });
           }
           const { data: existing, error: reErr } = await supabase
             .from("suppliers")
             .select("id,raw")
             .eq("company_id", companyId)
-            .eq("nome", "__CMVFACIL_DELETED_SUPPLIERS__")
+            .ilike("external_key", "supplier:default:sem_fornecedor")
             .limit(1)
             .maybeSingle();
           if (reErr) return json({ ok: false, traceId, error: reErr.message }, { status: 500 });
@@ -186,7 +181,7 @@ export async function GET(req: NextRequest) {
         }
       }
       const supplierId = String((supplierRow as any)?.id ?? "").trim();
-      if (!supplierId) return json({ ok: false, traceId, error: "missing_system_supplier" }, { status: 500 });
+      if (!supplierId) return json({ ok: false, traceId, error: "missing_default_supplier" }, { status: 500 });
       const rawBase = (supplierRow as any)?.raw ?? {};
       const systemBase = (rawBase as any)?.system ?? {};
       const prev = Array.isArray((systemBase as any)?.debug_events) ? (systemBase as any).debug_events : [];
@@ -202,6 +197,29 @@ export async function GET(req: NextRequest) {
         .eq("id", supplierId);
       if (updErr) return json({ ok: false, traceId, error: updErr.message }, { status: 500 });
       supplierRow = { ...(supplierRow as any), raw: nextRaw };
+    }
+
+    if (!supplierRow) {
+      return json(
+        {
+          ok: true,
+          traceId,
+          companyId,
+          ...(diag
+            ? {
+                diag: {
+                  hasDefaultSupplier: false,
+                  defaultSupplierId: null,
+                  eventsCount: 0,
+                  systemKeys: [],
+                  debugEventsTable: diagDebugTable,
+                },
+              }
+            : null),
+          events: [],
+        },
+        { status: 200 },
+      );
     }
 
     const raw = (supplierRow as any)?.raw ?? {};
