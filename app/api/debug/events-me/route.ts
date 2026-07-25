@@ -169,6 +169,8 @@ export async function GET(req: NextRequest) {
           supplierRow = ins as any;
         }
       }
+      const supplierId = String((supplierRow as any)?.id ?? "").trim();
+      if (!supplierId) return json({ ok: false, traceId, error: "missing_system_supplier" }, { status: 500 });
       const rawBase = (supplierRow as any)?.raw ?? {};
       const systemBase = (rawBase as any)?.system ?? {};
       const prev = Array.isArray((systemBase as any)?.debug_events) ? (systemBase as any).debug_events : [];
@@ -181,7 +183,7 @@ export async function GET(req: NextRequest) {
         .from("suppliers")
         .update({ raw: nextRaw } as any)
         .eq("company_id", companyId)
-        .eq("id", String((supplierRow as any)?.id ?? ""));
+        .eq("id", supplierId);
       if (updErr) return json({ ok: false, traceId, error: updErr.message }, { status: 500 });
       supplierRow = { ...(supplierRow as any), raw: nextRaw };
     }

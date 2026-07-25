@@ -95,12 +95,14 @@ async function __dbgStore(args: {
       }
     }
     if (!supplierRow) return;
+    const supplierId = String((supplierRow as any)?.id ?? "").trim();
+    if (!supplierId) return;
     const raw = supplierRow?.raw ?? {};
     const system = (raw as any)?.system ?? {};
     const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     const next = [...prev, args.event].slice(-200);
     const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
-    await supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", String(supplierRow?.id ?? ""));
+    await supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", supplierId);
   } catch {}
 }
 
