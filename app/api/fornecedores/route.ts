@@ -89,7 +89,7 @@ async function __dbgSend(args: {
     const accessToken = String(args.accessToken ?? "").trim();
     if (accessToken) headers.authorization = `Bearer ${accessToken}`;
     const data = typeof args.data === "undefined" || args.data === null ? {} : args.data;
-    if (cfg.url.includes("/api/debug/event") && args.companyId && args.supabase) {
+    if (process.env.NODE_ENV === "production" && args.companyId && args.supabase) {
       await __dbgStore({
         supabase: args.supabase,
         companyId: args.companyId,
@@ -104,7 +104,7 @@ async function __dbgSend(args: {
           ts: Date.now(),
         },
       });
-      return;
+      if (cfg.url.includes("/api/debug/event")) return;
     }
     void fetch(cfg.url, {
       method: "POST",
