@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import fs from "node:fs";
 
@@ -36,7 +36,14 @@ async function __dbgStore(args: {
   event: { sessionId: string; runId: string; hypothesisId: string; traceId?: string; location: string; msg: string; data: unknown; ts: number };
 }) {
   try {
-    const { data: defaultSupplier, error: supplierErr } = await args.supabase
+    const supabase = (() => {
+      try {
+        return getSupabaseAdmin();
+      } catch {
+        return args.supabase;
+      }
+    })();
+    const { data: defaultSupplier, error: supplierErr } = await supabase
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", args.companyId)
@@ -46,7 +53,7 @@ async function __dbgStore(args: {
     if (supplierErr) return;
     let supplierRow = defaultSupplier as any;
     if (!supplierRow) {
-      const { data: ins, error: insErr } = await args.supabase
+      const { data: ins, error: insErr } = await supabase
         .from("suppliers")
         .insert({
           company_id: args.companyId,
@@ -66,7 +73,7 @@ async function __dbgStore(args: {
     const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     const next = [...prev, args.event].slice(-200);
     const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
-    await args.supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", String(supplierRow?.id ?? ""));
+    await supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", String(supplierRow?.id ?? ""));
   } catch {}
 }
 
