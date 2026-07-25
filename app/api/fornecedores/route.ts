@@ -15,8 +15,12 @@ function __getDbgCfg() {
   if (__dbgCfg) return __dbgCfg;
   let url = String(process.env.DEBUG_SERVER_URL ?? "").trim();
   let sessionId = String(process.env.DEBUG_SESSION_ID ?? "").trim() || "supplier-items-persist";
-  const runId = String(process.env.DEBUG_RUN_ID ?? "").trim() || "pre-fix";
-  if (!url) {
+  let runId = String(process.env.DEBUG_RUN_ID ?? "").trim() || "pre-fix";
+  if (!url && process.env.NODE_ENV === "production") {
+    url = "https://cmvfacil.app/api/debug/event";
+    if (!String(process.env.DEBUG_RUN_ID ?? "").trim()) runId = "prod-pre-fix";
+  }
+  if (!url && process.env.NODE_ENV !== "production") {
     try {
       const raw = fs.readFileSync(DEBUG_ENV_PATH, "utf8");
       url = String(raw.match(/^DEBUG_SERVER_URL=(.+)$/m)?.[1] ?? "").trim() || url;

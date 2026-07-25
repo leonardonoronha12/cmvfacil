@@ -47,28 +47,47 @@ export async function POST(req: NextRequest) {
 
   const traceId = traceIdRaw && isUuid(traceIdRaw) ? traceIdRaw : null;
   const companyIdRaw = safeText(data?.companyId ?? data?.company_id ?? "", 80);
-  const userIdRaw = safeText(data?.userId ?? data?.user_id ?? "", 80);
   const companyId = companyIdRaw && isUuid(companyIdRaw) ? companyIdRaw : null;
-  const userId = userIdRaw && isUuid(userIdRaw) ? userIdRaw : null;
+  if (!companyId) return json({ ok: false, error: "missing_company_id" }, { status: 400 });
 
   try {
     const supabase = getSupabaseAdmin();
-    const { error } = await supabase.from("debug_events").insert({
-      session_id: sessionId,
-      run_id: runId,
-      hypothesis_id: hypothesisId,
-      trace_id: traceId,
+    const { data: defaultSupplier, error: supplierErr } = await supabase
+      .from("suppliers")
+      .select("id,raw")
+      .eq("company_id", companyId)
+      .eq("external_key", "supplier:default:sem_fornecedor")
+      .limit(1)
+      .maybeSingle();
+    if (supplierErr) return json({ ok: false, error: supplierErr.message }, { status: 500 });
+    if (!defaultSupplier) return json({ ok: false, error: "default_supplier_not_found" }, { status: 404 });
+
+    const raw = (defaultSupplier as any)?.raw ?? {};
+    const system = (raw as any)?.system ?? {};
+    const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
+    const nextEvent = {
+      sessionId,
+      runId,
+      hypothesisId,
+      traceId,
       location: location || null,
       msg,
       data: data ?? null,
-      company_id: companyId,
-      user_id: userId,
-    } as any);
-    if (error) return json({ ok: false, error: error.message }, { status: 500 });
+      ts: Date.now(),
+    };
+    const next = [...prev, nextEvent].slice(-200);
+
+    const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
+    const { error: upErr } = await supabase
+      .from("suppliers")
+      .update({ raw: nextRaw } as any)
+      .eq("company_id", companyId)
+      .eq("id", String((defaultSupplier as any).id ?? ""));
+    if (upErr) return json({ ok: false, error: upErr.message }, { status: 500 });
+
     return json({ ok: true }, { status: 200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err ?? "");
     return json({ ok: false, error: msg || "unknown_error" }, { status: 500 });
   }
 }
-
