@@ -394,6 +394,7 @@ export async function POST(req: NextRequest) {
       const hasVendedor = Object.prototype.hasOwnProperty.call(infoRow, "vendedor");
       const hasEndereco = Object.prototype.hasOwnProperty.call(infoRow, "endereco");
       const hasWhatsapp = Object.prototype.hasOwnProperty.call(infoRow, "whatsapp");
+      const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, key);
       const nomeFromInfo = normalizeText((infoRow as any).fornecedor ?? "");
       const nameKey = normalizeLookupKey(nomeFromInfo || key);
       const rawProdutos = safeArr(produtosMap[key])
@@ -411,7 +412,7 @@ export async function POST(req: NextRequest) {
       const existing = supplierId ? supplierInfoById.get(supplierId) : null;
 
       const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
-      const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
+      const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: hasProdutosKey ? produtos : undefined, equivalencias });
 
       const vendedor = hasVendedor ? normalizeText((infoRow as any).vendedor ?? "") : normalizeText(existing?.vendedor ?? "");
       const endereco = hasEndereco ? normalizeText((infoRow as any).endereco ?? "") : normalizeText(existing?.endereco ?? "");
@@ -509,6 +510,8 @@ export async function POST(req: NextRequest) {
 
     const supplierProductsById = new Map<string, string[]>();
     for (const key of keys) {
+      const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, key);
+      if (!hasProdutosKey) continue;
       const rawProdutos = safeArr(produtosMap[key])
         .map((x) => normalizeText(x))
         .filter(Boolean);
