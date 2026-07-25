@@ -345,7 +345,7 @@ export async function POST(req: NextRequest) {
 
     const { data: suppliersDb, error: suppliersErr } = await supabase
       .from("suppliers")
-      .select("id,bubble_id,external_key,nome,raw")
+      .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
       .eq("company_id", companyId)
       .limit(5000);
     if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
@@ -353,6 +353,7 @@ export async function POST(req: NextRequest) {
     const supplierIdByBubbleId = new Map<string, string>();
     const supplierIdByNameKey = new Map<string, string>();
     const supplierRawById = new Map<string, unknown>();
+    const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
     const supplierIdByKeyUpper = new Map<string, string>();
     let defaultSupplierId = "";
     const reservedSupplierIds = new Set<string>();
@@ -362,6 +363,9 @@ export async function POST(req: NextRequest) {
       const bubbleId = String((s as any)?.bubble_id ?? "").trim();
       const externalKey = normalizeText((s as any)?.external_key ?? "");
       const nome = normalizeText((s as any)?.nome ?? "");
+      const endereco = normalizeText((s as any)?.endereco ?? "");
+      const vendedor = normalizeText((s as any)?.vendedor ?? "");
+      const whatsapp = normalizeText((s as any)?.whatsapp ?? "");
       const sys = ((s as any)?.raw as any)?.system ?? null;
       const isDefault = externalKey === "supplier:default:sem_fornecedor" || normalizeNameKey(nome) === "sem fornecedor" || Boolean(sys?.default);
       if (isDefault) defaultSupplierId = sid;
@@ -369,6 +373,7 @@ export async function POST(req: NextRequest) {
       if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
       if (nome) supplierIdByNameKey.set(normalizeLookupKey(nome), sid);
       supplierRawById.set(sid, (s as any)?.raw ?? {});
+      supplierInfoById.set(sid, { nome, endereco, vendedor, whatsapp });
       const key = bubbleId || `db:${sid}`;
       supplierIdByKeyUpper.set(key.toUpperCase(), sid);
     }
@@ -385,7 +390,11 @@ export async function POST(req: NextRequest) {
     const insertsByKey = new Map<string, any>();
     for (const key of keys) {
       const infoRow = safeObj(infoMap[key]);
-      const nomeFromInfo = normalizeText(infoRow.fornecedor ?? "");
+      const hasFornecedor = Object.prototype.hasOwnProperty.call(infoRow, "fornecedor");
+      const hasVendedor = Object.prototype.hasOwnProperty.call(infoRow, "vendedor");
+      const hasEndereco = Object.prototype.hasOwnProperty.call(infoRow, "endereco");
+      const hasWhatsapp = Object.prototype.hasOwnProperty.call(infoRow, "whatsapp");
+      const nomeFromInfo = normalizeText((infoRow as any).fornecedor ?? "");
       const nameKey = normalizeLookupKey(nomeFromInfo || key);
       const rawProdutos = safeArr(produtosMap[key])
         .map((x) => normalizeText(x))
@@ -399,13 +408,46 @@ export async function POST(req: NextRequest) {
       if (!supplierId) supplierId = canonicalUuid(supplierIdByBubbleId.get(key) ?? "");
       if (!supplierId && nameKey) supplierId = canonicalUuid(supplierIdByNameKey.get(nameKey) ?? "");
 
+      const existing = supplierId ? supplierInfoById.get(supplierId) : null;
+
+      // #region debug-point A:missing-info-row
+      if (supplierId && isDbPrefixed(key) && !nomeFromInfo) {
+        (() => {
+          const fs = require("fs");
+          const p = ".dbg/supplier-sync-disappears.env";
+          let u = "http://127.0.0.1:7777/event",
+            s = "supplier-sync-disappears";
+          try {
+            const e = fs.readFileSync(p, "utf8");
+            u = e.match(/DEBUG_SERVER_URL=(.+)/)?.[1] || u;
+            s = e.match(/DEBUG_SESSION_ID=(.+)/)?.[1] || s;
+          } catch {}
+          fetch(u, {
+            method: "POST",
+            body: JSON.stringify({
+              sessionId: s,
+              runId: "pre-fix",
+              hypothesisId: "A",
+              location: "app/api/fornecedores/route.ts:POST",
+              msg: "[DEBUG] compat key db: sem fornecedor no infoMap",
+              data: { traceId, key, supplierId },
+              ts: Date.now(),
+            }),
+          }).catch(() => {});
+        })();
+      }
+      // #endregion
+
       const rawBase = supplierId ? supplierRawById.get(supplierId) : {};
       const nextRaw = normalizeFornecedoresRaw(rawBase, { produtos: produtos.length ? produtos : undefined, equivalencias });
 
-      const vendedor = normalizeText(infoRow.vendedor ?? "");
-      const endereco = normalizeText(infoRow.endereco ?? "");
-      const whatsapp = normalizeText(infoRow.whatsapp ?? "");
-      const nome = nomeFromInfo || normalizeText(key);
+      const vendedor = hasVendedor ? normalizeText((infoRow as any).vendedor ?? "") : normalizeText(existing?.vendedor ?? "");
+      const endereco = hasEndereco ? normalizeText((infoRow as any).endereco ?? "") : normalizeText(existing?.endereco ?? "");
+      const whatsapp = hasWhatsapp ? normalizeText((infoRow as any).whatsapp ?? "") : normalizeText(existing?.whatsapp ?? "");
+      const nome =
+        nomeFromInfo ||
+        normalizeText(existing?.nome ?? "") ||
+        (!isDbPrefixed(key) && !isUuid(key) && !hasFornecedor ? normalizeText(key) : "");
 
       const row = {
         ...(supplierId ? { id: supplierId } : null),
