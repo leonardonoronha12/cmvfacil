@@ -34,7 +34,7 @@ function __dbgSend(args: { hypothesisId: string; traceId?: string; location: str
   try {
     const cfg = __getDbgCfg();
     if (!cfg.url) return;
-    const adminSecret = String(process.env.ADMIN_SECRET ?? "").trim();
+    const adminSecret = String(process.env.ADMIN_SECRET ?? process.env.DEBUG_SECRET ?? "").trim();
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (adminSecret) headers["x-admin-secret"] = adminSecret;
     void fetch(cfg.url, {
@@ -47,7 +47,7 @@ function __dbgSend(args: { hypothesisId: string; traceId?: string; location: str
         traceId: args.traceId,
         location: args.location,
         msg: args.msg,
-        data: args.data ?? null,
+        data: typeof args.data === "undefined" || args.data === null ? {} : args.data,
         ts: Date.now(),
       }),
     }).catch(() => {});
@@ -703,7 +703,7 @@ export async function POST(req: NextRequest) {
           traceId,
           location: "app/api/fornecedores/route.ts:POST:compat:clear",
           msg: "[DEBUG] fornecedores POST compat: clearing supplier_items",
-          data: { supplierIdsToClear: supplierIdsToClear.length },
+          data: { companyId, supplierIdsToClear: supplierIdsToClear.length },
         });
         // #endregion
         const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
@@ -724,7 +724,7 @@ export async function POST(req: NextRequest) {
       traceId,
       location: "app/api/fornecedores/route.ts:POST:compat:done",
       msg: "[DEBUG] fornecedores POST compat: ok",
-      data: { ok: true },
+      data: { companyId, ok: true },
     });
     // #endregion
 
