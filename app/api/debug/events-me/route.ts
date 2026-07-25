@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { getSupabaseServerClient } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
 export const runtime = "nodejs";
@@ -55,7 +55,7 @@ export async function GET(req: NextRequest) {
     const limitRaw = Number(url.searchParams.get("limit") ?? "200");
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(400, Math.floor(limitRaw))) : 200;
 
-    const supabase = getSupabaseAdmin();
+    const supabase = getSupabaseServerClient(accessToken);
     const { data: memberRows, error: memberErr } = await supabase
       .from("company_members")
       .select("company_id,role,permission_level")

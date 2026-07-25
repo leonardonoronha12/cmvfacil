@@ -36,13 +36,7 @@ async function __dbgStore(args: {
   event: { sessionId: string; runId: string; hypothesisId: string; traceId?: string; location: string; msg: string; data: unknown; ts: number };
 }) {
   try {
-    const supabase = (() => {
-      try {
-        return getSupabaseAdmin();
-      } catch {
-        return args.supabase;
-      }
-    })();
+    const supabase = args.supabase;
     const { error: tableErr } = await supabase.from("debug_events").insert({
       session_id: args.event.sessionId,
       run_id: args.event.runId,
