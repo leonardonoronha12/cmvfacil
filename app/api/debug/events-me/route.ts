@@ -51,6 +51,7 @@ export async function GET(req: NextRequest) {
 
     const url = new URL(req.url);
     const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
+    const seed = String(url.searchParams.get("seed") ?? "").trim() === "1";
     const limitRaw = Number(url.searchParams.get("limit") ?? "200");
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(400, Math.floor(limitRaw))) : 200;
 
@@ -73,7 +74,41 @@ export async function GET(req: NextRequest) {
       .maybeSingle();
     if (supplierErr) return json({ ok: false, traceId, error: supplierErr.message }, { status: 500 });
 
-    const raw = (defaultSupplier as any)?.raw ?? {};
+    let supplierRow = defaultSupplier as any;
+    if (seed) {
+      if (!supplierRow) {
+        const { data: ins, error: insErr } = await supabase
+          .from("suppliers")
+          .insert({
+            company_id: companyId,
+            external_key: "supplier:default:sem_fornecedor",
+            nome: "Sem Fornecedor",
+            raw: { system: { default: true } },
+          } as any)
+          .select("id,raw")
+          .limit(1)
+          .maybeSingle();
+        if (insErr) return json({ ok: false, traceId, error: insErr.message }, { status: 500 });
+        supplierRow = ins as any;
+      }
+      const rawBase = (supplierRow as any)?.raw ?? {};
+      const systemBase = (rawBase as any)?.system ?? {};
+      const prev = Array.isArray((systemBase as any)?.debug_events) ? (systemBase as any).debug_events : [];
+      const next = [
+        ...prev,
+        { sessionId: "events-me", runId: "seed", hypothesisId: "seed", location: "app/api/debug/events-me/route.ts", msg: "seed", data: { companyId }, ts: Date.now() },
+      ].slice(-200);
+      const nextRaw = { ...(rawBase as any), system: { ...(systemBase as any), debug_events: next } };
+      const { error: updErr } = await supabase
+        .from("suppliers")
+        .update({ raw: nextRaw } as any)
+        .eq("company_id", companyId)
+        .eq("id", String((supplierRow as any)?.id ?? ""));
+      if (updErr) return json({ ok: false, traceId, error: updErr.message }, { status: 500 });
+      supplierRow = { ...(supplierRow as any), raw: nextRaw };
+    }
+
+    const raw = (supplierRow as any)?.raw ?? {};
     const system = (raw as any)?.system ?? {};
     const events = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     const out = events.slice(-limit);
@@ -85,8 +120,8 @@ export async function GET(req: NextRequest) {
         ...(diag
           ? {
               diag: {
-                hasDefaultSupplier: Boolean((defaultSupplier as any)?.id),
-                defaultSupplierId: String((defaultSupplier as any)?.id ?? "").trim() || null,
+                hasDefaultSupplier: Boolean((supplierRow as any)?.id),
+                defaultSupplierId: String((supplierRow as any)?.id ?? "").trim() || null,
                 eventsCount: events.length,
                 systemKeys: Object.keys(system ?? {}),
               },
