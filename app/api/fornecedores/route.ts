@@ -30,7 +30,56 @@ function __getDbgCfg() {
   __dbgCfg = { url, sessionId, runId };
   return __dbgCfg;
 }
-function __dbgSend(args: { hypothesisId: string; traceId?: string; location: string; msg: string; data?: unknown; accessToken?: string }) {
+async function __dbgStore(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  event: { sessionId: string; runId: string; hypothesisId: string; traceId?: string; location: string; msg: string; data: unknown; ts: number };
+}) {
+  try {
+    const { data: defaultSupplier, error: supplierErr } = await args.supabase
+      .from("suppliers")
+      .select("id,raw")
+      .eq("company_id", args.companyId)
+      .eq("external_key", "supplier:default:sem_fornecedor")
+      .limit(1)
+      .maybeSingle();
+    if (supplierErr) return;
+    let supplierRow = defaultSupplier as any;
+    if (!supplierRow) {
+      const { data: ins, error: insErr } = await args.supabase
+        .from("suppliers")
+        .insert({
+          company_id: args.companyId,
+          external_key: "supplier:default:sem_fornecedor",
+          nome: "Sem Fornecedor",
+          raw: { system: { default: true } },
+        } as any)
+        .select("id,raw")
+        .limit(1)
+        .maybeSingle();
+      if (insErr) return;
+      supplierRow = ins as any;
+    }
+    if (!supplierRow) return;
+    const raw = supplierRow?.raw ?? {};
+    const system = (raw as any)?.system ?? {};
+    const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
+    const next = [...prev, args.event].slice(-200);
+    const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
+    await args.supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", String(supplierRow?.id ?? ""));
+  } catch {}
+}
+
+function __dbgSend(args: {
+  hypothesisId: string;
+  traceId?: string;
+  location: string;
+  msg: string;
+  data?: unknown;
+  accessToken?: string;
+  companyId?: string;
+  supabase?: ReturnType<typeof getSupabaseServerClient>;
+}) {
   try {
     const cfg = __getDbgCfg();
     if (!cfg.url) return;
@@ -39,6 +88,24 @@ function __dbgSend(args: { hypothesisId: string; traceId?: string; location: str
     if (adminSecret) headers["x-admin-secret"] = adminSecret;
     const accessToken = String(args.accessToken ?? "").trim();
     if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+    const data = typeof args.data === "undefined" || args.data === null ? {} : args.data;
+    if (cfg.url.includes("/api/debug/event") && args.companyId && args.supabase) {
+      void __dbgStore({
+        supabase: args.supabase,
+        companyId: args.companyId,
+        event: {
+          sessionId: cfg.sessionId,
+          runId: cfg.runId,
+          hypothesisId: args.hypothesisId,
+          traceId: args.traceId,
+          location: args.location,
+          msg: args.msg,
+          data,
+          ts: Date.now(),
+        },
+      });
+      return;
+    }
     void fetch(cfg.url, {
       method: "POST",
       headers,
@@ -49,7 +116,7 @@ function __dbgSend(args: { hypothesisId: string; traceId?: string; location: str
         traceId: args.traceId,
         location: args.location,
         msg: args.msg,
-        data: typeof args.data === "undefined" || args.data === null ? {} : args.data,
+        data,
         ts: Date.now(),
       }),
     }).catch(() => {});
@@ -327,6 +394,8 @@ export async function GET(req: NextRequest) {
           produtosKeys: Object.keys(produtos).length,
         },
         accessToken,
+        companyId,
+        supabase,
       });
       // #endregion
 
@@ -496,6 +565,8 @@ export async function POST(req: NextRequest) {
           oneKeySamples,
         },
         accessToken,
+        companyId,
+        supabase,
       });
     })();
     // #endregion
@@ -687,6 +758,8 @@ export async function POST(req: NextRequest) {
           missingSample: missing.slice(0, 5),
         },
         accessToken,
+        companyId,
+        supabase,
       });
       // #endregion
 
@@ -710,6 +783,8 @@ export async function POST(req: NextRequest) {
           msg: "[DEBUG] fornecedores POST compat: clearing supplier_items",
           data: { companyId, supplierIdsToClear: supplierIdsToClear.length },
           accessToken,
+          companyId,
+          supabase,
         });
         // #endregion
         const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
@@ -732,6 +807,8 @@ export async function POST(req: NextRequest) {
       msg: "[DEBUG] fornecedores POST compat: ok",
       data: { companyId, ok: true },
       accessToken,
+      companyId,
+      supabase,
     });
     // #endregion
 
