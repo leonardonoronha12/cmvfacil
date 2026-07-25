@@ -75,6 +75,10 @@ async function __dbgStore(args: {
           company_id: args.companyId,
           external_key: "supplier:system:tombstones",
           nome: TOMBSTONE_KEY,
+          endereco: "",
+          vendedor: "",
+          whatsapp: "",
+          bubble_id: null,
           raw: { system: { cmvfacil_deleted_suppliers: [] } },
         } as any)
         .select("id,raw")
@@ -724,6 +728,10 @@ export async function POST(req: NextRequest) {
             company_id: companyId,
             external_key: "supplier:system:tombstones",
             nome: TOMBSTONE_KEY,
+            endereco: "",
+            vendedor: "",
+            whatsapp: "",
+            bubble_id: null,
             raw: { system: {} },
           } as any)
           .select("id")
