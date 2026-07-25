@@ -50,6 +50,7 @@ export async function GET(req: NextRequest) {
     if (!userId || !accessToken) return json({ ok: false, traceId, error: "unauthorized" }, { status: 401 });
 
     const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const limitRaw = Number(url.searchParams.get("limit") ?? "200");
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(400, Math.floor(limitRaw))) : 200;
 
@@ -76,10 +77,27 @@ export async function GET(req: NextRequest) {
     const system = (raw as any)?.system ?? {};
     const events = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     const out = events.slice(-limit);
-    return json({ ok: true, traceId, companyId, events: out }, { status: 200 });
+    return json(
+      {
+        ok: true,
+        traceId,
+        companyId,
+        ...(diag
+          ? {
+              diag: {
+                hasDefaultSupplier: Boolean((defaultSupplier as any)?.id),
+                defaultSupplierId: String((defaultSupplier as any)?.id ?? "").trim() || null,
+                eventsCount: events.length,
+                systemKeys: Object.keys(system ?? {}),
+              },
+            }
+          : null),
+        events: out,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err ?? "");
     return json({ ok: false, traceId, error: msg || "unknown_error" }, { status: 500 });
   }
 }
-
