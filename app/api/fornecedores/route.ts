@@ -354,7 +354,11 @@ export async function GET(req: NextRequest) {
           if (extracted.length) tombstones = extracted;
           continue;
         }
-        if (nome === TOMBSTONE_KEY) continue;
+        if (nome === TOMBSTONE_KEY) {
+          const extracted = extractCompatTombstonesFromRaw((s as any)?.raw);
+          if (extracted.length) tombstones = extracted;
+          continue;
+        }
         const dbId = String((s as any)?.id ?? "").trim();
         const bubbleId = String((s as any)?.bubble_id ?? "").trim();
         const key = bubbleId || (dbId ? `db:${dbId}` : "");
@@ -512,7 +516,7 @@ export async function POST(req: NextRequest) {
     const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
     const supplierIdByKeyUpper = new Map<string, string>();
     let defaultSupplierId = "";
-    const reservedSupplierIds = new Set<string>();
+    let tombstoneSupplierId = "";
     for (const s of suppliersDb ?? []) {
       const sid = canonicalUuid(String((s as any)?.id ?? ""));
       if (!sid) continue;
@@ -525,7 +529,7 @@ export async function POST(req: NextRequest) {
       const sys = ((s as any)?.raw as any)?.system ?? null;
       const isDefault = externalKey === "supplier:default:sem_fornecedor" || normalizeNameKey(nome) === "sem fornecedor" || Boolean(sys?.default);
       if (isDefault) defaultSupplierId = sid;
-      if (nome === TOMBSTONE_KEY) reservedSupplierIds.add(sid);
+      if (nome === TOMBSTONE_KEY) tombstoneSupplierId = sid;
       if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
       if (nome) supplierIdByNameKey.set(normalizeLookupKey(nome), sid);
       supplierRawById.set(sid, (s as any)?.raw ?? {});
@@ -677,7 +681,7 @@ export async function POST(req: NextRequest) {
       supplierIdByKeyUpper2.set(key.toUpperCase(), sid);
     }
 
-    if (defaultSupplierId) {
+    if (tombstonesUpper.length || tombstoneSupplierId) {
       const db = (() => {
         try {
           return getSupabaseAdmin();
@@ -685,27 +689,58 @@ export async function POST(req: NextRequest) {
           return supabase;
         }
       })();
-      const { data: defaultSupplierDb } = await db
-        .from("suppliers")
-        .select("raw")
-        .eq("company_id", companyId)
-        .eq("id", defaultSupplierId)
-        .limit(1)
-        .maybeSingle();
-      const rawBase = (defaultSupplierDb as any)?.raw ?? supplierRawById.get(defaultSupplierId) ?? {};
-      const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
-      const { error: defErr } = await db
-        .from("suppliers")
-        .update({ raw: nextRaw } as any)
-        .eq("company_id", companyId)
-        .eq("id", defaultSupplierId);
-      if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_default_raw", error: defErr.message, source: "compat" });
+      let tombId = tombstoneSupplierId;
+      if (!tombId) {
+        const { data: tombSupplierDb } = await db
+          .from("suppliers")
+          .select("id,raw")
+          .eq("company_id", companyId)
+          .eq("nome", TOMBSTONE_KEY)
+          .limit(1)
+          .maybeSingle();
+        tombId = canonicalUuid(String((tombSupplierDb as any)?.id ?? ""));
+      }
+      if (!tombId) {
+        const { data: ins, error: insErr } = await db
+          .from("suppliers")
+          .insert({
+            company_id: companyId,
+            external_key: "supplier:system:tombstones",
+            nome: TOMBSTONE_KEY,
+            raw: { system: {} },
+          } as any)
+          .select("id")
+          .limit(1)
+          .maybeSingle();
+        if (insErr) {
+          const { data: tombSupplierDb } = await db
+            .from("suppliers")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("nome", TOMBSTONE_KEY)
+            .limit(1)
+            .maybeSingle();
+          tombId = canonicalUuid(String((tombSupplierDb as any)?.id ?? ""));
+        } else {
+          tombId = canonicalUuid(String((ins as any)?.id ?? ""));
+        }
+      }
+      if (tombId) {
+        const { data: tombSupplierDb } = await db
+          .from("suppliers")
+          .select("raw")
+          .eq("company_id", companyId)
+          .eq("id", tombId)
+          .limit(1)
+          .maybeSingle();
+        const rawBase = (tombSupplierDb as any)?.raw ?? supplierRawById.get(tombId) ?? {};
+        const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
+        const { error: defErr } = await db.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", companyId).eq("id", tombId);
+        if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_tombstones_raw", error: defErr.message, source: "compat" });
+      }
     }
 
     const deleteCandidateIds = new Set<string>();
-    for (const sid of reservedSupplierIds) {
-      if (sid && sid !== defaultSupplierId) deleteCandidateIds.add(sid);
-    }
     for (const kUpper of tombstonesUpper) {
       if (!kUpper || keepKeysUpper.has(kUpper)) continue;
       let supplierId = "";
