@@ -563,6 +563,52 @@ export async function GET(req: NextRequest) {
       } catch {}
     }
 
+    const inferredNameById = new Map<string, string>();
+    if (companyId && supplierIds.length) {
+      const targets = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid));
+      for (const targetId of targets) {
+        try {
+          const { data: linksTarget } = await supabase
+            .from("supplier_items")
+            .select("item_id")
+            .eq("company_id", companyId)
+            .eq("supplier_id", targetId)
+            .limit(2000);
+          const itemIds = Array.from(
+            new Set((linksTarget ?? []).map((r: any) => String(r?.item_id ?? "").trim()).filter(Boolean)),
+          ).slice(0, 200);
+          if (!itemIds.length) continue;
+
+          const { data: linksOthers } = await supabase
+            .from("supplier_items")
+            .select("supplier_id,item_id")
+            .eq("company_id", companyId)
+            .in("item_id", itemIds)
+            .limit(5000);
+          const counts = new Map<string, number>();
+          for (const r of linksOthers ?? []) {
+            const sid = canonicalUuid(String((r as any)?.supplier_id ?? ""));
+            if (!sid || sid === targetId) continue;
+            counts.set(sid, (counts.get(sid) ?? 0) + 1);
+          }
+          if (!counts.size) continue;
+          const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+          const [bestId, bestCount] = sorted[0] ?? ["", 0];
+          if (!bestId || !bestCount) continue;
+          const threshold = Math.min(itemIds.length, 6);
+          if (bestCount < threshold) continue;
+
+          let candidateName = String(supplierNameById.get(bestId) ?? "").trim();
+          if (!isGoodSupplierLabel(candidateName)) {
+            const { data: row } = await supabase.from("suppliers").select("nome").eq("company_id", companyId).eq("id", bestId).limit(1).maybeSingle();
+            candidateName = String((row as any)?.nome ?? "").trim();
+          }
+          if (!isGoodSupplierLabel(candidateName)) continue;
+          inferredNameById.set(targetId, candidateName);
+        } catch {}
+      }
+    }
+
     const missingSupplierIds: string[] = [];
     const invalidSupplierNames: Array<{ id: string; nome: string }> = [];
     const rows = rowsDb.map((r) => {
@@ -573,7 +619,8 @@ export async function GET(req: NextRequest) {
       const fallback = dbId ? String(fallbackNameById.get(dbId) ?? "").trim() : "";
       const rawNome = dbId ? String(supplierNameRawById.get(dbId) ?? "").trim() : "";
       const rawLabel = dbId ? String(supplierNameFromRawById.get(dbId) ?? "").trim() : "";
-      const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback;
+      const inferred = dbId ? String(inferredNameById.get(dbId) ?? "").trim() : "";
+      const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback || inferred;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
       return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
@@ -601,6 +648,7 @@ export async function GET(req: NextRequest) {
                         rawKeys: supplierRawKeysById.get(sid) ?? [],
                         bubbleKeys: supplierBubbleKeysById.get(sid) ?? [],
                         resolved: supplierNameById.get(sid) ?? null,
+                        inferred: inferredNameById.get(sid) ?? null,
                       })),
                     }
                   : null),
