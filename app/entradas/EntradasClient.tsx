@@ -82,6 +82,7 @@ type EntradaRow = {
   numero: string;
   dataLancamento: string;
   fornecedor: string;
+  fornecedorNome?: string;
   valorNota: string;
   itens: string;
   responsavel: string;
@@ -649,8 +650,10 @@ export default function EntradasClient() {
   const [isMounted, setIsMounted] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserFullName, setCurrentUserFullName] = useState("");
+  const [companyId, setCompanyId] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
+  const authReady = Boolean(companyId && currentUserEmail);
 
   useEffect(() => {
     if (!isReadOnly) return;
@@ -677,8 +680,10 @@ export default function EntradasClient() {
       const me = readMeFromStore();
       const email = String(me?.email ?? "").trim();
       const fullName = String(me?.nomeCompleto ?? "").trim() || `${String(me?.nome ?? "").trim()} ${String(me?.sobrenome ?? "").trim()}`.trim();
-      if (email) setCurrentUserEmail(email);
-      if (fullName) setCurrentUserFullName(fullName);
+      const cid = String((me as any)?.companyId ?? "").trim();
+      setCurrentUserEmail(email);
+      setCurrentUserFullName(fullName);
+      setCompanyId(cid);
     };
     applyFromStore();
     void loadMeFromApi().finally(() => applyFromStore());
@@ -696,7 +701,7 @@ export default function EntradasClient() {
     const start = parseDateLabelLoose(dateStart);
     const end = parseDateLabelLoose(dateEnd);
     const filtered = rows.filter((r) => {
-      const fornLabel = displayFornecedor(r.fornecedor);
+      const fornLabel = displayFornecedorRow(r);
       if (q && !fornLabel.toLowerCase().includes(q)) return false;
       if (!start && !end) return true;
       const d = parseDateLabelLoose(r.dataLancamento);
@@ -720,7 +725,7 @@ export default function EntradasClient() {
           break;
         }
         case "fornecedor":
-          cmp = collator.compare(displayFornecedor(a.row.fornecedor), displayFornecedor(b.row.fornecedor));
+          cmp = collator.compare(displayFornecedorRow(a.row), displayFornecedorRow(b.row));
           break;
         case "responsavel":
           cmp = collator.compare(
@@ -737,6 +742,7 @@ export default function EntradasClient() {
     });
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorDbLabelCache, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+  const canRender = Boolean(isMounted && authReady);
 
   const pagination = usePagination({
     items: visible,
@@ -756,6 +762,12 @@ export default function EntradasClient() {
     const dbKey = canonicalDbKey(raw);
     const cached = dbKey && isDbKey(dbKey) ? String(fornecedorDbLabelCache[dbKey] ?? "").trim() : "";
     return cached || resolveFornecedorDisplay(raw, fornecedorInfoMap);
+  }
+
+  function displayFornecedorRow(row: { fornecedor: string; fornecedorNome?: string }) {
+    const override = sanitizeUiLabel(String((row as any)?.fornecedorNome ?? ""));
+    if (override && !isDbKey(canonicalDbKey(override))) return override;
+    return displayFornecedor(row.fornecedor);
   }
 
   useEffect(() => {
@@ -846,7 +858,7 @@ export default function EntradasClient() {
           id: r.id,
           numero: r.numero,
           dataLancamento: r.dataLancamento,
-          fornecedor: displayFornecedor(r.fornecedor),
+          fornecedor: displayFornecedorRow(r),
           valorNota: r.valorNota,
           responsavel: resolveResponsavelDisplay(r.responsavel, currentUserFullName, currentUserEmail),
           dataCriacao: r.dataCriacao,
@@ -946,7 +958,7 @@ export default function EntradasClient() {
       );
     }
     if (column === "fornecedor") {
-      return <div className={styles.td}>{displayFornecedor(row.fornecedor)}</div>;
+      return <div className={styles.td}>{displayFornecedorRow(row)}</div>;
     }
     if (column === "responsavel") {
       return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserFullName, currentUserEmail)}</div>;
@@ -1303,6 +1315,7 @@ export default function EntradasClient() {
   }, [isPeriodCalendarOpen]);
 
   useEffect(() => {
+    if (!authReady) return;
     setInsumosStore(readInsumosFromStore());
     void (async () => {
       try {
@@ -1311,9 +1324,12 @@ export default function EntradasClient() {
       } catch {}
     })();
     return subscribeInsumos((rows) => setInsumosStore(rows));
-  }, []);
+  }, [authReady]);
 
   useEffect(() => {
+    if (!authReady) return;
+    rowsReadyRef.current = false;
+    setIsLoadingTable(true);
     (async () => {
       try {
         const db = await loadEntradasStateFromSupabase();
@@ -1330,7 +1346,7 @@ export default function EntradasClient() {
       rowsReadyRef.current = true;
       setIsLoadingTable(false);
     })();
-  }, []);
+  }, [authReady]);
 
   useEffect(() => {
     if (!rowsReadyRef.current) return;
@@ -1338,6 +1354,7 @@ export default function EntradasClient() {
   }, [rows]);
 
   useEffect(() => {
+    if (!authReady) return;
     (async () => {
       let nextInfo: FornecedorInfoMap = {};
       let nextProdutos: FornecedorProdutos = {};
@@ -1374,7 +1391,7 @@ export default function EntradasClient() {
       u2();
       u3();
     };
-  }, []);
+  }, [authReady]);
 
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
@@ -1488,7 +1505,7 @@ export default function EntradasClient() {
       return;
     }
     setEditingId(row.id);
-    setDraftFornecedor(displayFornecedor(row.fornecedor));
+    setDraftFornecedor(displayFornecedorRow(row));
     setDraftDataLancamento(row.dataLancamento);
     const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
     setEditMonth(startOfMonth(parsed));
@@ -1782,40 +1799,52 @@ export default function EntradasClient() {
 
       <main className={dash.content}>
         <div className={dash.pageFrame}>
-        <QaModePanel screen="entradas" ui={qaUi} />
-        <section className={styles.header}>
-          <div className={styles.headerIcon}>
-            <IconEntrada />
-          </div>
-          <div className={styles.headerText}>
-            <h1 className={styles.title}>Entradas</h1>
-            <p className={styles.subtitle}>
-              Registre suas compras criando notas e relacionando os produtos adquiridos para controlar suas entradas.
-            </p>
-          </div>
-        </section>
+          {!canRender ? (
+            <section className={styles.header}>
+              <div className={styles.headerIcon}>
+                <IconEntrada />
+              </div>
+              <div className={styles.headerText}>
+                <h1 className={styles.title}>Entradas</h1>
+                <p className={styles.subtitle}>Carregando autenticação…</p>
+              </div>
+            </section>
+          ) : (
+            <>
+              <QaModePanel screen="entradas" ui={qaUi} />
+              <section className={styles.header}>
+                <div className={styles.headerIcon}>
+                  <IconEntrada />
+                </div>
+                <div className={styles.headerText}>
+                  <h1 className={styles.title}>Entradas</h1>
+                  <p className={styles.subtitle}>
+                    Registre suas compras criando notas e relacionando os produtos adquiridos para controlar suas entradas.
+                  </p>
+                </div>
+              </section>
 
-        {isCompatSource ? (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "#eef6ff",
-              border: "1px solid #cfe6ff",
-              color: "#1b3a57",
-              fontSize: 13,
-              fontWeight: 700,
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-          </div>
-        ) : null}
+              {isCompatSource ? (
+                <div
+                  style={{
+                    marginTop: 10,
+                    marginBottom: 14,
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    background: "#eef6ff",
+                    border: "1px solid #cfe6ff",
+                    color: "#1b3a57",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    display: "flex",
+                    justifyContent: "flex-end",
+                    gap: 12,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
+                </div>
+              ) : null}
 
         <section className={styles.toolbar}>
           <div className={styles.search}>
@@ -2579,7 +2608,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Fornecedor</div>
-                      <div className={styles.sideValue}>{displayFornecedor(detailsRow.fornecedor)}</div>
+                      <div className={styles.sideValue}>{displayFornecedorRow(detailsRow)}</div>
                     </div>
                   </button>
 
@@ -3369,6 +3398,8 @@ export default function EntradasClient() {
               document.body,
             )
           : null}
+            </>
+          )}
         </div>
       </main>
     </>

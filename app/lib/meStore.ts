@@ -10,6 +10,7 @@ export type MeProfile = {
   nomeCompleto: string;
   whatsapp: string;
   avatarUrl: string;
+  companyId: string;
   companyName: string;
   companyLogoUrl: string;
   companyCnpj: string;
@@ -141,6 +142,7 @@ export async function loadMeFromApi() {
         nomeCompleto: String(j.nomeCompleto ?? "").trim(),
         whatsapp: String(j.whatsapp ?? "").trim(),
         avatarUrl: String(j.avatarUrl ?? "").trim(),
+        companyId: String((j.source as any)?.companyId ?? (j as any)?.companyId ?? "").trim(),
         companyName: String(j.companyName ?? "").trim(),
         companyLogoUrl: String(j.companyLogoUrl ?? "").trim(),
         companyCnpj: String(j.companyCnpj ?? "").trim(),

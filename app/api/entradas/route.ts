@@ -37,6 +37,22 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function canonicalUuid(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  return isUuid(s) ? s.toLowerCase() : s;
+}
+
+function isDbPrefixed(value: string) {
+  return String(value ?? "").trim().toLowerCase().startsWith("db:");
+}
+
+function dbIdFromKey(value: string) {
+  const s = String(value ?? "").trim();
+  if (!isDbPrefixed(s)) return "";
+  return s.slice(3).trim();
+}
+
 function parseCsvEnv(value: string | undefined) {
   return String(value ?? "")
     .split(/[,\n;]/g)
@@ -137,6 +153,8 @@ function formatDateLabelPTFromValue(value: unknown) {
 
 export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
     if (!id) return json({ source: "legacy", readOnly: false, rows: [] }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
@@ -353,7 +371,64 @@ export async function GET(req: NextRequest) {
     const prefix = `${id}:`;
     const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+
+    let companyId = "";
+    try {
+      const { data: memberRows, error: memberErr } = await supabase
+        .from("company_members")
+        .select("company_id,role,permission_level")
+        .eq("user_id", userId)
+        .limit(50);
+      if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    } catch {}
+
+    const rowsDb = (data ?? []) as any[];
+    const supplierIds = Array.from(
+      new Set(
+        rowsDb
+          .map((r) => String(r?.fornecedor ?? "").trim())
+          .map((f) => (isDbPrefixed(f) ? canonicalUuid(dbIdFromKey(f)) : isUuid(f) ? canonicalUuid(f) : ""))
+          .filter(Boolean),
+      ),
+    );
+
+    const supplierNameById = new Map<string, string>();
+    if (companyId && supplierIds.length) {
+      const { data: suppliersDb } = await supabase.from("suppliers").select("id,nome").eq("company_id", companyId).in("id", supplierIds).limit(5000);
+      for (const s of suppliersDb ?? []) {
+        const sid = canonicalUuid(String((s as any)?.id ?? ""));
+        const nome = String((s as any)?.nome ?? "").trim();
+        if (sid && nome && !supplierNameById.has(sid)) supplierNameById.set(sid, nome);
+      }
+    }
+
+    const missingSupplierIds: string[] = [];
+    const rows = rowsDb.map((r) => {
+      const fornecedorRaw = String(r?.fornecedor ?? "").trim();
+      const dbId = isDbPrefixed(fornecedorRaw) ? canonicalUuid(dbIdFromKey(fornecedorRaw)) : isUuid(fornecedorRaw) ? canonicalUuid(fornecedorRaw) : "";
+      const nome = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
+      if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
+      return { ...r, fornecedor_nome: nome || null };
+    });
+
+    return json(
+      {
+        source: "legacy",
+        readOnly: false,
+        ...(diag
+          ? {
+              diag: {
+                companyId: companyId || null,
+                supplierIdsCount: supplierIds.length,
+                suppliersResolved: supplierNameById.size,
+                missingSupplierIds,
+              },
+            }
+          : null),
+        rows,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

@@ -7,6 +7,7 @@ type EntradaDbRow = {
   numero: string;
   data_lancamento: string;
   fornecedor: string;
+  fornecedor_nome?: string | null;
   valor_nota: string;
   itens: string;
   responsavel: string;
@@ -23,11 +24,13 @@ export type EntradasStatePayload = {
 
 function toStoreRow(r: EntradaDbRow): EntradaStoreRow {
   const fallbackValor = String((r as any)?.valorNota ?? (r as any)?.valor ?? "").trim();
+  const fornecedorNome = String((r as any)?.fornecedor_nome ?? (r as any)?.fornecedorNome ?? "").trim();
   return {
     id: r.id,
     numero: r.numero,
     dataLancamento: r.data_lancamento,
     fornecedor: r.fornecedor,
+    fornecedorNome: fornecedorNome || undefined,
     valorNota: r.valor_nota || fallbackValor,
     itens: r.itens,
     responsavel: r.responsavel,

@@ -14,6 +14,7 @@ export type EntradaStoreRow = {
   numero: string;
   dataLancamento: string;
   fornecedor: string;
+  fornecedorNome?: string;
   valorNota: string;
   itens: string;
   responsavel: string;
@@ -31,6 +32,7 @@ function normalizeRow(input: unknown): EntradaStoreRow | null {
   const numero = String(r.numero ?? "").trim();
   const dataLancamento = String(r.dataLancamento ?? "").trim();
   const fornecedor = String(r.fornecedor ?? "").trim();
+  const fornecedorNome = String((r as any).fornecedorNome ?? "").trim();
   const valorNota = String(r.valorNota ?? "").trim() || "R$0,00";
   const itens = String(r.itens ?? "").trim() || "0 Itens";
   const responsavel = String(r.responsavel ?? "").trim() || "-";
@@ -55,7 +57,7 @@ function normalizeRow(input: unknown): EntradaStoreRow | null {
         })
         .filter((x): x is NotaItem => Boolean(x))
     : undefined;
-  return { id, numero, dataLancamento, fornecedor, valorNota, itens, responsavel, dataCriacao, itensNota };
+  return { id, numero, dataLancamento, fornecedor, fornecedorNome: fornecedorNome || undefined, valorNota, itens, responsavel, dataCriacao, itensNota };
 }
 
 function normalizeRows(input: unknown): EntradaStoreRow[] {
