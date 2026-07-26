@@ -481,10 +481,12 @@ export async function GET(req: NextRequest) {
     const supplierNameFromRawById = new Map<string, string>();
     const supplierRawKeysById = new Map<string, string[]>();
     const supplierBubbleKeysById = new Map<string, string[]>();
+    const supplierBubbleIdById = new Map<string, string>();
+    const supplierExternalKeyById = new Map<string, string>();
     if (companyId && supplierIds.length) {
       const { data: suppliersDb } = await supabase
         .from("suppliers")
-        .select("id,nome,raw")
+        .select("id,nome,raw,bubble_id,external_key")
         .eq("company_id", companyId)
         .in("id", supplierIds)
         .limit(5000);
@@ -497,8 +499,50 @@ export async function GET(req: NextRequest) {
         if (sid && rawLabel && !supplierNameFromRawById.has(sid)) supplierNameFromRawById.set(sid, rawLabel);
         if (sid && !supplierRawKeysById.has(sid)) supplierRawKeysById.set(sid, Object.keys(safeObj(rawObj)).slice(0, 30));
         if (sid && !supplierBubbleKeysById.has(sid)) supplierBubbleKeysById.set(sid, Object.keys(safeObj(safeObj(rawObj as any).bubble)).slice(0, 30));
+        if (sid && !supplierBubbleIdById.has(sid)) supplierBubbleIdById.set(sid, String((s as any)?.bubble_id ?? "").trim());
+        if (sid && !supplierExternalKeyById.has(sid)) supplierExternalKeyById.set(sid, String((s as any)?.external_key ?? "").trim());
         const chosen = isGoodSupplierLabel(nome) ? nome : isGoodSupplierLabel(rawLabel) ? rawLabel : "";
         if (sid && chosen && !supplierNameById.has(sid)) supplierNameById.set(sid, chosen);
+      }
+    }
+
+    if (companyId && supplierIds.length) {
+      for (const sid of supplierIds) {
+        if (supplierNameById.get(sid)) continue;
+        const bubbleId = String(supplierBubbleIdById.get(sid) ?? "").trim();
+        const externalKey = String(supplierExternalKeyById.get(sid) ?? "").trim();
+        try {
+          if (bubbleId) {
+            const { data: alt } = await supabase
+              .from("suppliers")
+              .select("id,nome")
+              .eq("company_id", companyId)
+              .eq("bubble_id", bubbleId)
+              .limit(25);
+            for (const r of alt ?? []) {
+              const nome = String((r as any)?.nome ?? "").trim();
+              if (isGoodSupplierLabel(nome)) {
+                supplierNameById.set(sid, nome);
+                break;
+              }
+            }
+          }
+          if (!supplierNameById.get(sid) && externalKey) {
+            const { data: alt } = await supabase
+              .from("suppliers")
+              .select("id,nome")
+              .eq("company_id", companyId)
+              .eq("external_key", externalKey)
+              .limit(25);
+            for (const r of alt ?? []) {
+              const nome = String((r as any)?.nome ?? "").trim();
+              if (isGoodSupplierLabel(nome)) {
+                supplierNameById.set(sid, nome);
+                break;
+              }
+            }
+          }
+        } catch {}
       }
     }
 
@@ -524,11 +568,12 @@ export async function GET(req: NextRequest) {
     const rows = rowsDb.map((r) => {
       const fornecedorRaw = String(r?.fornecedor ?? "").trim();
       const dbId = isDbPrefixed(fornecedorRaw) ? canonicalUuid(dbIdFromKey(fornecedorRaw)) : isUuid(fornecedorRaw) ? canonicalUuid(fornecedorRaw) : "";
+      const storedNome = normalizeText((r as any)?.fornecedor_nome ?? "");
       const primary = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
       const fallback = dbId ? String(fallbackNameById.get(dbId) ?? "").trim() : "";
       const rawNome = dbId ? String(supplierNameRawById.get(dbId) ?? "").trim() : "";
       const rawLabel = dbId ? String(supplierNameFromRawById.get(dbId) ?? "").trim() : "";
-      const nome = primary || fallback;
+      const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
       return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
