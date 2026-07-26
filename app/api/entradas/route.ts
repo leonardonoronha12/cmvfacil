@@ -53,6 +53,15 @@ function dbIdFromKey(value: string) {
   return s.slice(3).trim();
 }
 
+function isBadSupplierLabel(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return true;
+  if (s === "-") return true;
+  if (isDbPrefixed(s)) return true;
+  if (isUuid(s)) return true;
+  return false;
+}
+
 function parseCsvEnv(value: string | undefined) {
   return String(value ?? "")
     .split(/[,\n;]/g)
@@ -393,22 +402,46 @@ export async function GET(req: NextRequest) {
     );
 
     const supplierNameById = new Map<string, string>();
+    const supplierNameRawById = new Map<string, string>();
     if (companyId && supplierIds.length) {
       const { data: suppliersDb } = await supabase.from("suppliers").select("id,nome").eq("company_id", companyId).in("id", supplierIds).limit(5000);
       for (const s of suppliersDb ?? []) {
         const sid = canonicalUuid(String((s as any)?.id ?? ""));
         const nome = String((s as any)?.nome ?? "").trim();
-        if (sid && nome && !supplierNameById.has(sid)) supplierNameById.set(sid, nome);
+        if (sid && !supplierNameRawById.has(sid)) supplierNameRawById.set(sid, nome);
+        if (sid && nome && !isBadSupplierLabel(nome) && !supplierNameById.has(sid)) supplierNameById.set(sid, nome);
       }
     }
 
+    const fallbackNameById = new Map<string, string>();
+    if (supplierIds.length) {
+      try {
+        const { data: st } = await supabase.from("fornecedores_state").select("info").eq("id", id).maybeSingle();
+        const infoMap = (st as any)?.info && typeof (st as any)?.info === "object" ? ((st as any).info as any) : null;
+        if (infoMap) {
+          for (const sid of supplierIds) {
+            if (supplierNameById.get(sid)) continue;
+            const key = `db:${sid}`;
+            const row = infoMap[key] ?? infoMap[key.toUpperCase()] ?? null;
+            const label = row && typeof row === "object" ? String((row as any)?.fornecedor ?? "").trim() : "";
+            if (label && !isBadSupplierLabel(label) && !fallbackNameById.has(sid)) fallbackNameById.set(sid, label);
+          }
+        }
+      } catch {}
+    }
+
     const missingSupplierIds: string[] = [];
+    const invalidSupplierNames: Array<{ id: string; nome: string }> = [];
     const rows = rowsDb.map((r) => {
       const fornecedorRaw = String(r?.fornecedor ?? "").trim();
       const dbId = isDbPrefixed(fornecedorRaw) ? canonicalUuid(dbIdFromKey(fornecedorRaw)) : isUuid(fornecedorRaw) ? canonicalUuid(fornecedorRaw) : "";
-      const nome = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
+      const primary = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
+      const fallback = dbId ? String(fallbackNameById.get(dbId) ?? "").trim() : "";
+      const rawNome = dbId ? String(supplierNameRawById.get(dbId) ?? "").trim() : "";
+      const nome = primary || fallback;
+      if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
-      return { ...r, fornecedor_nome: nome || null };
+      return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
     });
 
     return json(
@@ -421,7 +454,9 @@ export async function GET(req: NextRequest) {
                 companyId: companyId || null,
                 supplierIdsCount: supplierIds.length,
                 suppliersResolved: supplierNameById.size,
+                suppliersFallbackResolved: fallbackNameById.size,
                 missingSupplierIds,
+                invalidSupplierNames,
               },
             }
           : null),
