@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
-import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
-import { createClient } from "@supabase/supabase-js";
+import { getSupabaseServerClient } from "../../../lib/supabaseAdmin";
+import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -12,122 +11,106 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
-function safeText(v: unknown, max = 800) {
-  const s = String(v ?? "").trim();
-  if (!s) return "";
-  return s.length > max ? s.slice(0, max) : s;
+function parsePermissionLevel(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  const n = Number(String(v ?? "").trim());
+  return Number.isFinite(n) ? n : 0;
 }
 
-function isUuid(value: string) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+function scoreRole(role: unknown) {
+  const r = String(role ?? "").trim().toLowerCase();
+  if (!r) return 0;
+  if (r.includes("owner") || r.includes("propriet")) return 30;
+  if (r.includes("admin")) return 20;
+  if (r.includes("manager") || r.includes("gerente")) return 10;
+  return 0;
 }
 
-function getEnv(name: string) {
-  const v = (process.env[name] ?? "").trim();
-  return v || null;
+function pickBestCompanyId(memberRows: unknown[]) {
+  let bestCompanyId = "";
+  let bestScore = Number.NEGATIVE_INFINITY;
+  for (const row of memberRows ?? []) {
+    const r = row as any;
+    const companyId = String(r?.company_id ?? "").trim();
+    if (!companyId) continue;
+    const perm = parsePermissionLevel(r?.permission_level);
+    const score = perm * 100 + scoreRole(r?.role);
+    if (score > bestScore) {
+      bestScore = score;
+      bestCompanyId = companyId;
+    }
+  }
+  return bestCompanyId;
+}
+
+function safeString(v: unknown) {
+  return String(v ?? "").trim();
 }
 
 export async function POST(req: NextRequest) {
-  const requiredSecret = getEnv("ADMIN_SECRET") ?? getEnv("DEBUG_SECRET");
-  const got = safeText(req.headers.get("x-admin-secret") ?? "");
-  const authz = safeText(req.headers.get("authorization") ?? "", 4096);
-  const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7).trim() : "";
-  const hasValidSecret = Boolean(requiredSecret && got && got === requiredSecret);
-
-  const body = (await req.json().catch(() => null)) as any;
-  const sessionId = safeText(body?.sessionId ?? body?.session_id ?? "", 120);
-  const runId = safeText(body?.runId ?? body?.run_id ?? "", 120);
-  const hypothesisId = safeText(body?.hypothesisId ?? body?.hypothesis_id ?? "", 16);
-  const traceIdRaw = safeText(body?.traceId ?? body?.trace_id ?? "", 80);
-  const location = safeText(body?.location ?? "", 400);
-  const msg = safeText(body?.msg ?? "", 2000);
-  const data = (body?.data ?? null) as any;
-
-  if (!sessionId || !runId || !hypothesisId || !msg) {
-    return json({ ok: false, error: "invalid_payload" }, { status: 400 });
-  }
-
-  const traceId = traceIdRaw && isUuid(traceIdRaw) ? traceIdRaw : null;
-  const companyIdRaw = safeText(data?.companyId ?? data?.company_id ?? "", 80);
-  const companyId = companyIdRaw && isUuid(companyIdRaw) ? companyIdRaw : null;
-  if (!companyId) return json({ ok: false, error: "missing_company_id" }, { status: 400 });
-
-  if (process.env.NODE_ENV === "production" && requiredSecret && !hasValidSecret) {
-    if (!bearer) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    try {
-      const cfg = getSupabaseAuthConfig();
-      const authClient = createClient(cfg.url, cfg.anonKey, { auth: { persistSession: false, autoRefreshToken: false } });
-      const { data: userData, error: userErr } = await authClient.auth.getUser(bearer);
-      const userId = String(userData?.user?.id ?? "").trim();
-      if (userErr || !userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-      const admin = getSupabaseAdmin();
-      const { data: member } = await admin
-        .from("company_members")
-        .select("id")
-        .eq("company_id", companyId)
-        .eq("user_id", userId)
-        .limit(1)
-        .maybeSingle();
-      if (!member) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    } catch {
-      return json({ ok: false, error: "unauthorized" }, { status: 401 });
-    }
-  }
-
+  const traceId = crypto.randomUUID();
   try {
-    const supabase = getSupabaseAdmin();
-    const { data: defaultSupplier, error: supplierErr } = await supabase
+    const { accessToken, userId } = getUserIdFromRequest(req);
+    if (!userId || !accessToken) return json({ ok: false, traceId, error: "unauthorized" }, { status: 401 });
+
+    const payload = (await req.json().catch(() => null)) as any;
+    const sessionId = safeString(payload?.sessionId);
+    const runId = safeString(payload?.runId);
+    const hypothesisId = safeString(payload?.hypothesisId);
+    const location = safeString(payload?.location);
+    const msg = safeString(payload?.msg);
+    const data = typeof payload?.data === "undefined" || payload?.data === null ? {} : payload?.data;
+    const ts = typeof payload?.ts === "number" && Number.isFinite(payload.ts) ? payload.ts : Date.now();
+
+    if (!sessionId || !hypothesisId || !location || !msg) {
+      return json({ ok: false, traceId, error: "invalid_payload" }, { status: 400 });
+    }
+
+    const supabase = getSupabaseServerClient(accessToken);
+    const { data: memberRows, error: memberErr } = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return json({ ok: false, traceId, error: memberErr.message }, { status: 500 });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return json({ ok: true, traceId, companyId: null }, { status: 200 });
+
+    try {
+      const { error: insErr } = await supabase.from("debug_events").insert({
+        session_id: sessionId,
+        run_id: runId || "prod",
+        hypothesis_id: hypothesisId,
+        trace_id: safeString(payload?.traceId) || null,
+        location,
+        msg,
+        data: { ...(typeof data === "object" ? data : { value: data }), ts },
+        company_id: companyId,
+        user_id: userId,
+      } as any);
+      if (!insErr) return json({ ok: true, traceId, companyId }, { status: 200 });
+    } catch {}
+
+    const { data: defaultSupplier, error: supplierErr1 } = await supabase
       .from("suppliers")
       .select("id,raw")
       .eq("company_id", companyId)
-      .eq("external_key", "supplier:default:sem_fornecedor")
+      .ilike("external_key", "supplier:default:sem_fornecedor")
       .limit(1)
       .maybeSingle();
-    if (supplierErr) return json({ ok: false, error: supplierErr.message }, { status: 500 });
-    let supplierRow = defaultSupplier as any;
-    if (!supplierRow) {
-      const { data: ins, error: insErr } = await supabase
-        .from("suppliers")
-        .insert({
-          company_id: companyId,
-          external_key: "supplier:default:sem_fornecedor",
-          nome: "Sem Fornecedor",
-          raw: { system: { default: true } },
-        } as any)
-        .select("id,raw")
-        .limit(1)
-        .maybeSingle();
-      if (insErr) return json({ ok: false, error: insErr.message }, { status: 500 });
-      supplierRow = ins as any;
-    }
-    if (!supplierRow) return json({ ok: false, error: "default_supplier_not_found" }, { status: 404 });
-
-    const raw = supplierRow?.raw ?? {};
-    const system = (raw as any)?.system ?? {};
-    const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
-    const nextEvent = {
-      sessionId,
-      runId,
-      hypothesisId,
-      traceId,
-      location: location || null,
-      msg,
-      data: data ?? null,
-      ts: Date.now(),
-    };
-    const next = [...prev, nextEvent].slice(-200);
-
-    const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
-    const { error: upErr } = await supabase
-      .from("suppliers")
-      .update({ raw: nextRaw } as any)
-      .eq("company_id", companyId)
-      .eq("id", String(supplierRow?.id ?? ""));
-    if (upErr) return json({ ok: false, error: upErr.message }, { status: 500 });
-
-    return json({ ok: true }, { status: 200 });
+    if (supplierErr1) return json({ ok: false, traceId, error: supplierErr1.message }, { status: 500 });
+    const supplierId = safeString((defaultSupplier as any)?.id);
+    if (!supplierId) return json({ ok: true, traceId, companyId, stored: "no_default_supplier" }, { status: 200 });
+    const rawBase = (defaultSupplier as any)?.raw ?? {};
+    const systemBase = (rawBase as any)?.system ?? {};
+    const prev = Array.isArray((systemBase as any)?.debug_events) ? (systemBase as any).debug_events : [];
+    const next = [...prev, { sessionId, runId: runId || "prod", hypothesisId, traceId, location, msg, data, ts }].slice(-200);
+    const nextRaw = { ...(rawBase as any), system: { ...(systemBase as any), debug_events: next } };
+    await supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", companyId).eq("id", supplierId);
+    return json({ ok: true, traceId, companyId, stored: "supplier_raw" }, { status: 200 });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err ?? "");
-    return json({ ok: false, error: msg || "unknown_error" }, { status: 500 });
+    return json({ ok: false, traceId, error: msg || "unknown_error" }, { status: 500 });
   }
 }
+

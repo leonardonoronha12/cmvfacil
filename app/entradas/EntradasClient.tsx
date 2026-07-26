@@ -34,6 +34,20 @@ import { QaModePanel } from "../lib/qaMode";
 import { maskPhoneBR } from "../lib/masks";
 import styles from "./entradas.module.css";
 
+// #region debug-point reporter
+const __DBG_SESSION_ID = "entradas-selector-empty";
+const __DBG_RUN_ID = "prod-pre-fix";
+function __dbgSend(hypothesisId: string, location: string, msg: string, data: unknown) {
+  try {
+    void fetch("/api/debug/event", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ sessionId: __DBG_SESSION_ID, runId: __DBG_RUN_ID, hypothesisId, location, msg, data, ts: Date.now() }),
+    }).catch(() => {});
+  } catch {}
+}
+// #endregion
+
 type EntradaRow = {
   id: string;
   numero: string;
@@ -65,6 +79,11 @@ type FornecedorItemMap = {
 };
 
 type EntradaTableColumn = "dataLancamento" | "fornecedor" | "valorNota" | "responsavel" | "dataCriacao";
+
+type FornecedorSelectOption = {
+  key: string;
+  label: string;
+};
 
 function looksLikeUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -101,13 +120,51 @@ function resolveNotaItemDisplayName(it: unknown, insumosById: Map<string, string
   return nomeRaw || "-";
 }
 
+function normalizeLookupKey(v: string) {
+  return sanitizeUiLabel(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDbKey(value: string) {
+  return String(value ?? "").trim().toLowerCase().startsWith("db:");
+}
+
+function canonicalDbKey(value: string) {
+  const raw = sanitizeUiLabel(value);
+  if (!raw) return "";
+  if (!isDbKey(raw)) return raw;
+  const id = sanitizeUiLabel(raw.slice(3)).toLowerCase();
+  return id ? `db:${id}` : "";
+}
+
+function resolveFornecedorKey(fornecedorRaw: string, fornecedorInfoMap: FornecedorInfoMap) {
+  const raw = sanitizeUiLabel(fornecedorRaw);
+  if (!raw) return "";
+  const db = canonicalDbKey(raw);
+  if (isDbKey(db)) return db;
+  const rawNoSuffix = sanitizeUiLabel(raw.split("/")[0] ?? raw);
+  const lookup = normalizeLookupKey(rawNoSuffix);
+  if (lookup) {
+    for (const [k, info] of Object.entries(fornecedorInfoMap)) {
+      const label = sanitizeUiLabel((info as any)?.fornecedor ?? "");
+      if (label && normalizeLookupKey(label) === lookup) return canonicalDbKey(k);
+    }
+  }
+  return rawNoSuffix.toUpperCase();
+}
+
 function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: FornecedorInfoMap) {
   const raw = sanitizeUiLabel(fornecedorRaw);
   if (!raw) return "-";
-  const rawUpper = raw.toUpperCase();
   const rawNoSuffix = sanitizeUiLabel(raw.split("/")[0] ?? raw);
+  const resolvedKey = resolveFornecedorKey(rawNoSuffix, fornecedorInfoMap);
+  const rawUpper = raw.toUpperCase();
   const rawNoSuffixUpper = rawNoSuffix.toUpperCase();
-  const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
+  const info = (resolvedKey && fornecedorInfoMap[resolvedKey]) || fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
   const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
   return labelFromState || rawNoSuffix || raw;
 }
@@ -812,16 +869,62 @@ export default function EntradasClient() {
   }, [insumosStore]);
 
   const fornecedorItensNaNota = useMemo(() => {
-    const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
-    if (!fornecedor) return [];
-    return (fornecedorItemMap[fornecedor] ?? []).filter((m) => Boolean(normalizeNotaItemName(m.nomeNaNota)));
-  }, [detailsRow?.fornecedor, fornecedorItemMap]);
+    const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+    const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
+    if (!fornecedorKey) return [];
+    const out = (fornecedorItemMap[fornecedorKey] ?? []).filter((m) => Boolean(normalizeNotaItemName(m.nomeNaNota)));
+    if (!out.length && fornecedorRaw) {
+      __dbgSend(
+        "h1",
+        "app/entradas/EntradasClient.tsx:fornecedorItensNaNota",
+        "fornecedor_item_map_empty",
+        {
+          fornecedorRaw,
+          fornecedorKey,
+          fornecedorKeyUpper: fornecedorRaw.toUpperCase(),
+          hasInfoKey: Boolean(fornecedorInfoMap[fornecedorKey]),
+          infoKeys: Object.keys(fornecedorInfoMap).length,
+          eqKeys: Object.keys(fornecedorItemMap).length,
+          eqLenByKey: (fornecedorItemMap as any)[fornecedorKey]?.length ?? 0,
+          eqLenByUpper: (fornecedorItemMap as any)[fornecedorRaw.toUpperCase()]?.length ?? 0,
+        },
+      );
+    }
+    return out;
+  }, [detailsRow?.fornecedor, fornecedorInfoMap, fornecedorItemMap]);
 
   const fornecedorProdutos = useMemo(() => {
-    const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
-    if (!fornecedor) return [];
-    return (fornecedorProdutosMap[fornecedor] ?? []).map((p) => normalizeNotaItemName(p)).filter(Boolean);
-  }, [detailsRow?.fornecedor, fornecedorProdutosMap]);
+    const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+    const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
+    if (!fornecedorKey) return [];
+    const out = (fornecedorProdutosMap[fornecedorKey] ?? []).map((p) => normalizeNotaItemName(p)).filter(Boolean);
+    if (!out.length && fornecedorRaw) {
+      const lookup = normalizeLookupKey(resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap));
+      const candidates = lookup
+        ? Object.entries(fornecedorInfoMap)
+            .filter(([, info]) => normalizeLookupKey(String((info as any)?.fornecedor ?? "")) === lookup)
+            .map(([k]) => k)
+            .slice(0, 12)
+        : [];
+      __dbgSend(
+        "h2",
+        "app/entradas/EntradasClient.tsx:fornecedorProdutos",
+        "fornecedor_produtos_map_empty",
+        {
+          fornecedorRaw,
+          fornecedorKey,
+          fornecedorKeyUpper: fornecedorRaw.toUpperCase(),
+          display: resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap),
+          candidates,
+          hasInfoKey: Boolean(fornecedorInfoMap[fornecedorKey]),
+          produtosKeys: Object.keys(fornecedorProdutosMap).length,
+          produtosLenByKey: (fornecedorProdutosMap as any)[fornecedorKey]?.length ?? 0,
+          produtosLenByUpper: (fornecedorProdutosMap as any)[fornecedorRaw.toUpperCase()]?.length ?? 0,
+        },
+      );
+    }
+    return out;
+  }, [detailsRow?.fornecedor, fornecedorInfoMap, fornecedorProdutosMap]);
 
   const fornecedorProdutosMerged = useMemo(() => {
     const set = new Set<string>();
@@ -846,7 +949,8 @@ export default function EntradasClient() {
   }, [fornecedorItensNaNota, fornecedorProdutos]);
 
   const fornecedorModalProdutosMerged = useMemo(() => {
-    const key = (fornecedorModalKey ?? "").trim().toUpperCase();
+    const keyRaw = (fornecedorModalKey ?? "").trim();
+    const key = keyRaw ? resolveFornecedorKey(keyRaw, fornecedorInfoMap) : "";
     if (!key) return [];
     const set = new Set<string>();
     const out: string[] = [];
@@ -867,7 +971,7 @@ export default function EntradasClient() {
       out.push(name);
     }
     return out;
-  }, [fornecedorItemMap, fornecedorModalKey, fornecedorProdutosMap]);
+  }, [fornecedorInfoMap, fornecedorItemMap, fornecedorModalKey, fornecedorProdutosMap]);
 
   const filteredNotaItems = useMemo(() => {
     const list = fornecedorItensNaNota;
@@ -892,33 +996,44 @@ export default function EntradasClient() {
     return true;
   }, [detailItemName, detailQty, detailSubtotal]);
 
-  const fornecedores = useMemo(() => {
+  const fornecedorOptions = useMemo(() => {
     const seen = new Set<string>();
-    const out: string[] = [];
+    const out: FornecedorSelectOption[] = [];
+
+    for (const [k, info] of Object.entries(fornecedorInfoMap)) {
+      const key = canonicalDbKey(k);
+      const label = sanitizeUiLabel(String((info as any)?.fornecedor ?? "")) || sanitizeUiLabel(k);
+      if (!key || !label) continue;
+      const skey = key.toLowerCase();
+      if (seen.has(skey)) continue;
+      seen.add(skey);
+      out.push({ key, label });
+    }
+
     for (const r of rows) {
-      const v = String((r as any)?.fornecedor ?? "").trim();
-      if (!v) continue;
-      const k = v.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(v);
+      const raw = String((r as any)?.fornecedor ?? "").trim();
+      if (!raw) continue;
+      const key = resolveFornecedorKey(raw, fornecedorInfoMap);
+      const label = resolveFornecedorDisplay(raw, fornecedorInfoMap);
+      if (!key || !label) continue;
+      const skey = key.toLowerCase();
+      if (seen.has(skey)) continue;
+      seen.add(skey);
+      out.push({ key, label });
     }
+
     for (const v of customFornecedores) {
-      const name = v.trim();
-      if (!name) continue;
-      const k = name.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(name);
+      const raw = v.trim();
+      if (!raw) continue;
+      const key = resolveFornecedorKey(raw, fornecedorInfoMap);
+      const label = raw;
+      if (!key || !label) continue;
+      const skey = key.toLowerCase();
+      if (seen.has(skey)) continue;
+      seen.add(skey);
+      out.push({ key, label });
     }
-    for (const [key, info] of Object.entries(fornecedorInfoMap)) {
-      const label = String(info?.fornecedor ?? key).trim();
-      if (!label) continue;
-      const k = label.toLowerCase();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push(label);
-    }
+
     return out;
   }, [customFornecedores, fornecedorInfoMap, rows]);
 
@@ -965,11 +1080,27 @@ export default function EntradasClient() {
     void (async () => {
       try {
         const id = await buildUserScopedId(String(Date.now()));
+        const fornecedorKey = resolveFornecedorKey(fornecedor, fornecedorInfoMap);
+        __dbgSend(
+          "h3",
+          "app/entradas/EntradasClient.tsx:confirmNew",
+          "confirm_new",
+          {
+            selectedValue: fornecedor,
+            fornecedorKey,
+            display: resolveFornecedorDisplay(fornecedor, fornecedorInfoMap),
+            hasInfoKey: Boolean(fornecedorInfoMap[fornecedorKey]),
+            produtosLenByKey: (fornecedorProdutosMap as any)[fornecedorKey]?.length ?? 0,
+            eqLenByKey: (fornecedorItemMap as any)[fornecedorKey]?.length ?? 0,
+            produtosKeys: Object.keys(fornecedorProdutosMap).length,
+            eqKeys: Object.keys(fornecedorItemMap).length,
+          },
+        );
         const newRow: EntradaRow = {
           id,
           numero,
           dataLancamento: dataReceb,
-          fornecedor: fornecedor.toUpperCase(),
+          fornecedor: fornecedorKey || fornecedor.toUpperCase(),
           valorNota: "R$0,00",
           itens: "0 Itens",
           responsavel: "",
@@ -1164,7 +1295,7 @@ export default function EntradasClient() {
       const has = prev.some((p) => p.toLowerCase() === k);
       return has ? prev : [...prev, name];
     });
-    setNewFornecedor(name);
+    setNewFornecedor(name.toUpperCase());
     setIsAddFornecedorOpen(false);
     setAddFornecedorName("");
     setAddFornecedorVendedor("");
@@ -1193,7 +1324,7 @@ export default function EntradasClient() {
       return;
     }
     setEditingId(row.id);
-    setDraftFornecedor(row.fornecedor);
+    setDraftFornecedor(resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap));
     setDraftDataLancamento(row.dataLancamento);
     const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
     setEditMonth(startOfMonth(parsed));
@@ -1265,7 +1396,7 @@ export default function EntradasClient() {
     }
     const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
     if (!fornecedorRaw) return;
-    setFornecedorModalKey(fornecedorRaw.toUpperCase());
+    setFornecedorModalKey(resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap));
     setFornecedorModalLabel(resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap));
     setFornecedorProdutosSearch("");
     setFornecedorProdutosPick("");
@@ -1278,7 +1409,8 @@ export default function EntradasClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedorKey = (fornecedorModalKey || (detailsRow?.fornecedor ?? "")).trim().toUpperCase();
+    const fornecedorKeyRaw = (fornecedorModalKey || (detailsRow?.fornecedor ?? "")).trim();
+    const fornecedorKey = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const name = nomeNaNota.trim();
     if (!fornecedorKey) return;
     const existing = fornecedorItemMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
@@ -1294,7 +1426,8 @@ export default function EntradasClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedor = (fornecedorModalKey ?? "").trim().toUpperCase();
+    const fornecedorKeyRaw = (fornecedorModalKey ?? "").trim();
+    const fornecedor = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const item = nome.trim();
     if (!fornecedor || !item) return;
     setFornecedorProdutosMap((prev) => {
@@ -1311,7 +1444,8 @@ export default function EntradasClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedor = (fornecedorModalKey ?? "").trim().toUpperCase();
+    const fornecedorKeyRaw = (fornecedorModalKey ?? "").trim();
+    const fornecedor = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const item = nome.trim();
     if (!fornecedor || !item) return;
     setFornecedorProdutosMap((prev) => {
@@ -1347,7 +1481,8 @@ export default function EntradasClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
+    const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+    const fornecedor = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
     if (!fornecedor) return;
     const nomeNaNota = mapNomeNota.trim();
     const unidadeNaNota = mapUnidadeNota.trim() || "Und";
@@ -1428,7 +1563,8 @@ export default function EntradasClient() {
         { ...detailsRow, itensNota: items, itens: `${items.length} ${items.length === 1 ? "Item" : "Itens"}`, valorNota: formatBrlFromCents(total) } as unknown as any,
       ).catch(() => {});
     }
-    const fornecedor = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
+    const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+    const fornecedor = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
     if (fornecedor) {
       setFornecedorProdutosMap((prev) => {
         const cur = prev[fornecedor] ?? [];
@@ -2030,14 +2166,7 @@ export default function EntradasClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Fornecedor</div>
                   <select className={styles.formSelect} value={draftFornecedor} onChange={() => {}} disabled>
-                    {draftFornecedor && !fornecedores.some((f) => f === draftFornecedor) ? (
-                      <option value={draftFornecedor}>{draftFornecedor}</option>
-                    ) : null}
-                    {fornecedores.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
-                      </option>
-                    ))}
+                    <option value={draftFornecedor}>{draftFornecedor || "-"}</option>
                   </select>
                 </div>
 
@@ -2378,7 +2507,8 @@ export default function EntradasClient() {
                                     className={styles.itemOption}
                                     onClick={() => {
                                       setDetailItemName(normalizeNotaItemName(name) || "");
-                                      const fornecedorKey = (detailsRow?.fornecedor ?? "").trim().toUpperCase();
+                                      const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
+                                      const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
                                       const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
                                       const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
                                       setDetailUnit(existing?.unidadeNaNota || "Und");
@@ -2527,7 +2657,8 @@ export default function EntradasClient() {
                           <div className={styles.itemsName}>{resolveNotaItemDisplayName(it, insumosById)}</div>
                           <div className={styles.itemsEq}>
                             {(() => {
-                              const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
+                              const raw = (detailsRow.fornecedor ?? "").trim();
+                              const key = raw ? resolveFornecedorKey(raw, fornecedorInfoMap) : "";
                               const nome = resolveNotaItemDisplayName(it, insumosById);
                               if (!nome) return "-";
                               const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
@@ -2538,7 +2669,8 @@ export default function EntradasClient() {
                         </div>
                         <div className={styles.itemsQty} data-qa-grid-cell>
                           {(() => {
-                            const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
+                            const raw = (detailsRow.fornecedor ?? "").trim();
+                            const key = raw ? resolveFornecedorKey(raw, fornecedorInfoMap) : "";
                             const nome = resolveNotaItemDisplayName(it, insumosById);
                             if (!nome) return it.quantidadeLabel;
                             const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
@@ -2560,7 +2692,8 @@ export default function EntradasClient() {
                           <div className={styles.itemsSubtotal}>{it.subtotalLabel}</div>
                           <div className={styles.itemsUnitCost}>
                             {(() => {
-                              const key = (detailsRow.fornecedor ?? "").trim().toUpperCase();
+                              const raw = (detailsRow.fornecedor ?? "").trim();
+                              const key = raw ? resolveFornecedorKey(raw, fornecedorInfoMap) : "";
                               const nome = resolveNotaItemDisplayName(it, insumosById);
                               if (!nome) return it.custoUnitarioLabel;
                               const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === nome.toLowerCase()) ?? null;
@@ -2636,9 +2769,9 @@ export default function EntradasClient() {
                   </div>
                   <select className={styles.formSelect} value={newFornecedor} onChange={(e) => setNewFornecedor(e.target.value)}>
                     <option value="">Selecione</option>
-                    {fornecedores.map((f) => (
-                      <option key={f} value={f}>
-                        {f}
+                    {fornecedorOptions.map((opt) => (
+                      <option key={opt.key} value={opt.key}>
+                        {opt.label}
                       </option>
                     ))}
                   </select>
@@ -3039,7 +3172,8 @@ export default function EntradasClient() {
                             <div className={styles.fornecedorItemName}>{name}</div>
                             <div className={styles.fornecedorItemEq}>
                               {(() => {
-                                const key = (fornecedorModalKey ?? "").trim().toUpperCase();
+                                const raw = (fornecedorModalKey ?? "").trim();
+                                const key = raw ? resolveFornecedorKey(raw, fornecedorInfoMap) : "";
                                 const map = fornecedorItemMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
                                 const eq = map?.insumoEquivalente ?? (insumosByName.get(name.toLowerCase()) ? name : "");
                                 if (!eq) return "-";
