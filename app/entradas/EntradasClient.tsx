@@ -784,6 +784,7 @@ export default function EntradasClient() {
         })
         .then(({ status, payload }) => {
           const diagResolved = payload && typeof payload === "object" ? String((payload as any)?.diag?.fornecedorResolvedKey ?? "") : "";
+          const diagLabel = payload && typeof payload === "object" ? sanitizeUiLabel(String((payload as any)?.diag?.fornecedorResolvedLabel ?? "")) : "";
           const row = payload && typeof payload === "object" ? (payload as any).row : null;
           const infoMap = row && typeof row === "object" ? (row as any).info : null;
 
@@ -804,7 +805,9 @@ export default function EntradasClient() {
             }
           }
 
-          const label = direct && typeof direct === "object" ? sanitizeUiLabel(String((direct as any).fornecedor ?? "")) : "";
+          const labelFromDiag = diagLabel && !isDbKey(canonicalDbKey(diagLabel)) ? diagLabel : "";
+          const labelFromInfo = direct && typeof direct === "object" ? sanitizeUiLabel(String((direct as any).fornecedor ?? "")) : "";
+          const label = labelFromDiag || labelFromInfo;
           __dbgSend("h4", "app/entradas/EntradasClient.tsx:fornecedorDbLabel:fetch", "fornecedor_label_fetch_result", {
             key: k,
             status,

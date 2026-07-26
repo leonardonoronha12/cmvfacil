@@ -380,7 +380,7 @@ export async function GET(req: NextRequest) {
         }
         const dbId = canonicalUuid(String((s as any)?.id ?? ""));
         const bubbleId = String((s as any)?.bubble_id ?? "").trim();
-        const key = bubbleId || (dbId ? `db:${dbId}` : "");
+        const key = dbId ? `db:${dbId}` : "";
         if (!key || !nome) continue;
         supplierKeyById.set(dbId, key);
         const fornecedoresRaw = safeObj(((s as any)?.raw as any)?.fornecedores);
@@ -503,6 +503,7 @@ export async function GET(req: NextRequest) {
       const fornecedorLabelLookup = normalizeLookupKey(fornecedorLabelRaw);
       const fornecedorLabelUpper = fornecedorLabelRaw ? fornecedorLabelRaw.toUpperCase() : "";
       let resolvedKey: string | null = null;
+      let resolvedLabel: string | null = null;
       if (fornecedorLabelRaw) {
         if (isDbPrefixed(fornecedorLabelRaw)) {
           const dbId = canonicalUuid(dbIdFromKey(fornecedorLabelRaw));
@@ -516,6 +517,11 @@ export async function GET(req: NextRequest) {
             }
           }
         }
+      }
+      if (resolvedKey) {
+        const v = (info as any)[resolvedKey];
+        const label = normalizeText((v as any)?.fornecedor ?? "");
+        if (label) resolvedLabel = label;
       }
 
       return json(
@@ -544,6 +550,7 @@ export async function GET(req: NextRequest) {
                   fornecedorLabel: fornecedorLabelRaw || null,
                   fornecedorLabelUpper: fornecedorLabelUpper || null,
                   fornecedorResolvedKey: resolvedKey,
+                  fornecedorResolvedLabel: resolvedLabel,
                   fornecedorProdutosLenByResolvedKey: resolvedKey ? (produtos[resolvedKey]?.length ?? 0) : null,
                   fornecedorProdutosLenByUpperLabel: fornecedorLabelUpper ? (produtos[fornecedorLabelUpper]?.length ?? 0) : null,
                 },
@@ -631,11 +638,11 @@ export async function POST(req: NextRequest) {
       .limit(5000);
     if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
 
-    const supplierIdByBubbleId = new Map<string, string>();
-    const supplierIdByNameKey = new Map<string, string>();
-    const supplierRawById = new Map<string, unknown>();
-    const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
-    const supplierIdByKeyUpper = new Map<string, string>();
+      const supplierIdByBubbleId = new Map<string, string>();
+      const supplierIdByNameKey = new Map<string, string>();
+      const supplierRawById = new Map<string, unknown>();
+      const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
+      const supplierIdByKeyUpper = new Map<string, string>();
     let defaultSupplierId = "";
     let tombstoneSupplierId = "";
     for (const s of suppliersDb ?? []) {
@@ -655,8 +662,9 @@ export async function POST(req: NextRequest) {
       if (nome) supplierIdByNameKey.set(normalizeLookupKey(nome), sid);
       supplierRawById.set(sid, (s as any)?.raw ?? {});
       supplierInfoById.set(sid, { nome, endereco, vendedor, whatsapp });
-      const key = bubbleId || `db:${sid}`;
-      supplierIdByKeyUpper.set(key.toUpperCase(), sid);
+      const dbKey = `db:${sid}`;
+      supplierIdByKeyUpper.set(dbKey.toUpperCase(), sid);
+      if (bubbleId) supplierIdByKeyUpper.set(bubbleId.toUpperCase(), sid);
     }
 
     const tombstonesUpper = Array.from(new Set(safeArr(produtosMap[TOMBSTONE_KEY]).map(normalizeTombstoneKey).filter(Boolean)));
@@ -798,8 +806,9 @@ export async function POST(req: NextRequest) {
       const nome = normalizeText((s as any)?.nome ?? "");
       if (bubbleId) supplierIdByBubbleId2.set(bubbleId, sid);
       if (nome) supplierIdByNameKey2.set(normalizeLookupKey(nome), sid);
-      const key = bubbleId || `db:${sid}`;
-      supplierIdByKeyUpper2.set(key.toUpperCase(), sid);
+      const dbKey = `db:${sid}`;
+      supplierIdByKeyUpper2.set(dbKey.toUpperCase(), sid);
+      if (bubbleId) supplierIdByKeyUpper2.set(bubbleId.toUpperCase(), sid);
     }
 
     if (tombstonesUpper.length || tombstoneSupplierId) {
