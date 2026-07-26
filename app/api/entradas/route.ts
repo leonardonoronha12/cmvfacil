@@ -73,6 +73,33 @@ function normalizeText(v: unknown) {
   return String(v ?? "").replace(/\s+/g, " ").trim();
 }
 
+function safeObj(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  return input as Record<string, unknown>;
+}
+
+function pickFirstText(obj: unknown, keys: string[]) {
+  const o = safeObj(obj);
+  for (const k of keys) {
+    const v = normalizeText((o as any)[k]);
+    if (v) return v;
+  }
+  return "";
+}
+
+function extractSupplierLabelFromRaw(raw: unknown) {
+  const base = safeObj(raw);
+  const bubble = safeObj((base as any).bubble);
+  const bubbleNormalized = safeObj((base as any).bubble_normalized);
+  const candidates = [bubble, bubbleNormalized, base];
+  const keys = ["nome", "fornecedor", "name", "Nome", "Fornecedor", "Nome do fornecedor", "nome_fornecedor", "fornecedor_nome"];
+  for (const c of candidates) {
+    const v = pickFirstText(c, keys);
+    if (v) return v;
+  }
+  return "";
+}
+
 function normalizeNameKey(v: unknown) {
   return normalizeText(v).toLowerCase();
 }
@@ -403,13 +430,22 @@ export async function GET(req: NextRequest) {
 
     const supplierNameById = new Map<string, string>();
     const supplierNameRawById = new Map<string, string>();
+    const supplierNameFromRawById = new Map<string, string>();
     if (companyId && supplierIds.length) {
-      const { data: suppliersDb } = await supabase.from("suppliers").select("id,nome").eq("company_id", companyId).in("id", supplierIds).limit(5000);
+      const { data: suppliersDb } = await supabase
+        .from("suppliers")
+        .select("id,nome,raw")
+        .eq("company_id", companyId)
+        .in("id", supplierIds)
+        .limit(5000);
       for (const s of suppliersDb ?? []) {
         const sid = canonicalUuid(String((s as any)?.id ?? ""));
         const nome = String((s as any)?.nome ?? "").trim();
+        const rawLabel = extractSupplierLabelFromRaw((s as any)?.raw);
         if (sid && !supplierNameRawById.has(sid)) supplierNameRawById.set(sid, nome);
-        if (sid && nome && !isBadSupplierLabel(nome) && !supplierNameById.has(sid)) supplierNameById.set(sid, nome);
+        if (sid && rawLabel && !supplierNameFromRawById.has(sid)) supplierNameFromRawById.set(sid, rawLabel);
+        const chosen = !isBadSupplierLabel(nome) ? nome : !isBadSupplierLabel(rawLabel) ? rawLabel : "";
+        if (sid && chosen && !supplierNameById.has(sid)) supplierNameById.set(sid, chosen);
       }
     }
 
@@ -438,6 +474,7 @@ export async function GET(req: NextRequest) {
       const primary = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
       const fallback = dbId ? String(fallbackNameById.get(dbId) ?? "").trim() : "";
       const rawNome = dbId ? String(supplierNameRawById.get(dbId) ?? "").trim() : "";
+      const rawLabel = dbId ? String(supplierNameFromRawById.get(dbId) ?? "").trim() : "";
       const nome = primary || fallback;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
