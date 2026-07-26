@@ -35,7 +35,7 @@ import { maskPhoneBR } from "../lib/masks";
 import styles from "./entradas.module.css";
 
 // #region debug-point reporter
-const __DBG_SESSION_ID = "entradas-page-crash";
+const __DBG_SESSION_ID = "entradas-auth-hydration";
 const __DBG_RUN_ID = "prod";
 function __dbgSend(hypothesisId: string, location: string, msg: string, data: unknown) {
   try {
@@ -44,6 +44,35 @@ function __dbgSend(hypothesisId: string, location: string, msg: string, data: un
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId: __DBG_SESSION_ID, runId: __DBG_RUN_ID, hypothesisId, location, msg, data, ts: Date.now() }),
     }).catch(() => {});
+  } catch {}
+}
+// #endregion
+
+// #region debug-point console-hook
+let __dbgConsoleHooked = false;
+if (typeof window !== "undefined" && !__dbgConsoleHooked) {
+  __dbgConsoleHooked = true;
+  try {
+    const origError = console.error.bind(console);
+    const origWarn = console.warn.bind(console);
+    console.error = (...args: any[]) => {
+      try {
+        const text = args.map((x) => (typeof x === "string" ? x : x instanceof Error ? `${x.name}: ${x.message}` : JSON.stringify(x))).join(" ");
+        if (text.toLowerCase().includes("hydration") || text.includes("#425") || text.includes("#423") || text.includes("#329")) {
+          __dbgSend("h3", "app/entradas/EntradasClient.tsx:console.error", "console_error", { text });
+        }
+      } catch {}
+      origError(...args);
+    };
+    console.warn = (...args: any[]) => {
+      try {
+        const text = args.map((x) => (typeof x === "string" ? x : x instanceof Error ? `${x.name}: ${x.message}` : JSON.stringify(x))).join(" ");
+        if (text.toLowerCase().includes("hydration") || text.includes("#425") || text.includes("#423") || text.includes("#329")) {
+          __dbgSend("h3", "app/entradas/EntradasClient.tsx:console.warn", "console_warn", { text });
+        }
+      } catch {}
+      origWarn(...args);
+    };
   } catch {}
 }
 // #endregion
@@ -654,6 +683,8 @@ export default function EntradasClient() {
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
   const authReady = Boolean(companyId && currentUserEmail);
+  const dbgAuthOnceRef = useRef(false);
+  const dbgGateOnceRef = useRef(false);
 
   useEffect(() => {
     if (!isReadOnly) return;
@@ -684,9 +715,26 @@ export default function EntradasClient() {
       setCurrentUserEmail(email);
       setCurrentUserFullName(fullName);
       setCompanyId(cid);
+      if (!dbgAuthOnceRef.current) {
+        dbgAuthOnceRef.current = true;
+        __dbgSend("h1", "app/entradas/EntradasClient.tsx:meStore", "me_store_snapshot", {
+          email: email || null,
+          fullName: fullName || null,
+          companyId: cid || null,
+          hasMe: Boolean(me),
+          keys: me ? Object.keys(me as any).slice(0, 30) : [],
+        });
+      }
     };
     applyFromStore();
-    void loadMeFromApi().finally(() => applyFromStore());
+    void loadMeFromApi()
+      .catch((err) => {
+        __dbgSend("h2", "app/entradas/EntradasClient.tsx:loadMeFromApi", "load_me_error", { message: err instanceof Error ? err.message : String(err ?? "") });
+      })
+      .finally(() => {
+        dbgAuthOnceRef.current = false;
+        applyFromStore();
+      });
     return subscribeMe(() => applyFromStore());
   }, []);
 
@@ -743,6 +791,18 @@ export default function EntradasClient() {
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorDbLabelCache, fornecedorInfoMap, query, rows, sortDir, sortKey]);
   const canRender = Boolean(isMounted && authReady);
+  if (!canRender && isMounted && !dbgGateOnceRef.current) {
+    dbgGateOnceRef.current = true;
+    __dbgSend("h1", "app/entradas/EntradasClient.tsx:gate", "auth_gate_blocked", {
+      isMounted,
+      authReady,
+      companyId: companyId || null,
+      email: currentUserEmail || null,
+      fullName: currentUserFullName || null,
+      pathname: typeof window !== "undefined" ? window.location.pathname : null,
+      host: typeof window !== "undefined" ? window.location.host : null,
+    });
+  }
 
   const pagination = usePagination({
     items: visible,
