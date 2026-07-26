@@ -606,6 +606,8 @@ export default function EntradasClient() {
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
+  const [fornecedorDbLabelCache, setFornecedorDbLabelCache] = useState<Record<string, string>>({});
+  const fornecedorDbLabelInFlightRef = useRef<Set<string>>(new Set());
   const [isFornecedorProdutosOpen, setIsFornecedorProdutosOpen] = useState(false);
   const [fornecedorModalKey, setFornecedorModalKey] = useState<string | null>(null);
   const [fornecedorModalLabel, setFornecedorModalLabel] = useState<string>("");
@@ -665,7 +667,7 @@ export default function EntradasClient() {
     const start = parseDateLabelLoose(dateStart);
     const end = parseDateLabelLoose(dateEnd);
     const filtered = rows.filter((r) => {
-      const fornLabel = resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap);
+      const fornLabel = displayFornecedor(r.fornecedor);
       if (q && !fornLabel.toLowerCase().includes(q)) return false;
       if (!start && !end) return true;
       const d = parseDateLabelLoose(r.dataLancamento);
@@ -689,7 +691,7 @@ export default function EntradasClient() {
           break;
         }
         case "fornecedor":
-          cmp = collator.compare(resolveFornecedorDisplay(a.row.fornecedor, fornecedorInfoMap), resolveFornecedorDisplay(b.row.fornecedor, fornecedorInfoMap));
+          cmp = collator.compare(displayFornecedor(a.row.fornecedor), displayFornecedor(b.row.fornecedor));
           break;
         case "responsavel":
           cmp = collator.compare(
@@ -705,7 +707,7 @@ export default function EntradasClient() {
       return cmp * direction;
     });
     return decorated.map(({ row }) => row);
-  }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorInfoMap, query, rows, sortDir, sortKey]);
+  }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorDbLabelCache, fornecedorInfoMap, query, rows, sortDir, sortKey]);
 
   const pagination = usePagination({
     items: visible,
@@ -720,6 +722,46 @@ export default function EntradasClient() {
     setSelectedIds({});
     setIsBulkDeleteOpen(false);
   }, [bulkDeleteMode, query, dateStart, dateEnd, sortKey, sortDir]);
+
+  const displayFornecedor = (raw: string) => {
+    const dbKey = canonicalDbKey(raw);
+    const cached = dbKey && isDbKey(dbKey) ? String(fornecedorDbLabelCache[dbKey] ?? "").trim() : "";
+    return cached || resolveFornecedorDisplay(raw, fornecedorInfoMap);
+  };
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const missing: string[] = [];
+    for (const r of rows) {
+      const raw = sanitizeUiLabel(r?.fornecedor ?? "");
+      if (!raw) continue;
+      const key = canonicalDbKey(raw);
+      if (!key || !isDbKey(key)) continue;
+      if (fornecedorDbLabelCache[key]) continue;
+      const current = resolveFornecedorDisplay(raw, fornecedorInfoMap);
+      if (isDbKey(current)) missing.push(key);
+    }
+    const unique = Array.from(new Set(missing));
+    const pick = unique.filter((k) => !fornecedorDbLabelInFlightRef.current.has(k)).slice(0, 5);
+    if (!pick.length) return;
+    for (const k of pick) {
+      fornecedorDbLabelInFlightRef.current.add(k);
+      void fetch(`/api/fornecedores?diag=1&fornecedorLabel=${encodeURIComponent(k)}`)
+        .then((r) => r.json().catch(() => null))
+        .then((payload) => {
+          const row = payload && typeof payload === "object" ? (payload as any).row : null;
+          const infoMap = row && typeof row === "object" ? (row as any).info : null;
+          const direct = infoMap && typeof infoMap === "object" ? ((infoMap as any)[k] ?? (infoMap as any)[k.toUpperCase()] ?? null) : null;
+          const label = direct && typeof direct === "object" ? sanitizeUiLabel(String((direct as any).fornecedor ?? "")) : "";
+          if (!label) return;
+          if (isDbKey(label)) return;
+          setFornecedorDbLabelCache((prev) => (prev[k] ? prev : { ...prev, [k]: label }));
+        })
+        .finally(() => {
+          fornecedorDbLabelInFlightRef.current.delete(k);
+        });
+    }
+  }, [fornecedorDbLabelCache, fornecedorInfoMap, isMounted, rows]);
 
   const visibleIdSet = useMemo(() => new Set(pagination.pageItems.map((r) => r.id)), [pagination.pageItems]);
   const selectedList = useMemo(() => {
@@ -741,7 +783,7 @@ export default function EntradasClient() {
           id: r.id,
           numero: r.numero,
           dataLancamento: r.dataLancamento,
-          fornecedor: resolveFornecedorDisplay(r.fornecedor, fornecedorInfoMap),
+          fornecedor: displayFornecedor(r.fornecedor),
           valorNota: r.valorNota,
           responsavel: resolveResponsavelDisplay(r.responsavel, currentUserFullName, currentUserEmail),
           dataCriacao: r.dataCriacao,
@@ -769,6 +811,7 @@ export default function EntradasClient() {
     currentUserFullName,
     dateEnd,
     dateStart,
+    fornecedorDbLabelCache,
     fornecedorInfoMap,
     pagination.pageItems,
     pagination.totalItems,
@@ -840,7 +883,7 @@ export default function EntradasClient() {
       );
     }
     if (column === "fornecedor") {
-      return <div className={styles.td}>{resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap)}</div>;
+      return <div className={styles.td}>{displayFornecedor(row.fornecedor)}</div>;
     }
     if (column === "responsavel") {
       return <div className={styles.tdStrong}>{resolveResponsavelDisplay(row.responsavel, currentUserFullName, currentUserEmail)}</div>;
@@ -945,7 +988,7 @@ export default function EntradasClient() {
     if (!fornecedorKey) return [];
     const out = (fornecedorProdutosMap[fornecedorKey] ?? []).map((p) => normalizeNotaItemName(p)).filter(Boolean);
     if (!out.length && fornecedorRaw) {
-      const lookup = normalizeLookupKey(resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap));
+      const lookup = normalizeLookupKey(displayFornecedor(fornecedorRaw));
       const candidates = lookup
         ? Object.entries(fornecedorInfoMap)
             .filter(([, info]) => normalizeLookupKey(String((info as any)?.fornecedor ?? "")) === lookup)
@@ -960,7 +1003,7 @@ export default function EntradasClient() {
           fornecedorRaw,
           fornecedorKey,
           fornecedorKeyUpper: fornecedorRaw.toUpperCase(),
-          display: resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap),
+          display: displayFornecedor(fornecedorRaw),
           candidates,
           hasInfoKey: Boolean(fornecedorInfoMap[fornecedorKey]),
           produtosKeys: Object.keys(fornecedorProdutosMap).length,
@@ -1060,7 +1103,7 @@ export default function EntradasClient() {
       const raw = String((r as any)?.fornecedor ?? "").trim();
       if (!raw) continue;
       const key = resolveFornecedorKey(raw, fornecedorInfoMap);
-      const label = resolveFornecedorDisplay(raw, fornecedorInfoMap);
+      const label = displayFornecedor(raw);
       if (!key || !label) continue;
       const skey = key.toLowerCase();
       if (seen.has(skey)) continue;
@@ -1081,7 +1124,7 @@ export default function EntradasClient() {
     }
 
     return out;
-  }, [customFornecedores, fornecedorInfoMap, rows]);
+  }, [customFornecedores, fornecedorDbLabelCache, fornecedorInfoMap, rows]);
 
   function openNewModal() {
     if (isReadOnly) {
@@ -1134,7 +1177,7 @@ export default function EntradasClient() {
           {
             selectedValue: fornecedor,
             fornecedorKey,
-            display: resolveFornecedorDisplay(fornecedor, fornecedorInfoMap),
+            display: displayFornecedor(fornecedor),
             hasInfoKey: Boolean(fornecedorInfoMap[fornecedorKey]),
             produtosLenByKey: (fornecedorProdutosMap as any)[fornecedorKey]?.length ?? 0,
             eqLenByKey: (fornecedorItemMap as any)[fornecedorKey]?.length ?? 0,
@@ -1370,7 +1413,7 @@ export default function EntradasClient() {
       return;
     }
     setEditingId(row.id);
-    setDraftFornecedor(resolveFornecedorDisplay(row.fornecedor, fornecedorInfoMap));
+    setDraftFornecedor(displayFornecedor(row.fornecedor));
     setDraftDataLancamento(row.dataLancamento);
     const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
     setEditMonth(startOfMonth(parsed));
@@ -1443,7 +1486,7 @@ export default function EntradasClient() {
     const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
     if (!fornecedorRaw) return;
     setFornecedorModalKey(resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap));
-    setFornecedorModalLabel(resolveFornecedorDisplay(fornecedorRaw, fornecedorInfoMap));
+    setFornecedorModalLabel(displayFornecedor(fornecedorRaw));
     setFornecedorProdutosSearch("");
     setFornecedorProdutosPick("");
     setIsFornecedorProdutosOpen(true);
@@ -2461,7 +2504,7 @@ export default function EntradasClient() {
                     </div>
                     <div className={styles.sideText}>
                       <div className={styles.sideLabel}>Fornecedor</div>
-                      <div className={styles.sideValue}>{resolveFornecedorDisplay(detailsRow.fornecedor, fornecedorInfoMap)}</div>
+                      <div className={styles.sideValue}>{displayFornecedor(detailsRow.fornecedor)}</div>
                     </div>
                   </button>
 

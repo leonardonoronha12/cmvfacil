@@ -53,7 +53,9 @@ export async function GET(req: NextRequest) {
     const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const seed = String(url.searchParams.get("seed") ?? "").trim() === "1";
     const sessionIdFilter = String(url.searchParams.get("sessionId") ?? "").trim();
-    const sinceTsRaw = Number(url.searchParams.get("sinceTs") ?? "");
+    const sinceTsParam = url.searchParams.get("sinceTs");
+    const hasSinceTs = sinceTsParam !== null && String(sinceTsParam).trim() !== "";
+    const sinceTsRaw = hasSinceTs ? Number(sinceTsParam) : Number.NaN;
     const sinceTs = Number.isFinite(sinceTsRaw) ? Math.max(0, Math.floor(sinceTsRaw)) : 0;
     const limitRaw = Number(url.searchParams.get("limit") ?? "200");
     const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(400, Math.floor(limitRaw))) : 200;
@@ -113,7 +115,7 @@ export async function GET(req: NextRequest) {
           }))
           .reverse();
         let filtered = sessionIdFilter ? mapped.filter((e) => e.sessionId === sessionIdFilter) : mapped;
-        if (sinceTs) filtered = filtered.filter((e) => Number(e.ts) >= sinceTs);
+        if (hasSinceTs) filtered = filtered.filter((e) => Number(e.ts) >= sinceTs);
         return json(
           {
             ok: true,
@@ -125,7 +127,7 @@ export async function GET(req: NextRequest) {
                     hasDefaultSupplier: null,
                     defaultSupplierId: null,
                     eventsCount: count ?? 0,
-                    ...(sessionIdFilter || sinceTs ? { sessionIdFilter: sessionIdFilter || null, sinceTs: sinceTs || null, filteredCount: filtered.length } : null),
+                    ...(sessionIdFilter || hasSinceTs ? { sessionIdFilter: sessionIdFilter || null, sinceTs: hasSinceTs ? sinceTs : null, filteredCount: filtered.length } : null),
                     systemKeys: ["debug_events_table"],
                     debugEventsTable: diagDebugTable,
                   },
@@ -232,7 +234,7 @@ export async function GET(req: NextRequest) {
     const system = (raw as any)?.system ?? {};
     const events = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
     let filtered = sessionIdFilter ? events.filter((e: any) => String(e?.sessionId ?? "") === sessionIdFilter) : events;
-    if (sinceTs) filtered = filtered.filter((e: any) => Number(e?.ts ?? 0) >= sinceTs);
+    if (hasSinceTs) filtered = filtered.filter((e: any) => Number(e?.ts ?? 0) >= sinceTs);
     const out = filtered.slice(-limit);
     return json(
       {
@@ -245,7 +247,7 @@ export async function GET(req: NextRequest) {
                 hasDefaultSupplier: Boolean((supplierRow as any)?.id),
                 defaultSupplierId: String((supplierRow as any)?.id ?? "").trim() || null,
                 eventsCount: events.length,
-                ...(sessionIdFilter || sinceTs ? { sessionIdFilter: sessionIdFilter || null, sinceTs: sinceTs || null, filteredCount: filtered.length } : null),
+                ...(sessionIdFilter || hasSinceTs ? { sessionIdFilter: sessionIdFilter || null, sinceTs: hasSinceTs ? sinceTs : null, filteredCount: filtered.length } : null),
                 systemKeys: Object.keys(system ?? {}),
                 debugEventsTable: diagDebugTable,
               },
