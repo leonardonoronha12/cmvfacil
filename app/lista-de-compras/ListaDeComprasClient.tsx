@@ -525,7 +525,7 @@ export default function ListaDeComprasClient() {
       void (async () => {
         try {
           const db = await loadInventarioFromSupabase(userIdOverride || undefined);
-          if (db.length) writeInventarioToStore(db);
+          if (db.length) { writeInventarioToStore(db); setContagens(db); }
         } catch {}
       })();
 
