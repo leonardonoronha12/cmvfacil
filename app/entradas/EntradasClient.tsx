@@ -682,7 +682,7 @@ export default function EntradasClient() {
   const [companyId, setCompanyId] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
-  const authReady = Boolean(companyId && currentUserEmail);
+  const authReady = Boolean(currentUserEmail);
   const dbgAuthOnceRef = useRef(false);
   const dbgGateOnceRef = useRef(false);
 
