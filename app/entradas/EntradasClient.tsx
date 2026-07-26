@@ -164,7 +164,16 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
   const resolvedKey = resolveFornecedorKey(rawNoSuffix, fornecedorInfoMap);
   const rawUpper = raw.toUpperCase();
   const rawNoSuffixUpper = rawNoSuffix.toUpperCase();
-  const info = (resolvedKey && fornecedorInfoMap[resolvedKey]) || fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
+  let info = (resolvedKey && fornecedorInfoMap[resolvedKey]) || fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
+  if (!info && isDbKey(rawNoSuffix)) {
+    const target = canonicalDbKey(rawNoSuffix);
+    for (const [k, v] of Object.entries(fornecedorInfoMap)) {
+      if (!k) continue;
+      if (canonicalDbKey(k) !== target) continue;
+      info = v as any;
+      break;
+    }
+  }
   const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
   return labelFromState || rawNoSuffix || raw;
 }
