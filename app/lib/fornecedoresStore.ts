@@ -38,6 +38,13 @@ function isStableSupplierKey(key: string) {
   return /^\d{8,}x\d{6,}$/i.test(s);
 }
 
+function canonicalSupplierKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return "";
+  if (s.toLowerCase().startsWith("db:")) return `db:${s.slice(3).trim().toLowerCase()}`;
+  return s;
+}
+
 function normalizeInfoMap(input: unknown): FornecedorInfoMap {
   if (!input || typeof input !== "object") return {};
   const obj = input as Record<string, unknown>;
@@ -55,8 +62,8 @@ function normalizeInfoMap(input: unknown): FornecedorInfoMap {
       whatsapp: String(row.whatsapp ?? "").trim(),
       endereco: String(row.endereco ?? "").trim(),
     };
-    const inputKey = normName(String(k ?? ""));
-    const primaryKey = (isStableSupplierKey(inputKey) ? inputKey : fornecedorLabel).toUpperCase();
+    const inputKey = canonicalSupplierKey(normName(String(k ?? "")));
+    const primaryKey = isStableSupplierKey(inputKey) ? inputKey : fornecedorLabel.toUpperCase();
     if (!primaryKey) continue;
     out[primaryKey] = normalizedRow;
   }
@@ -72,7 +79,8 @@ function normalizeProdutosMap(input: unknown): FornecedorProdutos {
     if (!Array.isArray(arr)) continue;
     const items = arr.map((x) => String(x ?? "")).map(normName).filter(Boolean);
     if (!items.length) continue;
-    out[k.toUpperCase()] = Array.from(new Set(items));
+    const key = canonicalSupplierKey(normName(String(k ?? "")));
+    out[isStableSupplierKey(key) ? key : key.toUpperCase()] = Array.from(new Set(items));
   }
   return out;
 }
@@ -101,7 +109,8 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
       });
     }
     if (!list.length) continue;
-    out[k.toUpperCase()] = list;
+    const key = canonicalSupplierKey(normName(String(k ?? "")));
+    out[isStableSupplierKey(key) ? key : key.toUpperCase()] = list;
   }
   return out;
 }
