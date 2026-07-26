@@ -775,15 +775,46 @@ export default function EntradasClient() {
     if (!pick.length) return;
     for (const k of pick) {
       fornecedorDbLabelInFlightRef.current.add(k);
+      __dbgSend("h3", "app/entradas/EntradasClient.tsx:fornecedorDbLabel:fetch", "fornecedor_label_fetch_start", { key: k });
       void fetch(`/api/fornecedores?diag=1&fornecedorLabel=${encodeURIComponent(k)}`)
-        .then((r) => r.json().catch(() => null))
-        .then((payload) => {
+        .then(async (r) => {
+          const status = r.status;
+          const payload = await r.json().catch(() => null);
+          return { status, payload };
+        })
+        .then(({ status, payload }) => {
+          const diagResolved = payload && typeof payload === "object" ? String((payload as any)?.diag?.fornecedorResolvedKey ?? "") : "";
           const row = payload && typeof payload === "object" ? (payload as any).row : null;
           const infoMap = row && typeof row === "object" ? (row as any).info : null;
-          const direct = infoMap && typeof infoMap === "object" ? ((infoMap as any)[k] ?? (infoMap as any)[k.toUpperCase()] ?? null) : null;
+
+          let direct: any = null;
+          if (infoMap && typeof infoMap === "object") {
+            const candidates = [diagResolved, k, k.toUpperCase()].map((x) => String(x ?? "").trim()).filter(Boolean);
+            for (const c of candidates) {
+              direct = (infoMap as any)[c];
+              if (direct) break;
+            }
+            if (!direct) {
+              const target = canonicalDbKey(k);
+              for (const [kk, vv] of Object.entries(infoMap as any)) {
+                if (canonicalDbKey(kk) !== target) continue;
+                direct = vv;
+                break;
+              }
+            }
+          }
+
           const label = direct && typeof direct === "object" ? sanitizeUiLabel(String((direct as any).fornecedor ?? "")) : "";
+          __dbgSend("h4", "app/entradas/EntradasClient.tsx:fornecedorDbLabel:fetch", "fornecedor_label_fetch_result", {
+            key: k,
+            status,
+            diagResolved: diagResolved || null,
+            hasRow: Boolean(row),
+            hasInfo: Boolean(infoMap && typeof infoMap === "object"),
+            label: label || null,
+          });
           if (!label) return;
-          if (isDbKey(label)) return;
+          if (isDbKey(canonicalDbKey(label))) return;
           setFornecedorDbLabelCache((prev) => (prev[k] ? prev : { ...prev, [k]: label }));
         })
         .finally(() => {
