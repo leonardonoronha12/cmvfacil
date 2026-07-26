@@ -98,6 +98,14 @@ function scanSupplierLabelDeep(raw: unknown) {
   const maxDepth = 5;
   const maxItems = 50;
   let seen = 0;
+  const skipKey = (k: string) => {
+    const key = k.toLowerCase();
+    if (key.includes("produto") || key.includes("produtos")) return true;
+    if (key.includes("item") || key.includes("itens") || key.includes("items")) return true;
+    if (key.includes("equival")) return true;
+    if (key.includes("debug")) return true;
+    return false;
+  };
   const wantsKey = (k: string) => {
     const key = k.toLowerCase();
     return key.includes("nome") || key.includes("fornecedor") || key.includes("supplier") || key.includes("vendor");
@@ -112,16 +120,12 @@ function scanSupplierLabelDeep(raw: unknown) {
     }
     if (!node || typeof node !== "object") return "";
     if (Array.isArray(node)) {
-      for (const it of node.slice(0, 20)) {
-        const v = scan(it, depth + 1);
-        if (v) return v;
-      }
       return "";
     }
     const obj = node as Record<string, unknown>;
     const keys = Object.keys(obj);
-    const preferred = keys.filter(wantsKey);
-    const rest = keys.filter((k) => !wantsKey(k));
+    const preferred = keys.filter((k) => !skipKey(k) && wantsKey(k));
+    const rest = keys.filter((k) => !skipKey(k) && !wantsKey(k));
     for (const k of [...preferred, ...rest]) {
       const v = scan(obj[k], depth + 1);
       if (v) return v;
@@ -139,7 +143,7 @@ function extractSupplierLabelFromRaw(raw: unknown) {
   const keys = ["nome", "fornecedor", "name", "Nome", "Fornecedor", "Nome do fornecedor", "nome_fornecedor", "fornecedor_nome"];
   for (const c of candidates) {
     const v = pickFirstText(c, keys);
-    if (v) return v;
+    if (isGoodSupplierLabel(v)) return v;
   }
   return scanSupplierLabelDeep(raw);
 }
@@ -543,14 +547,15 @@ export async function GET(req: NextRequest) {
                 suppliersFallbackResolved: fallbackNameById.size,
                 missingSupplierIds,
                 invalidSupplierNames,
-                ...(missingSupplierIds.length
+                ...(supplierIds.length && (missingSupplierIds.length || invalidSupplierNames.length || supplierIds.length <= 5)
                   ? {
-                      supplierLabelDebug: missingSupplierIds.slice(0, 5).map((sid) => ({
+                      supplierLabelDebug: supplierIds.slice(0, 5).map((sid) => ({
                         id: sid,
                         nomeCol: supplierNameRawById.get(sid) ?? null,
                         rawLabel: supplierNameFromRawById.get(sid) ?? null,
                         rawKeys: supplierRawKeysById.get(sid) ?? [],
                         bubbleKeys: supplierBubbleKeysById.get(sid) ?? [],
+                        resolved: supplierNameById.get(sid) ?? null,
                       })),
                     }
                   : null),
