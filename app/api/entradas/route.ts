@@ -87,6 +87,50 @@ function pickFirstText(obj: unknown, keys: string[]) {
   return "";
 }
 
+function isGoodSupplierLabel(value: string) {
+  const s = normalizeText(value);
+  if (isBadSupplierLabel(s)) return false;
+  if (s.length > 120) return false;
+  return /[A-Za-zÀ-ÿ]/.test(s);
+}
+
+function scanSupplierLabelDeep(raw: unknown) {
+  const maxDepth = 5;
+  const maxItems = 50;
+  let seen = 0;
+  const wantsKey = (k: string) => {
+    const key = k.toLowerCase();
+    return key.includes("nome") || key.includes("fornecedor") || key.includes("supplier") || key.includes("vendor");
+  };
+  const scan = (node: unknown, depth: number): string => {
+    if (seen > maxItems) return "";
+    if (depth > maxDepth) return "";
+    if (typeof node === "string") {
+      seen += 1;
+      const s = normalizeText(node);
+      return isGoodSupplierLabel(s) ? s : "";
+    }
+    if (!node || typeof node !== "object") return "";
+    if (Array.isArray(node)) {
+      for (const it of node.slice(0, 20)) {
+        const v = scan(it, depth + 1);
+        if (v) return v;
+      }
+      return "";
+    }
+    const obj = node as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    const preferred = keys.filter(wantsKey);
+    const rest = keys.filter((k) => !wantsKey(k));
+    for (const k of [...preferred, ...rest]) {
+      const v = scan(obj[k], depth + 1);
+      if (v) return v;
+    }
+    return "";
+  };
+  return scan(raw, 0);
+}
+
 function extractSupplierLabelFromRaw(raw: unknown) {
   const base = safeObj(raw);
   const bubble = safeObj((base as any).bubble);
@@ -97,7 +141,7 @@ function extractSupplierLabelFromRaw(raw: unknown) {
     const v = pickFirstText(c, keys);
     if (v) return v;
   }
-  return "";
+  return scanSupplierLabelDeep(raw);
 }
 
 function normalizeNameKey(v: unknown) {
@@ -431,6 +475,8 @@ export async function GET(req: NextRequest) {
     const supplierNameById = new Map<string, string>();
     const supplierNameRawById = new Map<string, string>();
     const supplierNameFromRawById = new Map<string, string>();
+    const supplierRawKeysById = new Map<string, string[]>();
+    const supplierBubbleKeysById = new Map<string, string[]>();
     if (companyId && supplierIds.length) {
       const { data: suppliersDb } = await supabase
         .from("suppliers")
@@ -441,10 +487,13 @@ export async function GET(req: NextRequest) {
       for (const s of suppliersDb ?? []) {
         const sid = canonicalUuid(String((s as any)?.id ?? ""));
         const nome = String((s as any)?.nome ?? "").trim();
-        const rawLabel = extractSupplierLabelFromRaw((s as any)?.raw);
+        const rawObj = (s as any)?.raw;
+        const rawLabel = extractSupplierLabelFromRaw(rawObj);
         if (sid && !supplierNameRawById.has(sid)) supplierNameRawById.set(sid, nome);
         if (sid && rawLabel && !supplierNameFromRawById.has(sid)) supplierNameFromRawById.set(sid, rawLabel);
-        const chosen = !isBadSupplierLabel(nome) ? nome : !isBadSupplierLabel(rawLabel) ? rawLabel : "";
+        if (sid && !supplierRawKeysById.has(sid)) supplierRawKeysById.set(sid, Object.keys(safeObj(rawObj)).slice(0, 30));
+        if (sid && !supplierBubbleKeysById.has(sid)) supplierBubbleKeysById.set(sid, Object.keys(safeObj(safeObj(rawObj as any).bubble)).slice(0, 30));
+        const chosen = isGoodSupplierLabel(nome) ? nome : isGoodSupplierLabel(rawLabel) ? rawLabel : "";
         if (sid && chosen && !supplierNameById.has(sid)) supplierNameById.set(sid, chosen);
       }
     }
@@ -494,6 +543,17 @@ export async function GET(req: NextRequest) {
                 suppliersFallbackResolved: fallbackNameById.size,
                 missingSupplierIds,
                 invalidSupplierNames,
+                ...(missingSupplierIds.length
+                  ? {
+                      supplierLabelDebug: missingSupplierIds.slice(0, 5).map((sid) => ({
+                        id: sid,
+                        nomeCol: supplierNameRawById.get(sid) ?? null,
+                        rawLabel: supplierNameFromRawById.get(sid) ?? null,
+                        rawKeys: supplierRawKeysById.get(sid) ?? [],
+                        bubbleKeys: supplierBubbleKeysById.get(sid) ?? [],
+                      })),
+                    }
+                  : null),
               },
             }
           : null),
