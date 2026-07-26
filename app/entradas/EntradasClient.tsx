@@ -1336,11 +1336,13 @@ export default function EntradasClient() {
         openDetailsModal(newRow);
         setIsCreatingNota(true);
         await upsertEntradaToSupabase(newRow as unknown as any);
-        try {
-          const dbRows = await loadEntradasFromSupabase();
-          if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
-        } catch {}
         showToast("Nota criada!", "success", 6000);
+        void (async () => {
+          try {
+            const dbRows = await loadEntradasFromSupabase();
+            if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
+          } catch {}
+        })();
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         showToast(`Erro ao salvar no banco de dados: ${msg}`, "error", 8000);

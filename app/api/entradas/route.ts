@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { performance } from "node:perf_hooks";
 import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { formatMoneyBRL, parsePtNumber } from "../../lib/bubbleCsv";
@@ -722,7 +723,9 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const t0 = performance.now();
     const body = (await req.json().catch(() => null)) as unknown;
+    const tJson = performance.now();
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
     const { accessToken, id } = resolveUserScopedId(req);
     const prefix = id ? `${id}:` : "";
@@ -730,9 +733,15 @@ export async function POST(req: NextRequest) {
     const entradaId = String((body as any).id ?? "").trim();
     if (!entradaId || !entradaId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
+    const tBeforeUpsert = performance.now();
     const { error } = await supabase.from("entradas").upsert(body as any, { onConflict: "id" });
+    const tAfterUpsert = performance.now();
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    const total = tAfterUpsert - t0;
+    const jsonMs = tJson - t0;
+    const upsertMs = tAfterUpsert - tBeforeUpsert;
+    const serverTiming = `total;dur=${total.toFixed(1)}, json;dur=${jsonMs.toFixed(1)}, upsert;dur=${upsertMs.toFixed(1)}`;
+    return json({ ok: true }, { status: 200, headers: { "server-timing": serverTiming } });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
