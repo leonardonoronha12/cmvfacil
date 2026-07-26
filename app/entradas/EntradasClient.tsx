@@ -1340,7 +1340,20 @@ export default function EntradasClient() {
         void (async () => {
           try {
             const dbRows = await loadEntradasFromSupabase();
-            if (dbRows[0]) setRows(dbRows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
+            if (dbRows[0]) {
+              setRows((prev) => {
+                const prevById = new Map(prev.map((p) => [p.id, p]));
+                const next = dbRows.map((r) => {
+                  const normalized = { ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) } as EntradaRow;
+                  const existing = prevById.get(normalized.id);
+                  const prevLen = existing?.itensNota?.length ?? 0;
+                  const nextLen = normalized?.itensNota?.length ?? 0;
+                  if (existing && prevLen > nextLen) return existing;
+                  return normalized;
+                });
+                return next as unknown as EntradaRow[];
+              });
+            }
           } catch {}
         })();
       } catch (err) {
