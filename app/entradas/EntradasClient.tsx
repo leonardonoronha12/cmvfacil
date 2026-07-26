@@ -177,7 +177,7 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
     }
   }
   const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
-  if (!labelFromState && isDbKey(rawNoSuffix)) {
+  if (isDbKey(rawNoSuffix) && (!labelFromState || canonicalDbKey(labelFromState) === canonicalDbKey(rawNoSuffix))) {
     __dbgSend(
       "h4",
       "app/entradas/EntradasClient.tsx:resolveFornecedorDisplay",
@@ -187,6 +187,7 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
         raw,
         rawNoSuffix,
         resolvedKey,
+        labelFromState,
         hasDirectKey: Boolean(resolvedKey && fornecedorInfoMap[resolvedKey]),
         hasUpperKey: Boolean(fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper]),
         scanKey,
