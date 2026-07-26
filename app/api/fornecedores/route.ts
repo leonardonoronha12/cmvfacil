@@ -499,6 +499,25 @@ export async function GET(req: NextRequest) {
         if (typeof eq !== "undefined") equivalencias[k] = eq as any;
       }
 
+      const fornecedorLabelRaw = normalizeText(String(url.searchParams.get("fornecedorLabel") ?? ""));
+      const fornecedorLabelLookup = normalizeLookupKey(fornecedorLabelRaw);
+      const fornecedorLabelUpper = fornecedorLabelRaw ? fornecedorLabelRaw.toUpperCase() : "";
+      let resolvedKey: string | null = null;
+      if (fornecedorLabelRaw) {
+        if (isDbPrefixed(fornecedorLabelRaw)) {
+          const dbId = canonicalUuid(dbIdFromKey(fornecedorLabelRaw));
+          resolvedKey = dbId ? `db:${dbId}` : null;
+        } else {
+          for (const [k, v] of Object.entries(info)) {
+            const label = normalizeLookupKey((v as any)?.fornecedor ?? "");
+            if (label && fornecedorLabelLookup && label === fornecedorLabelLookup) {
+              resolvedKey = k;
+              break;
+            }
+          }
+        }
+      }
+
       return json(
         {
           ok: true,
@@ -522,6 +541,11 @@ export async function GET(req: NextRequest) {
                   linksItemNameMissing,
                   linksSupplierIdSamples,
                   linksNotInInfoSamples,
+                  fornecedorLabel: fornecedorLabelRaw || null,
+                  fornecedorLabelUpper: fornecedorLabelUpper || null,
+                  fornecedorResolvedKey: resolvedKey,
+                  fornecedorProdutosLenByResolvedKey: resolvedKey ? (produtos[resolvedKey]?.length ?? 0) : null,
+                  fornecedorProdutosLenByUpperLabel: fornecedorLabelUpper ? (produtos[fornecedorLabelUpper]?.length ?? 0) : null,
                 },
               }
             : null),
