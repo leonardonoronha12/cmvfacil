@@ -165,16 +165,36 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
   const rawUpper = raw.toUpperCase();
   const rawNoSuffixUpper = rawNoSuffix.toUpperCase();
   let info = (resolvedKey && fornecedorInfoMap[resolvedKey]) || fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper] || null;
+  let scanKey = "";
   if (!info && isDbKey(rawNoSuffix)) {
     const target = canonicalDbKey(rawNoSuffix);
     for (const [k, v] of Object.entries(fornecedorInfoMap)) {
       if (!k) continue;
       if (canonicalDbKey(k) !== target) continue;
       info = v as any;
+      scanKey = k;
       break;
     }
   }
   const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
+  if (!labelFromState && isDbKey(rawNoSuffix)) {
+    __dbgSend(
+      "h4",
+      "app/entradas/EntradasClient.tsx:resolveFornecedorDisplay",
+      "fornecedor_display_unresolved_db",
+      {
+        fornecedorRaw,
+        raw,
+        rawNoSuffix,
+        resolvedKey,
+        hasDirectKey: Boolean(resolvedKey && fornecedorInfoMap[resolvedKey]),
+        hasUpperKey: Boolean(fornecedorInfoMap[rawUpper] || fornecedorInfoMap[rawNoSuffixUpper]),
+        scanKey,
+        infoKeys: Object.keys(fornecedorInfoMap).length,
+        sampleKeys: Object.keys(fornecedorInfoMap).slice(0, 8),
+      },
+    );
+  }
   return labelFromState || rawNoSuffix || raw;
 }
 
