@@ -565,7 +565,7 @@ export default function InventarioClient() {
 
         const allIds = new Set<string>();
         for (const id of existingById.keys()) allIds.add(id);
-        for (const id of sourceById.keys()) allIds.add(id);
+
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
