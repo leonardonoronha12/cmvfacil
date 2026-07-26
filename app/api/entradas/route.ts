@@ -73,9 +73,21 @@ function normalizeText(v: unknown) {
   return String(v ?? "").replace(/\s+/g, " ").trim();
 }
 
+function normalizeLookupKey(v: unknown) {
+  return normalizeText(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
 function safeObj(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== "object") return {};
   return input as Record<string, unknown>;
+}
+
+function safeArr(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
 }
 
 function pickFirstText(obj: unknown, keys: string[]) {
@@ -547,10 +559,15 @@ export async function GET(req: NextRequest) {
     }
 
     const fallbackNameById = new Map<string, string>();
+    let fornecedoresStateInfo: any = null;
+    let fornecedoresStateProdutos: any = null;
     if (supplierIds.length) {
       try {
-        const { data: st } = await supabase.from("fornecedores_state").select("info").eq("id", id).maybeSingle();
+        const { data: st } = await supabase.from("fornecedores_state").select("info,produtos").eq("id", id).maybeSingle();
         const infoMap = (st as any)?.info && typeof (st as any)?.info === "object" ? ((st as any).info as any) : null;
+        const produtosMap = (st as any)?.produtos && typeof (st as any)?.produtos === "object" ? ((st as any).produtos as any) : null;
+        fornecedoresStateInfo = infoMap;
+        fornecedoresStateProdutos = produtosMap;
         if (infoMap) {
           for (const sid of supplierIds) {
             if (supplierNameById.get(sid)) continue;
@@ -605,6 +622,45 @@ export async function GET(req: NextRequest) {
           }
           if (!isGoodSupplierLabel(candidateName)) continue;
           inferredNameById.set(targetId, candidateName);
+        } catch {}
+      }
+    }
+
+    if (fornecedoresStateProdutos && fornecedoresStateInfo && supplierIds.length) {
+      const produtosMap = fornecedoresStateProdutos as Record<string, unknown>;
+      const infoMap = fornecedoresStateInfo as Record<string, unknown>;
+      const wanted = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
+      for (const sid of wanted) {
+        try {
+          const keyDb = `db:${sid}`;
+          const rowsWithSupplier = rowsDb.filter((r) => normalizeLookupKey((r as any)?.fornecedor) === normalizeLookupKey(keyDb));
+          const names = Array.from(
+            new Set(
+              rowsWithSupplier
+                .flatMap((r) => safeArr((r as any)?.itens_nota))
+                .map((it: any) => normalizeLookupKey(it?.nome))
+                .filter(Boolean),
+            ),
+          );
+          if (!names.length) continue;
+          const wantedSet = new Set(names);
+          let bestKey = "";
+          let bestScore = 0;
+          for (const k of Object.keys(produtosMap)) {
+            const arr = safeArr((produtosMap as any)[k]).map((x) => normalizeLookupKey(x)).filter(Boolean);
+            if (!arr.length) continue;
+            let score = 0;
+            for (const n of arr) if (wantedSet.has(n)) score += 1;
+            if (score > bestScore) {
+              bestScore = score;
+              bestKey = k;
+            }
+          }
+          const threshold = Math.min(2, names.length);
+          if (!bestKey || bestScore < threshold) continue;
+          const infoRow = (infoMap as any)[bestKey] ?? (infoMap as any)[String(bestKey).toUpperCase()] ?? null;
+          const label = infoRow && typeof infoRow === "object" ? String((infoRow as any)?.fornecedor ?? "").trim() : "";
+          if (isGoodSupplierLabel(label)) inferredNameById.set(sid, label);
         } catch {}
       }
     }
