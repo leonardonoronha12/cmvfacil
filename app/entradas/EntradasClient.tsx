@@ -35,8 +35,8 @@ import { maskPhoneBR } from "../lib/masks";
 import styles from "./entradas.module.css";
 
 // #region debug-point reporter
-const __DBG_SESSION_ID = "entradas-selector-empty";
-const __DBG_RUN_ID = "prod-pre-fix";
+const __DBG_SESSION_ID = "entradas-page-crash";
+const __DBG_RUN_ID = "prod";
 function __dbgSend(hypothesisId: string, location: string, msg: string, data: unknown) {
   try {
     void fetch("/api/debug/event", {
@@ -44,6 +44,35 @@ function __dbgSend(hypothesisId: string, location: string, msg: string, data: un
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ sessionId: __DBG_SESSION_ID, runId: __DBG_RUN_ID, hypothesisId, location, msg, data, ts: Date.now() }),
     }).catch(() => {});
+  } catch {}
+}
+// #endregion
+
+// #region debug-point window-error
+let __dbgWindowHooked = false;
+if (typeof window !== "undefined" && !__dbgWindowHooked) {
+  __dbgWindowHooked = true;
+  try {
+    window.addEventListener("error", (e) => {
+      try {
+        __dbgSend("h1", "app/entradas/EntradasClient.tsx:window.error", "window_error", {
+          message: (e as any)?.message ?? null,
+          filename: (e as any)?.filename ?? null,
+          lineno: (e as any)?.lineno ?? null,
+          colno: (e as any)?.colno ?? null,
+          stack: (e as any)?.error?.stack ?? null,
+        });
+      } catch {}
+    });
+    window.addEventListener("unhandledrejection", (e) => {
+      try {
+        const reason = (e as any)?.reason;
+        __dbgSend("h2", "app/entradas/EntradasClient.tsx:window.unhandledrejection", "unhandled_rejection", {
+          message: reason?.message ?? String(reason ?? ""),
+          stack: reason?.stack ?? null,
+        });
+      } catch {}
+    });
   } catch {}
 }
 // #endregion
@@ -723,11 +752,11 @@ export default function EntradasClient() {
     setIsBulkDeleteOpen(false);
   }, [bulkDeleteMode, query, dateStart, dateEnd, sortKey, sortDir]);
 
-  const displayFornecedor = (raw: string) => {
+  function displayFornecedor(raw: string) {
     const dbKey = canonicalDbKey(raw);
     const cached = dbKey && isDbKey(dbKey) ? String(fornecedorDbLabelCache[dbKey] ?? "").trim() : "";
     return cached || resolveFornecedorDisplay(raw, fornecedorInfoMap);
-  };
+  }
 
   useEffect(() => {
     if (!isMounted) return;
@@ -1334,6 +1363,7 @@ export default function EntradasClient() {
     const addIfMissing = (raw: unknown) => {
       const fornecedor = String(raw ?? "").trim();
       if (!fornecedor) return;
+      if (isDbKey(canonicalDbKey(fornecedor)) || looksLikeUuid(fornecedor) || looksLikeBubbleId(fornecedor)) return;
       const key = fornecedor.toUpperCase();
       if (next[key]) return;
       const info: FornecedorInfo = { fornecedor, vendedor: "", whatsapp: "", endereco: "" };
@@ -1342,6 +1372,17 @@ export default function EntradasClient() {
     };
     for (const r of rows) addIfMissing((r as any)?.fornecedor);
     for (const f of customFornecedores) addIfMissing(f);
+
+    for (const [k, info] of Object.entries(next)) {
+      const kk = String(k ?? "").trim();
+      if (!kk) continue;
+      if (!isDbKey(canonicalDbKey(kk))) continue;
+      const label = info && typeof info === "object" ? String((info as any)?.fornecedor ?? "").trim() : "";
+      if (isDbKey(canonicalDbKey(label)) || canonicalDbKey(label) === canonicalDbKey(kk) || label === kk) {
+        delete next[k];
+        changed = true;
+      }
+    }
     if (changed) writeFornecedorInfoMap(next);
   }, [customFornecedores, isReadOnly, rows]);
 
