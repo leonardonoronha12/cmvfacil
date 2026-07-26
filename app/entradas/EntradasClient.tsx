@@ -178,6 +178,22 @@ function resolveFornecedorDisplay(fornecedorRaw: string, fornecedorInfoMap: Forn
   }
   const labelFromState = info && typeof info === "object" ? sanitizeUiLabel((info as any).fornecedor ?? "") : "";
   if (isDbKey(rawNoSuffix) && (!labelFromState || canonicalDbKey(labelFromState) === canonicalDbKey(rawNoSuffix))) {
+    const target = canonicalDbKey(rawNoSuffix);
+    let best = "";
+    for (const [k, v] of Object.entries(fornecedorInfoMap)) {
+      if (!k) continue;
+      if (canonicalDbKey(k) !== target) continue;
+      const lbl = v && typeof v === "object" ? sanitizeUiLabel((v as any).fornecedor ?? "") : "";
+      if (!lbl) continue;
+      if (!isDbKey(lbl) && canonicalDbKey(lbl) !== target) {
+        best = lbl;
+        break;
+      }
+      if (!best) best = lbl;
+    }
+    if (best && !isDbKey(best) && canonicalDbKey(best) !== target) return best;
+  }
+  if (isDbKey(rawNoSuffix) && (!labelFromState || canonicalDbKey(labelFromState) === canonicalDbKey(rawNoSuffix))) {
     __dbgSend(
       "h4",
       "app/entradas/EntradasClient.tsx:resolveFornecedorDisplay",
