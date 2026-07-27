@@ -25,7 +25,14 @@ import {
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
-import { deleteEntradaFromSupabase, deleteEntradasFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
+import {
+  deleteEntradaFromSupabase,
+  deleteEntradasFromSupabase,
+  loadEntradasStateFromSupabase,
+  loadEntradasFromSupabase,
+  upsertEntradaToSupabase,
+  upsertEntradasBatchToSupabase,
+} from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
 import { buildUserScopedId } from "../lib/userScope";
@@ -687,6 +694,7 @@ export default function EntradasClient() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
   const importFileRef = useRef<HTMLInputElement | null>(null);
   const [newFornecedor, setNewFornecedor] = useState("");
   const [newDataReceb, setNewDataReceb] = useState(() => formatDateLabelPT(new Date()));
@@ -1342,6 +1350,7 @@ export default function EntradasClient() {
       return;
     }
     setIsImporting(true);
+    setImportProgress({ current: 0, total: 0, stage: "Lendo a planilha..." });
     try {
       let table: unknown[][] = [];
       const lower = importFile.name.toLowerCase();
@@ -1364,14 +1373,63 @@ export default function EntradasClient() {
 
       const headers = (table[0] ?? []).map(normalizeImportHeader);
       const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
+      const findFirstAvailable = (...names: string[]) => {
+        for (const name of names) {
+          const position = headers.indexOf(name);
+          if (position >= 0) return position;
+        }
+        return -1;
+      };
       const isNativeBubbleExport = headers.includes("nota_id_custom_notas_fiscais");
       const index = {
-        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "nota_id", "nota_id_custom_notas_fiscais", "codigo", "nf"),
-        data: find("data_de_lancamento", "data_lancamento", "data_lan_amento_date", "data_lancamento_date", "data_de_recebimento", "data_recebimento", "data"),
-        fornecedor: find("fornecedor", "fornecedor_id", "fornecedor_id_custom_fornecedores", "nome_fornecedor", "supplier", "supplier_id"),
+        numero: find(
+          "numero_da_nota",
+          "numero_nota",
+          "numero",
+          "nota",
+          "nota_id",
+          "nota_id_custom_notas_fiscais",
+          "codigo",
+          "nf",
+        ),
+        data: find(
+          "data_de_lancamento",
+          "data_lancamento",
+          "data_lan_amento_date",
+          "data_lancamento_date",
+          "data_de_recebimento",
+          "data_recebimento",
+          "data",
+        ),
+        fornecedor: findFirstAvailable(
+          "fornecedor_nome_migracao",
+          "fornecedor_nome_migracao_text",
+          "fornecedor_nome_migra_o",
+          "fornecedor_nome_migra_o_text",
+          "fornecedor",
+          "nome_fornecedor",
+          "fornecedor_id",
+          "fornecedor_id_custom_fornecedores",
+          "supplier",
+          "supplier_id",
+        ),
         responsavel: find("responsavel", "criado_por", "usuario"),
         criacao: find("data_de_criacao", "data_criacao", "created_date"),
-        item: find("item", "item_id", "item_id_custom_itens", "produto", "produto_id", "insumo", "insumo_id", "nome_do_item", "nome_item"),
+        item: findFirstAvailable(
+          "item_nome_migracao",
+          "item_nome_migracao_text",
+          "item_nome_migra_o",
+          "item_nome_migra_o_text",
+          "item",
+          "nome_do_item",
+          "nome_item",
+          "item_id",
+          "item_id_custom_itens",
+          "produto",
+          "produto_id",
+          "insumo",
+          "insumo_id",
+        ),
         quantidade: find("quantidade", "quantidade_number", "qtd", "quantity"),
         unidade: find("unidade", "medida", "unit"),
         subtotal: find("subtotal", "subtotal_number", "valor_total_item", "valor_item", "total"),
@@ -1427,6 +1485,7 @@ export default function EntradasClient() {
       if (!groups.size) throw new Error("Nenhuma entrada válida encontrada.");
 
       const imported: EntradaRow[] = [];
+      setImportProgress({ current: 0, total: groups.size, stage: "Preparando as notas..." });
       for (const group of groups.values()) {
         const id = await buildUserScopedId(`import-${Date.now()}-${imported.length}`);
         const total = group.itens.reduce((sum, item) => sum + parseBrlToCents(item.subtotalLabel), 0);
@@ -1443,7 +1502,41 @@ export default function EntradasClient() {
           itensNota: group.itens,
         });
       }
-      await Promise.all(imported.map((row) => upsertEntradaToSupabase(row as unknown as any)));
+      const batchSize = 40;
+      let saved = 0;
+      for (let offset = 0; offset < imported.length; offset += batchSize) {
+        const batch = imported.slice(offset, offset + batchSize);
+        setImportProgress({
+          current: saved,
+          total: imported.length,
+          stage: `Enviando notas ${offset + 1} a ${Math.min(offset + batch.length, imported.length)}...`,
+        });
+        let lastError: unknown = null;
+        for (let attempt = 1; attempt <= 3; attempt += 1) {
+          try {
+            await upsertEntradasBatchToSupabase(batch as unknown as any[]);
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+            if (attempt < 3) {
+              setImportProgress({
+                current: saved,
+                total: imported.length,
+                stage: `Reconectando e tentando novamente (${attempt}/3)...`,
+              });
+              await new Promise((resolve) => window.setTimeout(resolve, attempt * 700));
+            }
+          }
+        }
+        if (lastError) throw lastError;
+        saved += batch.length;
+        setImportProgress({
+          current: saved,
+          total: imported.length,
+          stage: saved === imported.length ? "Finalizando..." : `${saved} notas importadas`,
+        });
+      }
       setRows((previous) => [...imported, ...previous]);
       setIsImportOpen(false);
       setImportFile(null);
@@ -1453,6 +1546,7 @@ export default function EntradasClient() {
       showToast(error instanceof Error ? error.message : String(error), "error", 9000);
     } finally {
       setIsImporting(false);
+      setImportProgress(null);
     }
   }
 
@@ -3212,11 +3306,11 @@ export default function EntradasClient() {
 
         {isMounted && isImportOpen
           ? createPortal(
-              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
+              <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!isImporting) setIsImportOpen(false); }}>
                 <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
                   <div className={styles.modalHeader}>
                     <div className={styles.modalTitle}>Importar Entradas por Planilha</div>
-                    <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)}>
+                    <button type="button" className={styles.modalClose} aria-label="Fechar" disabled={isImporting} onClick={() => setIsImportOpen(false)}>
                       ×
                     </button>
                   </div>
@@ -3243,9 +3337,43 @@ export default function EntradasClient() {
                       onChange={(event) => setImportFile(event.currentTarget.files?.[0] ?? null)}
                     />
                     {importFile ? <div className={styles.importFileName}>Arquivo selecionado: {importFile.name}</div> : null}
+                    {importProgress ? (
+                      <div className={styles.importProgressPanel} aria-live="polite">
+                        <div className={styles.importProgressHeader}>
+                          <span>{importProgress.stage}</span>
+                          <strong>
+                            {importProgress.total > 0
+                              ? `${Math.round((importProgress.current / importProgress.total) * 100)}%`
+                              : "Preparando"}
+                          </strong>
+                        </div>
+                        <div
+                          className={styles.importProgressTrack}
+                          role="progressbar"
+                          aria-valuemin={0}
+                          aria-valuemax={importProgress.total || 1}
+                          aria-valuenow={importProgress.current}
+                        >
+                          <div
+                            className={styles.importProgressFill}
+                            style={{
+                              width:
+                                importProgress.total > 0
+                                  ? `${Math.max(2, (importProgress.current / importProgress.total) * 100)}%`
+                                  : "12%",
+                            }}
+                          />
+                        </div>
+                        <div className={styles.importProgressCount}>
+                          {importProgress.total > 0
+                            ? `${importProgress.current.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")} notas`
+                            : "Organizando os dados do arquivo"}
+                        </div>
+                      </div>
+                    ) : null}
                   </div>
                   <div className={`${styles.modalFooter} ${styles.importFooter}`}>
-                    <button type="button" className={styles.ghostBtn} onClick={() => setIsImportOpen(false)}>
+                    <button type="button" className={styles.ghostBtn} disabled={isImporting} onClick={() => setIsImportOpen(false)}>
                       Encerrar
                     </button>
                     <button type="button" className={styles.primaryBtn} disabled={isImporting} onClick={() => void importEntradasFile()}>
