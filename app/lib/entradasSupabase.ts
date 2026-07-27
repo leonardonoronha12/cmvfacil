@@ -45,6 +45,7 @@ function toDbRow(r: EntradaStoreRow) {
     numero: r.numero,
     data_lancamento: r.dataLancamento,
     fornecedor: r.fornecedor,
+    fornecedor_nome: String(r.fornecedorNome ?? "").trim() || null,
     valor_nota: r.valorNota,
     itens: r.itens,
     responsavel: r.responsavel,
