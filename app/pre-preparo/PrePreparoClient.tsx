@@ -1364,7 +1364,7 @@ export default function PrePreparoClient() {
           const unitForCost = String(stats?.unit ?? ins.medida ?? "Und").trim() || "Und";
           const unitCents =
             stats && stats.sumQty > 0 && stats.sumCents > 0
-              ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+              ? stats.sumCents / stats.sumQty
               : clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
           if (unitCents <= 0) return ing;
           const fromUnit = String(ing.unidade ?? unitForCost).trim() || unitForCost;
@@ -1417,7 +1417,7 @@ export default function PrePreparoClient() {
         setIngredientCost("0,00");
         return;
       }
-      const unitCents = clampNonNegativeInt(Math.round(totalCents / yieldQty));
+      const unitCents = totalCents / yieldQty;
       const cents = clampNonNegativeInt(Math.round(unitCents * qty));
       setIngredientCost(formatBRLValueFromCents(cents));
       return;
@@ -1806,7 +1806,7 @@ export default function PrePreparoClient() {
       const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
       const unitCents =
         stats && stats.sumQty > 0 && stats.sumCents > 0
-          ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+          ? stats.sumCents / stats.sumQty
           : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio || "0") * 100));
       const qtyInStatsUnit = stats?.unit ? convertQty(qty, selected.unidade, stats.unit) : qty;
       const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
