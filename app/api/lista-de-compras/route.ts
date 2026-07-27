@@ -555,7 +555,7 @@ export async function GET(req: NextRequest) {
         sample: (invRows ?? []).slice(0, 5).map((r: any) => ({ id: String(r?.id ?? ""), data_contagem: r?.data_contagem ?? null })),
       });
 
-      const inventories = (invRows ?? []).map((r: any) => ({
+      let inventoryRowsForPeriod = (invRows ?? []) as any[];      if (!inventoryRowsForPeriod.length) {        const legacyPeriodPrefix = `${id}:`;        const { data: legacyInventoryRows, error: legacyInventoryErr } = await supabaseServer          .from("inventario")          .select("id,data,categorias,created_at")          .like("id", `${legacyPeriodPrefix}%`)          .order("created_at", { ascending: false })          .limit(400);        if (legacyInventoryErr) {          return json({ ok: false, error: legacyInventoryErr.message, source: "compat", readOnly: true }, { status: 500 });        }        inventoryRowsForPeriod = (legacyInventoryRows ?? [])          .map((r: any) => ({            id: String(r?.id ?? "").trim(),            bubble_id: null,            nome: `Inventário ${String(r?.data ?? "").trim()}`,            data_contagem: parseDateOnlyLoose(r?.data),          }))          .filter((r: any) => r.id && r.data_contagem);      }      const inventories = inventoryRowsForPeriod.map((r: any) => ({
         id: String(r?.id ?? "").trim(),
         bubble_id: r?.bubble_id ? String(r.bubble_id) : null,
         nome: String(r?.nome ?? "").trim(),
