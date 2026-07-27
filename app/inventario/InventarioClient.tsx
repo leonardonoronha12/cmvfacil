@@ -204,6 +204,13 @@ export default function InventarioClient() {
   const [pendingKeepDraft, setPendingKeepDraft] = useState("");
   const [pendingCleanupError, setPendingCleanupError] = useState("");
   const [pendingCleanupBusy, setPendingCleanupBusy] = useState(false);
+  const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [addItemName, setAddItemName] = useState("");
+  const [addItemCategory, setAddItemCategory] = useState("");
+  const [addItemUnit, setAddItemUnit] = useState("Und");
+  const [addItemQuantity, setAddItemQuantity] = useState("");
+  const [addItemError, setAddItemError] = useState("");
+  const [addItemBusy, setAddItemBusy] = useState(false);
 
   const [menuContagemId, setMenuContagemId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -877,6 +884,68 @@ export default function InventarioClient() {
     }
   }
 
+  function openAddItem() {
+    setAddItemName("");
+    setAddItemCategory("");
+    setAddItemUnit("Und");
+    setAddItemQuantity("");
+    setAddItemError("");
+    setIsAddItemOpen(true);
+  }
+
+  async function confirmAddItem() {
+    const current = selectedContagem;
+    const name = addItemName.trim();
+    const categoryName = normCatName(addItemCategory) || "Sem categoria";
+    const unit = addItemUnit.trim() || "Und";
+    if (!current || addItemBusy) return;
+    if (!name) {
+      setAddItemError("Informe o nome do item.");
+      return;
+    }
+
+    const alreadyExists = (current.categorias ?? []).some((cat) =>
+      (cat.itens ?? []).some((item) => !item.removido && normalizeNameKey(item.item) === normalizeNameKey(name)),
+    );
+    if (alreadyExists) {
+      setAddItemError("Este item já existe no inventário.");
+      return;
+    }
+
+    const newItem: InventarioItemRow = {
+      id: `historico-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      item: name,
+      unidade: unit,
+      estoqueFinal: addItemQuantity.trim(),
+    };
+    const categoryIndex = (current.categorias ?? []).findIndex((cat) => normalizeNameKey(cat.nome) === normalizeNameKey(categoryName));
+    const categorias =
+      categoryIndex >= 0
+        ? (current.categorias ?? []).map((cat, index) => (index === categoryIndex ? { ...cat, itens: [...(cat.itens ?? []), newItem] } : cat))
+        : [
+            ...(current.categorias ?? []),
+            {
+              id: `historico-cat-${Date.now()}`,
+              nome: categoryName,
+              status: "pendente" as const,
+              itens: [newItem],
+            },
+          ];
+    const updated: InventarioContagem = { ...current, categorias };
+
+    setAddItemBusy(true);
+    setAddItemError("");
+    try {
+      await upsertInventarioToSupabase(updated);
+      setContagens((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setIsAddItemOpen(false);
+    } catch {
+      setAddItemError("Não foi possível adicionar o item. Tente novamente.");
+    } finally {
+      setAddItemBusy(false);
+    }
+  }
+
   function uncountItem(itemId: string) {
     setEditingItemId(null);
     setEditingValue("");
@@ -1268,11 +1337,16 @@ export default function InventarioClient() {
               <div className={styles.col}>
                 <div className={styles.colHeadPending}>
                   <span>Pendentes</span>
-                  {pendentes.length ? (
-                    <button type="button" className={styles.cleanupBtn} onClick={openPendingCleanup}>
-                      Limpar extras
+                  <div className={styles.pendingHeaderActions}>
+                    <button type="button" className={styles.cleanupBtn} onClick={openAddItem}>
+                      Adicionar item
                     </button>
-                  ) : null}
+                    {pendentes.length ? (
+                      <button type="button" className={styles.cleanupBtn} onClick={openPendingCleanup}>
+                        Limpar extras
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
                   {pendentes.map((r) => (
@@ -1675,6 +1749,87 @@ export default function InventarioClient() {
                     </button>
                     <button type="button" className={styles.primaryBtn} onClick={() => void confirmPendingCleanup()} disabled={pendingCleanupBusy}>
                       {pendingCleanupBusy ? "Salvando..." : "Remover extras"}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+
+        {mounted && isAddItemOpen && selectedContagem && !isCompatSource
+          ? createPortal(
+              <div className={styles.modalOverlay} role="dialog" aria-modal="true" onClick={() => !addItemBusy && setIsAddItemOpen(false)}>
+                <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+                  <div className={styles.modalHeader}>
+                    <div className={styles.modalTitle}>Adicionar item ao inventário</div>
+                    <button type="button" className={styles.modalClose} onClick={() => setIsAddItemOpen(false)} aria-label="Fechar" disabled={addItemBusy}>
+                      ×
+                    </button>
+                  </div>
+                  <div className={styles.modalBody}>
+                    <div className={styles.cleanupHelp}>
+                      Inventário de <strong>{selectedContagem.data}</strong>
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.label} htmlFor="historical-item-name">
+                        Nome
+                      </label>
+                      <input
+                        id="historical-item-name"
+                        className={styles.input}
+                        value={addItemName}
+                        onChange={(event) => setAddItemName(event.target.value)}
+                        disabled={addItemBusy}
+                        autoFocus
+                      />
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.label} htmlFor="historical-item-category">
+                        Categoria
+                      </label>
+                      <input
+                        id="historical-item-category"
+                        className={styles.input}
+                        value={addItemCategory}
+                        onChange={(event) => setAddItemCategory(event.target.value)}
+                        disabled={addItemBusy}
+                      />
+                    </div>
+                    <div className={styles.addItemGrid}>
+                      <div className={styles.field}>
+                        <label className={styles.label} htmlFor="historical-item-quantity">
+                          Quantidade
+                        </label>
+                        <input
+                          id="historical-item-quantity"
+                          className={styles.input}
+                          value={addItemQuantity}
+                          onChange={(event) => setAddItemQuantity(event.target.value)}
+                          disabled={addItemBusy}
+                        />
+                      </div>
+                      <div className={styles.field}>
+                        <label className={styles.label} htmlFor="historical-item-unit">
+                          Unidade
+                        </label>
+                        <input
+                          id="historical-item-unit"
+                          className={styles.input}
+                          value={addItemUnit}
+                          onChange={(event) => setAddItemUnit(event.target.value)}
+                          disabled={addItemBusy}
+                        />
+                      </div>
+                    </div>
+                    {addItemError ? <div className={styles.formError}>{addItemError}</div> : null}
+                  </div>
+                  <div className={styles.modalFooter}>
+                    <button type="button" className={styles.secondaryBtn} onClick={() => setIsAddItemOpen(false)} disabled={addItemBusy}>
+                      Cancelar
+                    </button>
+                    <button type="button" className={styles.primaryBtn} onClick={() => void confirmAddItem()} disabled={addItemBusy}>
+                      {addItemBusy ? "Salvando..." : "Adicionar item"}
                     </button>
                   </div>
                 </div>
