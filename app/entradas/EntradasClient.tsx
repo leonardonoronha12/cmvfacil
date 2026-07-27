@@ -528,7 +528,10 @@ function parseDateLabelLoose(value: string) {
 }
 
 function normalizeDateLabelPT(value: string) {
-  const d = parseDateLabelLoose(value);
+  const raw = value.trim();
+  const d =
+    parseDateLabelLoose(raw) ||
+    (/^[A-Za-z]/.test(raw) && Number.isFinite(new Date(raw).getTime()) ? new Date(raw) : null);
   return d ? formatDateLabelPT(d) : value.trim();
 }
 
@@ -1361,16 +1364,17 @@ export default function EntradasClient() {
 
       const headers = (table[0] ?? []).map(normalizeImportHeader);
       const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
+      const isNativeBubbleExport = headers.includes("nota_id_custom_notas_fiscais");
       const index = {
-        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "nota_id", "codigo", "nf"),
-        data: find("data_de_lancamento", "data_lancamento", "data_de_recebimento", "data_recebimento", "data"),
-        fornecedor: find("fornecedor", "fornecedor_id", "nome_fornecedor", "supplier", "supplier_id"),
+        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "nota_id", "nota_id_custom_notas_fiscais", "codigo", "nf"),
+        data: find("data_de_lancamento", "data_lancamento", "data_lan_amento_date", "data_lancamento_date", "data_de_recebimento", "data_recebimento", "data"),
+        fornecedor: find("fornecedor", "fornecedor_id", "fornecedor_id_custom_fornecedores", "nome_fornecedor", "supplier", "supplier_id"),
         responsavel: find("responsavel", "criado_por", "usuario"),
         criacao: find("data_de_criacao", "data_criacao", "created_date"),
-        item: find("item", "item_id", "produto", "produto_id", "insumo", "insumo_id", "nome_do_item", "nome_item"),
-        quantidade: find("quantidade", "qtd", "quantity"),
+        item: find("item", "item_id", "item_id_custom_itens", "produto", "produto_id", "insumo", "insumo_id", "nome_do_item", "nome_item"),
+        quantidade: find("quantidade", "quantidade_number", "qtd", "quantity"),
         unidade: find("unidade", "medida", "unit"),
-        subtotal: find("subtotal", "valor_total_item", "valor_item", "total"),
+        subtotal: find("subtotal", "subtotal_number", "valor_total_item", "valor_item", "total"),
       };
       if (index.data < 0 || index.fornecedor < 0 || index.item < 0 || index.quantidade < 0 || index.subtotal < 0) {
         throw new Error("Colunas obrigatórias: Data de Lançamento, Fornecedor, Item, Quantidade e Subtotal.");
@@ -1381,8 +1385,10 @@ export default function EntradasClient() {
       for (let line = 1; line < table.length; line += 1) {
         const cells = table[line] ?? [];
         const read = (column: number) => (column >= 0 ? String(cells[column] ?? "").trim() : "");
-        const fornecedor = read(index.fornecedor);
+        const numeroRaw = read(index.numero);
         const itemRaw = read(index.item);
+        if (isNativeBubbleExport && (!numeroRaw || !itemRaw)) continue;
+        const fornecedor = read(index.fornecedor) || "SEM FORNECEDOR";
         const item = normalizeNotaItemName(insumosById.get(itemRaw) || itemRaw);
         const data = normalizeDateLabelPT(read(index.data));
         const quantity = parsePtNumber(read(index.quantidade));
@@ -1391,7 +1397,7 @@ export default function EntradasClient() {
         if (!fornecedor || !item || !data || !(quantity > 0) || !(subtotalCents > 0)) {
           throw new Error(`Linha ${line + 1}: fornecedor, data, item, quantidade ou subtotal inválido.`);
         }
-        const numero = read(index.numero) || `IMPORT-${line}`;
+        const numero = numeroRaw || `IMPORT-${line}`;
         const unidade =
           read(index.unidade) ||
           (itemRaw
