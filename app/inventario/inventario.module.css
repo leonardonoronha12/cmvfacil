@@ -477,6 +477,12 @@
   background: rgba(255, 255, 255, 0.2);
 }
 
+.pendingHeaderActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .colHeadDone {
   background: #0ab86d;
   color: #ffffff;
@@ -910,6 +916,12 @@
 .cleanupTextarea:focus {
   border-color: #0ab86d;
   box-shadow: 0 0 0 3px rgba(10, 184, 109, 0.12);
+}
+
+.addItemGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .field {
