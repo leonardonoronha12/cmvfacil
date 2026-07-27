@@ -1362,12 +1362,12 @@ export default function EntradasClient() {
       const headers = (table[0] ?? []).map(normalizeImportHeader);
       const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
       const index = {
-        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "codigo", "nf"),
+        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "nota_id", "codigo", "nf"),
         data: find("data_de_lancamento", "data_lancamento", "data_de_recebimento", "data_recebimento", "data"),
-        fornecedor: find("fornecedor", "nome_fornecedor", "supplier"),
+        fornecedor: find("fornecedor", "fornecedor_id", "nome_fornecedor", "supplier", "supplier_id"),
         responsavel: find("responsavel", "criado_por", "usuario"),
         criacao: find("data_de_criacao", "data_criacao", "created_date"),
-        item: find("item", "produto", "insumo", "nome_do_item", "nome_item"),
+        item: find("item", "item_id", "produto", "produto_id", "insumo", "insumo_id", "nome_do_item", "nome_item"),
         quantidade: find("quantidade", "qtd", "quantity"),
         unidade: find("unidade", "medida", "unit"),
         subtotal: find("subtotal", "valor_total_item", "valor_item", "total"),
@@ -1382,7 +1382,8 @@ export default function EntradasClient() {
         const cells = table[line] ?? [];
         const read = (column: number) => (column >= 0 ? String(cells[column] ?? "").trim() : "");
         const fornecedor = read(index.fornecedor);
-        const item = normalizeNotaItemName(read(index.item));
+        const itemRaw = read(index.item);
+        const item = normalizeNotaItemName(insumosById.get(itemRaw) || itemRaw);
         const data = normalizeDateLabelPT(read(index.data));
         const quantity = parsePtNumber(read(index.quantidade));
         const subtotalCents = parseBrlToCents(read(index.subtotal));
@@ -1391,7 +1392,12 @@ export default function EntradasClient() {
           throw new Error(`Linha ${line + 1}: fornecedor, data, item, quantidade ou subtotal inválido.`);
         }
         const numero = read(index.numero) || `IMPORT-${line}`;
-        const unidade = read(index.unidade) || "Und";
+        const unidade =
+          read(index.unidade) ||
+          (itemRaw
+            ? insumosStore.find((entry) => String(entry.id ?? "").trim() === itemRaw)?.medida
+            : "") ||
+          "Und";
         const key = `${numero.toLowerCase()}|${data}|${fornecedor.toLowerCase()}`;
         const group =
           groups.get(key) ??
@@ -1423,7 +1429,7 @@ export default function EntradasClient() {
           numero: group.numero,
           dataLancamento: group.data,
           fornecedor: resolveFornecedorKey(group.fornecedor, fornecedorInfoMap) || group.fornecedor.toUpperCase(),
-          fornecedorNome: group.fornecedor,
+          fornecedorNome: resolveFornecedorDisplay(group.fornecedor, fornecedorInfoMap),
           valorNota: formatBrlFromCents(total),
           itens: `${group.itens.length} ${group.itens.length === 1 ? "Item" : "Itens"}`,
           responsavel: group.responsavel,
