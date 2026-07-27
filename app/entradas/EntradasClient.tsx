@@ -35,7 +35,7 @@ import {
 } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
-import { buildUserScopedId } from "../lib/userScope";
+import { buildUserScopedId, requireUserScopePrefix } from "../lib/userScope";
 import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import { QaModePanel } from "../lib/qaMode";
 import { maskPhoneBR } from "../lib/masks";
@@ -1485,9 +1485,11 @@ export default function EntradasClient() {
       if (!groups.size) throw new Error("Nenhuma entrada válida encontrada.");
 
       const imported: EntradaRow[] = [];
+      const importIdPrefix = await requireUserScopePrefix();
+      const importRunId = Date.now();
       setImportProgress({ current: 0, total: groups.size, stage: "Preparando as notas..." });
       for (const group of groups.values()) {
-        const id = await buildUserScopedId(`import-${Date.now()}-${imported.length}`);
+        const id = `${importIdPrefix}import-${importRunId}-${imported.length}`;
         const total = group.itens.reduce((sum, item) => sum + parseBrlToCents(item.subtotalLabel), 0);
         imported.push({
           id,
