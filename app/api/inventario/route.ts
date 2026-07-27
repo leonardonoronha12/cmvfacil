@@ -222,9 +222,30 @@ export async function GET(req: NextRequest) {
             const itDbId = String(it?.id ?? "").trim();
             const itBubbleId = String(it?.bubble_id ?? "").trim();
             const itemOutId = itBubbleId || (itDbId ? `db:${itDbId}` : "");
-            const itemName = String(it?.item?.name ?? "").trim() || "-";
-            const unit = String(it?.item?.unidade_medida ?? it?.raw?.unidade ?? it?.raw?.unidade_medida ?? "").trim() || "Und";
-            const categoria = categoryNameById.get(String(it?.item?.category_id ?? "")) || "Sem categoria";
+            const rawBubble = it?.raw?.bubble ?? {};
+            const itemName =
+              String(
+                it?.item?.name ??
+                  rawBubble?.item_id_custom_itens ??
+                  rawBubble?.item_id ??
+                  rawBubble?.item ??
+                  it?.raw?.item_nome ??
+                  it?.raw?.nome_item ??
+                  "",
+              ).trim() || "-";
+            const unit =
+              String(
+                it?.item?.unidade_medida ??
+                  rawBubble?.unidade ??
+                  rawBubble?.unidade_medida ??
+                  it?.raw?.unidade ??
+                  it?.raw?.unidade_medida ??
+                  "",
+              ).trim() || "Und";
+            const categoria =
+              categoryNameById.get(String(it?.item?.category_id ?? "")) ||
+              String(rawBubble?.categoria ?? rawBubble?.category ?? "").trim() ||
+              "Sem categoria";
             const expectedQty = pickExpectedQty(it?.raw ?? {});
             const countedQty = parseMaybeNumber(it?.quantidade_contada ?? it?.raw?.quantidade_contada ?? it?.raw?.quantidadeContada ?? "");
             const diffQty = countedQty - expectedQty;
