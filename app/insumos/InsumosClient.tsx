@@ -132,10 +132,41 @@ function parseCsvLine(line: string, delimiter: "," | ";" = ",") {
 
 function detectColumnMap(headers: unknown[]) {
   const idx: Record<string, number> = {};
+  const normalized = headers.map(normalizeHeader);
+
+  const findExact = (...names: string[]) => {
+    for (const name of names) {
+      const index = normalized.indexOf(name);
+      if (index >= 0) return index;
+    }
+    return undefined;
+  };
+
+  // Bubble exports many relationship/ID columns before the human-readable
+  // migration fields. Prefer the exact readable fields so values never shift
+  // into the wrong columns.
+  idx.item = findExact("nome", "item", "insumo")!;
+  idx.medida = findExact(
+    "unidade_nome-migracao",
+    "unidade nome-migracao",
+    "unidade_nome_migracao",
+    "medida",
+    "unidade",
+  )!;
+  idx.custoMedio = findExact("custo_medio", "custo medio", "custo médio", "preco", "preço")!;
+  idx.categoria = findExact(
+    "categoria_nome-migracao",
+    "categoria nome-migracao",
+    "categoria_nome_migracao",
+    "categoria",
+  )!;
+  idx.especificacao = findExact("especificacao", "especificação", "descricao", "descrição")!;
+  idx.ocultar = findExact("boolean_ocultar_cmv", "ocultar", "oculto")!;
+
   for (let i = 0; i < headers.length; i++) {
-    const h = normalizeHeader(headers[i]);
+    const h = normalized[i] ?? "";
     if (!h) continue;
-    if (idx.item == null && (h === "item" || h === "insumo" || h.includes("nome"))) idx.item = i;
+    if (idx.item == null && (h === "item" || h === "insumo" || h === "nome")) idx.item = i;
     if (idx.medida == null && (h === "medida" || h === "unidade" || h.includes("unid"))) idx.medida = i;
     if (
       idx.custoMedio == null &&
