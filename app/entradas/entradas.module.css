@@ -406,6 +406,38 @@
   overflow: hidden;
 }
 
+.importModal {
+  width: 620px;
+}
+
+.importTemplateRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.importFileInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px dashed #b8c7c5;
+  border-radius: 12px;
+  padding: 18px;
+  background: #f8fbfa;
+  color: #20312f;
+}
+
+.importFileName {
+  font-size: 12px;
+  font-weight: 800;
+  color: #20312f;
+}
+
+.importFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
 .editModal {
   width: 640px;
 }
