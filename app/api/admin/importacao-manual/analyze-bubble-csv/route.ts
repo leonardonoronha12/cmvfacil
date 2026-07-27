@@ -734,7 +734,13 @@ function validateIntegrity(records: Array<{ bubble_id: string | null; base_type:
     }
   }
   push("inventory_items_missing_inventory", "Item do inventário com inventário inexistente", true, invItemsMissingInv, invItemsMissingInvSamples);
-  push("inventory_items_missing_item", "Item do inventário com item inexistente", true, invItemsMissingItem, invItemsMissingItemSamples);
+  push(
+    "inventory_items_missing_item",
+    "Item do inventário sem cadastro atual (será preservado como item temporário do inventário)",
+    false,
+    invItemsMissingItem,
+    invItemsMissingItemSamples,
+  );
 
   let wastesMissingItem = 0;
   let wastesMissingReason = 0;
@@ -1404,7 +1410,7 @@ async function buildRelationResolutionPreview(args: { supabase: ReturnType<typeo
 
     const item = normalizeText(pickNormPreferBubbleId(raw, ["item_id_custom_itens", "item_id", "item"]));
     const itemRes = resolve({ type: "items", csvValue: item, bubbleIdMap: itemsByBubbleId, nameCandidates: itemsByName });
-    if (itemRes) {
+    if (itemRes && itemRes.kind !== "not_found") {
       inc(itemRes.kind);
       push({ type: "Item", csvValue: item, resolution: resolutionLabel(itemRes.kind), found: itemRes.found, reason: itemRes.kind === "not_found" ? itemRes.reason : "", overrideKey: itemRes.overrideKey, strategy: itemRes.strategy, candidates: itemRes.candidates });
     }
@@ -2523,7 +2529,7 @@ export async function POST(req: NextRequest) {
             incStrategy("inventory_items.item", itemRes.strategy, item, bt, tableName);
             if (itemRes.kind === "bubble_id_not_found") return "Item: Bubble ID não encontrado";
             if (itemRes.kind === "ambiguous") return "Item ambíguo (selecione)";
-            if (itemRes.kind === "not_found") return "Item não encontrado";
+            if (itemRes.kind === "not_found") return "";
             return "";
           }
 
