@@ -1504,7 +1504,7 @@ export default function EntradasClient() {
           itensNota: group.itens,
         });
       }
-      const batchSize = 40;
+      const batchSize = 10;
       let saved = 0;
       for (let offset = 0; offset < imported.length; offset += batchSize) {
         const batch = imported.slice(offset, offset + batchSize);
