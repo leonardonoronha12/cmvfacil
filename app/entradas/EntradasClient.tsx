@@ -1539,7 +1539,9 @@ export default function EntradasClient() {
           stage: saved === imported.length ? "Finalizando..." : `${saved} notas importadas`,
         });
       }
-      setRows((previous) => [...imported, ...previous]);
+      const previousIds = rows.map((row) => String(row.id ?? "").trim()).filter(Boolean);
+      if (previousIds.length) await deleteEntradasFromSupabase(previousIds);
+      setRows(imported);
       setIsImportOpen(false);
       setImportFile(null);
       if (importFileRef.current) importFileRef.current.value = "";
