@@ -710,6 +710,50 @@
   color: #01040e;
 }
 
+.importProgressPanel {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #cfe2de;
+  border-radius: 14px;
+  background: linear-gradient(135deg, #f1faf7 0%, #f8fbfa 100%);
+}
+
+.importProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #20312f;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.importProgressHeader strong {
+  color: #008f71;
+  font-size: 15px;
+}
+
+.importProgressTrack {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dcebe7;
+}
+
+.importProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #00a982, #00c79a);
+  transition: width 220ms ease;
+}
+
+.importProgressCount {
+  color: #5c6c69;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .confirmBody {
   padding: 16px 14px;
   display: flex;
