@@ -829,11 +829,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const desiredCategoryKeys = new Set(Array.from(categoryNames).map(normalizeNameKey).filter(Boolean));
       const invalidCategoryIds = (categoriesDb ?? [])
         .filter((category: any) => {
           const name = String(category?.name ?? "").trim();
-          if (!name || desiredCategoryKeys.has(normalizeNameKey(name))) return false;
+          if (!name) return false;
           return looksLikeBubbleId(name) || name.includes(",Chicken Gold ,true,Alta,25");
         })
         .map((category: any) => String(category?.id ?? "").trim())
