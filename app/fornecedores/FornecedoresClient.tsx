@@ -264,7 +264,13 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
     }
     return -1;
   };
-  const supplierHeaderIndex = findHeader("fornecedor nome migracao", "nome text", "fornecedor", "supplier");
+  const supplierHeaderIndex =
+    headerMap.get("nome") ??
+    headerMap.get("fornecedor nome migracao") ??
+    headerMap.get("nome text") ??
+    headerMap.get("fornecedor") ??
+    headerMap.get("supplier") ??
+    -1;
   const hasHeader = supplierHeaderIndex >= 0;
   const startIndex = hasHeader ? 1 : 0;
 
@@ -277,8 +283,15 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 
   if (hasHeader) {
     idxFornecedor = supplierHeaderIndex;
-    idxItens = findHeader("quantidade itens", "total itens", "itens", "items");
-    idxProdutoNomes = findHeader("itens nomes migracao", "produtos nomes migracao", "itens vinculados", "produtos vinculados");
+    idxItens =
+      headerMap.get("quantidade itens") ??
+      headerMap.get("total itens") ??
+      headerMap.get("quantidade de itens") ??
+      -1;
+    idxProdutoNomes =
+      headerMap.get("itens nomes migracao") ??
+      headerMap.get("produtos nomes migracao") ??
+      findHeader("itens nomes migracao", "produtos nomes migracao", "itens vinculados", "produtos vinculados");
     idxEndereco = headerMap.get("endereco") ?? headerMap.get("endereço") ?? headerMap.get("address") ?? -1;
 
     const whatsappKey =
