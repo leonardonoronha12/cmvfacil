@@ -364,6 +364,7 @@ export default function InsumosClient() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
   const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
@@ -704,6 +705,7 @@ export default function InsumosClient() {
     }
 
     setImporting(true);
+    setImportProgress({ current: 0, total: 0, stage: "Lendo a planilha..." });
     try {
       const name = selectedFile.name.toLowerCase();
       let table: unknown[][] = [];
@@ -727,10 +729,26 @@ export default function InsumosClient() {
 
       const importedRaw = parseRowsFromTable(table);
       if (!importedRaw.length) throw new Error("Nenhum item encontrado na planilha.");
-      const imported = importedRaw.map((row, idx) => ({
-        ...row,
-        id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${idx}`,
-      }));
+      const imported: InsumoRow[] = [];
+      const importRunId = Date.now();
+      const prepareChunkSize = 100;
+      setImportProgress({ current: 0, total: importedRaw.length, stage: "Preparando os insumos..." });
+      for (let offset = 0; offset < importedRaw.length; offset += prepareChunkSize) {
+        const chunk = importedRaw.slice(offset, offset + prepareChunkSize);
+        for (let index = 0; index < chunk.length; index += 1) {
+          const row = chunk[index]!;
+          imported.push({
+            ...row,
+            id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${importRunId}-${offset + index}`,
+          });
+        }
+        setImportProgress({
+          current: imported.length,
+          total: importedRaw.length,
+          stage: `${imported.length.toLocaleString("pt-BR")} insumos preparados`,
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
       const mergedCategories = (() => {
         const seen = new Set(categories.map((c) => c.toLowerCase()));
         const next = [...categories];
@@ -753,6 +771,7 @@ export default function InsumosClient() {
       if (fileInputRef.current) fileInputRef.current.value = "";
       if (!isReadOnly && !isBootstrapRunning()) {
         try {
+          setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
           await saveInsumosStateToSupabase({
             rows: imported.map((r) => ({
               id: r.id,
@@ -775,6 +794,7 @@ export default function InsumosClient() {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
 
@@ -2049,11 +2069,11 @@ export default function InsumosClient() {
 
         {mounted && isImportOpen ? (
           createPortal(
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!importing) setIsImportOpen(false); }}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Itens por Planilha</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" disabled={importing} onClick={() => setIsImportOpen(false)}>
                   ×
                 </button>
               </div>
@@ -2089,10 +2109,44 @@ export default function InsumosClient() {
                 />
 
                 {selectedFileName ? <div className={styles.fileName}>Arquivo selecionado: {selectedFileName}</div> : null}
+                {importProgress ? (
+                  <div className={styles.importProgressPanel} aria-live="polite">
+                    <div className={styles.importProgressHeader}>
+                      <span>{importProgress.stage}</span>
+                      <strong>
+                        {importProgress.total > 0
+                          ? `${Math.round((importProgress.current / importProgress.total) * 100)}%`
+                          : "Preparando"}
+                      </strong>
+                    </div>
+                    <div
+                      className={styles.importProgressTrack}
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={importProgress.total || 1}
+                      aria-valuenow={importProgress.current}
+                    >
+                      <div
+                        className={styles.importProgressFill}
+                        style={{
+                          width:
+                            importProgress.total > 0
+                              ? `${Math.max(2, (importProgress.current / importProgress.total) * 100)}%`
+                              : "12%",
+                        }}
+                      />
+                    </div>
+                    <div className={styles.importProgressCount}>
+                      {importProgress.total > 0
+                        ? `${importProgress.current.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")} insumos`
+                        : "Organizando os dados do arquivo"}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.modalCancel} onClick={() => setIsImportOpen(false)}>
+                <button type="button" className={styles.modalCancel} disabled={importing} onClick={() => setIsImportOpen(false)}>
                   Encerrar
                 </button>
                 <button type="button" className={styles.modalPrimary} onClick={onImport} disabled={importing}>
