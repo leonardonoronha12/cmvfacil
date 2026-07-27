@@ -168,6 +168,51 @@ function normalizeNotaItemName(value: unknown) {
   return raw;
 }
 
+function normalizeImportHeader(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function parseCsvImportLine(line: string, delimiter: string) {
+  const out: string[] = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < line.length; i += 1) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (quoted && line[i + 1] === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        quoted = !quoted;
+      }
+    } else if (ch === delimiter && !quoted) {
+      out.push(current);
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  out.push(current);
+  return out;
+}
+
+function downloadEntradaFile(blob: Blob, name: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = name;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
 function resolveNotaItemDisplayName(it: unknown, insumosById: Map<string, string>) {
   const obj = it && typeof it === "object" ? (it as any) : null;
   const nomeRaw = normalizeNotaItemName(obj?.nome);
@@ -636,6 +681,10 @@ export default function EntradasClient() {
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [newFornecedor, setNewFornecedor] = useState("");
   const [newDataReceb, setNewDataReceb] = useState(() => formatDateLabelPT(new Date()));
   const [isRecebCalendarOpen, setIsRecebCalendarOpen] = useState(false);
@@ -1260,6 +1309,140 @@ export default function EntradasClient() {
 
     return out;
   }, [customFornecedores, fornecedorDbLabelCache, fornecedorInfoMap, rows]);
+
+  function downloadEntradasTemplateCsv() {
+    const headers = ["Número da Nota", "Data de Lançamento", "Fornecedor", "Responsável", "Data de Criação", "Item", "Quantidade", "Unidade", "Subtotal"];
+    const example = ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Farinha de Trigo", "10,000", "Kg", "389,00"];
+    const csv = `\uFEFF${[headers, example].map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(";")).join("\n")}`;
+    downloadEntradaFile(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-planilha-entradas.csv");
+  }
+
+  async function downloadEntradasTemplateXlsx() {
+    const XLSX = await import("xlsx");
+    const data = [
+      ["Número da Nota", "Data de Lançamento", "Fornecedor", "Responsável", "Data de Criação", "Item", "Quantidade", "Unidade", "Subtotal"],
+      ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Farinha de Trigo", "10,000", "Kg", "389,00"],
+      ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Muçarela", "5,000", "Kg", "171,70"],
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    (ws as any)["!cols"] = [{ wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 24 }, { wch: 18 }, { wch: 32 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Entradas");
+    const output = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
+    downloadEntradaFile(new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-planilha-entradas.xlsx");
+  }
+
+  async function importEntradasFile() {
+    if (isImporting) return;
+    if (!importFile) {
+      importFileRef.current?.click();
+      return;
+    }
+    setIsImporting(true);
+    try {
+      let table: unknown[][] = [];
+      const lower = importFile.name.toLowerCase();
+      if (lower.endsWith(".csv")) {
+        const text = await importFile.text();
+        const lines = text.split(/\r?\n/).filter((line) => line.trim());
+        const first = lines[0] ?? "";
+        const delimiter = (first.match(/;/g)?.length ?? 0) >= (first.match(/,/g)?.length ?? 0) ? ";" : ",";
+        table = lines.map((line) => parseCsvImportLine(line, delimiter));
+      } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
+        const XLSX = await import("xlsx");
+        const workbook = XLSX.read(await importFile.arrayBuffer(), { type: "array", cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
+        if (!sheet) throw new Error("Planilha inválida.");
+        table = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: "dd/mm/yyyy" }) as unknown[][];
+      } else {
+        throw new Error("Formato não suportado. Use .xlsx, .xls ou .csv.");
+      }
+      if (table.length < 2) throw new Error("A planilha não possui linhas para importar.");
+
+      const headers = (table[0] ?? []).map(normalizeImportHeader);
+      const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
+      const index = {
+        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "codigo", "nf"),
+        data: find("data_de_lancamento", "data_lancamento", "data_de_recebimento", "data_recebimento", "data"),
+        fornecedor: find("fornecedor", "nome_fornecedor", "supplier"),
+        responsavel: find("responsavel", "criado_por", "usuario"),
+        criacao: find("data_de_criacao", "data_criacao", "created_date"),
+        item: find("item", "produto", "insumo", "nome_do_item", "nome_item"),
+        quantidade: find("quantidade", "qtd", "quantity"),
+        unidade: find("unidade", "medida", "unit"),
+        subtotal: find("subtotal", "valor_total_item", "valor_item", "total"),
+      };
+      if (index.data < 0 || index.fornecedor < 0 || index.item < 0 || index.quantidade < 0 || index.subtotal < 0) {
+        throw new Error("Colunas obrigatórias: Data de Lançamento, Fornecedor, Item, Quantidade e Subtotal.");
+      }
+
+      type ImportGroup = { numero: string; data: string; fornecedor: string; responsavel: string; criacao: string; itens: NotaItem[] };
+      const groups = new Map<string, ImportGroup>();
+      for (let line = 1; line < table.length; line += 1) {
+        const cells = table[line] ?? [];
+        const read = (column: number) => (column >= 0 ? String(cells[column] ?? "").trim() : "");
+        const fornecedor = read(index.fornecedor);
+        const item = normalizeNotaItemName(read(index.item));
+        const data = normalizeDateLabelPT(read(index.data));
+        const quantity = parsePtNumber(read(index.quantidade));
+        const subtotalCents = parseBrlToCents(read(index.subtotal));
+        if (!fornecedor && !item && !data) continue;
+        if (!fornecedor || !item || !data || !(quantity > 0) || !(subtotalCents > 0)) {
+          throw new Error(`Linha ${line + 1}: fornecedor, data, item, quantidade ou subtotal inválido.`);
+        }
+        const numero = read(index.numero) || `IMPORT-${line}`;
+        const unidade = read(index.unidade) || "Und";
+        const key = `${numero.toLowerCase()}|${data}|${fornecedor.toLowerCase()}`;
+        const group =
+          groups.get(key) ??
+          ({
+            numero,
+            data,
+            fornecedor,
+            responsavel: read(index.responsavel),
+            criacao: normalizeDateLabelPT(read(index.criacao)) || data,
+            itens: [],
+          } satisfies ImportGroup);
+        group.itens.push({
+          id: `${Date.now()}-${line}`,
+          nome: item,
+          quantidadeLabel: `${formatPtNumber(quantity, 3)}${unidade}`,
+          subtotalLabel: formatBrlFromCents(subtotalCents),
+          custoUnitarioLabel: `R$${formatPtNumber(subtotalCents / 100 / quantity, 3)}/${unidade}`,
+        });
+        groups.set(key, group);
+      }
+      if (!groups.size) throw new Error("Nenhuma entrada válida encontrada.");
+
+      const imported: EntradaRow[] = [];
+      for (const group of groups.values()) {
+        const id = await buildUserScopedId(`import-${Date.now()}-${imported.length}`);
+        const total = group.itens.reduce((sum, item) => sum + parseBrlToCents(item.subtotalLabel), 0);
+        imported.push({
+          id,
+          numero: group.numero,
+          dataLancamento: group.data,
+          fornecedor: resolveFornecedorKey(group.fornecedor, fornecedorInfoMap) || group.fornecedor.toUpperCase(),
+          fornecedorNome: group.fornecedor,
+          valorNota: formatBrlFromCents(total),
+          itens: `${group.itens.length} ${group.itens.length === 1 ? "Item" : "Itens"}`,
+          responsavel: group.responsavel,
+          dataCriacao: group.criacao,
+          itensNota: group.itens,
+        });
+      }
+      await Promise.all(imported.map((row) => upsertEntradaToSupabase(row as unknown as any)));
+      setRows((previous) => [...imported, ...previous]);
+      setIsImportOpen(false);
+      setImportFile(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+      showToast(`${imported.length} nota(s) importada(s) com sucesso.`, "success", 7000);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : String(error), "error", 9000);
+    } finally {
+      setIsImporting(false);
+    }
+  }
 
   function openNewModal() {
     if (isReadOnly) {
@@ -2181,6 +2364,21 @@ export default function EntradasClient() {
                 <button
                   type="button"
                   className={styles.secondaryBtn}
+                  disabled={isReadOnly}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    setImportFile(null);
+                    setIsImportOpen(true);
+                  }}
+                >
+                  Importar
+                </button>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
                   disabled={isReadOnly || visible.length === 0}
                   onClick={() => {
                     if (isReadOnly) {
@@ -2995,6 +3193,54 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
+              </div>,
+              document.body,
+            )
+          : null}
+
+        {isMounted && isImportOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
+                <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
+                  <div className={styles.modalHeader}>
+                    <div className={styles.modalTitle}>Importar Entradas por Planilha</div>
+                    <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)}>
+                      ×
+                    </button>
+                  </div>
+                  <div className={styles.modalBody}>
+                    <div className={styles.notice}>
+                      <span className={styles.noticeIcon}>!</span>
+                      <div className={styles.noticeText}>
+                        Cada linha representa um item. Repita o número da nota, a data e o fornecedor para agrupar vários itens na mesma entrada.
+                      </div>
+                    </div>
+                    <div className={styles.importTemplateRow}>
+                      <button type="button" className={styles.secondaryBtn} onClick={() => void downloadEntradasTemplateXlsx()}>
+                        Baixar modelo (.xlsx)
+                      </button>
+                      <button type="button" className={styles.secondaryBtn} onClick={downloadEntradasTemplateCsv}>
+                        Baixar modelo (.csv)
+                      </button>
+                    </div>
+                    <input
+                      ref={importFileRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      className={styles.importFileInput}
+                      onChange={(event) => setImportFile(event.currentTarget.files?.[0] ?? null)}
+                    />
+                    {importFile ? <div className={styles.importFileName}>Arquivo selecionado: {importFile.name}</div> : null}
+                  </div>
+                  <div className={`${styles.modalFooter} ${styles.importFooter}`}>
+                    <button type="button" className={styles.ghostBtn} onClick={() => setIsImportOpen(false)}>
+                      Encerrar
+                    </button>
+                    <button type="button" className={styles.primaryBtn} disabled={isImporting} onClick={() => void importEntradasFile()}>
+                      {isImporting ? "Importando..." : importFile ? "Importar" : "Selecionar planilha"}
+                    </button>
+                  </div>
+                </div>
               </div>,
               document.body,
             )
