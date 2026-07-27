@@ -1354,6 +1354,9 @@ export default function PrePreparoClient() {
         if (!ingredientes.length) return row;
         let ingredientesChanged = false;
         const nextIngredientes = ingredientes.map((ing) => {
+          // A saved recipe owns its historical ingredient subtotal. Repricing it
+          // on every load loses imported precision and changes past recipes.
+          if (clampNonNegativeInt(ing.custoCents) > 0) return ing;
           const byName = insumosByName.get(String(ing.item ?? "").toLowerCase());
           const byKey = insumosByKey.get(normalizeNameKey(String(ing.item ?? "")));
           const ins = byName ?? byKey ?? null;
