@@ -1738,7 +1738,8 @@ export async function POST(req: NextRequest) {
           if (overrideId) return overrideId;
           return itemIdByName.get(itemNameKey) ?? null;
         })();
-        if (!inventoryId || !itemId) {
+        const inventoryOnlyItem = !itemId && Boolean(itemRefText);
+        if (!inventoryId || (!itemId && !itemRefText)) {
           pt.ignored += 1;
           const reason = !inventoryId ? "missing_inventory_relation" : "missing_item_relation";
           inc(pt.ignoredReasons, reason);
@@ -1755,7 +1756,7 @@ export async function POST(req: NextRequest) {
           if (bubbleId) return "";
           const provided = String((r as any)?.external_key ?? "").trim();
           if (provided) return provided;
-          const seed = `${inventoryId}|${itemId}`;
+          const seed = `${inventoryId}|${itemId || normalizeNameKey(itemRefText)}`;
           const h = createHash("sha256").update(seed).digest("hex").slice(0, 24);
           return `inventory_item:${h}`;
         })();
@@ -1771,11 +1772,13 @@ export async function POST(req: NextRequest) {
           bubble_id: bubbleId || null,
           external_key: bubbleId ? null : externalKey0 || null,
           inventory_id: inventoryId,
-          item_id: itemId,
+          item_id: itemId || null,
           data_contagem: parseTime(pickAny(raw, ["data_contagem", "data_contagem_custom_itens_inventarios"])),
           quantidade_contada: parseNumber(pickAny(raw, ["quantidade_contada", "quantidade_contada_custom_itens_inventarios"])),
           ocultar_cmv: parseBool(pickAny(raw, ["ocultar_cmv", "ocultar_cmv_custom_itens_inventarios"])),
-          item_temporario: parseBool(pickAny(raw, ["item_temporario", "item_temporario_custom_itens_inventarios"])),
+          item_temporario:
+            inventoryOnlyItem ||
+            parseBool(pickAny(raw, ["item_temporario", "item_temporario_custom_itens_inventarios"])),
           created_by_user_id: targetUserId,
           raw: { bubble: raw },
         });
