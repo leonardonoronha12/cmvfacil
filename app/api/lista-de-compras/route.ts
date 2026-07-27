@@ -651,7 +651,9 @@ export async function GET(req: NextRequest) {
         legacyEndItems: legacyEndQtyByNameKey.size,
       });
 
-      const invIdsToLoad = Array.from(new Set([startInvId, endInvId].filter(Boolean)));
+      const invIdsToLoad = Array.from(
+        new Set([startInvId, endInvId].filter((id): id is string => Boolean(id) && isUuid(id))),
+      );
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
             .from("inventory_items")
