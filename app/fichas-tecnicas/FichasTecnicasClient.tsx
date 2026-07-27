@@ -1502,7 +1502,7 @@ export default function FichasTecnicasClient({
     for (const [id, q] of qtyById.entries()) {
       const c = centsById.get(id) ?? 0;
       if (!q || !c) continue;
-      out.set(id, Math.round(c / q));
+      out.set(id, c / q);
     }
     return out;
   }, [entradas, fornecedorEquivalenciasMap, insumos]);
