@@ -811,6 +811,48 @@ export async function POST(req: NextRequest) {
       if (bubbleId) supplierIdByKeyUpper2.set(bubbleId.toUpperCase(), sid);
     }
 
+    // The spreadsheet payload is authoritative: suppliers omitted from it
+    // must not survive from an earlier or incorrectly mapped import.
+    const desiredSupplierIds = new Set<string>();
+    for (const key of keys) {
+      const infoRow = safeObj(infoMap[key]);
+      const nameKey = normalizeLookupKey(normalizeText((infoRow as any).fornecedor ?? "") || key);
+      let supplierId = "";
+      if (isDbPrefixed(key) && isUuid(dbIdFromKey(key))) supplierId = canonicalUuid(dbIdFromKey(key));
+      if (!supplierId && isUuid(key)) supplierId = canonicalUuid(key);
+      if (!supplierId) supplierId = canonicalUuid(supplierIdByBubbleId2.get(key) ?? "");
+      if (!supplierId && nameKey) supplierId = canonicalUuid(supplierIdByNameKey2.get(nameKey) ?? "");
+      if (supplierId) desiredSupplierIds.add(supplierId);
+    }
+    const staleSupplierIds = (suppliersDb2 ?? [])
+      .filter((supplier: any) => {
+        const id = canonicalUuid(String(supplier?.id ?? ""));
+        const nome = normalizeText(supplier?.nome ?? "");
+        const externalKey = normalizeText(supplier?.external_key ?? "");
+        const isSystem =
+          nome === TOMBSTONE_KEY ||
+          externalKey === "supplier:system:tombstones" ||
+          externalKey === "supplier:default:sem_fornecedor" ||
+          normalizeNameKey(nome) === "sem fornecedor";
+        return Boolean(id && !isSystem && !desiredSupplierIds.has(id));
+      })
+      .map((supplier: any) => canonicalUuid(String(supplier?.id ?? "")))
+      .filter(Boolean);
+    if (staleSupplierIds.length) {
+      const { error: staleLinksErr } = await supabase
+        .from("supplier_items")
+        .delete()
+        .eq("company_id", companyId)
+        .in("supplier_id", staleSupplierIds);
+      if (staleLinksErr) return errJson({ status: 500, traceId, stage: "compat.stale_supplier_items_delete", error: staleLinksErr.message, source: "compat" });
+      const { error: staleSuppliersErr } = await supabase
+        .from("suppliers")
+        .delete()
+        .eq("company_id", companyId)
+        .in("id", staleSupplierIds);
+      if (staleSuppliersErr) return errJson({ status: 500, traceId, stage: "compat.stale_suppliers_delete", error: staleSuppliersErr.message, source: "compat" });
+    }
+
     if (tombstonesUpper.length || tombstoneSupplierId) {
       const db = (() => {
         try {
