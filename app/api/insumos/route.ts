@@ -771,8 +771,93 @@ export async function POST(req: NextRequest) {
         if (error) return json({ error: error.message }, { status: 500 });
       }
 
+      // A spreadsheet import represents the complete set of supplies for the
+      // company. Remove stale non-recipe items instead of merging every import
+      // with prior attempts. Recipe/preparation items are explicitly preserved.
+      const desiredIds = new Set(
+        [...upsertByBubble, ...upsertById]
+          .map((item) => String(item?.id ?? "").trim())
+          .filter(Boolean),
+      );
+      const { data: existingSupplyRows, error: existingSupplyErr } = await db
+        .from("items")
+        .select("id")
+        .eq("company_id", companyId)
+        .or("item_receita.is.null,item_receita.eq.false");
+      if (existingSupplyErr) return json({ error: existingSupplyErr.message }, { status: 500 });
+
+      const staleSupplyIds = (existingSupplyRows ?? [])
+        .map((item: any) => String(item?.id ?? "").trim())
+        .filter((itemId: string) => itemId && !desiredIds.has(itemId));
+      if (staleSupplyIds.length) {
+        for (let offset = 0; offset < staleSupplyIds.length; offset += 200) {
+          const chunk = staleSupplyIds.slice(offset, offset + 200);
+          for (const table of ["invoice_items", "inventory_items", "wastes", "shopping_list_items", "avg_cost_events"]) {
+            const { error } = await db.from(table).update({ item_id: null } as any).eq("company_id", companyId).in("item_id", chunk);
+            if (error) return json({ error: error.message }, { status: 500 });
+          }
+
+          const { error: supplierLinksErr } = await db
+            .from("supplier_items")
+            .delete()
+            .eq("company_id", companyId)
+            .in("item_id", chunk);
+          if (supplierLinksErr) return json({ error: supplierLinksErr.message }, { status: 500 });
+
+          // Stale supplies cannot remain as ingredients. These links will be
+          // rebuilt by the authoritative recipe/preparation imports.
+          const { error: ingredientLinksErr } = await db
+            .from("recipe_ingredients")
+            .delete()
+            .eq("company_id", companyId)
+            .in("ingredient_item_id", chunk);
+          if (ingredientLinksErr) return json({ error: ingredientLinksErr.message }, { status: 500 });
+
+          const { error: recipeLinksErr } = await db
+            .from("recipe_ingredients")
+            .delete()
+            .eq("company_id", companyId)
+            .in("recipe_item_id", chunk);
+          if (recipeLinksErr) return json({ error: recipeLinksErr.message }, { status: 500 });
+
+          const { error: deleteStaleErr } = await db
+            .from("items")
+            .delete()
+            .eq("company_id", companyId)
+            .in("id", chunk);
+          if (deleteStaleErr) return json({ error: deleteStaleErr.message }, { status: 500 });
+        }
+      }
+
+      const desiredCategoryKeys = new Set(Array.from(categoryNames).map(normalizeNameKey).filter(Boolean));
+      const invalidCategoryIds = (categoriesDb ?? [])
+        .filter((category: any) => {
+          const name = String(category?.name ?? "").trim();
+          if (!name || desiredCategoryKeys.has(normalizeNameKey(name))) return false;
+          return looksLikeBubbleId(name) || name.includes(",Chicken Gold ,true,Alta,25");
+        })
+        .map((category: any) => String(category?.id ?? "").trim())
+        .filter(Boolean);
+      let removedCategories = 0;
+      for (const categoryId of invalidCategoryIds) {
+        const { count, error: categoryUseErr } = await db
+          .from("items")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", companyId)
+          .eq("category_id", categoryId);
+        if (categoryUseErr) return json({ error: categoryUseErr.message }, { status: 500 });
+        if ((count ?? 0) > 0) continue;
+        const { error: deleteCategoryErr } = await db
+          .from("categories")
+          .delete()
+          .eq("company_id", companyId)
+          .eq("id", categoryId);
+        if (deleteCategoryErr) return json({ error: deleteCategoryErr.message }, { status: 500 });
+        removedCategories += 1;
+      }
+
       return json(
-        { ok: true },
+        { ok: true, replaced: true, removed: staleSupplyIds.length, removedCategories, saved: desiredIds.size },
         {
           status: 200,
           headers: {
