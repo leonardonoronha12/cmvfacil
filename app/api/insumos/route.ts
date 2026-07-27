@@ -840,13 +840,12 @@ export async function POST(req: NextRequest) {
         .filter(Boolean);
       let removedCategories = 0;
       for (const categoryId of invalidCategoryIds) {
-        const { count, error: categoryUseErr } = await db
+        const { error: clearCategoryErr } = await db
           .from("items")
-          .select("id", { count: "exact", head: true })
+          .update({ category_id: null } as any)
           .eq("company_id", companyId)
           .eq("category_id", categoryId);
-        if (categoryUseErr) return json({ error: categoryUseErr.message }, { status: 500 });
-        if ((count ?? 0) > 0) continue;
+        if (clearCategoryErr) return json({ error: clearCategoryErr.message }, { status: 500 });
         const { error: deleteCategoryErr } = await db
           .from("categories")
           .delete()
