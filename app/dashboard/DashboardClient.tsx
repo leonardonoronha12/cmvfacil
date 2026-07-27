@@ -2557,7 +2557,7 @@ export default function DashboardClient() {
           out.push({
             t,
             data: normalizeHistoryDateLabel(e.dataLancamento),
-            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2582,7 +2582,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: normalizeHistoryDateLabel(e.dataLancamento),
-          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
