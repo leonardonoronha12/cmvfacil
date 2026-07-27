@@ -664,11 +664,6 @@ export async function POST(req: NextRequest) {
       }
 
       const categoryNames = new Set<string>();
-      for (const c of categories) {
-        const name0 = String(c ?? "").trim();
-        if (!name0 || name0 === "-") continue;
-        categoryNames.add(name0);
-      }
       for (const r of rows as any[]) {
         const name0 = String(r?.categoria ?? "").trim();
         if (!name0 || name0 === "-") continue;
