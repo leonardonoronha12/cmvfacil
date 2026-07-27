@@ -903,6 +903,45 @@
   color: #01040e;
 }
 
+.importProgressPanel {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #dce8e3;
+  border-radius: 10px;
+  background: #f7fbf9;
+}
+
+.importProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11px;
+  color: #263832;
+}
+
+.importProgressTrack {
+  height: 8px;
+  margin-top: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #dfe9e5;
+}
+
+.importProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: #0ab86d;
+  transition: width 160ms ease;
+}
+
+.importProgressCount {
+  margin-top: 6px;
+  text-align: right;
+  font-size: 10px;
+  color: #63716c;
+}
+
 .downloadLink {
   display: inline-block;
   margin-top: 14px;
