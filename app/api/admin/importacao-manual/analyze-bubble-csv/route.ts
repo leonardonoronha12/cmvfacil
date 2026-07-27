@@ -1999,7 +1999,13 @@ export async function POST(req: NextRequest) {
 
     const requiredTypes = order.slice();
     const presentTypes = new Set(allRecords.map((r) => String(r.base_type ?? "").trim().toLowerCase()).filter(Boolean));
-    const missingFiles = requiredTypes.filter((t) => !presentTypes.has(t));
+    const inventoryOnlyTypes = new Set(["custom.inventarios", "custom.itens_inventarios"]);
+    const isInventoryOnlyImport =
+      presentTypes.size > 0 &&
+      presentTypes.has("custom.inventarios") &&
+      presentTypes.has("custom.itens_inventarios") &&
+      Array.from(presentTypes).every((type) => inventoryOnlyTypes.has(type));
+    const missingFiles = isInventoryOnlyImport ? [] : requiredTypes.filter((t) => !presentTypes.has(t));
 
     const duplicatesInCsv: Array<{ baseType: string; bubble_id: string; count: number; files: string[] }> = [];
     {
