@@ -32,6 +32,7 @@ type FornecedorRow = {
   id: string;
   fornecedor: string;
   itens: number;
+  produtoNomes?: string[];
   vendedorNome: string;
   whatsapp: string;
   endereco: string;
@@ -214,6 +215,7 @@ function normalizeHeader(value: unknown) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{Diacritic}+/gu, "")
+    .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ");
 }
 
@@ -256,18 +258,27 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
     if (!headerMap.has(key)) headerMap.set(key, i);
   });
 
-  const hasHeader = ["fornecedor", "fornecedores", "supplier"].some((k) => headerMap.has(k));
+  const findHeader = (...terms: string[]) => {
+    for (const [key, index] of headerMap) {
+      if (terms.some((term) => key === term || key.includes(term))) return index;
+    }
+    return -1;
+  };
+  const supplierHeaderIndex = findHeader("fornecedor nome migracao", "nome text", "fornecedor", "supplier");
+  const hasHeader = supplierHeaderIndex >= 0;
   const startIndex = hasHeader ? 1 : 0;
 
   let idxFornecedor = 0;
   let idxItens = -1;
+  let idxProdutoNomes = -1;
   let idxVendedorNome = -1;
   let idxWhatsapp = -1;
   let idxEndereco = -1;
 
   if (hasHeader) {
-    idxFornecedor = headerMap.get("fornecedor") ?? headerMap.get("fornecedores") ?? 0;
-    idxItens = headerMap.get("itens") ?? headerMap.get("items") ?? -1;
+    idxFornecedor = supplierHeaderIndex;
+    idxItens = findHeader("quantidade itens", "total itens", "itens", "items");
+    idxProdutoNomes = findHeader("itens nomes migracao", "produtos nomes migracao", "itens vinculados", "produtos vinculados");
     idxEndereco = headerMap.get("endereco") ?? headerMap.get("endereço") ?? headerMap.get("address") ?? -1;
 
     const whatsappKey =
@@ -307,7 +318,15 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
     const fornecedor = String(row[idxFornecedor] ?? "").trim();
     if (!fornecedor) continue;
     const itensRaw = idxItens >= 0 ? String(row[idxItens] ?? "").trim() : "";
-    const itens = itensRaw ? Number.parseInt(itensRaw.replace(/[^\d]/g, "") || "0", 10) : 0;
+    const produtoNomes =
+      idxProdutoNomes >= 0
+        ? String(row[idxProdutoNomes] ?? "")
+            .split(/\r?\n|\||;/)
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : undefined;
+    const itensParsed = itensRaw ? Number.parseInt(itensRaw.replace(/[^\d]/g, "") || "0", 10) : Number.NaN;
+    const itens = Number.isFinite(itensParsed) ? itensParsed : produtoNomes?.length ?? 0;
     const vendedorNome = idxVendedorNome >= 0 ? String(row[idxVendedorNome] ?? "").trim() || "-" : "-";
     const whatsapp = idxWhatsapp >= 0 ? String(row[idxWhatsapp] ?? "").trim() || "-" : "-";
     const endereco = idxEndereco >= 0 ? String(row[idxEndereco] ?? "").trim() || "-" : "-";
@@ -315,6 +334,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
       id: String(out.length + 1),
       fornecedor,
       itens: Number.isFinite(itens) ? itens : 0,
+      produtoNomes,
       vendedorNome,
       whatsapp,
       endereco,
@@ -383,6 +403,7 @@ export default function FornecedoresClient() {
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const markDirty = (ms = 6000) => {
     try {
@@ -1007,6 +1028,7 @@ export default function FornecedoresClient() {
     if (importing) return;
     setImportError(null);
     setImporting(true);
+    setImportProgress({ current: 0, total: 1, label: "Lendo a planilha..." });
     try {
       const name = file.name.toLowerCase();
       let table: unknown[][] = [];
@@ -1032,27 +1054,42 @@ export default function FornecedoresClient() {
       const imported = parseSupplierRowsFromTable(table);
       if (!imported.length) throw new Error("Nenhum fornecedor encontrado na planilha.");
       const nextInfo: FornecedorInfoMap = {};
-      for (const r of imported) {
-        const fornecedor = String(r.fornecedor ?? "").trim();
-        if (!fornecedor) continue;
-        const key = fornecedor.toUpperCase();
-        const vendedor = String(r.vendedorNome ?? "").trim();
-        const whatsapp = String(r.whatsapp ?? "").trim();
-        const endereco = String(r.endereco ?? "").trim();
-        nextInfo[key] = {
-          fornecedor,
-          vendedor: vendedor && vendedor !== "-" ? vendedor : "",
-          whatsapp: whatsapp && whatsapp !== "-" ? whatsapp : "",
-          endereco: endereco && endereco !== "-" ? endereco : "",
-        };
+      const importedProdutos: FornecedorProdutos = {};
+      const chunkSize = 50;
+      for (let offset = 0; offset < imported.length; offset += chunkSize) {
+        const chunk = imported.slice(offset, offset + chunkSize);
+        for (const r of chunk) {
+          const fornecedor = String(r.fornecedor ?? "").trim();
+          if (!fornecedor) continue;
+          const key = fornecedor.toUpperCase();
+          const vendedor = String(r.vendedorNome ?? "").trim();
+          const whatsapp = String(r.whatsapp ?? "").trim();
+          const endereco = String(r.endereco ?? "").trim();
+          nextInfo[key] = {
+            fornecedor,
+            vendedor: vendedor && vendedor !== "-" ? vendedor : "",
+            whatsapp: whatsapp && whatsapp !== "-" ? whatsapp : "",
+            endereco: endereco && endereco !== "-" ? endereco : "",
+          };
+          if (r.produtoNomes) importedProdutos[key] = Array.from(new Set(r.produtoNomes));
+        }
+        setImportProgress({
+          current: Math.min(offset + chunk.length, imported.length),
+          total: imported.length,
+          label: "Preparando fornecedores e vínculos...",
+        });
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
       const keepKeys = new Set(Object.keys(nextInfo));
       const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
       for (const k of keepKeys) tombstones.delete(String(k ?? "").trim().toUpperCase());
       const nextProdutos: FornecedorProdutos = withTombstones({}, Array.from(tombstones));
-      for (const [k, list] of Object.entries(produtosMap)) {
-        if (!keepKeys.has(k)) continue;
-        nextProdutos[k] = list;
+      for (const k of keepKeys) {
+        if (Object.prototype.hasOwnProperty.call(importedProdutos, k)) {
+          nextProdutos[k] = importedProdutos[k] ?? [];
+        } else if (produtosMap[k]) {
+          nextProdutos[k] = produtosMap[k];
+        }
       }
       const nextEq: FornecedorEquivalenciasMap = {};
       for (const [k, list] of Object.entries(equivalenciasMap)) {
@@ -1066,12 +1103,15 @@ export default function FornecedoresClient() {
       setInfoMap(nextInfo);
       setProdutosMap(nextProdutos);
       setEquivalenciasMap(nextEq);
+      setImportProgress({ current: imported.length, total: imported.length, label: "Salvando no banco de dados..." });
+      await saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq });
       setIsImportOpen(false);
-      showToast("Fornecedores importados e salvos.", "success");
+      showToast(`${imported.length} fornecedor(es) importado(s) e salvo(s).`, "success");
     } catch (err) {
       setImportError(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
+      setImportProgress(null);
       setDragOver(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -1458,15 +1498,18 @@ export default function FornecedoresClient() {
                   onDragLeave={() => setDragOver(false)}
                   onDrop={(e) => {
                     e.preventDefault();
+                    if (importing) return;
                     const file = e.dataTransfer.files?.[0] ?? null;
                     if (!file) return;
                     void importFile(file);
                   }}
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    if (!importing) fileInputRef.current?.click();
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
+                    if (!importing && (e.key === "Enter" || e.key === " ")) fileInputRef.current?.click();
                   }}
                 >
                   <div className={styles.dropzoneInner}>
@@ -1496,6 +1539,30 @@ export default function FornecedoresClient() {
                     </button>
                   </div>
                 </div>
+
+                {importProgress ? (
+                  <div className={styles.importProgressPanel}>
+                    <div className={styles.importProgressHeader}>
+                      <span>{importProgress.label}</span>
+                      <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+                    </div>
+                    <div
+                      className={styles.importProgressTrack}
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={importProgress.total}
+                      aria-valuenow={importProgress.current}
+                    >
+                      <div
+                        className={styles.importProgressFill}
+                        style={{ width: `${(importProgress.current / Math.max(importProgress.total, 1)) * 100}%` }}
+                      />
+                    </div>
+                    <div className={styles.importProgressCount}>
+                      {importProgress.current} de {importProgress.total}
+                    </div>
+                  </div>
+                ) : null}
 
                 {importError ? <div className={styles.importError}>{importError}</div> : null}
 
