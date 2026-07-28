@@ -99,6 +99,22 @@ function resolveUserScopedId(req: NextRequest) {
   return { accessToken, id: null as string | null, rawUserId: userId };
 }
 
+async function resolveCompanyScopedStateId(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  userScopedId: string,
+) {
+  const userId = userScopedId.startsWith("user:") ? userScopedId.slice("user:".length) : "";
+  if (!isUuid(userId)) return userScopedId;
+  const { data: memberRows, error } = await supabase
+    .from("company_members")
+    .select("company_id,role,permission_level")
+    .eq("user_id", userId)
+    .limit(50);
+  if (error) throw new Error(error.message);
+  const companyId = pickBestCompanyId((memberRows ?? []) as unknown[]);
+  return companyId ? `company:${companyId}` : userScopedId;
+}
+
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
   return false;
 }
@@ -135,6 +151,7 @@ export async function GET(req: NextRequest) {
     if (!id) return json({ source: "legacy", readOnly: false, rows: [] }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
     const userId = id.slice("user:".length);
+    const stateId = await resolveCompanyScopedStateId(supabase, id);
 
     const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
     const useCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
@@ -345,7 +362,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const { data, error } = await supabase.from("pre_preparo_state").select("*").eq("id", id).maybeSingle();
+    const { data, error } = await supabase.from("pre_preparo_state").select("*").eq("id", stateId).maybeSingle();
     if (error) return json({ error: error.message }, { status: 500 });
     const payload = (data as any)?.payload;
     return json({ source: "legacy", readOnly: false, rows: Array.isArray(payload) ? payload : [] }, { status: 200 });
@@ -366,11 +383,12 @@ export async function POST(req: NextRequest) {
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    const stateId = await resolveCompanyScopedStateId(supabase, id);
     if (rows.length === 0 && !allowEmpty) {
       const { data: current, error: currentError } = await supabase
         .from("pre_preparo_state")
         .select("payload")
-        .eq("id", id)
+        .eq("id", stateId)
         .maybeSingle();
       if (currentError) return json({ error: currentError.message }, { status: 500 });
       const currentRows = Array.isArray((current as any)?.payload) ? ((current as any).payload as unknown[]) : [];
@@ -384,12 +402,12 @@ export async function POST(req: NextRequest) {
         );
       }
     }
-    const { error } = await supabase.from("pre_preparo_state").upsert({ id, payload: rows } as any, { onConflict: "id" });
+    const { error } = await supabase.from("pre_preparo_state").upsert({ id: stateId, payload: rows } as any, { onConflict: "id" });
     if (error) return json({ error: error.message }, { status: 500 });
     const { data: persisted, error: verifyError } = await supabase
       .from("pre_preparo_state")
       .select("id,payload")
-      .eq("id", id)
+      .eq("id", stateId)
       .maybeSingle();
     if (verifyError) return json({ error: verifyError.message, code: "save_verification_failed" }, { status: 500 });
     const persistedRows = Array.isArray((persisted as any)?.payload) ? ((persisted as any).payload as unknown[]) : null;
