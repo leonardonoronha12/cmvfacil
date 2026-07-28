@@ -332,8 +332,18 @@ function RecipeThumb({ type, src }: { type: ThumbType; src?: string }) {
   );
 }
 
+function repairMojibake(value: string) {
+  const raw = String(value ?? "");
+  if (!/[ÃÂ]/.test(raw) || Array.from(raw).some((char) => (char.codePointAt(0) ?? 0) > 255)) return raw;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(Array.from(raw), (char) => char.charCodeAt(0)));
+  } catch {
+    return raw;
+  }
+}
+
 function normalizeText(value: string) {
-  return value
+  return repairMojibake(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -1013,7 +1023,7 @@ export default function FichasTecnicasClient({
       for (let offset = 0; offset < recipes.length; offset += chunkSize) {
         const chunk = recipes.slice(offset, offset + chunkSize);
         for (const { get } of chunk) {
-          const receita = get("nome", "receita");
+          const receita = repairMojibake(get("nome", "receita"));
           if (!receita) continue;
           const previous = existingByName.get(normalizeText(receita));
           const precoVendaNumber = parseImportedDecimal(get("preco_venda_total", "preco_venda", "preco venda"));
@@ -1031,7 +1041,7 @@ export default function FichasTecnicasClient({
           const importedIngredientRows = linkedIngredientIds.flatMap((ingredientRecordId) => {
             const record = ingredientRecordsById.get(ingredientRecordId);
             if (!record) return [];
-            const item = record.get("item_id", "ingrediente_nome", "item_nome");
+            const item = repairMojibake(record.get("item_id", "ingrediente_nome", "item_nome"));
             if (!item) return [];
             const option = ingredientOptionByName.get(normalizeText(item));
             const quantidadeNumber = parseImportedDecimal(record.get("quantidade"));
@@ -1064,7 +1074,7 @@ export default function FichasTecnicasClient({
             ingredientsTotal: importedIngredientRows.length ? importedIngredientsTotal : previous?.ingredientsTotal ?? custoTotalNumber,
             recipeYield: rendimentoNumber,
             ingredientRows: finalIngredientRows,
-            modoPreparo: get("modo_preparo", "modo de preparo") || previous?.modoPreparo || "",
+            modoPreparo: repairMojibake(get("modo_preparo", "modo de preparo")) || previous?.modoPreparo || "",
           });
         }
         setImportProgress({
