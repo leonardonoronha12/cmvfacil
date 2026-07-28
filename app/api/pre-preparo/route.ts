@@ -148,7 +148,7 @@ function formatDateOnlyPT(value: unknown) {
 export async function GET(req: NextRequest) {
   try {
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
-    if (!id) return json({ source: "legacy", readOnly: false, rows: [] }, { status: 200 });
+    if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
     const userId = id.slice("user:".length);
     const stateId = await resolveCompanyScopedStateId(supabase, id);
