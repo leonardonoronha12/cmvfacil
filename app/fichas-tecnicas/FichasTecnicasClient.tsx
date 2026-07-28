@@ -959,7 +959,11 @@ export default function FichasTecnicasClient({
       const XLSX = await import("xlsx");
       const normalizedRows: Array<{ get: (...keys: string[]) => string }> = [];
       for (const file of files) {
-        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array", raw: true });
+        const fileBuffer = await file.arrayBuffer();
+        const isCsv = file.name.toLowerCase().endsWith(".csv");
+        const workbook = isCsv
+          ? XLSX.read(new TextDecoder("utf-8").decode(fileBuffer), { type: "string", raw: true })
+          : XLSX.read(fileBuffer, { type: "array", raw: true });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         if (!sheet) continue;
         const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
