@@ -364,7 +364,29 @@ export async function GET(req: NextRequest) {
 
     const { data, error } = await supabase.from("pre_preparo_state").select("*").eq("id", stateId).maybeSingle();
     if (error) return json({ error: error.message }, { status: 500 });
-    const payload = (data as any)?.payload;
+    let payload = (data as any)?.payload;
+
+    // Existing installations stored this state under `user:<user_id>`. When the
+    // company-scoped row does not exist yet, migrate that user's legacy state on
+    // first read so the company-scoped rollout does not make saved recipes vanish.
+    if (!data && stateId !== id) {
+      const { data: legacyData, error: legacyError } = await supabase
+        .from("pre_preparo_state")
+        .select("payload")
+        .eq("id", id)
+        .maybeSingle();
+      if (legacyError) return json({ error: legacyError.message }, { status: 500 });
+
+      const legacyPayload = (legacyData as any)?.payload;
+      if (Array.isArray(legacyPayload)) {
+        const { error: migrationError } = await supabase
+          .from("pre_preparo_state")
+          .upsert({ id: stateId, payload: legacyPayload } as any, { onConflict: "id" });
+        if (migrationError) return json({ error: migrationError.message, code: "legacy_state_migration_failed" }, { status: 500 });
+        payload = legacyPayload;
+      }
+    }
+
     return json({ source: "legacy", readOnly: false, rows: Array.isArray(payload) ? payload : [] }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
