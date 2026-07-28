@@ -26,6 +26,7 @@ type PrePreparoRow = {
   id: string;
   categoria: string;
   receita: string;
+  especificacao?: string;
   recipeImage?: string;
   custoTotal: string;
   rendimento: string;
@@ -1477,7 +1478,7 @@ export default function PrePreparoClient() {
     const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
     setDraftCategory(match);
     setDraftImageUrl(String(row.recipeImage ?? "").trim());
-    setDraftSpec("");
+    setDraftSpec(String(row.especificacao ?? ""));
     const parsedYield = parseQtyLabel(String(row.rendimento ?? ""));
     setDraftUnit((parsedYield.unit || "Und").trim() || "Und");
     setDraftValidity("7");
@@ -3319,7 +3320,7 @@ export default function PrePreparoClient() {
                         <div className={styles.recipeMeta}>
                           <div className={styles.recipeCategory}>{r.categoria}</div>
                           <div className={styles.recipeName}>{r.receita}</div>
-                          <div className={styles.recipeDash}>-</div>
+                          <div className={styles.recipeDash}>{r.especificacao || "-"}</div>
                         </div>
                       </div>
                       <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined} onClick={(e) => e.stopPropagation()}>
@@ -3553,6 +3554,7 @@ export default function PrePreparoClient() {
                               return recomputeRowMetrics({
                                 ...r,
                                 receita: name,
+                                especificacao: draftSpec.trim() || undefined,
                                 categoria: draftCategory,
                                 recipeImage: draftImageUrl ? draftImageUrl : undefined,
                                 rendimento,
@@ -4157,6 +4159,7 @@ export default function PrePreparoClient() {
                           id: nextId,
                           categoria: newRecipeCategory,
                           receita: newRecipeName.trim(),
+                          especificacao: newRecipeSpec.trim() || undefined,
                           recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
                           custoTotal: totalLabel,
                           rendimento: rendimentoLabel,

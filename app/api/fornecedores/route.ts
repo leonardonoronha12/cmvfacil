@@ -1,11 +1,164 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
+import fs from "node:fs";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
+const DEBUG_ENV_PATH = ".dbg/supplier-items-persist.env";
+
+// #region debug-point reporter
+let __dbgCfg: null | { url: string; sessionId: string; runId: string } = null;
+function __getDbgCfg() {
+  if (__dbgCfg) return __dbgCfg;
+  let url = String(process.env.DEBUG_SERVER_URL ?? "").trim();
+  let sessionId = String(process.env.DEBUG_SESSION_ID ?? "").trim() || "supplier-items-persist";
+  let runId = String(process.env.DEBUG_RUN_ID ?? "").trim() || "pre-fix";
+  if (!url && process.env.NODE_ENV === "production") {
+    url = "https://cmvfacil.app/api/debug/event";
+    if (!String(process.env.DEBUG_RUN_ID ?? "").trim()) runId = "prod-pre-fix";
+  }
+  if (!url && process.env.NODE_ENV !== "production") {
+    try {
+      const raw = fs.readFileSync(DEBUG_ENV_PATH, "utf8");
+      url = String(raw.match(/^DEBUG_SERVER_URL=(.+)$/m)?.[1] ?? "").trim() || url;
+      sessionId = String(raw.match(/^DEBUG_SESSION_ID=(.+)$/m)?.[1] ?? "").trim() || sessionId;
+    } catch {}
+  }
+  __dbgCfg = { url, sessionId, runId };
+  return __dbgCfg;
+}
+async function __dbgStore(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  event: { sessionId: string; runId: string; hypothesisId: string; traceId?: string; location: string; msg: string; data: unknown; ts: number };
+}) {
+  try {
+    const supabase = (() => {
+      try {
+        return getSupabaseAdmin();
+      } catch {
+        return args.supabase;
+      }
+    })();
+    const { error: tableErr } = await supabase.from("debug_events").insert({
+      session_id: args.event.sessionId,
+      run_id: args.event.runId,
+      hypothesis_id: args.event.hypothesisId,
+      trace_id: args.event.traceId ?? null,
+      location: args.event.location ?? null,
+      msg: args.event.msg,
+      data: (args.event.data ?? {}) as any,
+      company_id: args.companyId,
+      user_id: null,
+    } as any);
+    if (!tableErr) return;
+    const { data: sysSupplier1, error: supplierErr1 } = await supabase
+      .from("suppliers")
+      .select("id,raw")
+      .eq("company_id", args.companyId)
+      .ilike("external_key", "supplier:default:sem_fornecedor")
+      .limit(1)
+      .maybeSingle();
+    if (supplierErr1) return;
+    let supplierRow = sysSupplier1 as any;
+    if (!supplierRow) {
+      const { data: ins, error: insErr } = await supabase
+        .from("suppliers")
+        .insert({
+          company_id: args.companyId,
+          external_key: "supplier:default:sem_fornecedor",
+          nome: "Sem Fornecedor",
+          endereco: "",
+          vendedor: "",
+          whatsapp: "",
+          bubble_id: null,
+          raw: { system: { default: true } },
+        } as any)
+        .select("id,raw")
+        .limit(1)
+        .maybeSingle();
+      if (insErr) {
+        const { data: existing, error: reErr } = await supabase
+          .from("suppliers")
+          .select("id,raw")
+          .eq("company_id", args.companyId)
+          .ilike("external_key", "supplier:default:sem_fornecedor")
+          .limit(1)
+          .maybeSingle();
+        if (reErr) return;
+        supplierRow = existing as any;
+      } else {
+        supplierRow = ins as any;
+      }
+    }
+    if (!supplierRow) return;
+    const supplierId = String((supplierRow as any)?.id ?? "").trim();
+    if (!supplierId) return;
+    const raw = supplierRow?.raw ?? {};
+    const system = (raw as any)?.system ?? {};
+    const prev = Array.isArray((system as any)?.debug_events) ? (system as any).debug_events : [];
+    const next = [...prev, args.event].slice(-200);
+    const nextRaw = { ...(raw as any), system: { ...(system as any), debug_events: next } };
+    await supabase.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", args.companyId).eq("id", supplierId);
+  } catch {}
+}
+
+async function __dbgSend(args: {
+  hypothesisId: string;
+  traceId?: string;
+  location: string;
+  msg: string;
+  data?: unknown;
+  accessToken?: string;
+  companyId?: string;
+  supabase?: ReturnType<typeof getSupabaseServerClient>;
+}) {
+  try {
+    const cfg = __getDbgCfg();
+    if (!cfg.url) return;
+    const adminSecret = String(process.env.ADMIN_SECRET ?? process.env.DEBUG_SECRET ?? "").trim();
+    const headers: Record<string, string> = { "content-type": "application/json" };
+    if (adminSecret) headers["x-admin-secret"] = adminSecret;
+    const accessToken = String(args.accessToken ?? "").trim();
+    if (accessToken) headers.authorization = `Bearer ${accessToken}`;
+    const data = typeof args.data === "undefined" || args.data === null ? {} : args.data;
+    if (process.env.NODE_ENV === "production" && args.companyId && args.supabase) {
+      await __dbgStore({
+        supabase: args.supabase,
+        companyId: args.companyId,
+        event: {
+          sessionId: cfg.sessionId,
+          runId: cfg.runId,
+          hypothesisId: args.hypothesisId,
+          traceId: args.traceId,
+          location: args.location,
+          msg: args.msg,
+          data,
+          ts: Date.now(),
+        },
+      });
+      if (cfg.url.includes("/api/debug/event")) return;
+    }
+    void fetch(cfg.url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        sessionId: cfg.sessionId,
+        runId: cfg.runId,
+        hypothesisId: args.hypothesisId,
+        traceId: args.traceId,
+        location: args.location,
+        msg: args.msg,
+        data,
+        ts: Date.now(),
+      }),
+    }).catch(() => {});
+  } catch {}
+}
+// #endregion
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -178,6 +331,8 @@ function dbIdFromKey(value: string) {
 export async function GET(req: NextRequest) {
   const traceId = crypto.randomUUID();
   try {
+    const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ ok: true, traceId, source: "legacy", readOnly: false, row: null }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
@@ -218,10 +373,14 @@ export async function GET(req: NextRequest) {
           if (extracted.length) tombstones = extracted;
           continue;
         }
-        if (nome === TOMBSTONE_KEY) continue;
-        const dbId = String((s as any)?.id ?? "").trim();
+        if (nome === TOMBSTONE_KEY) {
+          const extracted = extractCompatTombstonesFromRaw((s as any)?.raw);
+          if (extracted.length) tombstones = extracted;
+          continue;
+        }
+        const dbId = canonicalUuid(String((s as any)?.id ?? ""));
         const bubbleId = String((s as any)?.bubble_id ?? "").trim();
-        const key = bubbleId || (dbId ? `db:${dbId}` : "");
+        const key = dbId ? `db:${dbId}` : "";
         if (!key || !nome) continue;
         supplierKeyById.set(dbId, key);
         const fornecedoresRaw = safeObj(((s as any)?.raw as any)?.fornecedores);
@@ -241,18 +400,40 @@ export async function GET(req: NextRequest) {
       const produtos: Record<string, string[]> = {};
       const { data: linksDb, error: linksErr } = await supabase
         .from("supplier_items")
-        .select("supplier_id,item:items(name),supplier:suppliers(id,bubble_id)")
+        .select("supplier_id,item:items(name)")
         .eq("company_id", companyId)
         .limit(5000);
       if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
+      let linksSupplierIdMissing = 0;
+      let linksSupplierKeyMissing = 0;
+      let linksSupplierNotInInfo = 0;
+      let linksItemNameMissing = 0;
+      const linksSupplierIdSamples: string[] = [];
+      const linksNotInInfoSamples: string[] = [];
+      const distinctSupplierIds = new Set<string>();
       for (const r of linksDb ?? []) {
-        const supplier = (r as any)?.supplier ?? null;
-        const supplierDbId = String(supplier?.id ?? "").trim();
-        const supplierBubbleId = String(supplier?.bubble_id ?? "").trim();
-        const supplierKey = supplierBubbleId || supplierKeyById.get(supplierDbId) || (supplierDbId ? `db:${supplierDbId}` : "");
-        if (!supplierKey || !(supplierKey in info)) continue;
+        const supplierDbId = canonicalUuid(String((r as any)?.supplier_id ?? ""));
+        const supplierKey = supplierKeyById.get(supplierDbId) || (supplierDbId ? `db:${supplierDbId}` : "");
+        if (!supplierDbId) {
+          linksSupplierIdMissing++;
+          continue;
+        }
+        distinctSupplierIds.add(supplierDbId);
+        if (!supplierKey) {
+          linksSupplierKeyMissing++;
+          if (linksSupplierIdSamples.length < 5) linksSupplierIdSamples.push(supplierDbId);
+          continue;
+        }
+        if (!(supplierKey in info)) {
+          linksSupplierNotInInfo++;
+          if (linksNotInInfoSamples.length < 5) linksNotInInfoSamples.push(supplierKey);
+          continue;
+        }
         const itemName = String((r as any)?.item?.name ?? "").trim();
-        if (!itemName) continue;
+        if (!itemName) {
+          linksItemNameMissing++;
+          continue;
+        }
         const prev = Array.isArray(produtos[supplierKey]) ? produtos[supplierKey] : [];
         if (!prev.includes(itemName)) produtos[supplierKey] = [...prev, itemName];
       }
@@ -263,6 +444,52 @@ export async function GET(req: NextRequest) {
         if (!cur.length && rawProdutos.length) produtos[k] = rawProdutos;
       }
 
+      // #region debug-point D:get-compat-shape
+      await __dbgSend({
+        hypothesisId: "D",
+        traceId,
+        location: "app/api/fornecedores/route.ts:GET:compat",
+        msg: "[DEBUG] fornecedores GET compat: shape",
+        data: {
+          companyId,
+          suppliersDb: (suppliersDb ?? []).length,
+          infoKeys: Object.keys(info).length,
+          linksDb: (linksDb ?? []).length,
+          produtosKeys: Object.keys(produtos).length,
+        },
+        accessToken,
+        companyId,
+        supabase,
+      });
+      // #endregion
+
+      // #region debug-point D2:get-compat-links-skip
+      await __dbgSend({
+        hypothesisId: "D2",
+        traceId,
+        location: "app/api/fornecedores/route.ts:GET:compat",
+        msg: "[DEBUG] fornecedores GET compat: links skip reasons",
+        data: {
+          companyId,
+          shouldUseCompat,
+          isAdmin,
+          suppliersDb: (suppliersDb ?? []).length,
+          infoKeys: Object.keys(info).length,
+          linksDb: (linksDb ?? []).length,
+          distinctSupplierIds: distinctSupplierIds.size,
+          linksSupplierIdMissing,
+          linksSupplierKeyMissing,
+          linksSupplierNotInInfo,
+          linksItemNameMissing,
+          linksSupplierIdSamples,
+          linksNotInInfoSamples,
+        },
+        accessToken,
+        companyId,
+        supabase,
+      });
+      // #endregion
+
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
       if (normalizedTombstones.length) produtos[TOMBSTONE_KEY] = normalizedTombstones;
 
@@ -272,7 +499,67 @@ export async function GET(req: NextRequest) {
         if (typeof eq !== "undefined") equivalencias[k] = eq as any;
       }
 
-      return json({ ok: true, traceId, source: "compat", readOnly: false, row: { id, info, produtos, equivalencias } }, { status: 200 });
+      const fornecedorLabelRaw = normalizeText(String(url.searchParams.get("fornecedorLabel") ?? ""));
+      const fornecedorLabelLookup = normalizeLookupKey(fornecedorLabelRaw);
+      const fornecedorLabelUpper = fornecedorLabelRaw ? fornecedorLabelRaw.toUpperCase() : "";
+      let resolvedKey: string | null = null;
+      let resolvedLabel: string | null = null;
+      if (fornecedorLabelRaw) {
+        if (isDbPrefixed(fornecedorLabelRaw)) {
+          const dbId = canonicalUuid(dbIdFromKey(fornecedorLabelRaw));
+          resolvedKey = dbId ? `db:${dbId}` : null;
+        } else {
+          for (const [k, v] of Object.entries(info)) {
+            const label = normalizeLookupKey((v as any)?.fornecedor ?? "");
+            if (label && fornecedorLabelLookup && label === fornecedorLabelLookup) {
+              resolvedKey = k;
+              break;
+            }
+          }
+        }
+      }
+      if (resolvedKey) {
+        const v = (info as any)[resolvedKey];
+        const label = normalizeText((v as any)?.fornecedor ?? "");
+        if (label) resolvedLabel = label;
+      }
+
+      return json(
+        {
+          ok: true,
+          traceId,
+          source: "compat",
+          readOnly: false,
+          ...(diag
+            ? {
+                diag: {
+                  companyId,
+                  shouldUseCompat,
+                  isAdmin,
+                  suppliersDb: (suppliersDb ?? []).length,
+                  infoKeys: Object.keys(info).length,
+                  linksDb: (linksDb ?? []).length,
+                  produtosKeys: Object.keys(produtos).length,
+                  distinctSupplierIds: distinctSupplierIds.size,
+                  linksSupplierIdMissing,
+                  linksSupplierKeyMissing,
+                  linksSupplierNotInInfo,
+                  linksItemNameMissing,
+                  linksSupplierIdSamples,
+                  linksNotInInfoSamples,
+                  fornecedorLabel: fornecedorLabelRaw || null,
+                  fornecedorLabelUpper: fornecedorLabelUpper || null,
+                  fornecedorResolvedKey: resolvedKey,
+                  fornecedorResolvedLabel: resolvedLabel,
+                  fornecedorProdutosLenByResolvedKey: resolvedKey ? (produtos[resolvedKey]?.length ?? 0) : null,
+                  fornecedorProdutosLenByUpperLabel: fornecedorLabelUpper ? (produtos[fornecedorLabelUpper]?.length ?? 0) : null,
+                },
+              }
+            : null),
+          row: { id, info, produtos, equivalencias },
+        },
+        { status: 200 },
+      );
     }
 
     const { data, error } = await supabase.from("fornecedores_state").select("*").eq("id", id).maybeSingle();
@@ -351,13 +638,13 @@ export async function POST(req: NextRequest) {
       .limit(5000);
     if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
 
-    const supplierIdByBubbleId = new Map<string, string>();
-    const supplierIdByNameKey = new Map<string, string>();
-    const supplierRawById = new Map<string, unknown>();
-    const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
-    const supplierIdByKeyUpper = new Map<string, string>();
+      const supplierIdByBubbleId = new Map<string, string>();
+      const supplierIdByNameKey = new Map<string, string>();
+      const supplierRawById = new Map<string, unknown>();
+      const supplierInfoById = new Map<string, { nome: string; endereco: string; vendedor: string; whatsapp: string }>();
+      const supplierIdByKeyUpper = new Map<string, string>();
     let defaultSupplierId = "";
-    const reservedSupplierIds = new Set<string>();
+    let tombstoneSupplierId = "";
     for (const s of suppliersDb ?? []) {
       const sid = canonicalUuid(String((s as any)?.id ?? ""));
       if (!sid) continue;
@@ -370,13 +657,14 @@ export async function POST(req: NextRequest) {
       const sys = ((s as any)?.raw as any)?.system ?? null;
       const isDefault = externalKey === "supplier:default:sem_fornecedor" || normalizeNameKey(nome) === "sem fornecedor" || Boolean(sys?.default);
       if (isDefault) defaultSupplierId = sid;
-      if (nome === TOMBSTONE_KEY) reservedSupplierIds.add(sid);
+      if (nome === TOMBSTONE_KEY) tombstoneSupplierId = sid;
       if (bubbleId) supplierIdByBubbleId.set(bubbleId, sid);
       if (nome) supplierIdByNameKey.set(normalizeLookupKey(nome), sid);
       supplierRawById.set(sid, (s as any)?.raw ?? {});
       supplierInfoById.set(sid, { nome, endereco, vendedor, whatsapp });
-      const key = bubbleId || `db:${sid}`;
-      supplierIdByKeyUpper.set(key.toUpperCase(), sid);
+      const dbKey = `db:${sid}`;
+      supplierIdByKeyUpper.set(dbKey.toUpperCase(), sid);
+      if (bubbleId) supplierIdByKeyUpper.set(bubbleId.toUpperCase(), sid);
     }
 
     const tombstonesUpper = Array.from(new Set(safeArr(produtosMap[TOMBSTONE_KEY]).map(normalizeTombstoneKey).filter(Boolean)));
@@ -386,6 +674,52 @@ export async function POST(req: NextRequest) {
         .filter((k) => Boolean(k) && k !== TOMBSTONE_KEY),
     );
     const keepKeysUpper = new Set<string>(Array.from(keys).map(normalizeTombstoneKey).filter(Boolean));
+
+    // #region debug-point A:post-compat-payload
+    let countHasProdutosKey = 0;
+    let countProdutosEmpty = 0;
+    let countProdutosOne = 0;
+    let maxProdutosLen = 0;
+    const emptyKeySamples: string[] = [];
+    const oneKeySamples: string[] = [];
+    for (const k of keys) {
+      const hasProdutosKey = Object.prototype.hasOwnProperty.call(produtosMap, k);
+      if (!hasProdutosKey) continue;
+      countHasProdutosKey++;
+      const produtosLen = safeArr(produtosMap[k]).filter((x) => String(x ?? "").trim()).length;
+      if (!produtosLen) {
+        countProdutosEmpty++;
+        if (emptyKeySamples.length < 5) emptyKeySamples.push(k);
+      } else if (produtosLen === 1) {
+        countProdutosOne++;
+        if (oneKeySamples.length < 5) oneKeySamples.push(k);
+      }
+      if (produtosLen > maxProdutosLen) maxProdutosLen = produtosLen;
+    }
+    await __dbgSend({
+      hypothesisId: "A",
+      traceId,
+      location: "app/api/fornecedores/route.ts:POST:compat",
+      msg: "[DEBUG] fornecedores POST compat: payload summary",
+      data: {
+        companyId,
+        infoKeys: Object.keys(infoMap).length,
+        produtosKeys: Object.keys(produtosMap).length,
+        equivKeys: Object.keys(equivMap).length,
+        unionKeys: keys.size,
+        hasProdutosKey: countHasProdutosKey,
+        produtosEmpty: countProdutosEmpty,
+        produtosOne: countProdutosOne,
+        produtosMax: maxProdutosLen,
+        tombstones: safeArr(produtosMap[TOMBSTONE_KEY]).length,
+        emptyKeySamples,
+        oneKeySamples,
+      },
+      accessToken,
+      companyId,
+      supabase,
+    });
+    // #endregion
 
     const updatesById = new Map<string, any>();
     const insertsByKey = new Map<string, any>();
@@ -472,25 +806,75 @@ export async function POST(req: NextRequest) {
       const nome = normalizeText((s as any)?.nome ?? "");
       if (bubbleId) supplierIdByBubbleId2.set(bubbleId, sid);
       if (nome) supplierIdByNameKey2.set(normalizeLookupKey(nome), sid);
-      const key = bubbleId || `db:${sid}`;
-      supplierIdByKeyUpper2.set(key.toUpperCase(), sid);
+      const dbKey = `db:${sid}`;
+      supplierIdByKeyUpper2.set(dbKey.toUpperCase(), sid);
+      if (bubbleId) supplierIdByKeyUpper2.set(bubbleId.toUpperCase(), sid);
     }
 
-    if (defaultSupplierId) {
-      const rawBase = supplierRawById.get(defaultSupplierId) ?? {};
-      const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
-      const { error: defErr } = await supabase
-        .from("suppliers")
-        .update({ raw: nextRaw } as any)
-        .eq("company_id", companyId)
-        .eq("id", defaultSupplierId);
-      if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_default_raw", error: defErr.message, source: "compat" });
+    if (tombstonesUpper.length || tombstoneSupplierId) {
+      const db = (() => {
+        try {
+          return getSupabaseAdmin();
+        } catch {
+          return supabase;
+        }
+      })();
+      let tombId = tombstoneSupplierId;
+      if (!tombId) {
+        const { data: tombSupplierDb } = await db
+          .from("suppliers")
+          .select("id,raw")
+          .eq("company_id", companyId)
+          .eq("nome", TOMBSTONE_KEY)
+          .limit(1)
+          .maybeSingle();
+        tombId = canonicalUuid(String((tombSupplierDb as any)?.id ?? ""));
+      }
+      if (!tombId) {
+        const { data: ins, error: insErr } = await db
+          .from("suppliers")
+          .insert({
+            company_id: companyId,
+            external_key: "supplier:system:tombstones",
+            nome: TOMBSTONE_KEY,
+            endereco: "",
+            vendedor: "",
+            whatsapp: "",
+            bubble_id: null,
+            raw: { system: {} },
+          } as any)
+          .select("id")
+          .limit(1)
+          .maybeSingle();
+        if (insErr) {
+          const { data: tombSupplierDb } = await db
+            .from("suppliers")
+            .select("id")
+            .eq("company_id", companyId)
+            .eq("nome", TOMBSTONE_KEY)
+            .limit(1)
+            .maybeSingle();
+          tombId = canonicalUuid(String((tombSupplierDb as any)?.id ?? ""));
+        } else {
+          tombId = canonicalUuid(String((ins as any)?.id ?? ""));
+        }
+      }
+      if (tombId) {
+        const { data: tombSupplierDb } = await db
+          .from("suppliers")
+          .select("raw")
+          .eq("company_id", companyId)
+          .eq("id", tombId)
+          .limit(1)
+          .maybeSingle();
+        const rawBase = (tombSupplierDb as any)?.raw ?? supplierRawById.get(tombId) ?? {};
+        const nextRaw = withCompatTombstonesRaw(rawBase, tombstonesUpper);
+        const { error: defErr } = await db.from("suppliers").update({ raw: nextRaw } as any).eq("company_id", companyId).eq("id", tombId);
+        if (defErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_update_tombstones_raw", error: defErr.message, source: "compat" });
+      }
     }
 
     const deleteCandidateIds = new Set<string>();
-    for (const sid of reservedSupplierIds) {
-      if (sid && sid !== defaultSupplierId) deleteCandidateIds.add(sid);
-    }
     for (const kUpper of tombstonesUpper) {
       if (!kUpper || keepKeysUpper.has(kUpper)) continue;
       let supplierId = "";
@@ -560,6 +944,25 @@ export async function POST(req: NextRequest) {
       }
       const desiredRows = Array.from(desiredByKey.values());
 
+      // #region debug-point B:post-compat-link-plan
+      await __dbgSend({
+        hypothesisId: "B",
+        traceId,
+        location: "app/api/fornecedores/route.ts:POST:compat:links",
+        msg: "[DEBUG] fornecedores POST compat: link plan",
+        data: {
+          companyId,
+          supplierIdsForSync: supplierIdsForSync.length,
+          desiredRows: desiredRows.length,
+          missing: missing.length,
+          missingSample: missing.slice(0, 5),
+        },
+        accessToken,
+        companyId,
+        supabase,
+      });
+      // #endregion
+
       if (missing.length) {
         return errJson({
           status: 400,
@@ -572,6 +975,18 @@ export async function POST(req: NextRequest) {
 
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
       if (supplierIdsToClear.length) {
+        // #region debug-point B:post-compat-clear
+        await __dbgSend({
+          hypothesisId: "B",
+          traceId,
+          location: "app/api/fornecedores/route.ts:POST:compat:clear",
+          msg: "[DEBUG] fornecedores POST compat: clearing supplier_items",
+          data: { companyId, supplierIdsToClear: supplierIdsToClear.length },
+          accessToken,
+          companyId,
+          supabase,
+        });
+        // #endregion
         const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
         if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
       }
@@ -583,6 +998,19 @@ export async function POST(req: NextRequest) {
         if (linkInsErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_insert", error: linkInsErr.message, source: "compat" });
       }
     }
+
+    // #region debug-point C:post-compat-ok
+    await __dbgSend({
+      hypothesisId: "C",
+      traceId,
+      location: "app/api/fornecedores/route.ts:POST:compat:done",
+      msg: "[DEBUG] fornecedores POST compat: ok",
+      data: { companyId, ok: true },
+      accessToken,
+      companyId,
+      supabase,
+    });
+    // #endregion
 
     return json({ ok: true, traceId }, { status: 200 });
   } catch (err) {

@@ -7,6 +7,7 @@ type EntradaDbRow = {
   numero: string;
   data_lancamento: string;
   fornecedor: string;
+  fornecedor_nome?: string | null;
   valor_nota: string;
   itens: string;
   responsavel: string;
@@ -23,11 +24,13 @@ export type EntradasStatePayload = {
 
 function toStoreRow(r: EntradaDbRow): EntradaStoreRow {
   const fallbackValor = String((r as any)?.valorNota ?? (r as any)?.valor ?? "").trim();
+  const fornecedorNome = String((r as any)?.fornecedor_nome ?? (r as any)?.fornecedorNome ?? "").trim();
   return {
     id: r.id,
     numero: r.numero,
     dataLancamento: r.data_lancamento,
     fornecedor: r.fornecedor,
+    fornecedorNome: fornecedorNome || undefined,
     valorNota: r.valor_nota || fallbackValor,
     itens: r.itens,
     responsavel: r.responsavel,
@@ -90,6 +93,19 @@ export async function upsertEntradaToSupabase(row: EntradaStoreRow) {
   const res = await fetch("/api/entradas", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(toDbRow(row)) });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
+}
+
+export async function upsertEntradasBatchToSupabase(rows: EntradaStoreRow[]) {
+  const batch = rows.map(toDbRow);
+  if (!batch.length) return { savedCount: 0 };
+  const res = await fetch("/api/entradas", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rows: batch }),
+  });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; savedCount?: number } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save_batch");
+  return { savedCount: Number(json.savedCount ?? batch.length) };
 }
 
 export async function deleteEntradaFromSupabase(id: string) {

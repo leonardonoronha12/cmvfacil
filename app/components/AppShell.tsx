@@ -3,8 +3,10 @@
 import type { ReactNode } from "react";
 import { useMemo } from "react";
 import { usePathname } from "next/navigation";
+import dynamic from "next/dynamic";
 import dash from "../dashboard/dashboard.module.css";
-import AppSidebar from "./AppSidebar";
+
+const AppSidebar = dynamic(() => import("./AppSidebar"), { ssr: false });
 
 type SidebarKey =
   | "dashboard"

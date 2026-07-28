@@ -555,7 +555,26 @@ export async function GET(req: NextRequest) {
         sample: (invRows ?? []).slice(0, 5).map((r: any) => ({ id: String(r?.id ?? ""), data_contagem: r?.data_contagem ?? null })),
       });
 
-      const inventories = (invRows ?? []).map((r: any) => ({
+      const legacyPeriodPrefix = `${id}:`;
+      const { data: legacyInventoryRows, error: legacyInventoryErr } = await supabaseServer
+        .from("inventario")
+        .select("id,data,categorias,created_at")
+        .like("id", `${legacyPeriodPrefix}%`)
+        .order("created_at", { ascending: false })
+        .limit(400);
+      if (legacyInventoryErr) {
+        return json({ ok: false, error: legacyInventoryErr.message, source: "compat", readOnly: true }, { status: 500 });
+      }
+      const legacyInventoryRowsForPeriod = (legacyInventoryRows ?? [])
+        .map((r: any) => ({
+          id: String(r?.id ?? "").trim(),
+          bubble_id: null,
+          nome: `Inventário ${String(r?.data ?? "").trim()}`,
+          data_contagem: parseDateOnlyLoose(r?.data),
+        }))
+        .filter((r: any) => r.id && r.data_contagem);
+      const inventoryRowsForPeriod = legacyInventoryRowsForPeriod.length ? legacyInventoryRowsForPeriod : ((invRows ?? []) as any[]);
+      const inventories = inventoryRowsForPeriod.map((r: any) => ({
         id: String(r?.id ?? "").trim(),
         bubble_id: r?.bubble_id ? String(r.bubble_id) : null,
         nome: String(r?.nome ?? "").trim(),
@@ -651,7 +670,9 @@ export async function GET(req: NextRequest) {
         legacyEndItems: legacyEndQtyByNameKey.size,
       });
 
-      const invIdsToLoad = Array.from(new Set([startInvId, endInvId].filter(Boolean)));
+      const invIdsToLoad = Array.from(
+        new Set([startInvId, endInvId].filter((id): id is string => Boolean(id) && isUuid(id))),
+      );
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
             .from("inventory_items")

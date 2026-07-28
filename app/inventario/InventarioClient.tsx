@@ -200,6 +200,10 @@ export default function InventarioClient() {
   const [newCalRect, setNewCalRect] = useState<{ left: number; top: number } | null>(null);
   const [isDeleteContagemOpen, setIsDeleteContagemOpen] = useState(false);
   const [deleteContagemRow, setDeleteContagemRow] = useState<InventarioContagem | null>(null);
+  const [isPendingCleanupOpen, setIsPendingCleanupOpen] = useState(false);
+  const [pendingKeepDraft, setPendingKeepDraft] = useState("");
+  const [pendingCleanupError, setPendingCleanupError] = useState("");
+  const [pendingCleanupBusy, setPendingCleanupBusy] = useState(false);
 
   const [menuContagemId, setMenuContagemId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -565,7 +569,7 @@ export default function InventarioClient() {
 
         const allIds = new Set<string>();
         for (const id of existingById.keys()) allIds.add(id);
-        for (const id of sourceById.keys()) allIds.add(id);
+
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
@@ -818,6 +822,59 @@ export default function InventarioClient() {
       if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
       return next;
     });
+  }
+
+  function openPendingCleanup() {
+    setPendingKeepDraft("");
+    setPendingCleanupError("");
+    setIsPendingCleanupOpen(true);
+  }
+
+  async function confirmPendingCleanup() {
+    const current = selectedContagem;
+    if (!current || pendingCleanupBusy) return;
+
+    const keepNames = pendingKeepDraft
+      .split(/\r?\n/)
+      .map((name) => name.trim())
+      .filter(Boolean);
+    if (!keepNames.length) {
+      setPendingCleanupError("Informe ao menos um item pendente que deve permanecer.");
+      return;
+    }
+
+    const currentPendingKeys = new Set(pendentes.map((row) => normalizeNameKey(row.item)));
+    const missingNames = keepNames.filter((name) => !currentPendingKeys.has(normalizeNameKey(name)));
+    if (missingNames.length) {
+      setPendingCleanupError(`Não encontrado neste inventário: ${missingNames.join(", ")}`);
+      return;
+    }
+
+    const keepKeys = new Set(keepNames.map(normalizeNameKey));
+    const updated: InventarioContagem = {
+      ...current,
+      categorias: (current.categorias ?? []).map((cat) => ({
+        ...cat,
+        itens: (cat.itens ?? []).map((item) => {
+          const isPending = !item.removido && !String(item.estoqueFinal ?? "").trim();
+          if (!isPending || keepKeys.has(normalizeNameKey(item.item))) return item;
+          return { ...item, removido: true, estoqueFinal: "" };
+        }),
+      })),
+    };
+
+    setPendingCleanupBusy(true);
+    setPendingCleanupError("");
+    try {
+      await upsertInventarioToSupabase(updated);
+      setContagens((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setIsPendingCleanupOpen(false);
+      setPendingKeepDraft("");
+    } catch {
+      setPendingCleanupError("Não foi possível salvar a limpeza. Tente novamente.");
+    } finally {
+      setPendingCleanupBusy(false);
+    }
   }
 
   function uncountItem(itemId: string) {
@@ -1209,7 +1266,14 @@ export default function InventarioClient() {
             {isCompatSource ? null : (
             <div className={styles.cols}>
               <div className={styles.col}>
-                <div className={styles.colHeadPending}>Pendentes</div>
+                <div className={styles.colHeadPending}>
+                  <span>Pendentes</span>
+                  {pendentes.length ? (
+                    <button type="button" className={styles.cleanupBtn} onClick={openPendingCleanup}>
+                      Limpar extras
+                    </button>
+                  ) : null}
+                </div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
                   {pendentes.map((r) => (
                     <div key={r.id} className={styles.itemRow}>
@@ -1257,6 +1321,9 @@ export default function InventarioClient() {
                           placeholder="0"
                         />
                         <div className={styles.unitPill}>{r.unidade}</div>
+                        <button type="button" className={styles.iconBtn} aria-label={`Excluir ${r.item}`} onClick={() => removeItem(r.id)}>
+                          <IconTrash />
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1557,6 +1624,61 @@ export default function InventarioClient() {
               </div>
             </div>
           </div>,
+              document.body,
+            )
+          : null}
+
+        {mounted && isPendingCleanupOpen && selectedContagem && !isCompatSource
+          ? createPortal(
+              <div
+                className={styles.modalOverlay}
+                role="dialog"
+                aria-modal="true"
+                onClick={() => {
+                  if (!pendingCleanupBusy) setIsPendingCleanupOpen(false);
+                }}
+              >
+                <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+                  <div className={styles.modalHeader}>
+                    <div className={styles.modalTitle}>Limpar pendentes extras</div>
+                    <button
+                      type="button"
+                      className={styles.modalClose}
+                      onClick={() => setIsPendingCleanupOpen(false)}
+                      aria-label="Fechar"
+                      disabled={pendingCleanupBusy}
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className={styles.modalBody}>
+                    <div className={styles.cleanupHelp}>
+                      Inventário de <strong>{selectedContagem.data}</strong>. Informe, um por linha, somente os itens pendentes que devem permanecer. Os demais
+                      pendentes serão removidos; os contabilizados não serão alterados.
+                    </div>
+                    <textarea
+                      className={styles.cleanupTextarea}
+                      value={pendingKeepDraft}
+                      onChange={(event) => {
+                        setPendingKeepDraft(event.target.value);
+                        setPendingCleanupError("");
+                      }}
+                      placeholder={"Exemplo:\nXarope 1883 Mirtilo (1 L)"}
+                      autoFocus
+                      disabled={pendingCleanupBusy}
+                    />
+                    {pendingCleanupError ? <div className={styles.formError}>{pendingCleanupError}</div> : null}
+                  </div>
+                  <div className={styles.modalFooter}>
+                    <button type="button" className={styles.secondaryBtn} onClick={() => setIsPendingCleanupOpen(false)} disabled={pendingCleanupBusy}>
+                      Cancelar
+                    </button>
+                    <button type="button" className={styles.primaryBtn} onClick={() => void confirmPendingCleanup()} disabled={pendingCleanupBusy}>
+                      {pendingCleanupBusy ? "Salvando..." : "Remover extras"}
+                    </button>
+                  </div>
+                </div>
+              </div>,
               document.body,
             )
           : null}

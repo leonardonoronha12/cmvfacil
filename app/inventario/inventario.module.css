@@ -457,6 +457,24 @@
   font-size: 11px;
   font-weight: 900;
   padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cleanupBtn {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.cleanupBtn:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .colHeadDone {
@@ -866,6 +884,32 @@
   padding: 14px;
   display: grid;
   gap: 12px;
+}
+
+.cleanupHelp {
+  color: #536563;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.cleanupTextarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid #dfe5e4;
+  border-radius: 10px;
+  padding: 10px 12px;
+  color: #01040e;
+  background: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: 0;
+}
+
+.cleanupTextarea:focus {
+  border-color: #0ab86d;
+  box-shadow: 0 0 0 3px rgba(10, 184, 109, 0.12);
 }
 
 .field {

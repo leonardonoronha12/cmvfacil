@@ -2557,7 +2557,7 @@ export default function DashboardClient() {
           out.push({
             t,
             data: normalizeHistoryDateLabel(e.dataLancamento),
-            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2582,7 +2582,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: normalizeHistoryDateLabel(e.dataLancamento),
-          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2672,11 +2672,18 @@ export default function DashboardClient() {
       const key = rawKey.trim().toUpperCase();
       if (!key) return;
       const info = fornecedorInfoMap[key];
+      const resolvedLabel = info?.fornecedor?.trim() || "";
+      const rawLabel = rawKey.trim();
+      const isUnresolvedTechnicalKey =
+        !resolvedLabel &&
+        (/^DB:[0-9A-F-]{20,}$/i.test(rawLabel) ||
+          /^[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(rawLabel));
+      if (isUnresolvedTechnicalKey) return;
       const prev = byFornecedor.get(key);
       if (!prev) {
         byFornecedor.set(key, {
           key,
-          fornecedor: info?.fornecedor?.trim() || rawKey.trim() || key,
+          fornecedor: resolvedLabel || rawLabel || key,
           vendedor: info?.vendedor?.trim() || "-",
           endereco: info?.endereco?.trim() || "-",
           totalProdutos: fornecedorProdutosMap[key]?.length ?? 0,

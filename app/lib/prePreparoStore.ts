@@ -4,6 +4,7 @@ export type PrePreparoStoreRow = {
   id: string;
   categoria: string;
   receita: string;
+  especificacao?: string;
   recipeImage?: string;
   custoTotal: string;
   rendimento: string;
@@ -36,6 +37,7 @@ function normalizeRows(input: unknown): PrePreparoStoreRow[] {
       id,
       categoria: String(r.categoria ?? "").trim() || "-",
       receita,
+      especificacao: String(r.especificacao ?? "").trim() || undefined,
       recipeImage: recipeImage ? recipeImage : undefined,
       custoTotal: String(r.custoTotal ?? "").trim() || "-",
       rendimento: String(r.rendimento ?? "").trim() || "-",

@@ -32,6 +32,7 @@ type FornecedorRow = {
   id: string;
   fornecedor: string;
   itens: number;
+  produtoNomes?: string[];
   vendedorNome: string;
   whatsapp: string;
   endereco: string;
@@ -42,6 +43,70 @@ function looksLikeItemId(value: string) {
   if (!s) return false;
   if (/^\d{10,}$/.test(s)) return true;
   return /^\d{8,}x\d{6,}$/.test(s);
+}
+
+function isStableFornecedorKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return false;
+  if (s.toLowerCase().startsWith("db:")) return true;
+  if (/^\d{10,}$/.test(s)) return true;
+  return /^\d{8,}x\d{6,}$/i.test(s);
+}
+
+function normalizeFornecedorKey(key: string) {
+  const s = String(key ?? "").trim();
+  if (!s) return "";
+  if (s.toLowerCase().startsWith("db:")) return `db:${s.slice(3).trim().toLowerCase()}`;
+  return isStableFornecedorKey(s) ? s : s.toUpperCase();
+}
+
+function getProdutosForKey(map: FornecedorProdutos, key: string) {
+  const raw = String(key ?? "").trim();
+  if (!raw) return [];
+  const norm = normalizeFornecedorKey(raw);
+  return map[norm] ?? map[raw] ?? map[raw.toUpperCase()] ?? map[raw.toLowerCase()] ?? [];
+}
+
+function getEquivalenciasForKey(map: FornecedorEquivalenciasMap, key: string) {
+  const raw = String(key ?? "").trim();
+  if (!raw) return [];
+  const norm = normalizeFornecedorKey(raw);
+  return map[norm] ?? map[raw] ?? map[raw.toUpperCase()] ?? map[raw.toLowerCase()] ?? [];
+}
+
+function keyVariants(rawKey: string) {
+  const raw = String(rawKey ?? "").trim();
+  const norm = normalizeFornecedorKey(raw);
+  const s = new Set<string>();
+  for (const v of [raw, norm, raw.toUpperCase(), raw.toLowerCase(), norm.toUpperCase(), norm.toLowerCase()]) {
+    const t = String(v ?? "").trim();
+    if (t) s.add(t);
+  }
+  return { norm, variants: Array.from(s.values()) };
+}
+
+function setProdutosForKey(map: FornecedorProdutos, rawKey: string, list: string[]) {
+  const { norm, variants } = keyVariants(rawKey);
+  if (!norm) return map;
+  const next: FornecedorProdutos = { ...map };
+  for (const k of variants) {
+    if (k !== norm && Object.prototype.hasOwnProperty.call(next, k)) delete (next as any)[k];
+  }
+  if (list.length) next[norm] = list;
+  else if (Object.prototype.hasOwnProperty.call(next, norm)) delete (next as any)[norm];
+  return next;
+}
+
+function setEquivalenciasForKey(map: FornecedorEquivalenciasMap, rawKey: string, list: any[]) {
+  const { norm, variants } = keyVariants(rawKey);
+  if (!norm) return map;
+  const next: FornecedorEquivalenciasMap = { ...map };
+  for (const k of variants) {
+    if (k !== norm && Object.prototype.hasOwnProperty.call(next, k)) delete (next as any)[k];
+  }
+  if (list.length) next[norm] = list as any;
+  else if (Object.prototype.hasOwnProperty.call(next, norm)) delete (next as any)[norm];
+  return next;
 }
 
 function IconBox() {
@@ -150,6 +215,7 @@ function normalizeHeader(value: unknown) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/\p{Diacritic}+/gu, "")
+    .replace(/[_-]+/g, " ")
     .replace(/\s+/g, " ");
 }
 
@@ -192,18 +258,27 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
     if (!headerMap.has(key)) headerMap.set(key, i);
   });
 
-  const hasHeader = ["fornecedor", "fornecedores", "supplier"].some((k) => headerMap.has(k));
+  const findHeader = (...terms: string[]) => {
+    for (const [key, index] of headerMap) {
+      if (terms.some((term) => key === term || key.includes(term))) return index;
+    }
+    return -1;
+  };
+  const supplierHeaderIndex = findHeader("fornecedor nome migracao", "nome text", "fornecedor", "supplier");
+  const hasHeader = supplierHeaderIndex >= 0;
   const startIndex = hasHeader ? 1 : 0;
 
   let idxFornecedor = 0;
   let idxItens = -1;
+  let idxProdutoNomes = -1;
   let idxVendedorNome = -1;
   let idxWhatsapp = -1;
   let idxEndereco = -1;
 
   if (hasHeader) {
-    idxFornecedor = headerMap.get("fornecedor") ?? headerMap.get("fornecedores") ?? 0;
-    idxItens = headerMap.get("itens") ?? headerMap.get("items") ?? -1;
+    idxFornecedor = supplierHeaderIndex;
+    idxItens = findHeader("quantidade itens", "total itens", "itens", "items");
+    idxProdutoNomes = findHeader("itens nomes migracao", "produtos nomes migracao", "itens vinculados", "produtos vinculados");
     idxEndereco = headerMap.get("endereco") ?? headerMap.get("endereço") ?? headerMap.get("address") ?? -1;
 
     const whatsappKey =
@@ -243,7 +318,15 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
     const fornecedor = String(row[idxFornecedor] ?? "").trim();
     if (!fornecedor) continue;
     const itensRaw = idxItens >= 0 ? String(row[idxItens] ?? "").trim() : "";
-    const itens = itensRaw ? Number.parseInt(itensRaw.replace(/[^\d]/g, "") || "0", 10) : 0;
+    const produtoNomes =
+      idxProdutoNomes >= 0
+        ? String(row[idxProdutoNomes] ?? "")
+            .split(/\r?\n|\||;/)
+            .map((value) => value.trim())
+            .filter(Boolean)
+        : undefined;
+    const itensParsed = itensRaw ? Number.parseInt(itensRaw.replace(/[^\d]/g, "") || "0", 10) : Number.NaN;
+    const itens = Number.isFinite(itensParsed) ? itensParsed : produtoNomes?.length ?? 0;
     const vendedorNome = idxVendedorNome >= 0 ? String(row[idxVendedorNome] ?? "").trim() || "-" : "-";
     const whatsapp = idxWhatsapp >= 0 ? String(row[idxWhatsapp] ?? "").trim() || "-" : "-";
     const endereco = idxEndereco >= 0 ? String(row[idxEndereco] ?? "").trim() || "-" : "-";
@@ -251,6 +334,7 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
       id: String(out.length + 1),
       fornecedor,
       itens: Number.isFinite(itens) ? itens : 0,
+      produtoNomes,
       vendedorNome,
       whatsapp,
       endereco,
@@ -319,6 +403,7 @@ export default function FornecedoresClient() {
   const [dragOver, setDragOver] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; label: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const markDirty = (ms = 6000) => {
     try {
@@ -453,7 +538,7 @@ export default function FornecedoresClient() {
     const nextList: FornecedorRow[] = [];
     for (const [key, info] of Object.entries(infoMap)) {
       const fornecedorLabel = info.fornecedor || key;
-      const itens = (produtosMap[key]?.length ?? 0) || 0;
+      const itens = getProdutosForKey(produtosMap, key).length || 0;
       nextList.push({
         id: key,
         fornecedor: fornecedorLabel,
@@ -489,7 +574,7 @@ export default function FornecedoresClient() {
     let changed = false;
     const next: FornecedorProdutos = {};
     for (const [k, listRaw] of Object.entries(produtosMap)) {
-      const key = String(k ?? "").trim().toUpperCase();
+      const key = normalizeFornecedorKey(k);
       const list = Array.isArray(listRaw) ? listRaw : [];
       const out: string[] = [];
       for (const raw of list) {
@@ -504,7 +589,7 @@ export default function FornecedoresClient() {
         if (!out.some((x) => x.toLowerCase() === label.toLowerCase())) out.push(label);
       }
       if (!key) continue;
-      if (key !== k) changed = true;
+      if (key !== String(k ?? "").trim()) changed = true;
       if (out.length) next[key] = out;
       if (!out.length && list.length) changed = true;
     }
@@ -556,7 +641,7 @@ export default function FornecedoresClient() {
   const produtosFornecedor = useMemo(() => {
     const key = (prodFornecedorKey ?? "").trim();
     if (!key) return [];
-    return produtosMap[key] ?? [];
+    return getProdutosForKey(produtosMap, key);
   }, [prodFornecedorKey, produtosMap]);
 
   const insumosByName = useMemo(() => {
@@ -577,12 +662,14 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
-    const existing = equivalenciasMap[key]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const list = getEquivalenciasForKey(equivalenciasMap, keyRaw);
+    const existing = list.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
+    const defaultEq = name && insumosByName.get(name.toLowerCase()) ? name : insumosStore[0]?.item ?? "";
     setVincNomeOriginal(name);
     setVincNomeNota(name);
     setVincUnidadeNota(existing?.unidadeNaNota || "Und");
-    setVincInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? ""));
+    setVincInsumoEq(existing?.insumoEquivalente || defaultEq);
     setVincEqQtd(existing?.equivalenteQuantidade || "");
     setIsVincOpen(true);
   }
@@ -592,7 +679,8 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const fornecedorKey = (prodFornecedorKey ?? "").trim();
+    const fornecedorKeyRaw = (prodFornecedorKey ?? "").trim();
+    const fornecedorKey = normalizeFornecedorKey(fornecedorKeyRaw);
     if (!fornecedorKey) return;
     const nomeNaNota = vincNomeNota.trim();
     const unidadeNaNota = vincUnidadeNota.trim() || "Und";
@@ -600,7 +688,8 @@ export default function FornecedoresClient() {
     if (!nomeNaNota || !insumoEquivalente) return;
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
     const originalName = vincNomeOriginal.trim();
-    const existing = equivalenciasMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
+    const existingList = getEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw);
+    const existing = existingList.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
     const nextItem = {
       id: existing?.id ?? String(Date.now()),
       nomeNaNota,
@@ -611,13 +700,13 @@ export default function FornecedoresClient() {
     };
     const oldName = originalName;
 
-    const curProdutos = produtosMap[fornecedorKey] ?? [];
+    const curProdutos = getProdutosForKey(produtosMap, fornecedorKeyRaw);
     const hasNomeNaNota = curProdutos.some((x) => x.toLowerCase() === nomeNaNota.toLowerCase());
     let nextProdutos = produtosMap;
 
     if (!oldName && !hasNomeNaNota) {
       const nextList = [...curProdutos, nomeNaNota];
-      nextProdutos = { ...produtosMap, [fornecedorKey]: nextList };
+      nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, nextList);
       writeFornecedorProdutosMap(nextProdutos);
       setProdutosMap(nextProdutos);
     } else if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
@@ -626,16 +715,16 @@ export default function FornecedoresClient() {
       for (const n of replaced) {
         if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
       }
-      nextProdutos = { ...produtosMap, [fornecedorKey]: dedup };
+      nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, dedup);
       writeFornecedorProdutosMap(nextProdutos);
       setProdutosMap(nextProdutos);
     }
 
-    const curEq = equivalenciasMap[fornecedorKey] ?? [];
+    const curEq = existingList;
     const filtered = curEq.filter(
       (x) => x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
     );
-    const nextEq = { ...equivalenciasMap, [fornecedorKey]: [...filtered, nextItem] };
+    const nextEq = setEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw, [...filtered, nextItem] as any[]);
     writeFornecedorEquivalenciasMap(nextEq);
     setEquivalenciasMap(nextEq);
 
@@ -649,7 +738,7 @@ export default function FornecedoresClient() {
   function openProdutos(row: FornecedorRow) {
     const key = String(row.id ?? "").trim();
     if (!key) return;
-    setProdFornecedorKey(key);
+    setProdFornecedorKey(normalizeFornecedorKey(key));
     setProdFornecedorLabel(row.fornecedor);
     setProdVendedor(row.vendedorNome || "-");
     setProdEndereco(row.endereco || "-");
@@ -665,7 +754,8 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const key = normalizeFornecedorKey(keyRaw);
     const item = (produtoDraft || produtoQuery).trim();
     if (!key) return;
     if (!item) {
@@ -676,13 +766,13 @@ export default function FornecedoresClient() {
       openVinculacao("");
       return;
     }
-    const curList = produtosMap[key] ?? [];
+    const curList = getProdutosForKey(produtosMap, keyRaw);
     const has = curList.some((x) => x.toLowerCase() === item.toLowerCase());
     if (has) {
       openVinculacao(curList.find((x) => x.toLowerCase() === item.toLowerCase()) ?? item);
       return;
     }
-    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: [...curList, item] };
+    const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, [...curList, item]);
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
@@ -700,11 +790,12 @@ export default function FornecedoresClient() {
       showToast("Modo somente leitura.", "error");
       return;
     }
-    const key = (prodFornecedorKey ?? "").trim();
+    const keyRaw = (prodFornecedorKey ?? "").trim();
+    const key = normalizeFornecedorKey(keyRaw);
     if (!key) return;
-    const cur = produtosMap[key] ?? [];
+    const cur = getProdutosForKey(produtosMap, keyRaw);
     const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
-    const nextProdutos: FornecedorProdutos = { ...produtosMap, [key]: nextList };
+    const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, nextList);
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
@@ -937,6 +1028,7 @@ export default function FornecedoresClient() {
     if (importing) return;
     setImportError(null);
     setImporting(true);
+    setImportProgress({ current: 0, total: 1, label: "Lendo a planilha..." });
     try {
       const name = file.name.toLowerCase();
       let table: unknown[][] = [];
@@ -962,27 +1054,42 @@ export default function FornecedoresClient() {
       const imported = parseSupplierRowsFromTable(table);
       if (!imported.length) throw new Error("Nenhum fornecedor encontrado na planilha.");
       const nextInfo: FornecedorInfoMap = {};
-      for (const r of imported) {
-        const fornecedor = String(r.fornecedor ?? "").trim();
-        if (!fornecedor) continue;
-        const key = fornecedor.toUpperCase();
-        const vendedor = String(r.vendedorNome ?? "").trim();
-        const whatsapp = String(r.whatsapp ?? "").trim();
-        const endereco = String(r.endereco ?? "").trim();
-        nextInfo[key] = {
-          fornecedor,
-          vendedor: vendedor && vendedor !== "-" ? vendedor : "",
-          whatsapp: whatsapp && whatsapp !== "-" ? whatsapp : "",
-          endereco: endereco && endereco !== "-" ? endereco : "",
-        };
+      const importedProdutos: FornecedorProdutos = {};
+      const chunkSize = 50;
+      for (let offset = 0; offset < imported.length; offset += chunkSize) {
+        const chunk = imported.slice(offset, offset + chunkSize);
+        for (const r of chunk) {
+          const fornecedor = String(r.fornecedor ?? "").trim();
+          if (!fornecedor) continue;
+          const key = fornecedor.toUpperCase();
+          const vendedor = String(r.vendedorNome ?? "").trim();
+          const whatsapp = String(r.whatsapp ?? "").trim();
+          const endereco = String(r.endereco ?? "").trim();
+          nextInfo[key] = {
+            fornecedor,
+            vendedor: vendedor && vendedor !== "-" ? vendedor : "",
+            whatsapp: whatsapp && whatsapp !== "-" ? whatsapp : "",
+            endereco: endereco && endereco !== "-" ? endereco : "",
+          };
+          if (r.produtoNomes) importedProdutos[key] = Array.from(new Set(r.produtoNomes));
+        }
+        setImportProgress({
+          current: Math.min(offset + chunk.length, imported.length),
+          total: imported.length,
+          label: "Preparando fornecedores e vínculos...",
+        });
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
       const keepKeys = new Set(Object.keys(nextInfo));
       const tombstones = new Set(getTombstones(produtosMap).map((x) => x.toUpperCase()));
       for (const k of keepKeys) tombstones.delete(String(k ?? "").trim().toUpperCase());
       const nextProdutos: FornecedorProdutos = withTombstones({}, Array.from(tombstones));
-      for (const [k, list] of Object.entries(produtosMap)) {
-        if (!keepKeys.has(k)) continue;
-        nextProdutos[k] = list;
+      for (const k of keepKeys) {
+        if (Object.prototype.hasOwnProperty.call(importedProdutos, k)) {
+          nextProdutos[k] = importedProdutos[k] ?? [];
+        } else if (produtosMap[k]) {
+          nextProdutos[k] = produtosMap[k];
+        }
       }
       const nextEq: FornecedorEquivalenciasMap = {};
       for (const [k, list] of Object.entries(equivalenciasMap)) {
@@ -996,12 +1103,15 @@ export default function FornecedoresClient() {
       setInfoMap(nextInfo);
       setProdutosMap(nextProdutos);
       setEquivalenciasMap(nextEq);
+      setImportProgress({ current: imported.length, total: imported.length, label: "Salvando no banco de dados..." });
+      await saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq });
       setIsImportOpen(false);
-      showToast("Fornecedores importados e salvos.", "success");
+      showToast(`${imported.length} fornecedor(es) importado(s) e salvo(s).`, "success");
     } catch (err) {
       setImportError(err instanceof Error ? err.message : String(err));
     } finally {
       setImporting(false);
+      setImportProgress(null);
       setDragOver(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -1388,15 +1498,18 @@ export default function FornecedoresClient() {
                   onDragLeave={() => setDragOver(false)}
                   onDrop={(e) => {
                     e.preventDefault();
+                    if (importing) return;
                     const file = e.dataTransfer.files?.[0] ?? null;
                     if (!file) return;
                     void importFile(file);
                   }}
-                  onClick={() => fileInputRef.current?.click()}
+                  onClick={() => {
+                    if (!importing) fileInputRef.current?.click();
+                  }}
                   role="button"
                   tabIndex={0}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") fileInputRef.current?.click();
+                    if (!importing && (e.key === "Enter" || e.key === " ")) fileInputRef.current?.click();
                   }}
                 >
                   <div className={styles.dropzoneInner}>
@@ -1426,6 +1539,30 @@ export default function FornecedoresClient() {
                     </button>
                   </div>
                 </div>
+
+                {importProgress ? (
+                  <div className={styles.importProgressPanel}>
+                    <div className={styles.importProgressHeader}>
+                      <span>{importProgress.label}</span>
+                      <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+                    </div>
+                    <div
+                      className={styles.importProgressTrack}
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={importProgress.total}
+                      aria-valuenow={importProgress.current}
+                    >
+                      <div
+                        className={styles.importProgressFill}
+                        style={{ width: `${(importProgress.current / Math.max(importProgress.total, 1)) * 100}%` }}
+                      />
+                    </div>
+                    <div className={styles.importProgressCount}>
+                      {importProgress.current} de {importProgress.total}
+                    </div>
+                  </div>
+                ) : null}
 
                 {importError ? <div className={styles.importError}>{importError}</div> : null}
 

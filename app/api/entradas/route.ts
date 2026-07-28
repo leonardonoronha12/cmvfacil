@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { performance } from "node:perf_hooks";
 import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { formatMoneyBRL, parsePtNumber } from "../../lib/bubbleCsv";
@@ -37,6 +38,31 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function canonicalUuid(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  return isUuid(s) ? s.toLowerCase() : s;
+}
+
+function isDbPrefixed(value: string) {
+  return String(value ?? "").trim().toLowerCase().startsWith("db:");
+}
+
+function dbIdFromKey(value: string) {
+  const s = String(value ?? "").trim();
+  if (!isDbPrefixed(s)) return "";
+  return s.slice(3).trim();
+}
+
+function isBadSupplierLabel(value: string) {
+  const s = String(value ?? "").trim();
+  if (!s) return true;
+  if (s === "-") return true;
+  if (isDbPrefixed(s)) return true;
+  if (isUuid(s)) return true;
+  return false;
+}
+
 function parseCsvEnv(value: string | undefined) {
   return String(value ?? "")
     .split(/[,\n;]/g)
@@ -46,6 +72,93 @@ function parseCsvEnv(value: string | undefined) {
 
 function normalizeText(v: unknown) {
   return String(v ?? "").replace(/\s+/g, " ").trim();
+}
+
+function normalizeLookupKey(v: unknown) {
+  return normalizeText(v)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function safeObj(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== "object") return {};
+  return input as Record<string, unknown>;
+}
+
+function safeArr(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
+}
+
+function pickFirstText(obj: unknown, keys: string[]) {
+  const o = safeObj(obj);
+  for (const k of keys) {
+    const v = normalizeText((o as any)[k]);
+    if (v) return v;
+  }
+  return "";
+}
+
+function isGoodSupplierLabel(value: string) {
+  const s = normalizeText(value);
+  if (isBadSupplierLabel(s)) return false;
+  if (s.length > 120) return false;
+  return /[A-Za-zÀ-ÿ]/.test(s);
+}
+
+function scanSupplierLabelDeep(raw: unknown) {
+  const maxDepth = 5;
+  const maxItems = 50;
+  let seen = 0;
+  const skipKey = (k: string) => {
+    const key = k.toLowerCase();
+    if (key.includes("produto") || key.includes("produtos")) return true;
+    if (key.includes("item") || key.includes("itens") || key.includes("items")) return true;
+    if (key.includes("equival")) return true;
+    if (key.includes("debug")) return true;
+    return false;
+  };
+  const wantsKey = (k: string) => {
+    const key = k.toLowerCase();
+    return key.includes("nome") || key.includes("fornecedor") || key.includes("supplier") || key.includes("vendor");
+  };
+  const scan = (node: unknown, depth: number): string => {
+    if (seen > maxItems) return "";
+    if (depth > maxDepth) return "";
+    if (typeof node === "string") {
+      seen += 1;
+      const s = normalizeText(node);
+      return isGoodSupplierLabel(s) ? s : "";
+    }
+    if (!node || typeof node !== "object") return "";
+    if (Array.isArray(node)) {
+      return "";
+    }
+    const obj = node as Record<string, unknown>;
+    const keys = Object.keys(obj);
+    const preferred = keys.filter((k) => !skipKey(k) && wantsKey(k));
+    const rest = keys.filter((k) => !skipKey(k) && !wantsKey(k));
+    for (const k of [...preferred, ...rest]) {
+      const v = scan(obj[k], depth + 1);
+      if (v) return v;
+    }
+    return "";
+  };
+  return scan(raw, 0);
+}
+
+function extractSupplierLabelFromRaw(raw: unknown) {
+  const base = safeObj(raw);
+  const bubble = safeObj((base as any).bubble);
+  const bubbleNormalized = safeObj((base as any).bubble_normalized);
+  const candidates = [bubble, bubbleNormalized, base];
+  const keys = ["nome", "fornecedor", "name", "Nome", "Fornecedor", "Nome do fornecedor", "nome_fornecedor", "fornecedor_nome"];
+  for (const c of candidates) {
+    const v = pickFirstText(c, keys);
+    if (isGoodSupplierLabel(v)) return v;
+  }
+  return scanSupplierLabelDeep(raw);
 }
 
 function normalizeNameKey(v: unknown) {
@@ -137,6 +250,8 @@ function formatDateLabelPTFromValue(value: unknown) {
 
 export async function GET(req: NextRequest) {
   try {
+    const url = new URL(req.url);
+    const diag = String(url.searchParams.get("diag") ?? "").trim() === "1";
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
     if (!id) return json({ source: "legacy", readOnly: false, rows: [] }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
@@ -353,7 +468,254 @@ export async function GET(req: NextRequest) {
     const prefix = `${id}:`;
     const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+
+    let companyId = "";
+    try {
+      const { data: memberRows, error: memberErr } = await supabase
+        .from("company_members")
+        .select("company_id,role,permission_level")
+        .eq("user_id", userId)
+        .limit(50);
+      if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    } catch {}
+
+    const rowsDb = (data ?? []) as any[];
+    const supplierIds = Array.from(
+      new Set(
+        rowsDb
+          .map((r) => String(r?.fornecedor ?? "").trim())
+          .map((f) => (isDbPrefixed(f) ? canonicalUuid(dbIdFromKey(f)) : isUuid(f) ? canonicalUuid(f) : ""))
+          .filter(Boolean),
+      ),
+    );
+
+    const supplierNameById = new Map<string, string>();
+    const supplierNameRawById = new Map<string, string>();
+    const supplierNameFromRawById = new Map<string, string>();
+    const supplierRawKeysById = new Map<string, string[]>();
+    const supplierBubbleKeysById = new Map<string, string[]>();
+    const supplierBubbleIdById = new Map<string, string>();
+    const supplierExternalKeyById = new Map<string, string>();
+    if (companyId && supplierIds.length) {
+      const { data: suppliersDb } = await supabase
+        .from("suppliers")
+        .select("id,nome,raw,bubble_id,external_key")
+        .eq("company_id", companyId)
+        .in("id", supplierIds)
+        .limit(5000);
+      for (const s of suppliersDb ?? []) {
+        const sid = canonicalUuid(String((s as any)?.id ?? ""));
+        const nome = String((s as any)?.nome ?? "").trim();
+        const rawObj = (s as any)?.raw;
+        const rawLabel = extractSupplierLabelFromRaw(rawObj);
+        if (sid && !supplierNameRawById.has(sid)) supplierNameRawById.set(sid, nome);
+        if (sid && rawLabel && !supplierNameFromRawById.has(sid)) supplierNameFromRawById.set(sid, rawLabel);
+        if (sid && !supplierRawKeysById.has(sid)) supplierRawKeysById.set(sid, Object.keys(safeObj(rawObj)).slice(0, 30));
+        if (sid && !supplierBubbleKeysById.has(sid)) supplierBubbleKeysById.set(sid, Object.keys(safeObj(safeObj(rawObj as any).bubble)).slice(0, 30));
+        if (sid && !supplierBubbleIdById.has(sid)) supplierBubbleIdById.set(sid, String((s as any)?.bubble_id ?? "").trim());
+        if (sid && !supplierExternalKeyById.has(sid)) supplierExternalKeyById.set(sid, String((s as any)?.external_key ?? "").trim());
+        const chosen = isGoodSupplierLabel(nome) ? nome : isGoodSupplierLabel(rawLabel) ? rawLabel : "";
+        if (sid && chosen && !supplierNameById.has(sid)) supplierNameById.set(sid, chosen);
+      }
+    }
+
+    if (companyId && supplierIds.length) {
+      for (const sid of supplierIds) {
+        if (supplierNameById.get(sid)) continue;
+        const bubbleId = String(supplierBubbleIdById.get(sid) ?? "").trim();
+        const externalKey = String(supplierExternalKeyById.get(sid) ?? "").trim();
+        try {
+          if (bubbleId) {
+            const { data: alt } = await supabase
+              .from("suppliers")
+              .select("id,nome")
+              .eq("company_id", companyId)
+              .eq("bubble_id", bubbleId)
+              .limit(25);
+            for (const r of alt ?? []) {
+              const nome = String((r as any)?.nome ?? "").trim();
+              if (isGoodSupplierLabel(nome)) {
+                supplierNameById.set(sid, nome);
+                break;
+              }
+            }
+          }
+          if (!supplierNameById.get(sid) && externalKey) {
+            const { data: alt } = await supabase
+              .from("suppliers")
+              .select("id,nome")
+              .eq("company_id", companyId)
+              .eq("external_key", externalKey)
+              .limit(25);
+            for (const r of alt ?? []) {
+              const nome = String((r as any)?.nome ?? "").trim();
+              if (isGoodSupplierLabel(nome)) {
+                supplierNameById.set(sid, nome);
+                break;
+              }
+            }
+          }
+        } catch {}
+      }
+    }
+
+    const fallbackNameById = new Map<string, string>();
+    let fornecedoresStateInfo: any = null;
+    let fornecedoresStateProdutos: any = null;
+    if (supplierIds.length) {
+      try {
+        const { data: st } = await supabase.from("fornecedores_state").select("info,produtos").eq("id", id).maybeSingle();
+        const infoMap = (st as any)?.info && typeof (st as any)?.info === "object" ? ((st as any).info as any) : null;
+        const produtosMap = (st as any)?.produtos && typeof (st as any)?.produtos === "object" ? ((st as any).produtos as any) : null;
+        fornecedoresStateInfo = infoMap;
+        fornecedoresStateProdutos = produtosMap;
+        if (infoMap) {
+          for (const sid of supplierIds) {
+            if (supplierNameById.get(sid)) continue;
+            const key = `db:${sid}`;
+            const row = infoMap[key] ?? infoMap[key.toUpperCase()] ?? null;
+            const label = row && typeof row === "object" ? String((row as any)?.fornecedor ?? "").trim() : "";
+            if (label && !isBadSupplierLabel(label) && !fallbackNameById.has(sid)) fallbackNameById.set(sid, label);
+          }
+        }
+      } catch {}
+    }
+
+    const inferredNameById = new Map<string, string>();
+    if (companyId && supplierIds.length) {
+      const targets = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid));
+      for (const targetId of targets) {
+        try {
+          const { data: linksTarget } = await supabase
+            .from("supplier_items")
+            .select("item_id")
+            .eq("company_id", companyId)
+            .eq("supplier_id", targetId)
+            .limit(2000);
+          const itemIds = Array.from(
+            new Set((linksTarget ?? []).map((r: any) => String(r?.item_id ?? "").trim()).filter(Boolean)),
+          ).slice(0, 200);
+          if (!itemIds.length) continue;
+
+          const { data: linksOthers } = await supabase
+            .from("supplier_items")
+            .select("supplier_id,item_id")
+            .eq("company_id", companyId)
+            .in("item_id", itemIds)
+            .limit(5000);
+          const counts = new Map<string, number>();
+          for (const r of linksOthers ?? []) {
+            const sid = canonicalUuid(String((r as any)?.supplier_id ?? ""));
+            if (!sid || sid === targetId) continue;
+            counts.set(sid, (counts.get(sid) ?? 0) + 1);
+          }
+          if (!counts.size) continue;
+          const sorted = Array.from(counts.entries()).sort((a, b) => b[1] - a[1]);
+          const [bestId, bestCount] = sorted[0] ?? ["", 0];
+          if (!bestId || !bestCount) continue;
+          const threshold = Math.min(itemIds.length, 6);
+          if (bestCount < threshold) continue;
+
+          let candidateName = String(supplierNameById.get(bestId) ?? "").trim();
+          if (!isGoodSupplierLabel(candidateName)) {
+            const { data: row } = await supabase.from("suppliers").select("nome").eq("company_id", companyId).eq("id", bestId).limit(1).maybeSingle();
+            candidateName = String((row as any)?.nome ?? "").trim();
+          }
+          if (!isGoodSupplierLabel(candidateName)) continue;
+          inferredNameById.set(targetId, candidateName);
+        } catch {}
+      }
+    }
+
+    if (fornecedoresStateProdutos && fornecedoresStateInfo && supplierIds.length) {
+      const produtosMap = fornecedoresStateProdutos as Record<string, unknown>;
+      const infoMap = fornecedoresStateInfo as Record<string, unknown>;
+      const wanted = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
+      for (const sid of wanted) {
+        try {
+          const keyDb = `db:${sid}`;
+          const rowsWithSupplier = rowsDb.filter((r) => normalizeLookupKey((r as any)?.fornecedor) === normalizeLookupKey(keyDb));
+          const names = Array.from(
+            new Set(
+              rowsWithSupplier
+                .flatMap((r) => safeArr((r as any)?.itens_nota))
+                .map((it: any) => normalizeLookupKey(it?.nome))
+                .filter(Boolean),
+            ),
+          );
+          if (!names.length) continue;
+          const wantedSet = new Set(names);
+          let bestKey = "";
+          let bestScore = 0;
+          for (const k of Object.keys(produtosMap)) {
+            const arr = safeArr((produtosMap as any)[k]).map((x) => normalizeLookupKey(x)).filter(Boolean);
+            if (!arr.length) continue;
+            let score = 0;
+            for (const n of arr) if (wantedSet.has(n)) score += 1;
+            if (score > bestScore) {
+              bestScore = score;
+              bestKey = k;
+            }
+          }
+          const threshold = Math.min(2, names.length);
+          if (!bestKey || bestScore < threshold) continue;
+          const infoRow = (infoMap as any)[bestKey] ?? (infoMap as any)[String(bestKey).toUpperCase()] ?? null;
+          const label = infoRow && typeof infoRow === "object" ? String((infoRow as any)?.fornecedor ?? "").trim() : "";
+          if (isGoodSupplierLabel(label)) inferredNameById.set(sid, label);
+        } catch {}
+      }
+    }
+
+    const missingSupplierIds: string[] = [];
+    const invalidSupplierNames: Array<{ id: string; nome: string }> = [];
+    const rows = rowsDb.map((r) => {
+      const fornecedorRaw = String(r?.fornecedor ?? "").trim();
+      const dbId = isDbPrefixed(fornecedorRaw) ? canonicalUuid(dbIdFromKey(fornecedorRaw)) : isUuid(fornecedorRaw) ? canonicalUuid(fornecedorRaw) : "";
+      const storedNome = normalizeText((r as any)?.fornecedor_nome ?? "");
+      const primary = dbId ? String(supplierNameById.get(dbId) ?? "").trim() : "";
+      const fallback = dbId ? String(fallbackNameById.get(dbId) ?? "").trim() : "";
+      const rawNome = dbId ? String(supplierNameRawById.get(dbId) ?? "").trim() : "";
+      const rawLabel = dbId ? String(supplierNameFromRawById.get(dbId) ?? "").trim() : "";
+      const inferred = dbId ? String(inferredNameById.get(dbId) ?? "").trim() : "";
+      const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback || inferred;
+      if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
+      if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
+      return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
+    });
+
+    return json(
+      {
+        source: "legacy",
+        readOnly: false,
+        ...(diag
+          ? {
+              diag: {
+                companyId: companyId || null,
+                supplierIdsCount: supplierIds.length,
+                suppliersResolved: supplierNameById.size,
+                suppliersFallbackResolved: fallbackNameById.size,
+                missingSupplierIds,
+                invalidSupplierNames,
+                ...(supplierIds.length && (missingSupplierIds.length || invalidSupplierNames.length || supplierIds.length <= 5)
+                  ? {
+                      supplierLabelDebug: supplierIds.slice(0, 5).map((sid) => ({
+                        id: sid,
+                        nomeCol: supplierNameRawById.get(sid) ?? null,
+                        rawLabel: supplierNameFromRawById.get(sid) ?? null,
+                        rawKeys: supplierRawKeysById.get(sid) ?? [],
+                        bubbleKeys: supplierBubbleKeysById.get(sid) ?? [],
+                        resolved: supplierNameById.get(sid) ?? null,
+                        inferred: inferredNameById.get(sid) ?? null,
+                      })),
+                    }
+                  : null),
+              },
+            }
+          : null),
+        rows,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -361,17 +723,31 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
+    const t0 = performance.now();
     const body = (await req.json().catch(() => null)) as unknown;
+    const tJson = performance.now();
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
     const { accessToken, id } = resolveUserScopedId(req);
     const prefix = id ? `${id}:` : "";
     if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
-    const entradaId = String((body as any).id ?? "").trim();
-    if (!entradaId || !entradaId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    const bodyRows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : [body];
+    if (!bodyRows.length || bodyRows.length > 100) return json({ error: "invalid_batch_size" }, { status: 400 });
+    const rows = bodyRows.filter((row) => row && typeof row === "object") as Record<string, unknown>[];
+    if (rows.length !== bodyRows.length) return json({ error: "invalid_batch_row" }, { status: 400 });
+    const invalidIds = rows
+      .map((row) => String(row.id ?? "").trim())
+      .filter((entradaId) => !entradaId || !entradaId.startsWith(prefix));
+    if (invalidIds.length) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
-    const { error } = await supabase.from("entradas").upsert(body as any, { onConflict: "id" });
+    const tBeforeUpsert = performance.now();
+    const { error } = await supabase.from("entradas").upsert(rows as any, { onConflict: "id" });
+    const tAfterUpsert = performance.now();
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    const total = tAfterUpsert - t0;
+    const jsonMs = tJson - t0;
+    const upsertMs = tAfterUpsert - tBeforeUpsert;
+    const serverTiming = `total;dur=${total.toFixed(1)}, json;dur=${jsonMs.toFixed(1)}, upsert;dur=${upsertMs.toFixed(1)}`;
+    return json({ ok: true, savedCount: rows.length }, { status: 200, headers: { "server-timing": serverTiming } });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

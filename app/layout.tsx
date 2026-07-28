@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import type { Metadata } from "next";
+import dynamic from "next/dynamic";
 import AuthRecoveryRedirect from "./AuthRecoveryRedirect";
-import AppShell from "./components/AppShell";
 import "./globals.css";
+
+const AppShell = dynamic(() => import("./components/AppShell"), { ssr: false });
 
 export const metadata: Metadata = {
   title: "CMV Fácil",

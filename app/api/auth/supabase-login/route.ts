@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { SUPABASE_AT_COOKIE, SUPABASE_RT_COOKIE, parseJwtExpMs } from "../../../lib/supabaseAuthCookies";
-import { shouldUseSecureCookies } from "../../../lib/cookieSecurity";
+import { getAuthCookieDomain, shouldUseSecureCookies } from "../../../lib/cookieSecurity";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
 
   const res = json({ ok: true });
   const secure = shouldUseSecureCookies(req);
-  const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/" };
+  const domain = getAuthCookieDomain(req);
+  const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/", ...(domain ? { domain } : {}) };
 
   res.cookies.set({
     name: SUPABASE_AT_COOKIE,
