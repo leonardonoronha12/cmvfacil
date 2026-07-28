@@ -936,8 +936,9 @@ export default function FichasTecnicasClient({
     }, durationMs);
   }
 
-  async function importFichasFile(file: File) {
+  async function importFichasFiles(files: File[]) {
     if (isImporting || isReadOnly) return;
+    if (!files.length) return;
     if (isLoadingTable) {
       showToast("Aguarde o carregamento das fichas técnicas antes de importar.", "error", 7000);
       return;
@@ -946,26 +947,39 @@ export default function FichasTecnicasClient({
     setImportProgress({ current: 0, total: 1, stage: "Lendo a planilha..." });
     try {
       const XLSX = await import("xlsx");
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      if (!sheet) throw new Error("A planilha não possui uma aba válida.");
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const normalizedRows = rawRows.map((raw) => {
-        const values = Object.entries(raw).map(([key, value]) => [normalizeText(key), value] as const);
-        const get = (...keys: string[]) => {
-          for (const key of keys) {
-            const found = values.find(([candidate]) => candidate === normalizeText(key));
-            if (found) return String(found[1] ?? "").trim();
-          }
-          return "";
-        };
-        return { get };
-      });
+      const normalizedRows: Array<{ get: (...keys: string[]) => string }> = [];
+      for (const file of files) {
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        if (!sheet) continue;
+        const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+        normalizedRows.push(
+          ...rawRows.map((raw) => {
+            const values = Object.entries(raw).map(([key, value]) => [normalizeText(key), value] as const);
+            const get = (...keys: string[]) => {
+              for (const key of keys) {
+                const found = values.find(([candidate]) => candidate === normalizeText(key));
+                if (found) return String(found[1] ?? "").trim();
+              }
+              return "";
+            };
+            return { get };
+          }),
+        );
+      }
+      if (!normalizedRows.length) throw new Error("As planilhas não possuem dados válidos.");
       const recipes = normalizedRows.filter(({ get }) => {
         const flag = normalizeText(get("boolean_item_receita", "item_receita"));
         return flag === "true" || flag === "sim" || flag === "1";
       });
       if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
+
+      const ingredientRecordsById = new Map(
+        normalizedRows
+          .filter(({ get }) => get("unique id", "unique_id") && get("item_id", "ingrediente_nome", "item_nome"))
+          .map(({ get }) => [get("unique id", "unique_id"), { get }] as const),
+      );
+      const ingredientOptionByName = new Map(ingredientOptions.map((option) => [normalizeText(option.item), option]));
 
       // Merge against the freshest persisted snapshot so a stale render can
       // never replace recipes that were still loading in the background.
@@ -996,6 +1010,31 @@ export default function FichasTecnicasClient({
           const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
           const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
           const bubbleId = get("unique id", "unique_id", "bubble_id");
+          const linkedIngredientIds = get("lista_ingredientes", "ingredientes")
+            .split(",")
+            .map((value) => value.trim())
+            .filter(Boolean);
+          const importedIngredientRows = linkedIngredientIds.flatMap((ingredientRecordId) => {
+            const record = ingredientRecordsById.get(ingredientRecordId);
+            if (!record) return [];
+            const item = record.get("item_id", "ingrediente_nome", "item_nome");
+            if (!item) return [];
+            const option = ingredientOptionByName.get(normalizeText(item));
+            const quantidadeNumber = parseDecimalInput(record.get("quantidade"));
+            const custo = Math.max(0, parseDecimalInput(record.get("custo", "custo_total")));
+            return [
+              {
+                id: `bubble:${ingredientRecordId}`,
+                ingredientId: option?.id || `bubble-item:${normalizeText(item)}`,
+                item,
+                quantidade: quantidadeNumber.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
+                unidade: option?.medida || "Und",
+                custoTotal: custo,
+              } satisfies ModalIngredientRow,
+            ];
+          });
+          const finalIngredientRows = importedIngredientRows.length ? importedIngredientRows : previous?.ingredientRows ?? [];
+          const importedIngredientsTotal = importedIngredientRows.reduce((total, row) => total + row.custoTotal, 0);
           imported.push({
             id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
             receita,
@@ -1008,9 +1047,9 @@ export default function FichasTecnicasClient({
             thumb: previous?.thumb ?? "burger",
             recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
             popularidade: pop,
-            ingredientsTotal: previous?.ingredientsTotal ?? custoTotalNumber,
+            ingredientsTotal: importedIngredientRows.length ? importedIngredientsTotal : previous?.ingredientsTotal ?? custoTotalNumber,
             recipeYield: rendimentoNumber,
-            ingredientRows: previous?.ingredientRows ?? [],
+            ingredientRows: finalIngredientRows,
             modoPreparo: get("modo_preparo", "modo de preparo") || previous?.modoPreparo || "",
           });
         }
@@ -2759,11 +2798,12 @@ export default function FichasTecnicasClient({
                 <input
                   ref={importFileRef}
                   type="file"
+                  multiple
                   accept=".csv,.xlsx,.xls,text/csv"
                   className={styles.hiddenFileInput}
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importFichasFile(file);
+                    const files = Array.from(event.target.files ?? []);
+                    if (files.length) void importFichasFiles(files);
                   }}
                 />
                 <button
