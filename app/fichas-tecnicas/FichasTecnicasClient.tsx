@@ -863,6 +863,7 @@ export default function FichasTecnicasClient({
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const toastTimerRef = useRef<number | null>(null);
   const saveTimeoutRef = useRef<number | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const saveErrorShownRef = useRef(false);
   const loadErrorShownRef = useRef(false);
@@ -923,6 +924,8 @@ export default function FichasTecnicasClient({
   const [actionMenuRect, setActionMenuRect] = useState<{ left: number; top: number } | null>(null);
   const [editDraft, setEditDraft] = useState<EditRecipeDraft | null>(null);
   const [deleteRow, setDeleteRow] = useState<RecipeRow | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -931,6 +934,93 @@ export default function FichasTecnicasClient({
       setToast(null);
       toastTimerRef.current = null;
     }, durationMs);
+  }
+
+  async function importFichasFile(file: File) {
+    if (isImporting || isReadOnly) return;
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: 1, stage: "Lendo a planilha..." });
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      if (!sheet) throw new Error("A planilha não possui uma aba válida.");
+      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
+      const normalizedRows = rawRows.map((raw) => {
+        const values = Object.entries(raw).map(([key, value]) => [normalizeText(key), value] as const);
+        const get = (...keys: string[]) => {
+          for (const key of keys) {
+            const found = values.find(([candidate]) => candidate === normalizeText(key));
+            if (found) return String(found[1] ?? "").trim();
+          }
+          return "";
+        };
+        return { get };
+      });
+      const recipes = normalizedRows.filter(({ get }) => {
+        const flag = normalizeText(get("boolean_item_receita", "item_receita"));
+        return flag === "true" || flag === "sim" || flag === "1";
+      });
+      if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
+
+      const existingByName = new Map(tableRows.map((row) => [normalizeText(row.receita), row]));
+      const imported: RecipeRow[] = [];
+      const chunkSize = 25;
+      for (let offset = 0; offset < recipes.length; offset += chunkSize) {
+        const chunk = recipes.slice(offset, offset + chunkSize);
+        for (const { get } of chunk) {
+          const receita = get("nome", "receita");
+          if (!receita) continue;
+          const previous = existingByName.get(normalizeText(receita));
+          const precoVendaNumber = parseDecimalInput(get("preco_venda_total", "preco_venda", "preco venda"));
+          const rendimentoNumber = Math.max(parseDecimalInput(get("rendimento")) || 1, 0.000001);
+          const custoTotalNumber = parseDecimalInput(get("custo_total_receita", "custo_total"));
+          const custoUnitarioNumber = custoTotalNumber / rendimentoNumber;
+          const cmvMetaNumber = parseDecimalInput(get("cmv_desejado", "cmv_meta"));
+          const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
+          const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
+          const bubbleId = get("unique id", "unique_id", "bubble_id");
+          imported.push({
+            id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
+            receita,
+            precoVenda: formatMoney(precoVendaNumber),
+            custoUnitario: formatMoney(custoUnitarioNumber),
+            cmvMeta: `${cmvMetaNumber.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
+            cmvAtual: `${formatPercent1(cmvAtualNumber)}%`,
+            cmvDelta: buildCmvDeltaLabel(cmvAtualNumber, cmvMetaNumber),
+            bcg: computeBcg(pop, cmvAtualNumber, cmvMetaNumber),
+            thumb: previous?.thumb ?? "burger",
+            recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
+            popularidade: pop,
+            ingredientsTotal: previous?.ingredientsTotal ?? custoTotalNumber,
+            recipeYield: rendimentoNumber,
+            ingredientRows: previous?.ingredientRows ?? [],
+            modoPreparo: get("modo_preparo", "modo de preparo") || previous?.modoPreparo || "",
+          });
+        }
+        setImportProgress({
+          current: Math.min(offset + chunk.length, recipes.length),
+          total: recipes.length,
+          stage: "Preparando fichas técnicas...",
+        });
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+
+      const importedNames = new Set(imported.map((row) => normalizeText(row.receita)));
+      const merged = [...tableRows.filter((row) => !importedNames.has(normalizeText(row.receita))), ...imported];
+      setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
+      writeFichasTecnicasToStore(merged as any);
+      if (isSupabaseFichasEnabled) await saveFichasTecnicasToSupabase(merged as any);
+      setTableRows(merged);
+      setPage(1);
+      showToast(`${imported.length} ficha(s) técnica(s) importada(s) com sucesso.`, "success", 7000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Não foi possível importar a planilha.", "error", 8000);
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
   }
 
   useEffect(() => {
@@ -1502,7 +1592,7 @@ export default function FichasTecnicasClient({
     for (const [id, q] of qtyById.entries()) {
       const c = centsById.get(id) ?? 0;
       if (!q || !c) continue;
-      out.set(id, Math.round(c / q));
+      out.set(id, c / q);
     }
     return out;
   }, [entradas, fornecedorEquivalenciasMap, insumos]);
@@ -2645,12 +2735,50 @@ export default function FichasTecnicasClient({
             </div>
 
             {isReadOnly ? null : (
-              <button type="button" className={styles.newButton} onClick={openCreateModal}>
-                <PlusIcon />
-                Nova Ficha Técnica
-              </button>
+              <div className={styles.headerActions}>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls,text/csv"
+                  className={styles.hiddenFileInput}
+                  onChange={(event) => {
+                    const file = event.target.files?.[0];
+                    if (file) void importFichasFile(file);
+                  }}
+                />
+                <button
+                  type="button"
+                  className={styles.importButton}
+                  disabled={isImporting}
+                  onClick={() => importFileRef.current?.click()}
+                >
+                  {isImporting ? "Importando..." : "Importar planilha"}
+                </button>
+                <button type="button" className={styles.newButton} onClick={openCreateModal} disabled={isImporting}>
+                  <PlusIcon />
+                  Nova Ficha Técnica
+                </button>
+              </div>
             )}
           </section>
+
+          {importProgress ? (
+            <section className={styles.importProgressPanel} aria-live="polite">
+              <div className={styles.importProgressHeader}>
+                <span>{importProgress.stage}</span>
+                <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+              </div>
+              <div className={styles.importProgressTrack}>
+                <div
+                  className={styles.importProgressFill}
+                  style={{ width: `${Math.max(2, (importProgress.current / Math.max(importProgress.total, 1)) * 100)}%` }}
+                />
+              </div>
+              <div className={styles.importProgressCount}>
+                {importProgress.current.toLocaleString("pt-BR")} de {importProgress.total.toLocaleString("pt-BR")} fichas
+              </div>
+            </section>
+          ) : null}
 
           <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
 
