@@ -1825,7 +1825,17 @@ export default function PrePreparoClient() {
   function confirmDelete() {
     const id = deletingId;
     if (!id) return;
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    const nextRows = rows.filter((r) => r.id !== id);
+    if (nextRows.length === 0) {
+      if (savePrePreparoTimeoutRef.current) {
+        window.clearTimeout(savePrePreparoTimeoutRef.current);
+        savePrePreparoTimeoutRef.current = null;
+      }
+      void savePrePreparoToSupabase([], { allowEmpty: true }).catch((err) => {
+        showToast(supabaseSaveErrorMessage(err), "error");
+      });
+    }
+    setRows(nextRows);
     setIsDeleteOpen(false);
     setDeletingId(null);
     setDeletingName("");

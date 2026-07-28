@@ -362,9 +362,28 @@ export async function POST(req: NextRequest) {
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
     const rows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : null;
     if (!rows) return json({ error: "missing_rows" }, { status: 400 });
+    const allowEmpty = (body as any).allowEmpty === true;
     const { accessToken, id } = resolveUserScopedId(req);
     if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    if (rows.length === 0 && !allowEmpty) {
+      const { data: current, error: currentError } = await supabase
+        .from("pre_preparo_state")
+        .select("payload")
+        .eq("id", id)
+        .maybeSingle();
+      if (currentError) return json({ error: currentError.message }, { status: 500 });
+      const currentRows = Array.isArray((current as any)?.payload) ? ((current as any).payload as unknown[]) : [];
+      if (currentRows.length > 0) {
+        return json(
+          {
+            error: "stale_empty_write_rejected",
+            persistedRows: currentRows.length,
+          },
+          { status: 409 },
+        );
+      }
+    }
     const { error } = await supabase.from("pre_preparo_state").upsert({ id, payload: rows } as any, { onConflict: "id" });
     if (error) return json({ error: error.message }, { status: 500 });
     const { data: persisted, error: verifyError } = await supabase

@@ -82,11 +82,11 @@ export async function loadPrePreparoFromSupabase(userId?: string) {
   return st.rows;
 }
 
-export async function savePrePreparoToSupabase(rows: PrePreparoStoreRow[]) {
+export async function savePrePreparoToSupabase(rows: PrePreparoStoreRow[], options?: { allowEmpty?: boolean }) {
   const res = await fetch("/api/pre-preparo", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rows }),
+    body: JSON.stringify({ rows, allowEmpty: options?.allowEmpty === true }),
   });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_save_${res.status}`);
