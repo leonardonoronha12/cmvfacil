@@ -346,6 +346,16 @@ function parseDecimalInput(value: string) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function parseImportedDecimal(value: string) {
+  const raw = String(value ?? "")
+    .replace(/[^\d,.-]/g, "")
+    .trim();
+  if (!raw) return 0;
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const num = Number(normalized);
+  return Number.isFinite(num) ? num : 0;
+}
+
 function formatDecimal3(value: number) {
   return value.toLocaleString("pt-BR", {
     minimumFractionDigits: 3,
@@ -1002,11 +1012,11 @@ export default function FichasTecnicasClient({
           const receita = get("nome", "receita");
           if (!receita) continue;
           const previous = existingByName.get(normalizeText(receita));
-          const precoVendaNumber = parseDecimalInput(get("preco_venda_total", "preco_venda", "preco venda"));
-          const rendimentoNumber = Math.max(parseDecimalInput(get("rendimento")) || 1, 0.000001);
-          const custoTotalNumber = parseDecimalInput(get("custo_total_receita", "custo_total"));
+          const precoVendaNumber = parseImportedDecimal(get("preco_venda_total", "preco_venda", "preco venda"));
+          const rendimentoNumber = Math.max(parseImportedDecimal(get("rendimento")) || 1, 0.000001);
+          const custoTotalNumber = parseImportedDecimal(get("custo_total_receita", "custo_total"));
           const custoUnitarioNumber = custoTotalNumber / rendimentoNumber;
-          const cmvMetaNumber = parseDecimalInput(get("cmv_desejado", "cmv_meta"));
+          const cmvMetaNumber = parseImportedDecimal(get("cmv_desejado", "cmv_meta"));
           const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
           const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
           const bubbleId = get("unique id", "unique_id", "bubble_id");
@@ -1020,8 +1030,8 @@ export default function FichasTecnicasClient({
             const item = record.get("item_id", "ingrediente_nome", "item_nome");
             if (!item) return [];
             const option = ingredientOptionByName.get(normalizeText(item));
-            const quantidadeNumber = parseDecimalInput(record.get("quantidade"));
-            const custo = Math.max(0, parseDecimalInput(record.get("custo", "custo_total")));
+            const quantidadeNumber = parseImportedDecimal(record.get("quantidade"));
+            const custo = Math.max(0, parseImportedDecimal(record.get("custo", "custo_total")));
             return [
               {
                 id: `bubble:${ingredientRecordId}`,
