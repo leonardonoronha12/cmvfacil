@@ -731,6 +731,12 @@ export default function PrePreparoClient() {
       showToast("Aguarde o carregamento dos pré-preparos antes de importar.", "error");
       return;
     }
+    // Prevent an autosave scheduled with the old list from overwriting the
+    // freshly imported rows after the direct import save finishes.
+    if (savePrePreparoTimeoutRef.current) {
+      window.clearTimeout(savePrePreparoTimeoutRef.current);
+      savePrePreparoTimeoutRef.current = null;
+    }
     setIsImporting(true);
     setImportProgress({ current: 0, total: 1, stage: "Lendo as planilhas..." });
     try {
@@ -1217,7 +1223,7 @@ export default function PrePreparoClient() {
   }, [isReadOnly]);
 
   useEffect(() => {
-    if (isReadOnly) return;
+    if (isReadOnly || isImporting) return;
     if (!prePreparoLoadedRef.current) return;
     if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
     savePrePreparoTimeoutRef.current = window.setTimeout(() => {
@@ -1238,7 +1244,13 @@ export default function PrePreparoClient() {
           }
         });
     }, 700);
-  }, [isReadOnly, rows]);
+    return () => {
+      if (savePrePreparoTimeoutRef.current) {
+        window.clearTimeout(savePrePreparoTimeoutRef.current);
+        savePrePreparoTimeoutRef.current = null;
+      }
+    };
+  }, [isImporting, isReadOnly, rows]);
 
   useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);

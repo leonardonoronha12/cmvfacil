@@ -367,7 +367,24 @@ export async function POST(req: NextRequest) {
     const supabase = getSupabaseServerClient(accessToken);
     const { error } = await supabase.from("pre_preparo_state").upsert({ id, payload: rows } as any, { onConflict: "id" });
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    const { data: persisted, error: verifyError } = await supabase
+      .from("pre_preparo_state")
+      .select("id,payload")
+      .eq("id", id)
+      .maybeSingle();
+    if (verifyError) return json({ error: verifyError.message, code: "save_verification_failed" }, { status: 500 });
+    const persistedRows = Array.isArray((persisted as any)?.payload) ? ((persisted as any).payload as unknown[]) : null;
+    if (!persistedRows || persistedRows.length !== rows.length) {
+      return json(
+        {
+          error: "save_verification_failed",
+          expectedRows: rows.length,
+          persistedRows: persistedRows?.length ?? 0,
+        },
+        { status: 500 },
+      );
+    }
+    return json({ ok: true, persistedRows: persistedRows.length }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
