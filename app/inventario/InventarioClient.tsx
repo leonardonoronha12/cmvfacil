@@ -16,6 +16,14 @@ import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInve
 import { buildUserScopedId } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
+import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
+import {
+  formatBubbleDate,
+  normalizeBubbleName,
+  parseBubbleDecimal,
+  readBubbleSpreadsheetFiles,
+  repairBubbleText,
+} from "../lib/bubbleSpreadsheetImport";
 
 function IconBox() {
   return (
@@ -172,6 +180,7 @@ function normalizeContagens(list: InventarioContagem[]) {
 const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingInventario, setIsLoadingInventario] = useState(true);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -204,6 +213,15 @@ export default function InventarioClient() {
   const [pendingKeepDraft, setPendingKeepDraft] = useState("");
   const [pendingCleanupError, setPendingCleanupError] = useState("");
   const [pendingCleanupBusy, setPendingCleanupBusy] = useState(false);
+  const [isAddItemOpen, setIsAddItemOpen] = useState(false);
+  const [addItemName, setAddItemName] = useState("");
+  const [addItemCategory, setAddItemCategory] = useState("");
+  const [addItemUnit, setAddItemUnit] = useState("Und");
+  const [addItemQuantity, setAddItemQuantity] = useState("");
+  const [addItemError, setAddItemError] = useState("");
+  const [addItemBusy, setAddItemBusy] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   const [menuContagemId, setMenuContagemId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -877,6 +895,164 @@ export default function InventarioClient() {
     }
   }
 
+  async function importInventarios(files: File[]) {
+    if (!files.length || isImporting || isReadOnly || isLoadingInventario) return;
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: 1, stage: "Lendo as planilhas..." });
+    try {
+      const importedRows = await readBubbleSpreadsheetFiles(files);
+      const inventoryRows = importedRows.filter(
+        ({ get }) =>
+          !get("inventario_id") &&
+          Boolean(get("nome")) &&
+          Boolean(get("data_contagem")) &&
+          Boolean(get("unique id", "unique_id")),
+      );
+      if (!inventoryRows.length) throw new Error("Nenhum inventário foi encontrado nas planilhas.");
+      const inventoryItems = importedRows.filter(({ get }) => get("inventario_id", "data_contagem") && get("item_id", "item_nome-migração", "item_nome_migracao", "item_nome"));
+
+      const itemCatalog = new Map<string, { categoria: string; unidade: string }>();
+      for (const item of insumosStore) {
+        itemCatalog.set(normalizeBubbleName(item.item), { categoria: normCatName(String(item.categoria ?? "")) || "Sem categoria", unidade: item.medida || "Und" });
+      }
+      for (const item of prePreparoStore) {
+        itemCatalog.set(normalizeBubbleName(item.receita), { categoria: normCatName(item.categoria) || "Pré-Preparo", unidade: parseUnitFromPrePreparo(item) });
+      }
+      for (const item of fichasTecnicasRows) {
+        itemCatalog.set(normalizeBubbleName(String(item.receita ?? "")), { categoria: "Ficha Técnica", unidade: "Und" });
+      }
+
+      const base = await loadInventarioFromSupabase().catch(() => contagens);
+      const existingByDate = new Map(base.map((row) => [row.data, row]));
+      const imported: InventarioContagem[] = [];
+      for (let index = 0; index < inventoryRows.length; index += 1) {
+        const { get } = inventoryRows[index];
+        const bubbleId = get("unique id", "unique_id", "bubble_id");
+        const data = formatBubbleDate(get("data_contagem")) || get("nome");
+        if (!data) continue;
+        const inventoryName = get("nome") || data;
+        const related = inventoryItems.filter(({ get: itemGet }) => {
+          const ref = itemGet("inventario_id");
+          const itemDate = formatBubbleDate(itemGet("data_contagem"));
+          return ref === bubbleId || normalizeBubbleName(ref) === normalizeBubbleName(inventoryName) || (itemDate && itemDate === data);
+        });
+        const grouped = new Map<string, InventarioItemRow[]>();
+        for (const { get: itemGet } of related) {
+          const item = repairBubbleText(itemGet("item_nome-migração", "item_nome_migracao", "item_nome", "item_id"));
+          if (!item) continue;
+          const catalog = itemCatalog.get(normalizeBubbleName(item));
+          const categoria = repairBubbleText(itemGet("categoria_nome-migração", "categoria_nome_migracao", "categoria")) || catalog?.categoria || "Sem categoria";
+          const unidade = repairBubbleText(itemGet("unidade_nome-migração", "unidade_nome_migracao", "unidade")) || catalog?.unidade || "Und";
+          const quantidadeRaw = itemGet("quantidade_contada", "estoque_final", "quantidade");
+          const quantidade = quantidadeRaw ? parseBubbleDecimal(quantidadeRaw).toLocaleString("pt-BR", { maximumFractionDigits: 3 }) : "";
+          const itemId = itemGet("unique id", "unique_id");
+          const categoryItems = grouped.get(categoria) ?? [];
+          categoryItems.push({
+            id: itemId ? `bubble:${itemId}` : `${bubbleId}:${normalizeBubbleName(item)}`,
+            item,
+            unidade,
+            estoqueFinal: quantidade,
+          });
+          grouped.set(categoria, categoryItems);
+        }
+        const categorias: InventarioCategoria[] = Array.from(grouped.entries()).map(([nome, itens], categoryIndex) => ({
+          id: `${bubbleId || data}:cat:${categoryIndex}`,
+          nome,
+          status: itens.every((item) => Boolean(item.estoqueFinal)) ? "concluida" : "pendente",
+          itens,
+        }));
+        const previous = existingByDate.get(data);
+        imported.push({
+          id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
+          data,
+          categorias: categorias.length ? categorias : previous?.categorias ?? [],
+        });
+        setImportProgress({ current: index + 1, total: inventoryRows.length, stage: "Preparando inventários..." });
+        if ((index + 1) % 10 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+      if (!imported.length) throw new Error("Nenhum inventário válido foi encontrado.");
+
+      setImportProgress({ current: 0, total: imported.length, stage: "Salvando inventários..." });
+      for (let index = 0; index < imported.length; index += 1) {
+        await upsertInventarioToSupabase(imported[index]);
+        setImportProgress({ current: index + 1, total: imported.length, stage: "Salvando inventários..." });
+      }
+      const importedDates = new Set(imported.map((row) => row.data));
+      const merged = sortContagensDesc([...base.filter((row) => !importedDates.has(row.data)), ...imported]);
+      writeInventarioToStore(merged);
+      setContagens(merged);
+      setSelectedContagemId(imported[0]?.id ?? null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Não foi possível importar os inventários.");
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  }
+
+  function openAddItem() {
+    setAddItemName("");
+    setAddItemCategory("");
+    setAddItemUnit("Und");
+    setAddItemQuantity("");
+    setAddItemError("");
+    setIsAddItemOpen(true);
+  }
+
+  async function confirmAddItem() {
+    const current = selectedContagem;
+    const name = addItemName.trim();
+    const categoryName = normCatName(addItemCategory) || "Sem categoria";
+    const unit = addItemUnit.trim() || "Und";
+    if (!current || addItemBusy) return;
+    if (!name) {
+      setAddItemError("Informe o nome do item.");
+      return;
+    }
+
+    const alreadyExists = (current.categorias ?? []).some((cat) =>
+      (cat.itens ?? []).some((item) => !item.removido && normalizeNameKey(item.item) === normalizeNameKey(name)),
+    );
+    if (alreadyExists) {
+      setAddItemError("Este item já existe no inventário.");
+      return;
+    }
+
+    const newItem: InventarioItemRow = {
+      id: `historico-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      item: name,
+      unidade: unit,
+      estoqueFinal: addItemQuantity.trim(),
+    };
+    const categoryIndex = (current.categorias ?? []).findIndex((cat) => normalizeNameKey(cat.nome) === normalizeNameKey(categoryName));
+    const categorias =
+      categoryIndex >= 0
+        ? (current.categorias ?? []).map((cat, index) => (index === categoryIndex ? { ...cat, itens: [...(cat.itens ?? []), newItem] } : cat))
+        : [
+            ...(current.categorias ?? []),
+            {
+              id: `historico-cat-${Date.now()}`,
+              nome: categoryName,
+              status: "pendente" as const,
+              itens: [newItem],
+            },
+          ];
+    const updated: InventarioContagem = { ...current, categorias };
+
+    setAddItemBusy(true);
+    setAddItemError("");
+    try {
+      await upsertInventarioToSupabase(updated);
+      setContagens((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
+      setIsAddItemOpen(false);
+    } catch {
+      setAddItemError("Não foi possível adicionar o item. Tente novamente.");
+    } finally {
+      setAddItemBusy(false);
+    }
+  }
+
   function uncountItem(itemId: string) {
     setEditingItemId(null);
     setEditingValue("");
@@ -1058,6 +1234,26 @@ export default function InventarioClient() {
         ) : null}
         <section className={styles.layout}>
           <div className={styles.left}>
+            <input
+              ref={importFileRef}
+              type="file"
+              multiple
+              accept=".csv,.xlsx,.xls,text/csv"
+              className={ft.hiddenFileInput}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) void importInventarios(files);
+              }}
+            />
+            <button
+              type="button"
+              className={ft.importButton}
+              disabled={isReadOnly || isImporting || isLoadingInventario}
+              onClick={() => importFileRef.current?.click()}
+              style={{ width: "100%", marginBottom: 8 }}
+            >
+              {isImporting ? "Importando..." : "Importar planilha"}
+            </button>
             <button
               type="button"
               className={styles.newCountBtn}
@@ -1070,6 +1266,21 @@ export default function InventarioClient() {
               <img src="/dashboard/ml7hdudz-6qw4osi.svg" className={styles.newCountIcon} alt="" />
               Nova Contagem
             </button>
+
+            {importProgress ? (
+              <div className={ft.importProgressPanel} aria-live="polite" style={{ marginBottom: 10 }}>
+                <div className={ft.importProgressHeader}>
+                  <span>{importProgress.stage}</span>
+                  <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+                </div>
+                <div className={ft.importProgressTrack}>
+                  <div className={ft.importProgressFill} style={{ width: `${Math.max(2, (importProgress.current / Math.max(importProgress.total, 1)) * 100)}%` }} />
+                </div>
+                <div className={ft.importProgressCount}>
+                  {importProgress.current.toLocaleString("pt-BR")} de {importProgress.total.toLocaleString("pt-BR")}
+                </div>
+              </div>
+            ) : null}
 
             <div className={styles.leftTop}>
               <div className={styles.leftTitle}>{isCompatSource ? `Inventários (${compatInventories.length})` : `Suas contagens (${contagens.length})`}</div>
@@ -1268,11 +1479,16 @@ export default function InventarioClient() {
               <div className={styles.col}>
                 <div className={styles.colHeadPending}>
                   <span>Pendentes</span>
-                  {pendentes.length ? (
-                    <button type="button" className={styles.cleanupBtn} onClick={openPendingCleanup}>
-                      Limpar extras
+                  <div className={styles.pendingHeaderActions}>
+                    <button type="button" className={styles.cleanupBtn} onClick={openAddItem}>
+                      Adicionar item
                     </button>
-                  ) : null}
+                    {pendentes.length ? (
+                      <button type="button" className={styles.cleanupBtn} onClick={openPendingCleanup}>
+                        Limpar extras
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
                   {pendentes.map((r) => (
@@ -1675,6 +1891,87 @@ export default function InventarioClient() {
                     </button>
                     <button type="button" className={styles.primaryBtn} onClick={() => void confirmPendingCleanup()} disabled={pendingCleanupBusy}>
                       {pendingCleanupBusy ? "Salvando..." : "Remover extras"}
+                    </button>
+                  </div>
+                </div>
+              </div>,
+              document.body,
+            )
+          : null}
+
+        {mounted && isAddItemOpen && selectedContagem && !isCompatSource
+          ? createPortal(
+              <div className={styles.modalOverlay} role="dialog" aria-modal="true" onClick={() => !addItemBusy && setIsAddItemOpen(false)}>
+                <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
+                  <div className={styles.modalHeader}>
+                    <div className={styles.modalTitle}>Adicionar item ao inventário</div>
+                    <button type="button" className={styles.modalClose} onClick={() => setIsAddItemOpen(false)} aria-label="Fechar" disabled={addItemBusy}>
+                      ×
+                    </button>
+                  </div>
+                  <div className={styles.modalBody}>
+                    <div className={styles.cleanupHelp}>
+                      Inventário de <strong>{selectedContagem.data}</strong>
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.label} htmlFor="historical-item-name">
+                        Nome
+                      </label>
+                      <input
+                        id="historical-item-name"
+                        className={styles.input}
+                        value={addItemName}
+                        onChange={(event) => setAddItemName(event.target.value)}
+                        disabled={addItemBusy}
+                        autoFocus
+                      />
+                    </div>
+                    <div className={styles.field}>
+                      <label className={styles.label} htmlFor="historical-item-category">
+                        Categoria
+                      </label>
+                      <input
+                        id="historical-item-category"
+                        className={styles.input}
+                        value={addItemCategory}
+                        onChange={(event) => setAddItemCategory(event.target.value)}
+                        disabled={addItemBusy}
+                      />
+                    </div>
+                    <div className={styles.addItemGrid}>
+                      <div className={styles.field}>
+                        <label className={styles.label} htmlFor="historical-item-quantity">
+                          Quantidade
+                        </label>
+                        <input
+                          id="historical-item-quantity"
+                          className={styles.input}
+                          value={addItemQuantity}
+                          onChange={(event) => setAddItemQuantity(event.target.value)}
+                          disabled={addItemBusy}
+                        />
+                      </div>
+                      <div className={styles.field}>
+                        <label className={styles.label} htmlFor="historical-item-unit">
+                          Unidade
+                        </label>
+                        <input
+                          id="historical-item-unit"
+                          className={styles.input}
+                          value={addItemUnit}
+                          onChange={(event) => setAddItemUnit(event.target.value)}
+                          disabled={addItemBusy}
+                        />
+                      </div>
+                    </div>
+                    {addItemError ? <div className={styles.formError}>{addItemError}</div> : null}
+                  </div>
+                  <div className={styles.modalFooter}>
+                    <button type="button" className={styles.secondaryBtn} onClick={() => setIsAddItemOpen(false)} disabled={addItemBusy}>
+                      Cancelar
+                    </button>
+                    <button type="button" className={styles.primaryBtn} onClick={() => void confirmAddItem()} disabled={addItemBusy}>
+                      {addItemBusy ? "Salvando..." : "Adicionar item"}
                     </button>
                   </div>
                 </div>
