@@ -938,6 +938,10 @@ export default function FichasTecnicasClient({
 
   async function importFichasFile(file: File) {
     if (isImporting || isReadOnly) return;
+    if (isLoadingTable) {
+      showToast("Aguarde o carregamento das fichas técnicas antes de importar.", "error", 7000);
+      return;
+    }
     setIsImporting(true);
     setImportProgress({ current: 0, total: 1, stage: "Lendo a planilha..." });
     try {
@@ -963,7 +967,19 @@ export default function FichasTecnicasClient({
       });
       if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
 
-      const existingByName = new Map(tableRows.map((row) => [normalizeText(row.receita), row]));
+      // Merge against the freshest persisted snapshot so a stale render can
+      // never replace recipes that were still loading in the background.
+      let baseRows = tableRows;
+      if (isSupabaseFichasEnabled) {
+        const currentState = await loadFichasTecnicasStateFromSupabase();
+        if (currentState.meta?.source === "compat" || currentState.meta?.readOnly) {
+          throw new Error("Esta origem de fichas técnicas está em modo somente leitura.");
+        }
+        const persistedRows = currentState.rows as unknown as RecipeRow[];
+        if (persistedRows.length) baseRows = persistedRows;
+      }
+
+      const existingByName = new Map(baseRows.map((row) => [normalizeText(row.receita), row]));
       const imported: RecipeRow[] = [];
       const chunkSize = 25;
       for (let offset = 0; offset < recipes.length; offset += chunkSize) {
@@ -1006,11 +1022,15 @@ export default function FichasTecnicasClient({
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
 
+      if (!imported.length) throw new Error("Nenhuma ficha técnica com nome válido foi encontrada na planilha.");
+
       const importedNames = new Set(imported.map((row) => normalizeText(row.receita)));
-      const merged = [...tableRows.filter((row) => !importedNames.has(normalizeText(row.receita))), ...imported];
+      const merged = [...baseRows.filter((row) => !importedNames.has(normalizeText(row.receita))), ...imported];
+      if (!merged.length) throw new Error("A importação foi interrompida para proteger as fichas existentes.");
+
       setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
-      writeFichasTecnicasToStore(merged as any);
       if (isSupabaseFichasEnabled) await saveFichasTecnicasToSupabase(merged as any);
+      writeFichasTecnicasToStore(merged as any);
       setTableRows(merged);
       setPage(1);
       showToast(`${imported.length} ficha(s) técnica(s) importada(s) com sucesso.`, "success", 7000);
@@ -2749,12 +2769,12 @@ export default function FichasTecnicasClient({
                 <button
                   type="button"
                   className={styles.importButton}
-                  disabled={isImporting}
+                  disabled={isImporting || isLoadingTable}
                   onClick={() => importFileRef.current?.click()}
                 >
-                  {isImporting ? "Importando..." : "Importar planilha"}
+                  {isImporting ? "Importando..." : isLoadingTable ? "Carregando..." : "Importar planilha"}
                 </button>
-                <button type="button" className={styles.newButton} onClick={openCreateModal} disabled={isImporting}>
+                <button type="button" className={styles.newButton} onClick={openCreateModal} disabled={isImporting || isLoadingTable}>
                   <PlusIcon />
                   Nova Ficha Técnica
                 </button>
