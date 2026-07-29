@@ -9,8 +9,51 @@ function escapeHtml(s: string) {
     .replace(/'/g, "&#039;");
 }
 
+function normalizeUrl(raw: string) {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  return s.replace(/\/+$/, "");
+}
+
+function emailLogoUrl() {
+  const appUrl =
+    normalizeUrl(process.env.NEXT_PUBLIC_APP_URL ?? "") ||
+    normalizeUrl(process.env.NEXT_PUBLIC_SITE_URL ?? "") ||
+    "https://cmvfacil.app";
+  return `${appUrl}/favicon.png`;
+}
+
+function emailBrandHeader(subtitle: string) {
+  const logoUrl = escapeHtml(emailLogoUrl());
+  const safeSubtitle = escapeHtml(String(subtitle ?? "").trim());
+
+  return `
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;">
+      <tr>
+        <td width="54" style="padding:14px 0 14px 16px;vertical-align:middle;">
+          <img
+            src="${logoUrl}"
+            width="44"
+            height="44"
+            alt="CMV Fácil"
+            style="display:block;width:44px;height:44px;border:0;border-radius:12px;"
+          />
+        </td>
+        <td style="padding:14px 16px 14px 10px;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;">
+          <div style="font-weight:900;font-size:16px;letter-spacing:-0.2px;color:#00282d;">CMV Fácil</div>
+          <div style="margin-top:3px;color:#6b7280;font-size:12px;">${safeSubtitle}</div>
+        </td>
+        <td style="padding:14px 16px;color:#6b7280;font-size:12px;text-align:right;vertical-align:middle;font-family:Arial,Helvetica,sans-serif;">
+          cmvfacil.app
+        </td>
+      </tr>
+    </table>
+  `.trim();
+}
+
 export function renderEmailLayout(args: {
   title: string;
+  brandSubtitle?: string;
   previewText?: string;
   greeting?: string;
   bodyHtml: string;
@@ -19,6 +62,7 @@ export function renderEmailLayout(args: {
   supportEmail?: string | null;
 }) {
   const title = String(args.title ?? "").trim() || "CMV Fácil";
+  const brandSubtitle = String(args.brandSubtitle ?? "").trim() || title;
   const previewText = String(args.previewText ?? "").trim();
   const greeting = String(args.greeting ?? "").trim();
   const bodyHtml = String(args.bodyHtml ?? "").trim();
@@ -60,22 +104,7 @@ export function renderEmailLayout(args: {
             <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="max-width:640px;">
               <tr>
                 <td style="padding:0 0 14px 0;">
-                  <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
-                    <tr>
-                      <td style="font-family:Arial,Helvetica,sans-serif;">
-                        <div style="display:inline-flex;align-items:center;gap:10px;">
-                          <div style="width:44px;height:44px;border-radius:14px;background:rgba(10,184,109,0.14);display:inline-flex;align-items:center;justify-content:center;border:1px solid rgba(10,184,109,0.25);">
-                            <span style="color:#06754b;font-weight:900;font-size:14px;">CMV</span>
-                          </div>
-                          <div>
-                            <div style="font-weight:900;font-size:16px;letter-spacing:-0.2px;color:#111827;">CMV Fácil</div>
-                            <div style="color:#6b7280;font-size:12px;">${escapeHtml(title)}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td align="right" style="font-family:Arial,Helvetica,sans-serif;color:#6b7280;font-size:12px;">cmvfacil.app</td>
-                    </tr>
-                  </table>
+                  ${emailBrandHeader(brandSubtitle)}
                 </td>
               </tr>
               <tr>
