@@ -49,6 +49,7 @@ export async function sendCompanyInviteEmail(args: {
   roleLabel: string;
   inviterName?: string | null;
   actionLink: string;
+  existingUser?: boolean;
 }): Promise<SendEmailResult> {
   const to = safeEmail(args.to);
   if (!to) return { ok: false, error: "invalid_to_email" };
@@ -65,6 +66,7 @@ export async function sendCompanyInviteEmail(args: {
     roleLabel,
     inviterName: args.inviterName ?? null,
     actionLink,
+    existingUser: args.existingUser,
     supportEmail,
   });
   const sent = await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });

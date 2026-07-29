@@ -14,6 +14,7 @@ export function renderCompanyInviteEmail(args: {
   roleLabel: string;
   inviterName?: string | null;
   actionLink: string;
+  existingUser?: boolean;
   supportEmail?: string | null;
 }) {
   const companyName = String(args.companyName ?? "").trim() || "CMV Fácil";
@@ -21,11 +22,22 @@ export function renderCompanyInviteEmail(args: {
   const inviter = String(args.inviterName ?? "").trim();
   const inviterFirst = inviter ? firstWord(inviter) : "";
   const inviterText = inviterFirst ? `Convite enviado por ${inviterFirst}.` : "Você recebeu um convite.";
+  const existingUser = Boolean(args.existingUser);
+  const stepsHtml = existingUser
+    ? `<li>Clique no botão abaixo.</li>
+        <li>Entre com seu e-mail e sua senha atuais.</li>
+        <li>Selecione a empresa <strong>${companyName}</strong> para acessar o painel.</li>`
+    : `<li>Clique no botão abaixo.</li>
+        <li>Crie sua senha de acesso (é só para você).</li>
+        <li>Você será redirecionado automaticamente para o painel.</li>`;
+  const buttonLabel = existingUser ? "Entrar no sistema" : "Criar senha e acessar";
 
   const bodyText =
     `Você foi convidado para acessar ${companyName} no CMV Fácil.\n` +
     `${inviterText} Sua permissão será: ${roleLabel}.\n\n` +
-    `Para entrar, clique no botão abaixo e crie sua senha.`;
+    (existingUser
+      ? `Para entrar, acesse o link usando seu e-mail e sua senha atuais.`
+      : `Para entrar, clique no botão abaixo e crie sua senha.`);
 
   const bodyHtml = `
     <h2 style="margin:0 0 8px 0;font-size:20px;letter-spacing:-0.2px;">Seu acesso está pronto</h2>
@@ -34,9 +46,7 @@ export function renderCompanyInviteEmail(args: {
     <div style="margin:14px 0 0;border:1px solid #e5e7eb;border-radius:14px;padding:12px 12px;background:#f9fafb;">
       <div style="font-weight:900;margin:0 0 8px 0;font-size:14px;">Como entrar (bem simples)</div>
       <ol style="margin:0;padding-left:18px;color:#374151;font-size:14px;">
-        <li>Clique no botão.</li>
-        <li>Crie sua senha de acesso.</li>
-        <li>Você será redirecionado para o painel.</li>
+        ${stepsHtml}
       </ol>
     </div>
   `.trim();
@@ -47,7 +57,7 @@ export function renderCompanyInviteEmail(args: {
     greeting: "",
     bodyHtml,
     bodyText,
-    button: { label: "Acessar sistema", url: args.actionLink },
+    button: { label: buttonLabel, url: args.actionLink },
     supportEmail: args.supportEmail ?? null,
   });
 

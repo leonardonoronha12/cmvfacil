@@ -148,7 +148,14 @@ export async function POST(req: NextRequest) {
       if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
     }
 
-    const emailRes = await sendCompanyInviteEmail({ to: email, companyName, roleLabel: role, inviterName, actionLink });
+    const emailRes = await sendCompanyInviteEmail({
+      to: email,
+      companyName,
+      roleLabel: role,
+      inviterName,
+      actionLink,
+      existingUser: !isNewUser,
+    });
 
     return json(
       {
