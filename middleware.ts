@@ -169,6 +169,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/api/bubble-compat/") ||
     pathname.startsWith("/api/billing/") ||
     pathname.startsWith("/api/cron/") ||
+    pathname === "/api/webhooks/resend" ||
     pathname === "/api/stripe/webhook"
   ) {
     return NextResponse.next();
