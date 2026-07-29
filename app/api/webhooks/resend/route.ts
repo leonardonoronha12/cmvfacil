@@ -57,6 +57,20 @@ function verifySvix(args: { rawBody: string; headers: Headers; secret: string })
   return ok ? { ok: true as const, id: msgId, ts } : { ok: false as const, error: "invalid_signature" as const };
 }
 
+function normalizeEventType(raw: string) {
+  const v = String(raw ?? "").trim();
+  if (
+    v === "email.sent" ||
+    v === "email.delivered" ||
+    v === "email.delivery_delayed" ||
+    v === "email.bounced" ||
+    v === "email.complained"
+  ) {
+    return v;
+  }
+  return v || "unknown";
+}
+
 export async function POST(req: NextRequest) {
   const secret = String(process.env.RESEND_WEBHOOK_SECRET ?? "").trim();
   if (!secret) return json({ ok: false, error: "server_not_configured" }, { status: 500 });
@@ -69,22 +83,63 @@ export async function POST(req: NextRequest) {
   try {
     payload = JSON.parse(rawBody);
   } catch {
+    try {
+      const supabase = getSupabaseAdmin();
+      await supabase
+        .from("resend_webhook_events")
+        .insert({
+          svix_id: verified.id,
+          svix_timestamp: verified.ts,
+          event_type: "invalid_json",
+          email_id: null,
+          status: "failed",
+          error_message: "invalid_json",
+          processed_at: new Date().toISOString(),
+          payload_summary: null,
+        } as any)
+        .throwOnError();
+    } catch {}
     return json({ ok: false, error: "invalid_json" }, { status: 400 });
   }
 
-  const eventType = String(payload?.type ?? payload?.event_type ?? "").trim();
+  const eventType = normalizeEventType(String(payload?.type ?? payload?.event_type ?? "").trim());
   const emailId = String(payload?.data?.email_id ?? payload?.data?.id ?? "").trim() || null;
 
   try {
     const supabase = getSupabaseAdmin();
     await supabase
       .from("resend_webhook_events")
-      .insert({ svix_id: verified.id, svix_timestamp: verified.ts, event_type: eventType || "unknown", email_id: emailId } as any)
+      .insert({
+        svix_id: verified.id,
+        svix_timestamp: verified.ts,
+        event_type: eventType || "unknown",
+        email_id: emailId,
+        status: "processed",
+        processed_at: new Date().toISOString(),
+        error_message: null,
+        payload_summary: { event_type: eventType, email_id: emailId },
+      } as any)
       .throwOnError();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.toLowerCase().includes("duplicate")) return json({ ok: true }, { status: 200 });
     console.error("resend_webhook_persist_failed", { code: msg.slice(0, 160) });
+    try {
+      const supabase = getSupabaseAdmin();
+      await supabase
+        .from("resend_webhook_events")
+        .insert({
+          svix_id: verified.id,
+          svix_timestamp: verified.ts,
+          event_type: eventType,
+          email_id: emailId,
+          status: "failed",
+          error_message: "persist_failed",
+          processed_at: new Date().toISOString(),
+          payload_summary: { event_type: eventType, email_id: emailId },
+        } as any)
+        .throwOnError();
+    } catch {}
     return json({ ok: false, error: "persist_failed" }, { status: 500 });
   }
 
