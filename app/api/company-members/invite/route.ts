@@ -46,6 +46,23 @@ function randomPassword() {
   return out;
 }
 
+async function findAuthUserByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const normalizedEmail = safeEmail(email);
+  if (!normalizedEmail) return null;
+
+  for (let page = 1; page <= 10; page++) {
+    const listed = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (listed.error) throw new Error(listed.error.message);
+
+    const users = listed.data?.users ?? [];
+    const match = users.find((user) => safeEmail(user.email) === normalizedEmail);
+    if (match) return match;
+    if (users.length < 1000) break;
+  }
+
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -87,24 +104,47 @@ export async function POST(req: NextRequest) {
     if (membership.error) throw new Error(membership.error.message);
     if (!membership.data || !isCompanyAdminMember(membership.data)) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
-    await supabase.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "company-invite" } } as any).catch(() => null);
-
     const appUrl = getPublicAppUrl().replace(/\/+$/, "");
     const next = `/restaurar-senha?invite=1&company=${encodeURIComponent(companyName)}&role=${encodeURIComponent(role)}&email=${encodeURIComponent(email)}`;
     const redirectTo = `${appUrl}/auth/callback?next=${encodeURIComponent(next)}`;
-    const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
-    if (invite.error) return json({ ok: false, error: invite.error.message }, { status: 500 });
+    let authUser = await findAuthUserByEmail(supabase, email);
+    const isNewUser = !authUser;
 
-    const actionLink = String((invite.data as any)?.properties?.action_link ?? "").trim();
-    const createdUserId = String((invite.data as any)?.user?.id ?? "").trim();
-    if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
+    if (!authUser) {
+      const created = await supabase.auth.admin.createUser({
+        email,
+        password: randomPassword(),
+        email_confirm: true,
+        user_metadata: { source: "company-invite" },
+      } as any);
 
-    if (createdUserId && isUuid(createdUserId)) {
-      const up = await supabase.from("company_members").upsert(
-        { company_id: companyId, user_id: createdUserId, role, permission_level: permissionLevel } as any,
-        { onConflict: "company_id,user_id" },
-      );
-      if (up.error) throw new Error(up.error.message);
+      if (created.error) {
+        authUser = await findAuthUserByEmail(supabase, email);
+        if (!authUser) throw new Error(created.error.message);
+      } else {
+        authUser = created.data.user;
+      }
+    }
+
+    const invitedUserId = String(authUser?.id ?? "").trim();
+    if (!isUuid(invitedUserId)) return json({ ok: false, error: "invalid_invited_user" }, { status: 500 });
+
+    const up = await supabase.from("company_members").upsert(
+      { company_id: companyId, user_id: invitedUserId, role, permission_level: permissionLevel } as any,
+      { onConflict: "company_id,user_id" },
+    );
+    if (up.error) throw new Error(up.error.message);
+
+    let actionLink = `${appUrl}/login`;
+    if (isNewUser) {
+      const recovery = await supabase.auth.admin.generateLink({
+        type: "recovery",
+        email,
+        options: { redirectTo },
+      } as any);
+      if (recovery.error) return json({ ok: false, error: recovery.error.message }, { status: 500 });
+      actionLink = String((recovery.data as any)?.properties?.action_link ?? "").trim();
+      if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
     }
 
     const emailRes = await sendCompanyInviteEmail({ to: email, companyName, roleLabel: role, inviterName, actionLink });
