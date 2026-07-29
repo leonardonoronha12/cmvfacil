@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 import { checkAuthRateLimit } from "../../../lib/authRateLimit";
+import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
+import { sendPasswordResetEmail } from "../../../lib/email";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -30,26 +30,41 @@ export async function POST(req: NextRequest) {
   const rl = await checkAuthRateLimit({ req, action: "password_reset", email });
   if (!rl.ok) return json({ ok: false, error: rl.error }, { status: 429 });
 
-  let cfg;
+  const appUrl = getPublicAppUrl().replace(/\/+$/, "");
+  const redirectTo = `${appUrl}/auth/callback?next=${encodeURIComponent("/restaurar-senha")}`;
+
+  let admin;
   try {
-    cfg = getSupabaseAuthConfig();
+    admin = getSupabaseAdmin();
   } catch {
     return json({ error: "server_not_configured" }, { status: 500 });
   }
 
-  const supabase = createClient(cfg.url, cfg.anonKey, {
-    auth: { persistSession: false, autoRefreshToken: false, flowType: "implicit" },
-  });
+  const generated = await admin.auth.admin.generateLink({
+    type: "recovery",
+    email,
+    options: { redirectTo },
+  } as any);
 
-  const appUrl = getPublicAppUrl().replace(/\/+$/, "");
-  const redirectTo = `${appUrl}/auth/callback?next=${encodeURIComponent("/restaurar-senha")}`;
+  if (generated.error) {
+    const message = String(generated.error.message ?? "").toLowerCase();
+    if (message.includes("not found") || message.includes("does not exist") || message.includes("unable to find")) {
+      return json({ ok: true }, { status: 200 });
+    }
+    console.error("password_reset_generate_link_failed", { code: message.slice(0, 120) });
+    return json({ ok: true }, { status: 200 });
+  }
 
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo,
-  });
+  const actionLink = String((generated.data as any)?.properties?.action_link ?? "").trim();
+  if (!actionLink) {
+    console.error("password_reset_generate_link_missing_action_link");
+    return json({ ok: true }, { status: 200 });
+  }
 
-  if (error) {
-    console.error("password_reset_request_failed", { code: String(error.message ?? "").slice(0, 120) });
+  const sent = await sendPasswordResetEmail({ to: email, actionLink });
+  if (!sent.ok) {
+    console.error("password_reset_email_send_failed", { code: String(sent.error ?? "").slice(0, 120) });
+    return json({ ok: true }, { status: 200 });
   }
 
   return json({ ok: true }, { status: 200 });
