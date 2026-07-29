@@ -73,6 +73,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as any;
     const email = safeEmail(body?.email);
     const role = String(body?.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador";
+    const memberRole = role === "Administrador" ? "admin" : "member";
     const permissionLevel = role === "Administrador" ? "3" : "1";
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
 
@@ -130,7 +131,7 @@ export async function POST(req: NextRequest) {
     if (!isUuid(invitedUserId)) return json({ ok: false, error: "invalid_invited_user" }, { status: 500 });
 
     const up = await supabase.from("company_members").upsert(
-      { company_id: companyId, user_id: invitedUserId, role, permission_level: permissionLevel } as any,
+      { company_id: companyId, user_id: invitedUserId, role: memberRole, permission_level: permissionLevel } as any,
       { onConflict: "company_id,user_id" },
     );
     if (up.error) throw new Error(up.error.message);
@@ -150,7 +151,14 @@ export async function POST(req: NextRequest) {
     const emailRes = await sendCompanyInviteEmail({ to: email, companyName, roleLabel: role, inviterName, actionLink });
 
     return json(
-      { ok: true, email, role, actionLink, emailSent: emailRes.ok, ...(emailRes.ok ? {} : { emailError: emailRes.error }) },
+      {
+        ok: true,
+        email,
+        role,
+        existingUser: !isNewUser,
+        emailSent: emailRes.ok,
+        ...(emailRes.ok ? {} : { emailError: emailRes.error }),
+      },
       { status: 200 },
     );
   } catch (err) {
