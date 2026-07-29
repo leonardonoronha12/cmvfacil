@@ -1195,18 +1195,19 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             <span className={dash.navIcon}><IconGear /></span>
             Ajustes
           </Link>
-          <a
+          <button
+            type="button"
             className={navClass(active, "suporte")}
-            href="/suporte"
-            onClick={(e) => {
-              e.preventDefault();
+            aria-haspopup="dialog"
+            aria-expanded={isSupportOpen}
+            onClick={() => {
               setIsSupportOpen(true);
               setIsDrawerOpen(false);
             }}
           >
             <span className={dash.navIcon}><IconChat /></span>
             Suporte
-          </a>
+          </button>
         </div>
       </div>
 
