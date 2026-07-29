@@ -64,10 +64,6 @@ function parseDateLabelLoose(value: string) {
   return d;
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
-}
-
 function formatIntPT(n: number) {
   return new Intl.NumberFormat("pt-BR").format(n);
 }
@@ -861,31 +857,27 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, []);
 
   useEffect(() => {
-    try {
-      const key = "cmvfacil:sidebarPrefetch:lastAtMs:v1";
-      const last = Number(window.sessionStorage.getItem(key) ?? "0");
-      if (Number.isFinite(last) && last > 0 && Date.now() - last < 5 * 60_000) return;
-      window.sessionStorage.setItem(key, String(Date.now()));
-    } catch {}
+    const prefetchRoutes = (routes: string[]) => {
+      for (const route of routes) {
+        if (route === pathname) continue;
+        try {
+          router.prefetch(route);
+        } catch {}
+      }
+    };
+
+    prefetchRoutes(["/dashboard", "/lista-de-compras", "/fichas-tecnicas", "/insumos"]);
 
     const id = window.setTimeout(() => {
       try {
         if (document.visibilityState !== "visible") return;
       } catch {}
 
-      void (async () => {
-        const routes = ["/lista-de-compras", "/insumos", "/fichas-tecnicas", "/entradas", "/inventario"];
-        for (const r of routes) {
-          try {
-            await router.prefetch(r);
-          } catch {}
-          await sleep(80);
-        }
-      })();
-    }, 900);
+      prefetchRoutes(["/pre-preparo", "/fornecedores", "/entradas", "/inventario", "/desperdicios", "/ajustes"]);
+    }, 250);
 
     return () => window.clearTimeout(id);
-  }, [router]);
+  }, [pathname, router]);
 
   useEffect(() => {
     if (isCompatInsumosMode()) return;
