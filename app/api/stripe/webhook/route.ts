@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import type Stripe from "stripe";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { planKeyFromPriceId, updateCompanyFromSubscription } from "../../../lib/billing";
+import { sendBillingEventEmail } from "../../../lib/email";
+import type { BillingEventType } from "../../../lib/email/templates/billingEvent";
+import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 import { getStripe } from "../../../lib/stripeServer";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 
@@ -43,6 +46,163 @@ function isStripeObject(value: unknown): value is Record<string, unknown> {
 
 function isValidE164(value: string) {
   return /^\+\d{10,15}$/.test(value.trim());
+}
+
+function safeEmail(value: unknown) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (!v || !v.includes("@")) return "";
+  return v;
+}
+
+function planDisplayNameFromPriceId(priceId: string | null) {
+  const key = planKeyFromPriceId(priceId);
+  if (key === "pro_monthly") return "Pro Mensal";
+  if (key === "pro_yearly") return "Pro Anual";
+  return "";
+}
+
+function toIsoFromUnixSeconds(value: unknown) {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return new Date(n * 1000).toISOString();
+}
+
+function moneyFromStripeCents(value: unknown) {
+  const n = typeof value === "number" && Number.isFinite(value) ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(n)) return null;
+  return n / 100;
+}
+
+async function resolveBillingRecipientEmail(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  companyId: string;
+  companyEmail: string | null;
+}) {
+  const { supabase, companyId, companyEmail } = params;
+  const fromCompany = safeEmail(companyEmail);
+  if (fromCompany) return { email: fromCompany, source: "company" as const };
+
+  const members = await supabase
+    .from("company_members")
+    .select("user_id,role,permission_level")
+    .eq("company_id", companyId)
+    .eq("role", "admin")
+    .order("permission_level", { ascending: false })
+    .limit(20);
+  if (members.error) throw new Error(members.error.message);
+
+  const userIds = ((members.data ?? []) as any[])
+    .map((r: any) => String(r?.user_id ?? "").trim())
+    .filter(Boolean);
+  if (!userIds.length) return { email: null as string | null, source: null as null };
+
+  const profiles = await supabase.from("user_profiles").select("user_id,email").in("user_id", userIds).limit(50);
+  if (profiles.error) throw new Error(profiles.error.message);
+
+  const byUserId = new Map<string, string>();
+  for (const row of (profiles.data ?? []) as any[]) {
+    const uid = String(row?.user_id ?? "").trim();
+    const em = safeEmail(row?.email);
+    if (uid && em) byUserId.set(uid, em);
+  }
+
+  for (const uid of userIds) {
+    const em = byUserId.get(uid);
+    if (em) return { email: em, source: "admin" as const };
+  }
+
+  return { email: null as string | null, source: null as null };
+}
+
+function sanitizeEmailError(value: unknown) {
+  const s = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!s) return "send_failed";
+  return s.slice(0, 160);
+}
+
+async function maybeSendBillingNotification(params: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  companyId: string;
+  companyName: string;
+  companyEmail: string | null;
+  stripeEventId: string;
+  eventType: BillingEventType;
+  planName?: string | null;
+  previousPlanName?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  currentPeriodEnd?: string | null;
+  actionUrl: string;
+}) {
+  try {
+    const recipient = await resolveBillingRecipientEmail({
+      supabase: params.supabase,
+      companyId: params.companyId,
+      companyEmail: params.companyEmail,
+    });
+
+    if (!recipient.email) {
+      try {
+        await updateWebhookEvent({
+          supabase: params.supabase,
+          eventId: params.stripeEventId,
+          patch: { email_notification_type: params.eventType, email_notification_status: "skipped_no_recipient" },
+        });
+      } catch {}
+      return;
+    }
+
+    const sent = await sendBillingEventEmail({
+      to: recipient.email,
+      eventType: params.eventType,
+      companyName: params.companyName,
+      planName: params.planName ?? null,
+      previousPlanName: params.previousPlanName ?? null,
+      amount: typeof params.amount === "number" ? params.amount : null,
+      currency: params.currency ?? null,
+      currentPeriodEnd: params.currentPeriodEnd ?? null,
+      actionUrl: params.actionUrl,
+    });
+
+    if (!sent.ok) {
+      try {
+        await updateWebhookEvent({
+          supabase: params.supabase,
+          eventId: params.stripeEventId,
+          patch: {
+            email_notification_type: params.eventType,
+            email_notification_status: "failed",
+            email_notification_error: sanitizeEmailError(sent.error),
+          },
+        });
+      } catch {}
+      return;
+    }
+
+    try {
+      await updateWebhookEvent({
+        supabase: params.supabase,
+        eventId: params.stripeEventId,
+        patch: {
+          email_notification_type: params.eventType,
+          email_notification_status: "sent",
+          ...(sent.id ? { resend_email_id: sent.id } : {}),
+        },
+      });
+    } catch {}
+  } catch (err) {
+    try {
+      await updateWebhookEvent({
+        supabase: params.supabase,
+        eventId: params.stripeEventId,
+        patch: {
+          email_notification_type: params.eventType,
+          email_notification_status: "failed",
+          email_notification_error: sanitizeEmailError(err instanceof Error ? err.message : String(err)),
+        },
+      });
+    } catch {}
+  }
 }
 
 async function bestEffortTriggerSync(supabase: ReturnType<typeof getSupabaseAdmin>) {
@@ -97,7 +257,7 @@ async function findCompanyByCustomerId(supabase: ReturnType<typeof getSupabaseAd
   const res = await supabase
     .from("companies")
     .select(
-      "id,stripe_customer_id,subscription_status,subscription_plan,stripe_price_id,current_period_end,cancel_at_period_end,trial_started_at,trial_ends_at,checkout_status,checkout_url,checkout_plan,checkout_abandoned_at,billing_last_event_created_at",
+      "id,fantasy_name,legal_name,email,stripe_customer_id,stripe_subscription_id,subscription_status,subscription_plan,stripe_price_id,current_period_end,cancel_at_period_end,trial_started_at,trial_ends_at,checkout_status,checkout_url,checkout_plan,checkout_abandoned_at,billing_last_event_created_at",
     )
     .eq("stripe_customer_id", customerId)
     .maybeSingle();
@@ -435,6 +595,12 @@ export async function POST(req: NextRequest) {
   }
 
   const type = String(event.type ?? "").trim();
+  const billingCompanyName =
+    String((company as any)?.fantasy_name ?? "").trim() ||
+    String((company as any)?.legal_name ?? "").trim() ||
+    "Minha Empresa";
+  const billingCompanyEmail = asString((company as any)?.email) ?? null;
+  const billingActionUrl = `${getPublicAppUrl().replace(/\/+$/, "")}/ajustes?tab=planos`;
 
   try {
     if (type === "checkout.session.expired") {
@@ -474,6 +640,7 @@ export async function POST(req: NextRequest) {
       const session = event.data.object as any;
       const sessionId = asString(session?.id);
       const subscriptionId = extractSubscriptionId(event);
+      const mode = asString(session?.mode);
       const origin = asString(session?.metadata?.origin);
       const planKey = asString(session?.metadata?.plan_key);
       const userId = asString(session?.metadata?.user_id);
@@ -489,8 +656,9 @@ export async function POST(req: NextRequest) {
       const r = await supabase.from("companies").update(patch).eq("id", company.id);
       if (r.error) throw new Error(r.error.message);
 
+      let sub: Stripe.Subscription | null = null;
       if (subscriptionId) {
-        const sub = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["items.data.price"] });
+        sub = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["items.data.price"] });
         await updateCompanyFromSubscription({ supabase, customerId, subscription: sub });
       }
       await maybeEnqueueSubscriptionActive({
@@ -502,6 +670,25 @@ export async function POST(req: NextRequest) {
         planKey,
         origin,
       });
+      if (mode === "subscription") {
+        const priceId = asString((sub as any)?.items?.data?.[0]?.price?.id) ?? asString((company as any)?.stripe_price_id);
+        const planName = planDisplayNameFromPriceId(priceId);
+        const currentPeriodEnd = toIsoFromUnixSeconds((sub as any)?.current_period_end) ?? asString((company as any)?.current_period_end);
+        await maybeSendBillingNotification({
+          supabase,
+          companyId: company.id,
+          companyName: billingCompanyName,
+          companyEmail: billingCompanyEmail,
+          stripeEventId: event.id,
+          eventType: "subscription_started",
+          planName: planName || null,
+          previousPlanName: null,
+          amount: null,
+          currency: null,
+          currentPeriodEnd,
+          actionUrl: billingActionUrl,
+        });
+      }
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });
@@ -510,6 +697,23 @@ export async function POST(req: NextRequest) {
     if (type.startsWith("customer.subscription.")) {
       const sub = event.data.object as Stripe.Subscription;
       const cid = asString((sub as any)?.customer) ?? customerId;
+      const prevPriceId = asString((company as any)?.stripe_price_id);
+      const prevCancelAtPeriodEnd = Boolean((company as any)?.cancel_at_period_end);
+      const newPriceId = asString((sub as any)?.items?.data?.[0]?.price?.id);
+      const newCancelAtPeriodEnd = Boolean((sub as any)?.cancel_at_period_end);
+      const newStatus = String((sub as any)?.status ?? "").trim().toLowerCase();
+      const newCurrentPeriodEnd = toIsoFromUnixSeconds((sub as any)?.current_period_end);
+
+      let notificationType: BillingEventType | null = null;
+      if (type === "customer.subscription.deleted") {
+        notificationType = "subscription_canceled";
+      } else if (type === "customer.subscription.updated") {
+        if (prevPriceId && newPriceId && prevPriceId !== newPriceId) notificationType = "plan_changed";
+        else if (!prevCancelAtPeriodEnd && newCancelAtPeriodEnd) notificationType = "cancellation_scheduled";
+        else if (prevCancelAtPeriodEnd && !newCancelAtPeriodEnd && (newStatus === "active" || newStatus === "trialing"))
+          notificationType = "subscription_reactivated";
+      }
+
       await updateCompanyFromSubscription({ supabase, customerId: cid, subscription: sub });
       await maybeEnqueueSubscriptionActive({
         supabase,
@@ -520,6 +724,27 @@ export async function POST(req: NextRequest) {
         planKey: asString((sub as any)?.metadata?.plan_key),
         origin: asString((sub as any)?.metadata?.origin),
       });
+      if (notificationType) {
+        const planName =
+          notificationType === "plan_changed"
+            ? planDisplayNameFromPriceId(newPriceId)
+            : planDisplayNameFromPriceId(newPriceId || prevPriceId);
+        const previousPlanName = notificationType === "plan_changed" ? planDisplayNameFromPriceId(prevPriceId) : "";
+        await maybeSendBillingNotification({
+          supabase,
+          companyId: company.id,
+          companyName: billingCompanyName,
+          companyEmail: billingCompanyEmail,
+          stripeEventId: event.id,
+          eventType: notificationType,
+          planName: planName || null,
+          previousPlanName: previousPlanName || null,
+          amount: null,
+          currency: null,
+          currentPeriodEnd: newCurrentPeriodEnd ?? asString((company as any)?.current_period_end),
+          actionUrl: billingActionUrl,
+        });
+      }
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });
@@ -528,9 +753,19 @@ export async function POST(req: NextRequest) {
     if (type.startsWith("invoice.")) {
       const invoice = event.data.object as any;
       const subscriptionId = asString(invoice?.subscription);
+      const invoiceCurrency = asString(invoice?.currency);
+      const billingReason = asString(invoice?.billing_reason);
+      const invoicePaidAmount = moneyFromStripeCents(invoice?.amount_paid);
+      const invoiceFailedAmount = moneyFromStripeCents(invoice?.amount_due);
+      let planName = "";
+      let currentPeriodEnd: string | null = null;
+
       if (subscriptionId) {
         const sub = await stripe.subscriptions.retrieve(subscriptionId, { expand: ["items.data.price"] });
         const cid = asString(sub.customer) ?? customerId;
+        const priceId = asString((sub as any)?.items?.data?.[0]?.price?.id);
+        planName = planDisplayNameFromPriceId(priceId);
+        currentPeriodEnd = toIsoFromUnixSeconds((sub as any)?.current_period_end);
         await updateCompanyFromSubscription({ supabase, customerId: cid, subscription: sub });
         await maybeEnqueueSubscriptionActive({
           supabase,
@@ -543,6 +778,7 @@ export async function POST(req: NextRequest) {
         });
       } else {
         const priceId = asString(invoice?.lines?.data?.[0]?.price?.id) ?? null;
+        planName = planDisplayNameFromPriceId(priceId);
         const planKey = planKeyFromPriceId(priceId);
         const patch: any = {
           stripe_customer_id: customerId,
@@ -552,6 +788,40 @@ export async function POST(req: NextRequest) {
         };
         const r = await supabase.from("companies").update(patch).eq("id", company.id);
         if (r.error) throw new Error(r.error.message);
+      }
+
+      if (type === "invoice.paid" && billingReason !== "subscription_create") {
+        await maybeSendBillingNotification({
+          supabase,
+          companyId: company.id,
+          companyName: billingCompanyName,
+          companyEmail: billingCompanyEmail,
+          stripeEventId: event.id,
+          eventType: "payment_succeeded",
+          planName: planName || null,
+          previousPlanName: null,
+          amount: invoicePaidAmount,
+          currency: invoiceCurrency,
+          currentPeriodEnd: currentPeriodEnd ?? asString((company as any)?.current_period_end),
+          actionUrl: billingActionUrl,
+        });
+      }
+
+      if (type === "invoice.payment_failed") {
+        await maybeSendBillingNotification({
+          supabase,
+          companyId: company.id,
+          companyName: billingCompanyName,
+          companyEmail: billingCompanyEmail,
+          stripeEventId: event.id,
+          eventType: "payment_failed",
+          planName: planName || null,
+          previousPlanName: null,
+          amount: invoiceFailedAmount,
+          currency: invoiceCurrency,
+          currentPeriodEnd: currentPeriodEnd ?? asString((company as any)?.current_period_end),
+          actionUrl: billingActionUrl,
+        });
       }
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });

@@ -2,6 +2,8 @@ import "server-only";
 
 import { getPublicAppUrl } from "./publicAppUrl";
 import { sendEmail } from "./email/sendEmail";
+import type { BillingEventType } from "./email/templates/billingEvent";
+import { renderBillingEventEmail } from "./email/templates/billingEvent";
 import { renderCompanyInviteEmail } from "./email/templates/companyInvite";
 import { renderEmailLayout } from "./email/templates/emailLayout";
 import { renderWelcomeEmail } from "./email/templates/welcome";
@@ -103,6 +105,41 @@ export async function sendPasswordResetEmail(args: { to: string; actionLink: str
     html,
     text,
   });
+  if (!sent.ok) return { ok: false, error: sent.error };
+  return { ok: true, id: sent.id };
+}
+
+export async function sendBillingEventEmail(args: {
+  to: string;
+  eventType: BillingEventType;
+  companyName: string;
+  planName?: string | null;
+  previousPlanName?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  currentPeriodEnd?: string | null;
+  actionUrl: string;
+}): Promise<SendEmailResult> {
+  const to = safeEmail(args.to);
+  if (!to) return { ok: false, error: "invalid_to_email" };
+
+  const actionUrl = String(args.actionUrl ?? "").trim();
+  if (!actionUrl) return { ok: false, error: "missing_action_url" };
+
+  const supportEmail = env("EMAIL_REPLY_TO") || null;
+  const tpl = renderBillingEventEmail({
+    eventType: args.eventType,
+    companyName: args.companyName,
+    planName: args.planName ?? null,
+    previousPlanName: args.previousPlanName ?? null,
+    amount: typeof args.amount === "number" ? args.amount : null,
+    currency: args.currency ?? null,
+    currentPeriodEnd: args.currentPeriodEnd ?? null,
+    actionUrl,
+    supportEmail,
+  });
+
+  const sent = await sendEmail({ to, subject: tpl.subject, html: tpl.html, text: tpl.text });
   if (!sent.ok) return { ok: false, error: sent.error };
   return { ok: true, id: sent.id };
 }
