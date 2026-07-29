@@ -3,6 +3,7 @@ import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
 import { resolveCurrentCompanyForUser } from "../../../lib/billing";
 import { sendCompanyInviteEmail } from "../../../lib/email";
+import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -23,16 +24,6 @@ function safeEmail(input: unknown) {
   const v = String(input ?? "").trim().toLowerCase();
   if (!v || !v.includes("@")) return "";
   return v;
-}
-
-function requestOrigin(req: NextRequest) {
-  const xfProto = String(req.headers.get("x-forwarded-proto") ?? "").trim();
-  const proto = xfProto || "https";
-  const xfHostRaw = String(req.headers.get("x-forwarded-host") ?? "").trim();
-  const hostRaw = xfHostRaw || String(req.headers.get("host") ?? "").trim();
-  const host = hostRaw.split(",")[0]?.trim() || "";
-  if (!host) return "";
-  return `${proto}://${host}`.replace(/\/+$/, "");
 }
 
 function parsePermissionLevel(v: unknown) {
@@ -98,10 +89,9 @@ export async function POST(req: NextRequest) {
 
     await supabase.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "company-invite" } } as any).catch(() => null);
 
-    const origin = requestOrigin(req) || "https://cmvfacil.app";
-    const redirectTo = `${origin}/restaurar-senha?invite=1&company=${encodeURIComponent(companyName)}&role=${encodeURIComponent(role)}&email=${encodeURIComponent(
-      email,
-    )}`;
+    const appUrl = getPublicAppUrl().replace(/\/+$/, "");
+    const next = `/restaurar-senha?invite=1&company=${encodeURIComponent(companyName)}&role=${encodeURIComponent(role)}&email=${encodeURIComponent(email)}`;
+    const redirectTo = `${appUrl}/auth/callback?next=${encodeURIComponent(next)}`;
     const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
     if (invite.error) return json({ ok: false, error: invite.error.message }, { status: 500 });
 

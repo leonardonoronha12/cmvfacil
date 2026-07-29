@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
+import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -8,13 +9,10 @@ function json(data: unknown, init: ResponseInit = {}) {
   return NextResponse.json(data, { ...init, headers });
 }
 
-function requestOrigin(req: NextRequest) {
-  const origin = (req.headers.get("origin") ?? "").trim();
-  if (origin) return origin;
-  const proto = (req.headers.get("x-forwarded-proto") ?? "").trim();
-  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").trim();
-  if (proto && host) return `${proto}://${host}`;
-  return "";
+function safeEmail(value: unknown) {
+  const v = String(value ?? "").trim().toLowerCase();
+  if (!v || !v.includes("@")) return "";
+  return v;
 }
 
 export async function POST(req: NextRequest) {
@@ -25,8 +23,8 @@ export async function POST(req: NextRequest) {
     return json({ error: "invalid_json" }, { status: 400 });
   }
 
-  const email = (body.email ?? "").trim();
-  if (!email) return json({ error: "email_required" }, { status: 400 });
+  const email = safeEmail(body.email);
+  if (!email) return json({ ok: false, error: "email_required" }, { status: 400 });
 
   let cfg;
   try {
@@ -39,9 +37,8 @@ export async function POST(req: NextRequest) {
     auth: { persistSession: false, autoRefreshToken: false, flowType: "implicit" },
   });
 
-  const baseSiteUrl = (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim();
-  const siteUrl = requestOrigin(req) || baseSiteUrl;
-  const emailRedirectTo = siteUrl ? `${siteUrl.replace(/\/+$/, "")}/login` : undefined;
+  const appUrl = getPublicAppUrl().replace(/\/+$/, "");
+  const emailRedirectTo = `${appUrl}/login`;
 
   const { error } = await supabase.auth.resend({
     type: "signup",
@@ -50,9 +47,8 @@ export async function POST(req: NextRequest) {
   });
 
   if (error) {
-    return json({ error: "resend_failed", details: error.message }, { status: 400 });
+    console.error("signup_resend_failed", { code: String(error.message ?? "").slice(0, 120) });
   }
 
   return json({ ok: true }, { status: 200 });
 }
-

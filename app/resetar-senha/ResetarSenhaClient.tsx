@@ -48,7 +48,7 @@ export default function ResetarSenhaClient() {
                     return;
                   }
                   setSent(true);
-                  router.push(`/restaurar-senha?sent=1&email=${encodeURIComponent(email)}`);
+                  router.push(`/restaurar-senha?sent=1`);
                 } catch {
                   setError("Erro ao enviar instruções.");
                 } finally {

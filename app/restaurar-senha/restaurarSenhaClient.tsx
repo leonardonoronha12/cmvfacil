@@ -137,7 +137,7 @@ export default function RestaurarSenhaClient() {
             </div>
 
             {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
-            {ok ? <div className="cmv-alert cmv-alert-ok">Senha atualizada com sucesso.</div> : null}
+            {ok ? <div className="cmv-alert cmv-alert-ok">Senha alterada com sucesso. Você já pode acessar sua conta.</div> : null}
 
             {sent ? (
               <div className="cmv-reset-form">

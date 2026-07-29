@@ -3,20 +3,12 @@ import { createClient } from "@supabase/supabase-js";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { sendWelcomeEmail } from "../../../lib/email";
+import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("content-type", "application/json; charset=utf-8");
   return NextResponse.json(data, { ...init, headers });
-}
-
-function requestOrigin(req: NextRequest) {
-  const origin = (req.headers.get("origin") ?? "").trim();
-  if (origin) return origin;
-  const proto = (req.headers.get("x-forwarded-proto") ?? "").trim();
-  const host = (req.headers.get("x-forwarded-host") ?? req.headers.get("host") ?? "").trim();
-  if (proto && host) return `${proto}://${host}`;
-  return "";
 }
 
 export async function POST(req: NextRequest) {
@@ -40,7 +32,7 @@ export async function POST(req: NextRequest) {
   if (!email || !password) return json({ error: "missing_fields" }, { status: 400 });
   const firstName = (body.first_name ?? "").trim();
   const lastName = (body.last_name ?? "").trim();
-  const siteUrl = requestOrigin(req) || (process.env.NEXT_PUBLIC_SITE_URL ?? "").trim() || "https://cmvfacil.app";
+  const siteUrl = getPublicAppUrl();
 
   try {
     const admin = getSupabaseAdmin();
@@ -119,7 +111,7 @@ export async function POST(req: NextRequest) {
     auth: { persistSession: false, autoRefreshToken: false, flowType: "implicit" },
   });
 
-  const emailRedirectTo = siteUrl ? `${siteUrl.replace(/\/+$/, "")}/login` : undefined;
+  const emailRedirectTo = `${siteUrl.replace(/\/+$/, "")}/login`;
 
   const { data, error } = await supabase.auth.signUp({
     email,

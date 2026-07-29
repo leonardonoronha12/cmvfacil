@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { getPublicAppUrl } from "../../../lib/publicAppUrl";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,6 +28,23 @@ function safeEmail(input: unknown) {
   const v = String(input ?? "").trim().toLowerCase();
   if (!v || !v.includes("@")) return "";
   return v;
+}
+
+function resolveRedirectTo(raw: string) {
+  const appUrl = getPublicAppUrl().replace(/\/+$/, "");
+  const candidate = String(raw ?? "").trim();
+  if (!candidate) return `${appUrl}/restaurar-senha`;
+
+  if (candidate.startsWith("/")) return `${appUrl}${candidate}`;
+
+  try {
+    const u = new URL(candidate);
+    const app = new URL(appUrl);
+    if (u.origin !== app.origin) return `${appUrl}/restaurar-senha`;
+    return u.toString();
+  } catch {
+    return `${appUrl}/restaurar-senha`;
+  }
 }
 
 async function createInvite(args: { req: NextRequest; email: string; redirectTo: string }) {
@@ -62,7 +80,7 @@ export async function GET(req: NextRequest) {
     const url = new URL(req.url);
     const email = safeEmail(url.searchParams.get("email") ?? "");
     const redirectToRaw = String(url.searchParams.get("redirectTo") ?? "").trim();
-    const redirectTo = redirectToRaw || `${url.origin}/restaurar-senha`;
+    const redirectTo = resolveRedirectTo(redirectToRaw);
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
 
     const result = await createInvite({ req, email, redirectTo });
@@ -83,8 +101,7 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as any;
     const email = safeEmail(body?.email);
     const redirectToRaw = String(body?.redirectTo ?? "").trim();
-    const url = new URL(req.url);
-    const redirectTo = redirectToRaw || `${url.origin}/restaurar-senha`;
+    const redirectTo = resolveRedirectTo(redirectToRaw);
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
     const result = await createInvite({ req, email, redirectTo });
     if (!result.ok) return json({ ok: false, error: result.error }, { status: result.status });
