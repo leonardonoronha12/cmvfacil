@@ -40,6 +40,23 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function parseCsvEnv(value: string | undefined) {
+  return String(value ?? "")
+    .split(/[,\n;]/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function isAdminUserId(userId: string) {
+  const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
+  const emails = new Set(parseCsvEnv(process.env.ADMIN_USER_EMAILS).map((x) => x.toLowerCase()));
+  const raw = userId.toLowerCase();
+  if (!isUuid(userId) && raw.includes("@") && process.env.ADMIN_SECRET) return true;
+  if (ids.size && ids.has(raw)) return true;
+  if (emails.size && emails.has(raw)) return true;
+  return false;
+}
+
 async function ensureBucket(supabase: ReturnType<typeof getSupabaseAdmin>, bucket: string) {
   const got = await supabase.storage.getBucket(bucket);
   if (!got.error) return;
@@ -209,11 +226,16 @@ export async function GET(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
     if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isAdminUserId(userId)) return json({ ok: false, error: "forbidden" }, { status: 403 });
 
     const url = new URL(req.url);
     const email = normalizeEmail(url.searchParams.get("email") ?? "");
+    const requestedTargetUserId = String(url.searchParams.get("userId") ?? "").trim().toLowerCase();
     const mode = String(url.searchParams.get("mode") ?? "").trim().toLowerCase();
     if (!email || !email.includes("@")) return json({ ok: false, error: "invalid_email" }, { status: 400 });
+    if (requestedTargetUserId && !isUuid(requestedTargetUserId)) {
+      return json({ ok: false, error: "invalid_target_user_id" }, { status: 400 });
+    }
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -222,26 +244,35 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
-    const requesterRaw = String(userId ?? "").trim().toLowerCase();
-    const requesterUuid = isUuid(requesterRaw) ? requesterRaw : requesterRaw.includes("@") ? await findAuthUserIdByEmail(supabase, requesterRaw) : null;
-    const candidatePrefixes = (() => {
-      const out = new Set<string>();
-      if (isUuid(requesterRaw)) out.add(`user:${requesterRaw}`);
-      if (requesterRaw.includes("@")) out.add(`user:${requesterRaw}`);
-      if (requesterUuid && isUuid(requesterUuid)) out.add(`user:${requesterUuid}`);
-      return Array.from(out);
-    })();
-    if (!candidatePrefixes.length) return json({ ok: false, error: "cannot_resolve_user_prefix", requester: requesterRaw }, { status: 400 });
+    let targetUserId = requestedTargetUserId;
+    if (targetUserId) {
+      const { data, error } = await supabase.auth.admin.getUserById(targetUserId);
+      if (error || !data?.user) return json({ ok: false, error: "auth_user_not_found" }, { status: 404 });
+      if (normalizeEmail(data.user.email ?? "") !== email) {
+        return json({ ok: false, error: "target_user_email_mismatch" }, { status: 400 });
+      }
+    } else {
+      const requesterRaw = String(userId ?? "").trim().toLowerCase();
+      const requesterUuid = isUuid(requesterRaw) ? requesterRaw : requesterRaw.includes("@") ? await findAuthUserIdByEmail(supabase, requesterRaw) : null;
+      const candidatePrefixes = (() => {
+        const out = new Set<string>();
+        if (isUuid(requesterRaw)) out.add(`user:${requesterRaw}`);
+        if (requesterRaw.includes("@")) out.add(`user:${requesterRaw}`);
+        if (requesterUuid && isUuid(requesterUuid)) out.add(`user:${requesterUuid}`);
+        return Array.from(out);
+      })();
+      if (!candidatePrefixes.length) return json({ ok: false, error: "cannot_resolve_user_prefix", requester: requesterRaw }, { status: 400 });
 
-    let allowed = false;
-    for (const prefix of candidatePrefixes) {
-      allowed = (await emailAllowedByCache(supabase, prefix, email)) || (await emailExistsInUsersUpload(supabase, prefix, email));
-      if (allowed) break;
+      let allowed = false;
+      for (const prefix of candidatePrefixes) {
+        allowed = (await emailAllowedByCache(supabase, prefix, email)) || (await emailExistsInUsersUpload(supabase, prefix, email));
+        if (allowed) break;
+      }
+      if (!allowed) return json({ ok: false, error: "email_not_in_upload" }, { status: 403 });
+      targetUserId = (await findAuthUserIdByEmail(supabase, email)) ?? "";
     }
-    if (!allowed) return json({ ok: false, error: "email_not_in_upload" }, { status: 403 });
 
     const redirectTo = `${url.origin}/dashboard`;
-    const targetUserId = await findAuthUserIdByEmail(supabase, email);
     if (!targetUserId) return json({ ok: false, error: "auth_user_not_found" }, { status: 404 });
 
     let data: any = null;

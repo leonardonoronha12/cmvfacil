@@ -126,13 +126,18 @@ export default function EmailsUsuariosClient() {
     }
   }
 
-  async function loginAs(email: string) {
+  async function loginAs(email: string, authUserId?: string) {
     const normalizedEmail = email.trim().toLowerCase();
     if (!normalizedEmail.includes("@")) return;
     setImpersonating(normalizedEmail);
     setError("");
     try {
-      const response = await fetch(`/api/admin/impersonate-link?email=${encodeURIComponent(normalizedEmail)}&ts=${Date.now()}`, {
+      const params = new URLSearchParams({
+        email: normalizedEmail,
+        ts: String(Date.now()),
+      });
+      if (authUserId) params.set("userId", authUserId);
+      const response = await fetch(`/api/admin/impersonate-link?${params.toString()}`, {
         method: "GET",
         cache: "no-store",
       });
@@ -235,7 +240,7 @@ export default function EmailsUsuariosClient() {
                         <td>{user.companies?.length ? user.companies.map((company) => company.name || "—").join(" • ") : "—"}</td>
                         <td><span className={user.authUserId ? styles.statusBadgeActive : styles.statusBadgePending}>{user.authUserId ? "Cadastro ativo" : "Aguardando cadastro"}</span></td>
                         <td className={styles.actionColumn}>
-                          <LoginButton email={user.email} enabled={Boolean(user.authUserId)} loadingEmail={impersonating} onLogin={loginAs} />
+                          <LoginButton email={user.email} authUserId={user.authUserId ?? undefined} enabled={Boolean(user.authUserId)} loadingEmail={impersonating} onLogin={loginAs} />
                         </td>
                       </tr>
                     ))}
@@ -254,7 +259,7 @@ export default function EmailsUsuariosClient() {
                         <td>{formatDate(user.last_sign_in_at)}</td>
                         <td><span className={user.banned_until ? styles.statusBadgeBlocked : styles.statusBadgeActive}>{user.banned_until ? "Bloqueado" : "Ativo"}</span></td>
                         <td className={styles.actionColumn}>
-                          <LoginButton email={user.email ?? ""} enabled={Boolean(user.email) && !user.banned_until} loadingEmail={impersonating} onLogin={loginAs} />
+                          <LoginButton email={user.email ?? ""} authUserId={user.id} enabled={Boolean(user.email) && !user.banned_until} loadingEmail={impersonating} onLogin={loginAs} />
                         </td>
                       </tr>
                     ))}
@@ -279,10 +284,10 @@ function UserCell({ email, label }: { email: string; label: string }) {
   );
 }
 
-function LoginButton({ email, enabled, loadingEmail, onLogin }: { email: string; enabled: boolean; loadingEmail: string; onLogin: (email: string) => void }) {
+function LoginButton({ email, authUserId, enabled, loadingEmail, onLogin }: { email: string; authUserId?: string; enabled: boolean; loadingEmail: string; onLogin: (email: string, authUserId?: string) => void }) {
   const loading = loadingEmail === email;
   return (
-    <button type="button" className={styles.loginButton} disabled={!enabled || Boolean(loadingEmail)} onClick={() => onLogin(email)}>
+    <button type="button" className={styles.loginButton} disabled={!enabled || Boolean(loadingEmail)} onClick={() => onLogin(email, authUserId)}>
       {loading ? <span className={styles.spinnerLight} /> : null}
       {loading ? "Entrando..." : "Entrar como usuário"}
     </button>
