@@ -1336,7 +1336,10 @@ export async function POST(req: NextRequest) {
     step = "auth_email";
     const accessToken = (req.cookies.get("cmv_at")?.value ?? "").trim();
     const authUser = await supabase.auth.admin.getUserById(userId);
-    const email = (authUser.error ? "" : String(authUser.data?.user?.email ?? "").trim().toLowerCase()) || existingEmail || jwtEmail(accessToken);
+    // During a controlled migration test, the authenticated account may be a
+    // separate test user. The migration row always retains the Bubble source
+    // email and therefore takes precedence over the authentication email.
+    const email = existingEmail || (authUser.error ? "" : String(authUser.data?.user?.email ?? "").trim().toLowerCase()) || jwtEmail(accessToken);
     if (!email) return json({ ok: false, error: "missing_supabase_email" }, { status: 400 });
 
     step = "migration_row";

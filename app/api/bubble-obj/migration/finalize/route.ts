@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
     const supabase = getSupabaseAdmin();
     const migrationResult = await supabase
       .from("bubble_obj_user_migration")
-      .select("status,email,last_run_id,bubble_user_id")
+      .select("status,email,last_run_id,bubble_user_id,validation_report")
       .eq("supabase_user_id", userId)
       .maybeSingle();
     if (migrationResult.error) return json({ ok: false, error: migrationResult.error.message }, { status: 500 });
@@ -39,8 +39,9 @@ export async function POST(req: NextRequest) {
     }
 
     const authUser = await supabase.auth.admin.getUserById(userId);
-    const email = String(authUser.data?.user?.email ?? migration.email ?? "").trim().toLowerCase();
+    const email = String(migration.email ?? authUser.data?.user?.email ?? "").trim().toLowerCase();
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
+    const testMode = Boolean(migration.validation_report?.testMode);
 
     const startedAt = new Date().toISOString();
     await supabase
@@ -50,7 +51,9 @@ export async function POST(req: NextRequest) {
 
     const applied = await applyBubbleCompatForEmail(email);
     const audit = await auditBubbleCompatForEmail(email);
-    const billing = await reconcileMigrationBilling({ supabase, userId, email });
+    const billing = testMode
+      ? { ok: true, status: "skipped_test_mode" }
+      : await reconcileMigrationBilling({ supabase, userId, email });
 
     const critical = audit.summary?.critical ?? [];
     const divergentTables = audit.summary?.tablesWithDivergence ?? [];
@@ -64,7 +67,9 @@ export async function POST(req: NextRequest) {
       field: "migrado",
     };
 
-    if (validated && !cutover.bubbleUserId) {
+    if (validated && testMode) {
+      cutover = { ...cutover, ok: true, skipped: "test_mode" } as any;
+    } else if (validated && !cutover.bubbleUserId) {
       validated = false;
       cutover = { ...cutover, error: "missing_bubble_user_id" };
     } else if (validated && cutover.bubbleUserId) {

@@ -42,10 +42,14 @@ export async function POST(req: NextRequest) {
     if (!authorized(req)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
     const body = (await req.json().catch(() => null)) as any;
     const email = String(body?.email ?? "").trim().toLowerCase();
+    const targetEmail = String(body?.targetEmail ?? body?.target_email ?? email)
+      .trim()
+      .toLowerCase();
     const bubbleUserId = String(body?.bubbleUserId ?? body?.bubble_user_id ?? "").trim();
-    if (!email || !email.includes("@") || !bubbleUserId) {
+    if (!email || !email.includes("@") || !targetEmail || !targetEmail.includes("@") || !bubbleUserId) {
       return json({ ok: false, error: "missing_identity" }, { status: 400 });
     }
+    const testMode = targetEmail !== email;
 
     const creds = await getBubbleObjCredentials();
     const bubblePage = await fetchBubbleObjPageWithConstraints<any>({
@@ -63,13 +67,13 @@ export async function POST(req: NextRequest) {
     if (!bubbleUser) return json({ ok: false, error: "bubble_identity_mismatch" }, { status: 403 });
 
     const supabase = getSupabaseAdmin();
-    let authUser = await findAuthUserByEmail(supabase, email);
+    let authUser = await findAuthUserByEmail(supabase, targetEmail);
     if (!authUser) {
       const created = await supabase.auth.admin.createUser({
-        email,
+        email: targetEmail,
         email_confirm: true,
         password: crypto.randomBytes(36).toString("base64url"),
-        user_metadata: { bubble_user_id: bubbleUserId, migration_source: "bubble" },
+        user_metadata: { bubble_user_id: bubbleUserId, migration_source: "bubble", migration_test_mode: testMode },
       });
       if (created.error || !created.data.user) throw new Error(created.error?.message ?? "user_creation_failed");
       authUser = created.data.user;
@@ -86,9 +90,26 @@ export async function POST(req: NextRequest) {
     );
     if (mapResult.error) throw new Error(mapResult.error.message);
 
+    const migrationResult = await supabase.from("bubble_obj_user_migration").upsert(
+      {
+        supabase_user_id: authUser.id,
+        email,
+        bubble_user_id: bubbleUserId,
+        status: "not_started",
+        validation_status: "not_started",
+        validation_report: {
+          testMode,
+          sourceEmail: email,
+          targetEmail,
+        },
+      } as any,
+      { onConflict: "supabase_user_id" },
+    );
+    if (migrationResult.error) throw new Error(migrationResult.error.message);
+
     const generated = await supabase.auth.admin.generateLink({
       type: "magiclink",
-      email,
+      email: targetEmail,
     });
     if (generated.error) throw new Error(generated.error.message);
     const tokenHash = String((generated.data as any)?.properties?.hashed_token ?? "").trim();
@@ -96,6 +117,7 @@ export async function POST(req: NextRequest) {
 
     const redirectUrl = new URL("/api/auth/migration-handoff", getAppUrl());
     redirectUrl.searchParams.set("token_hash", tokenHash);
+    if (testMode) redirectUrl.searchParams.set("test_mode", "1");
     return json({ ok: true, redirectUrl: redirectUrl.toString() });
   } catch (error) {
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });

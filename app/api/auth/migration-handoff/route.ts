@@ -20,7 +20,10 @@ export async function GET(req: NextRequest) {
     const session = verified.data.session;
     if (verified.error || !session) return NextResponse.redirect(new URL("/login?migration=expired", req.url));
 
-    const response = NextResponse.redirect(new URL("/atualizacao", req.url));
+    const testMode = req.nextUrl.searchParams.get("test_mode") === "1";
+    const destination = new URL("/atualizacao", req.url);
+    if (testMode) destination.searchParams.set("test_mode", "1");
+    const response = NextResponse.redirect(destination);
     const secure = shouldUseSecureCookies(req);
     const domain = getAuthCookieDomain(req);
     const cookieBase = {
