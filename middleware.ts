@@ -159,6 +159,7 @@ export async function middleware(req: NextRequest) {
     pathname === "/sitemap.xml" ||
     isPublicFile ||
     pathname.startsWith("/api/auth/") ||
+    pathname === "/api/bubble-obj/migration/handoff" ||
     pathname.startsWith("/api/onboarding/") ||
     pathname === "/api/admin/create-user-password" ||
     pathname === "/api/version" ||
@@ -187,11 +188,14 @@ export async function middleware(req: NextRequest) {
       return NextResponse.redirect(url);
     }
     if (
+      pathname === "/atualizacao" ||
+      pathname.startsWith("/atualizacao/") ||
       pathname === "/ajustes" ||
       pathname.startsWith("/ajustes/") ||
       pathname === "/cadastro-empresa" ||
       pathname.startsWith("/cadastro-empresa/") ||
       pathname === "/api/me" ||
+      pathname.startsWith("/api/bubble-obj/migration/") ||
       pathname.startsWith("/api/billing/") ||
       pathname === "/api/stripe/webhook"
     ) {

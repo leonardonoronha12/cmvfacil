@@ -24,6 +24,7 @@ type SidebarKey =
 function shouldHideSidebar(pathname: string) {
   const p = pathname.trim() || "/";
   if (p === "/" || p.startsWith("/login") || p.startsWith("/cadastro") || p.startsWith("/resetar-senha") || p.startsWith("/restaurar-senha")) return true;
+  if (p.startsWith("/atualizacao")) return true;
   if (p.startsWith("/setup-supabase") || p.startsWith("/debug-supabase") || p.startsWith("/debug")) return true;
   return false;
 }

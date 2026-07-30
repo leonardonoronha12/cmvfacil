@@ -105,3 +105,35 @@ export async function fetchBubbleObjPageWithConstraints<T = any>(input: {
   const { results, remaining } = extractResults(parsed);
   return { results: results as T[], remaining, cursor, limit };
 }
+
+export async function updateBubbleObjThing(input: {
+  creds: BubbleObjCredentials;
+  type: string;
+  id: string;
+  fields: Record<string, unknown>;
+}) {
+  const { creds } = input;
+  const type = String(input.type ?? "").trim();
+  const id = String(input.id ?? "").trim();
+  if (!type || !id) throw new Error("bubble_update_missing_target");
+  const url = `${creds.baseUrl.replace(/\/+$/, "")}/api/1.1/obj/${encodeURIComponent(type)}/${encodeURIComponent(id)}`;
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${creds.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input.fields ?? {}),
+    cache: "no-store",
+  });
+  const text = await response.text();
+  let parsed: any = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {}
+  if (!response.ok) {
+    const message = String(parsed?.body?.message ?? parsed?.message ?? text ?? "").slice(0, 600);
+    throw new Error(`bubble_update_${response.status}:${message}`);
+  }
+  return parsed;
+}

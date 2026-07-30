@@ -1,0 +1,375 @@
+.page {
+  --green: #08b56b;
+  --green-dark: #047344;
+  min-height: 100vh;
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  padding: 32px 18px;
+  background:
+    radial-gradient(circle at 12% 18%, rgba(8, 181, 107, 0.12), transparent 28%),
+    radial-gradient(circle at 88% 82%, rgba(255, 196, 44, 0.12), transparent 26%),
+    #f4f7f5;
+  font-family: Inter, sans-serif;
+}
+
+.glowOne,
+.glowTwo {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(2px);
+  pointer-events: none;
+}
+
+.glowOne {
+  width: 240px;
+  height: 240px;
+  left: -110px;
+  top: 12%;
+  background: rgba(8, 181, 107, 0.08);
+}
+
+.glowTwo {
+  width: 300px;
+  height: 300px;
+  right: -150px;
+  bottom: 5%;
+  background: rgba(255, 196, 44, 0.09);
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 600px);
+  min-height: 610px;
+  border: 1px solid #e0e8e3;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 34px 42px 38px;
+  box-shadow: 0 28px 80px rgba(12, 43, 29, 0.14);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+}
+
+.brand {
+  position: absolute;
+  left: 32px;
+  top: 28px;
+}
+
+.brand img {
+  width: 122px;
+  height: auto;
+  display: block;
+}
+
+.center {
+  display: grid;
+  justify-items: center;
+}
+
+.card h1 {
+  margin: 18px 0 10px;
+  color: #10261c;
+  font-size: clamp(28px, 4.4vw, 38px);
+  line-height: 1.13;
+  letter-spacing: -0.04em;
+}
+
+.lead {
+  margin: 0 auto 24px;
+  max-width: 480px;
+  color: #54625b;
+  font-size: 16px;
+  line-height: 1.65;
+}
+
+.updateIcon,
+.successIcon,
+.errorIcon {
+  width: 76px;
+  height: 76px;
+  margin: 58px auto 16px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  font-size: 38px;
+  font-weight: 800;
+}
+
+.updateIcon {
+  color: #fff;
+  background: linear-gradient(145deg, #1ccc83, #069257);
+  box-shadow: 0 16px 34px rgba(8, 181, 107, 0.28);
+}
+
+.successIcon {
+  color: #fff;
+  background: linear-gradient(145deg, #20ca7d, #078f57);
+}
+
+.errorIcon {
+  color: #a52938;
+  background: #ffe9ec;
+}
+
+.appIcon {
+  width: 90px;
+  height: 90px;
+  margin: 54px auto 12px;
+  position: relative;
+  border-radius: 25px;
+  background: #fff;
+  padding: 10px;
+  box-shadow: 0 14px 34px rgba(13, 55, 35, 0.16);
+}
+
+.appIcon img {
+  width: 100%;
+  height: 100%;
+  border-radius: 18px;
+  object-fit: cover;
+}
+
+.downloadPulse {
+  position: absolute;
+  right: -6px;
+  bottom: -6px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--green);
+  border: 4px solid #fff;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+.versionBadge {
+  align-self: center;
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--green-dark);
+  background: #e9f9f0;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.infoBox,
+.safeBox {
+  border: 1px solid #dce7e1;
+  border-radius: 17px;
+  background: #f8fbf9;
+  padding: 16px 18px;
+  margin: 2px 0 22px;
+  text-align: left;
+}
+
+.infoBox {
+  display: grid;
+  gap: 5px;
+}
+
+.infoBox strong,
+.safeBox strong {
+  color: #173c2a;
+  font-size: 14px;
+}
+
+.infoBox span,
+.safeBox p {
+  margin: 0;
+  color: #607068;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.safeBox {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 26px;
+}
+
+.lock {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: var(--green);
+  font-weight: 800;
+}
+
+.primaryButton {
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  border-radius: 15px;
+  color: #fff;
+  background: linear-gradient(135deg, #0bbb70, #07965b);
+  box-shadow: 0 12px 24px rgba(7, 150, 91, 0.24);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  cursor: pointer;
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+
+.primaryButton:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 15px 28px rgba(7, 150, 91, 0.3);
+}
+
+.footnote,
+.supportLink {
+  margin: 14px 0 0;
+  color: #78877f;
+  font-size: 12px;
+}
+
+.supportLink {
+  display: inline-block;
+  color: var(--green-dark);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.progressHeader,
+.progressMeta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.progressHeader {
+  margin: 4px 0 10px;
+  color: #263f33;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.progressHeader strong {
+  font-size: 15px;
+}
+
+.progressTrack {
+  height: 13px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e6ece8;
+  box-shadow: inset 0 1px 2px rgba(16, 50, 35, 0.08);
+}
+
+.progressBar {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #08a961, #22cc7f);
+  transition: width 420ms ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.progressBar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.45) 48%, transparent 76%);
+  transform: translateX(-100%);
+  animation: shimmer 1.6s linear infinite;
+}
+
+.progressMeta {
+  margin-top: 9px;
+  color: #78877f;
+  font-size: 11px;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 4px 0 24px;
+}
+
+.summary div {
+  border: 1px solid #e0e8e3;
+  border-radius: 15px;
+  padding: 15px 8px;
+  background: #fbfdfc;
+  display: grid;
+  gap: 4px;
+}
+
+.summary strong {
+  color: #173c2a;
+  font-size: 18px;
+}
+
+.summary span {
+  color: #718078;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 4px solid #dfe9e3;
+  border-top-color: var(--green);
+  animation: spin 850ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes shimmer {
+  to { transform: translateX(100%); }
+}
+
+@keyframes pulse {
+  50% { transform: scale(1.08); }
+}
+
+@media (max-width: 640px) {
+  .page {
+    padding: 0;
+    align-items: stretch;
+  }
+
+  .card {
+    width: 100%;
+    min-height: 100vh;
+    border: 0;
+    border-radius: 0;
+    padding: 30px 22px;
+    box-shadow: none;
+  }
+
+  .brand {
+    left: 22px;
+    top: 24px;
+  }
+
+  .summary {
+    gap: 6px;
+  }
+
+  .progressMeta {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
