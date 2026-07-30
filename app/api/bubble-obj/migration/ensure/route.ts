@@ -108,6 +108,7 @@ async function ensureBubbleUserForEmail(supabase: ReturnType<typeof getSupabaseA
         cursor: 0,
         limit: 10,
         constraints: [{ key: "email", constraint_type: "equals", value: email }],
+        timeoutMs: 8_000,
       });
       const first = (page.results ?? [])[0];
       if (first) {
@@ -197,6 +198,7 @@ async function discoverCompanyIdsForUser(args: { creds: Awaited<ReturnType<typeo
           cursor,
           limit: 100,
           constraints: [{ key: k, constraint_type: "contains", value: bubbleUserId }],
+          timeoutMs: 8_000,
         });
         for (const r of page.results ?? []) {
           const id = String((r as any)?.unique_id ?? (r as any)?._id ?? (r as any)?.id ?? "").trim();
