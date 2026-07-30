@@ -1398,7 +1398,9 @@ export async function POST(req: NextRequest) {
     const creds = await getBubbleObjCredentials();
     const batchLimit = 100;
     step = "run_create";
-    const runId = await ensureRunForUser(supabase, { userId, baseUrl: creds.baseUrl, batchLimit, prevRunId: row.last_run_id ? String(row.last_run_id) : null });
+    const migrationCanResume = ["running", "pending", "retrying"].includes(String((row as any)?.status ?? "").trim().toLowerCase());
+    const previousRunId = migrationCanResume && row.last_run_id ? String(row.last_run_id) : null;
+    const runId = await ensureRunForUser(supabase, { userId, baseUrl: creds.baseUrl, batchLimit, prevRunId: previousRunId });
 
     step = "object_types";
     const scopeObjectType = (t: string) => `${String(t ?? "").trim()}#${userId}`;
