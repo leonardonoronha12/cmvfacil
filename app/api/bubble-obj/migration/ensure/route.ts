@@ -272,7 +272,9 @@ async function ensureRunForUser(supabase: ReturnType<typeof getSupabaseAdmin>, a
 
   if (prevRunId) {
     const { data, error } = await supabase.from("bubble_obj_import_run").select("*").eq("id", prevRunId).maybeSingle();
-    if (!error && data && String((data as any).triggered_by_supabase_user_id ?? "") === userId) {
+    const previousStatus = String((data as any)?.status ?? "").trim().toLowerCase();
+    const canResume = ["running", "pending", "retrying"].includes(previousStatus);
+    if (!error && data && canResume && String((data as any).triggered_by_supabase_user_id ?? "") === userId) {
       return String((data as any).id);
     }
   }
