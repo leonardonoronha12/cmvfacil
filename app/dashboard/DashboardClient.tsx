@@ -886,9 +886,18 @@ function formatQtyLabelBubble(qty: number, unit: string) {
 function formatQty(qty: number, unit: string) {
   const u = (unit || "").trim() || "Und";
   const abs = Math.abs(qty);
-  const decimals = u.toLowerCase() === "kg" ? 3 : u.toLowerCase() === "l" ? 2 : 0;
   const v = Number.isFinite(qty) ? qty : 0;
-  const label = abs === 0 ? "0" : v.toLocaleString("pt-BR", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  const unitKey = u.toLowerCase();
+  const hasFraction = Math.abs(v - Math.trunc(v)) > Number.EPSILON;
+  const minimumFractionDigits = unitKey === "kg" ? 3 : unitKey === "l" ? 2 : 0;
+  const maximumFractionDigits = unitKey === "kg" ? 3 : unitKey === "l" ? 2 : hasFraction ? 3 : 0;
+  const label =
+    abs === 0
+      ? "0"
+      : v.toLocaleString("pt-BR", {
+          minimumFractionDigits,
+          maximumFractionDigits,
+        });
   return `${label}${u}`;
 }
 
@@ -1571,12 +1580,17 @@ export default function DashboardClient() {
 
     const initialById = new Map<string, number>();
     const finalById = new Map<string, number>();
+    const initialByName = new Map<string, number>();
+    const finalByName = new Map<string, number>();
     const unitStartById = new Map<string, string>();
     const unitEndById = new Map<string, string>();
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
-        initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+        const qty = parsePtNumber((it as any).estoqueFinal || "0");
+        initialById.set(it.id, qty);
+        const nameKey = normalizeKey(String((it as any).item ?? ""));
+        if (nameKey) initialByName.set(nameKey, qty);
         const u = String((it as any).unidade ?? "").trim();
         if (u) unitStartById.set(it.id, u);
       }
@@ -1584,7 +1598,10 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
-        finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+        const qty = parsePtNumber((it as any).estoqueFinal || "0");
+        finalById.set(it.id, qty);
+        const nameKey = normalizeKey(String((it as any).item ?? ""));
+        if (nameKey) finalByName.set(nameKey, qty);
         const u = String((it as any).unidade ?? "").trim();
         if (u) unitEndById.set(it.id, u);
       }
@@ -1691,8 +1708,9 @@ export default function DashboardClient() {
     for (const i of list) {
       const inventoryUnit = (unitById.get(i.id) ?? "").trim();
       const unit = inventoryUnit || i.medida || "Und";
-      const initialQty = initialById.get(i.id) ?? 0;
-      const finalQty = finalById.get(i.id) ?? 0;
+      const itemNameKey = normalizeKey(String(i.item ?? ""));
+      const initialQty = initialById.get(i.id) ?? initialByName.get(itemNameKey) ?? 0;
+      const finalQty = finalById.get(i.id) ?? finalByName.get(itemNameKey) ?? 0;
       const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
       const saidasQty = initialQty + entradasQty - finalQty;
 
@@ -1818,12 +1836,17 @@ export default function DashboardClient() {
 
       const initialById = new Map<string, number>();
       const finalById = new Map<string, number>();
+      const initialByName = new Map<string, number>();
+      const finalByName = new Map<string, number>();
       const unitStartById = new Map<string, string>();
       const unitEndById = new Map<string, string>();
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
-          initialById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+          const qty = parsePtNumber((it as any).estoqueFinal || "0");
+          initialById.set(it.id, qty);
+          const nameKey = normalizeKey(String((it as any).item ?? ""));
+          if (nameKey) initialByName.set(nameKey, qty);
           const u = String((it as any).unidade ?? "").trim();
           if (u) unitStartById.set(it.id, u);
         }
@@ -1831,7 +1854,10 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
-          finalById.set(it.id, parsePtNumber((it as any).estoqueFinal || "0"));
+          const qty = parsePtNumber((it as any).estoqueFinal || "0");
+          finalById.set(it.id, qty);
+          const nameKey = normalizeKey(String((it as any).item ?? ""));
+          if (nameKey) finalByName.set(nameKey, qty);
           const u = String((it as any).unidade ?? "").trim();
           if (u) unitEndById.set(it.id, u);
         }
@@ -1940,8 +1966,9 @@ export default function DashboardClient() {
       for (const i of list) {
         const inventoryUnit = (unitById.get(i.id) ?? "").trim();
         const unit = inventoryUnit || i.medida || "Und";
-        const initialQty = initialById.get(i.id) ?? 0;
-        const finalQty = finalById.get(i.id) ?? 0;
+        const itemNameKey = normalizeKey(String(i.item ?? ""));
+        const initialQty = initialById.get(i.id) ?? initialByName.get(itemNameKey) ?? 0;
+        const finalQty = finalById.get(i.id) ?? finalByName.get(itemNameKey) ?? 0;
         const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
         const saidasQty = initialQty + entradasQty - finalQty;
         const baseCostCents =
