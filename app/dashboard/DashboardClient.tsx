@@ -866,6 +866,35 @@ function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+function buildPriorInventoryBalances(contagens: InventarioContagem[], beforeTime: number) {
+  const byId = new Map<string, number>();
+  const byName = new Map<string, number>();
+  const prior = contagens
+    .map((contagem) => {
+      const date = parseDateDDMMYYYY(contagem.data);
+      return { contagem, time: date ? startOfDay(date).getTime() : Number.NaN };
+    })
+    .filter((entry) => Number.isFinite(entry.time) && entry.time < beforeTime)
+    .sort((a, b) => b.time - a.time);
+
+  for (const { contagem } of prior) {
+    for (const cat of safeArray<any>((contagem as any).categorias)) {
+      for (const it of safeArray<any>((cat as any).itens)) {
+        if (Boolean((it as any).removido)) continue;
+        const rawQty = String((it as any).estoqueFinal ?? "").trim();
+        if (!rawQty) continue;
+        const qty = parsePtNumber(rawQty);
+        const id = String((it as any).id ?? "").trim();
+        const nameKey = normalizeKey(String((it as any).item ?? ""));
+        if (id && !byId.has(id)) byId.set(id, qty);
+        if (nameKey && !byName.has(nameKey)) byName.set(nameKey, qty);
+      }
+    }
+  }
+
+  return { byId, byName };
+}
+
 function parseQtyLabel(input: string) {
   const raw = input.trim();
   if (!raw) return { qty: 0, unit: "" };
@@ -1582,6 +1611,7 @@ export default function DashboardClient() {
     const finalById = new Map<string, number>();
     const initialByName = new Map<string, number>();
     const finalByName = new Map<string, number>();
+    const priorInitial = buildPriorInventoryBalances(contagens, startT);
     const unitStartById = new Map<string, string>();
     const unitEndById = new Map<string, string>();
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
@@ -1709,7 +1739,12 @@ export default function DashboardClient() {
       const inventoryUnit = (unitById.get(i.id) ?? "").trim();
       const unit = inventoryUnit || i.medida || "Und";
       const itemNameKey = normalizeKey(String(i.item ?? ""));
-      const initialQty = initialById.get(i.id) ?? initialByName.get(itemNameKey) ?? 0;
+      const initialQty =
+        initialById.get(i.id) ??
+        initialByName.get(itemNameKey) ??
+        priorInitial.byId.get(i.id) ??
+        priorInitial.byName.get(itemNameKey) ??
+        0;
       const finalQty = finalById.get(i.id) ?? finalByName.get(itemNameKey) ?? 0;
       const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
       const saidasQty = initialQty + entradasQty - finalQty;
@@ -1838,6 +1873,7 @@ export default function DashboardClient() {
       const finalById = new Map<string, number>();
       const initialByName = new Map<string, number>();
       const finalByName = new Map<string, number>();
+      const priorInitial = buildPriorInventoryBalances(contagens, startT);
       const unitStartById = new Map<string, string>();
       const unitEndById = new Map<string, string>();
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
@@ -1967,7 +2003,12 @@ export default function DashboardClient() {
         const inventoryUnit = (unitById.get(i.id) ?? "").trim();
         const unit = inventoryUnit || i.medida || "Und";
         const itemNameKey = normalizeKey(String(i.item ?? ""));
-        const initialQty = initialById.get(i.id) ?? initialByName.get(itemNameKey) ?? 0;
+        const initialQty =
+          initialById.get(i.id) ??
+          initialByName.get(itemNameKey) ??
+          priorInitial.byId.get(i.id) ??
+          priorInitial.byName.get(itemNameKey) ??
+          0;
         const finalQty = finalById.get(i.id) ?? finalByName.get(itemNameKey) ?? 0;
         const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
         const saidasQty = initialQty + entradasQty - finalQty;
