@@ -272,7 +272,7 @@ export async function GET(req: NextRequest) {
       targetUserId = (await findAuthUserIdByEmail(supabase, email)) ?? "";
     }
 
-    const redirectTo = `${url.origin}/dashboard`;
+    const redirectTo = `${url.origin}/auth/impersonate`;
     if (!targetUserId) return json({ ok: false, error: "auth_user_not_found" }, { status: 404 });
 
     let data: any = null;
