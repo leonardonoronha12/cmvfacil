@@ -217,6 +217,45 @@ async function discoverCompanyIdsForUser(args: { creds: Awaited<ReturnType<typeo
   return Array.from(new Set(out)).filter(Boolean);
 }
 
+function companyIdsFromBubbleUser(input: any) {
+  if (!input || typeof input !== "object") return [];
+  const ids: string[] = [];
+  const companyKey = /(empresa|company)/i;
+  const bubbleId = /\d{8,}x\d{6,}/g;
+  for (const [key, value] of Object.entries(input)) {
+    if (!companyKey.test(key) || value == null) continue;
+    const serialized = typeof value === "string" ? value : JSON.stringify(value);
+    for (const match of serialized.match(bubbleId) ?? []) ids.push(String(match).trim());
+  }
+  return Array.from(new Set(ids)).filter(Boolean);
+}
+
+async function discoverCompanyIdsFromUserEmail(args: {
+  creds: Awaited<ReturnType<typeof getBubbleObjCredentials>>;
+  email: string;
+  bubbleUserId: string;
+}) {
+  const { creds, email, bubbleUserId } = args;
+  for (const type of ["user", "User", "users", "Users"]) {
+    try {
+      const page = await fetchBubbleObjPageWithConstraints<any>({
+        creds,
+        type,
+        cursor: 0,
+        limit: 10,
+        constraints: [{ key: "email", constraint_type: "equals", value: email }],
+        timeoutMs: 8_000,
+      });
+      const user = (page.results ?? []).find((row: any) => {
+        const id = String(row?.unique_id ?? row?._id ?? row?.id ?? "").trim();
+        return !bubbleUserId || id === bubbleUserId;
+      });
+      if (user) return companyIdsFromBubbleUser(user);
+    } catch {}
+  }
+  return [];
+}
+
 function expandCompanyObjectTypes(companyIds: string[]) {
   const bases = companyScopedBaseTypes();
   const out: string[] = [];
@@ -1388,6 +1427,9 @@ export async function POST(req: NextRequest) {
         .limit(200);
       if (!error) {
         companyIds = Array.from(new Set((data ?? []).map((x: any) => String(x?.bubble_unique_id ?? "").trim()).filter(Boolean)));
+      }
+      if (!companyIds.length) {
+        companyIds = await discoverCompanyIdsFromUserEmail({ creds, email, bubbleUserId });
       }
       if (!companyIds.length) companyIds = await discoverCompanyIdsForUser({ creds, bubbleUserId });
     } catch {
