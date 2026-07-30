@@ -12,10 +12,6 @@ type ApiUser = {
   banned_until: string | null;
 };
 
-type Mode = "bubble" | "supabase";
-type BubbleCompany = { id: string; name: string };
-type BubbleRow = { email: string; authUserId: string | null; companies: BubbleCompany[]; companiesCount: number };
-
 function friendlyError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? "");
   if (message === "forbidden") return "Sua conta não possui permissão de administrador para visualizar estes usuários.";
@@ -42,12 +38,9 @@ function formatDate(value: string | null) {
 }
 
 export default function EmailsUsuariosClient() {
-  const [mode, setMode] = useState<Mode>("bubble");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [users, setUsers] = useState<ApiUser[]>([]);
-  const [bubbleUsers, setBubbleUsers] = useState<BubbleRow[]>([]);
-  const [bubbleSourcePath, setBubbleSourcePath] = useState("");
   const [filter, setFilter] = useState("");
   const [copied, setCopied] = useState(false);
   const [impersonating, setImpersonating] = useState("");
@@ -69,27 +62,8 @@ export default function EmailsUsuariosClient() {
     }
   }
 
-  async function loadBubble() {
-    setIsLoading(true);
-    setError("");
-    setCopied(false);
-    try {
-      const response = await fetch(`/api/admin/bubble-users-table?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-      const json = (await response.json().catch(() => null)) as any;
-      if (!response.ok || !json?.ok) throw new Error(String(json?.error ?? `failed_${response.status}`));
-      setBubbleUsers(Array.isArray(json.rows) ? json.rows : []);
-      setBubbleSourcePath(String(json?.files?.users?.path ?? json?.files?.empresas?.path ?? ""));
-    } catch (requestError) {
-      setBubbleUsers([]);
-      setBubbleSourcePath("");
-      setError(friendlyError(requestError));
-    } finally {
-      setIsLoading(false);
-    }
-  }
-
   useEffect(() => {
-    void loadBubble();
+    void loadSupabase();
   }, []);
 
   const filteredSupabase = useMemo(() => {
@@ -98,23 +72,12 @@ export default function EmailsUsuariosClient() {
     return users.filter((user) => String(user.email ?? "").toLowerCase().includes(query) || user.id.toLowerCase().includes(query));
   }, [filter, users]);
 
-  const filteredBubble = useMemo(() => {
-    const query = filter.trim().toLowerCase();
-    if (!query) return bubbleUsers;
-    return bubbleUsers.filter((user) => {
-      if (user.email.toLowerCase().includes(query)) return true;
-      return user.companies?.some((company) => String(company.name ?? "").toLowerCase().includes(query));
-    });
-  }, [bubbleUsers, filter]);
-
   const emailsText = useMemo(() => {
-    const emails = mode === "bubble"
-      ? filteredBubble.map((user) => user.email)
-      : filteredSupabase.map((user) => user.email ?? "");
+    const emails = filteredSupabase.map((user) => user.email ?? "");
     return Array.from(new Set(emails.map((email) => email.trim().toLowerCase()).filter((email) => email.includes("@"))))
       .sort()
       .join("\n");
-  }, [filteredBubble, filteredSupabase, mode]);
+  }, [filteredSupabase]);
 
   async function copyEmails() {
     try {
@@ -152,15 +115,8 @@ export default function EmailsUsuariosClient() {
     }
   }
 
-  function selectMode(nextMode: Mode) {
-    setMode(nextMode);
-    setFilter("");
-    if (nextMode === "bubble") void loadBubble();
-    else void loadSupabase();
-  }
-
-  const visibleCount = mode === "bubble" ? filteredBubble.length : filteredSupabase.length;
-  const totalCount = mode === "bubble" ? bubbleUsers.length : users.length;
+  const visibleCount = filteredSupabase.length;
+  const totalCount = users.length;
 
   return (
     <main className={dash.content}>
@@ -183,20 +139,11 @@ export default function EmailsUsuariosClient() {
           <section className={styles.stats}>
             <div><span>Usuários encontrados</span><strong>{isLoading ? "—" : totalCount}</strong></div>
             <div><span>Resultados visíveis</span><strong>{isLoading ? "—" : visibleCount}</strong></div>
-            <div><span>Fonte atual</span><strong>{mode === "bubble" ? "Bubble" : "Sistema novo"}</strong></div>
+            <div><span>Fonte atual</span><strong>Supabase</strong></div>
           </section>
 
           <section className={styles.panel}>
             <div className={styles.toolbar}>
-              <div className={styles.sourceTabs} role="tablist" aria-label="Fonte dos usuários">
-                <button type="button" role="tab" aria-selected={mode === "bubble"} className={mode === "bubble" ? styles.sourceTabActive : styles.sourceTab} onClick={() => selectMode("bubble")} disabled={isLoading}>
-                  Usuários do Bubble
-                </button>
-                <button type="button" role="tab" aria-selected={mode === "supabase"} className={mode === "supabase" ? styles.sourceTabActive : styles.sourceTab} onClick={() => selectMode("supabase")} disabled={isLoading}>
-                  Usuários do sistema
-                </button>
-              </div>
-
               <div className={styles.actions}>
                 <label className={styles.search}>
                   <svg width="17" height="17" viewBox="0 0 24 24" fill="none" aria-hidden>
@@ -205,7 +152,7 @@ export default function EmailsUsuariosClient() {
                   </svg>
                   <input value={filter} onChange={(event) => setFilter(event.target.value)} placeholder="Buscar por e-mail, ID ou empresa" />
                 </label>
-                <button type="button" className={styles.secondaryButton} onClick={() => (mode === "bubble" ? void loadBubble() : void loadSupabase())} disabled={isLoading}>
+                <button type="button" className={styles.secondaryButton} onClick={() => void loadSupabase()} disabled={isLoading}>
                   {isLoading ? <span className={styles.spinner} /> : null}
                   {isLoading ? "Atualizando" : "Atualizar"}
                 </button>
@@ -222,51 +169,25 @@ export default function EmailsUsuariosClient() {
               </div>
             ) : null}
 
-            {mode === "bubble" && !error ? (
-              <div className={styles.sourceInfo}>
-                <span className={bubbleSourcePath ? styles.statusOnline : styles.statusNeutral} />
-                {bubbleSourcePath ? "Arquivos de migração detectados e prontos para consulta." : "Nenhum arquivo de usuários do Bubble foi detectado."}
-              </div>
-            ) : null}
-
             <div className={styles.tableWrap}>
-              {mode === "bubble" ? (
-                <table className={styles.table}>
-                  <thead><tr><th>Usuário</th><th>Empresa vinculada</th><th>Status da conta</th><th className={styles.actionColumn}>Ação</th></tr></thead>
-                  <tbody>
-                    {filteredBubble.map((user) => (
-                      <tr key={user.email}>
-                        <td><UserCell email={user.email} label="Conta migrada do Bubble" /></td>
-                        <td>{user.companies?.length ? user.companies.map((company) => company.name || "—").join(" • ") : "—"}</td>
-                        <td><span className={user.authUserId ? styles.statusBadgeActive : styles.statusBadgePending}>{user.authUserId ? "Cadastro ativo" : "Aguardando cadastro"}</span></td>
-                        <td className={styles.actionColumn}>
-                          <LoginButton email={user.email} authUserId={user.authUserId ?? undefined} enabled={Boolean(user.authUserId)} loadingEmail={impersonating} onLogin={loginAs} />
-                        </td>
-                      </tr>
-                    ))}
-                    {!isLoading && !filteredBubble.length ? <EmptyRow columns={4} /> : null}
-                  </tbody>
-                </table>
-              ) : (
-                <table className={styles.table}>
-                  <thead><tr><th>Usuário</th><th>Identificador</th><th>Criado em</th><th>Último acesso</th><th>Status</th><th className={styles.actionColumn}>Ação</th></tr></thead>
-                  <tbody>
-                    {filteredSupabase.map((user) => (
-                      <tr key={user.id}>
-                        <td><UserCell email={user.email ?? "E-mail não informado"} label="Usuário do sistema novo" /></td>
-                        <td><code className={styles.userId} title={user.id}>{shortId(user.id)}</code></td>
-                        <td>{formatDate(user.created_at)}</td>
-                        <td>{formatDate(user.last_sign_in_at)}</td>
-                        <td><span className={user.banned_until ? styles.statusBadgeBlocked : styles.statusBadgeActive}>{user.banned_until ? "Bloqueado" : "Ativo"}</span></td>
-                        <td className={styles.actionColumn}>
-                          <LoginButton email={user.email ?? ""} authUserId={user.id} enabled={Boolean(user.email) && !user.banned_until} loadingEmail={impersonating} onLogin={loginAs} />
-                        </td>
-                      </tr>
-                    ))}
-                    {!isLoading && !filteredSupabase.length ? <EmptyRow columns={6} /> : null}
-                  </tbody>
-                </table>
-              )}
+              <table className={styles.table}>
+                <thead><tr><th>Usuário</th><th>Identificador</th><th>Criado em</th><th>Último acesso</th><th>Status</th><th className={styles.actionColumn}>Ação</th></tr></thead>
+                <tbody>
+                  {filteredSupabase.map((user) => (
+                    <tr key={user.id}>
+                      <td><UserCell email={user.email ?? "E-mail não informado"} label="Usuário do sistema novo" /></td>
+                      <td><code className={styles.userId} title={user.id}>{shortId(user.id)}</code></td>
+                      <td>{formatDate(user.created_at)}</td>
+                      <td>{formatDate(user.last_sign_in_at)}</td>
+                      <td><span className={user.banned_until ? styles.statusBadgeBlocked : styles.statusBadgeActive}>{user.banned_until ? "Bloqueado" : "Ativo"}</span></td>
+                      <td className={styles.actionColumn}>
+                        <LoginButton email={user.email ?? ""} authUserId={user.id} enabled={Boolean(user.email) && !user.banned_until} loadingEmail={impersonating} onLogin={loginAs} />
+                      </td>
+                    </tr>
+                  ))}
+                  {!isLoading && !filteredSupabase.length ? <EmptyRow columns={6} /> : null}
+                </tbody>
+              </table>
             </div>
           </section>
         </div>
