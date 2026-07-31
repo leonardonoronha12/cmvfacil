@@ -100,6 +100,9 @@ export default function EmailsUsuariosClient() {
         ts: String(Date.now()),
       });
       if (authUserId) params.set("userId", authUserId);
+      params.set("mode", "redirect");
+      window.location.assign(`/api/admin/impersonate-link?${params.toString()}`);
+      return;
       const response = await fetch(`/api/admin/impersonate-link?${params.toString()}`, {
         method: "GET",
         cache: "no-store",
