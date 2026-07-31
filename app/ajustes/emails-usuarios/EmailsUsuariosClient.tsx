@@ -100,18 +100,15 @@ export default function EmailsUsuariosClient() {
         ts: String(Date.now()),
       });
       if (authUserId) params.set("userId", authUserId);
-      params.set("mode", "redirect");
-      window.location.assign(`/api/admin/impersonate-link?${params.toString()}`);
-      return;
+      params.set("mode", "session");
       const response = await fetch(`/api/admin/impersonate-link?${params.toString()}`, {
         method: "GET",
         cache: "no-store",
       });
       const json = (await response.json().catch(() => null)) as any;
       if (!response.ok || !json?.ok) throw new Error(String(json?.error ?? `failed_${response.status}`));
-      const actionLink = String(json?.actionLink ?? "");
-      if (!actionLink) throw new Error("Não foi possível gerar o acesso temporário.");
-      window.location.href = actionLink;
+      const redirectTo = String(json?.redirectTo ?? "/dashboard");
+      window.location.assign(redirectTo);
     } catch (loginError) {
       setError(friendlyError(loginError));
       setImpersonating("");

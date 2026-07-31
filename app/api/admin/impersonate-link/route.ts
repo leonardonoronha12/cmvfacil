@@ -290,7 +290,7 @@ export async function GET(req: NextRequest) {
     const actionLink = (data as any)?.properties?.action_link ? String((data as any).properties.action_link) : "";
     if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
 
-    if (mode === "redirect") {
+    if (mode === "redirect" || mode === "session") {
       const verifyRes = await fetch(actionLink, { method: "GET", redirect: "manual", cache: "no-store" });
       const location = String(verifyRes.headers.get("location") ?? "").trim();
       const hash = location.includes("#") ? location.slice(location.indexOf("#") + 1) : "";
@@ -299,7 +299,10 @@ export async function GET(req: NextRequest) {
       const refreshToken = String(params.get("refresh_token") ?? "").trim();
       if (!accessToken) return json({ ok: false, error: "missing_access_token_from_verify_redirect" }, { status: 500 });
 
-      const res = NextResponse.redirect(new URL("/dashboard", url.origin), { status: 302 });
+      const res =
+        mode === "session"
+          ? json({ ok: true, redirectTo: "/dashboard" }, { status: 200 })
+          : NextResponse.redirect(new URL("/dashboard", url.origin), { status: 302 });
       const secure = shouldUseSecureCookies(req);
       const domain = getAuthCookieDomain(req);
       const cookieBase = { httpOnly: true, sameSite: "lax" as const, secure, path: "/", ...(domain ? { domain } : {}) };
