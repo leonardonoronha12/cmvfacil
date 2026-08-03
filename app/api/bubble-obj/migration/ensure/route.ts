@@ -920,6 +920,15 @@ async function processStagingBatch(args: {
           .maybeSingle();
         if (exErr) throw new Error(exErr.message);
         if (!existing) {
+          // Do not leave orphaned note items staged forever. A staged row that
+          // cannot resolve its parent keeps the whole migration in "running"
+          // even though subsequent calls cannot make progress. Validation will
+          // keep the migration from being finalized until these rows are
+          // reviewed or their parent entry is recovered.
+          for (const rowWrap of rows) {
+            pendingReview += 1;
+            pendingIds.push(String(rowWrap.stId));
+          }
           continue;
         }
         const baseItems = Array.isArray((existing as any)?.itens_nota) ? ((existing as any).itens_nota as any[]) : [];
@@ -1032,7 +1041,11 @@ async function processStagingBatch(args: {
   } else {
     for (const r of list) {
       const bubbleUniqueId = String(r.bubble_unique_id ?? "").trim();
-      if (!bubbleUniqueId) continue;
+      if (!bubbleUniqueId) {
+        pendingReview += 1;
+        pendingIds.push(String(r.id));
+        continue;
+      }
       processedIds.push(String(r.id));
       processedUniqueIds.push(bubbleUniqueId);
       processed += 1;
@@ -1795,6 +1808,20 @@ export async function POST(req: NextRequest) {
 
     if (Date.now() < deadline && processedInCall < maxProcessTotal) {
       step = "process_backlog";
+      const orderedDrain = await drainStagingForRun({
+        supabase,
+        userId,
+        runId,
+        objectTypes,
+        processLimit,
+        deadlineMs: deadline,
+      });
+      processedInCall += Object.values(orderedDrain).reduce((sum, count) => sum + Math.max(0, Number(count) || 0), 0);
+
+      // Rows from an older resumable run can reference object types that are
+      // not present in the newly discovered list. Drain those as a fallback
+      // after the dependency-ordered pass so they cannot pin the migration at
+      // 92% forever.
       const { data: stagedRows, error: stagedErr } = await supabase
         .from("bubble_obj_import_staging")
         .select("bubble_object_type")
