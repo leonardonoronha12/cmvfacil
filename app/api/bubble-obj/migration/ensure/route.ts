@@ -661,10 +661,10 @@ async function processStagingBatch(args: {
           const catObj = catsByKey.get(catKey) ?? { id: `cat:${catKey}`, nome: catName, status: "pendente", itens: [] };
           const itensArr = Array.isArray(catObj.itens) ? (catObj.itens as any[]) : [];
           const id = insumoId || `${userScopedId(userId)}inventario_item:${bubbleItemId || rowWrap.bubbleUniqueId}`;
-          const prevItem = itensArr.find((x) => String((x as any)?.id ?? "") === id) ?? null;
-          if (!prevItem) {
-            itensArr.push({ id, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "" });
-          }
+          const prevIndex = itensArr.findIndex((x) => String((x as any)?.id ?? "") === id);
+          const nextItem = { id, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "" };
+          if (prevIndex >= 0) itensArr[prevIndex] = { ...(itensArr[prevIndex] ?? {}), ...nextItem };
+          else itensArr.push(nextItem);
           catObj.itens = itensArr;
           catsByKey.set(catKey, catObj);
 
@@ -1323,6 +1323,113 @@ async function rebuildEntradasFromControlForCompany(args: {
   }
 }
 
+async function rebuildInventariosFromControlForCompany(args: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  userId: string;
+  companyId: string;
+}) {
+  const { supabase, userId, companyId } = args;
+  const stateId = userScopedId(userId).slice(0, -1);
+  const scopeObjectType = (t: string) => `${String(t ?? "").trim()}#${userId}`;
+
+  const loadAllControlRows = async (objectType: string) => {
+    const out: any[] = [];
+    for (let from = 0; from < 50_000; from += 1_000) {
+      const { data, error } = await supabase
+        .from("bubble_obj_import_control")
+        .select("bubble_unique_id,raw_payload_json,status")
+        .eq("supabase_user_id", userId)
+        .eq("bubble_object_type", objectType)
+        .in("status", ["staged", "processed", "staged_only"])
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      const page = (data ?? []) as any[];
+      out.push(...page);
+      if (page.length < 1_000) break;
+    }
+    return out;
+  };
+
+  const { data: insumosState, error: insumosErr } = await supabase
+    .from("insumos_state")
+    .select("payload")
+    .eq("id", stateId)
+    .maybeSingle();
+  if (insumosErr) throw new Error(insumosErr.message);
+  const insumos = Array.isArray((insumosState as any)?.payload?.rows) ? ((insumosState as any).payload.rows as any[]) : [];
+  const insumoByBubbleId = new Map<string, any>();
+  for (const row of insumos) {
+    const id = String((row as any)?.id ?? "");
+    const match = id.match(/insumo:(.+)$/);
+    if (match?.[1]) insumoByBubbleId.set(String(match[1]).trim(), row);
+  }
+
+  const categoriaRows = await loadAllControlRows(scopeObjectType(`categorias@${companyId}`));
+  const categoriaNameById: Record<string, string> = {};
+  for (const row of categoriaRows) {
+    const id = String((row as any)?.bubble_unique_id ?? "").trim();
+    const nome = mapCategoriaName((row as any)?.raw_payload_json ?? {});
+    if (id && nome) categoriaNameById[id] = nome;
+  }
+
+  const inventarioRows = await loadAllControlRows(scopeObjectType(`inventarios@${companyId}`));
+  const itemRows = await loadAllControlRows(scopeObjectType(`itens_inventarios@${companyId}`));
+  const itemsByInventory = new Map<string, Map<string, any>>();
+
+  for (const row of itemRows) {
+    const mapped = mapItemInventario((row as any)?.raw_payload_json ?? {});
+    const bubbleInventoryId = String(mapped.bubbleInventarioId ?? "").trim();
+    const bubbleItemId = String(mapped.bubbleItemId ?? "").trim();
+    if (!bubbleInventoryId || !bubbleItemId) continue;
+    const insumo = insumoByBubbleId.get(bubbleItemId) ?? null;
+    const itemId = buildInsumoId(userId, bubbleItemId);
+    const item = {
+      id: itemId,
+      item: String((insumo as any)?.item ?? "").trim() || "Item",
+      unidade: String((insumo as any)?.medida ?? mapped.unidade ?? "Und").trim() || "Und",
+      estoqueFinal: String(mapped.estoqueFinal ?? "").trim(),
+      categoria:
+        String(mapped.categoriaNome ?? "").trim() ||
+        String(categoriaNameById[String(mapped.categoriaId ?? "").trim()] ?? "").trim() ||
+        String((insumo as any)?.categoria ?? "").trim() ||
+        "Sem categoria",
+    };
+    const byItem = itemsByInventory.get(bubbleInventoryId) ?? new Map<string, any>();
+    byItem.set(itemId, item);
+    itemsByInventory.set(bubbleInventoryId, byItem);
+  }
+
+  const upserts: any[] = [];
+  for (const row of inventarioRows) {
+    const mapped = mapInventario((row as any)?.raw_payload_json ?? {});
+    const bubbleInventoryId = String(mapped.bubbleInventarioId ?? "").trim();
+    if (!bubbleInventoryId) continue;
+    const categories = new Map<string, any>();
+    for (const item of itemsByInventory.get(bubbleInventoryId)?.values() ?? []) {
+      const name = String((item as any).categoria ?? "").trim() || "Sem categoria";
+      const key = name.toLocaleLowerCase("pt-BR");
+      const category = categories.get(key) ?? { id: `cat:${key}`, nome: name, status: "contabilizado", itens: [] };
+      category.itens.push({
+        id: item.id,
+        item: item.item,
+        unidade: item.unidade,
+        estoqueFinal: item.estoqueFinal,
+      });
+      categories.set(key, category);
+    }
+    upserts.push({
+      id: buildInventarioId(userId, bubbleInventoryId),
+      data: mapped.data,
+      categorias: Array.from(categories.values()),
+    });
+  }
+
+  for (let i = 0; i < upserts.length; i += 100) {
+    const { error } = await supabase.from("inventario").upsert(upserts.slice(i, i + 100) as any, { onConflict: "id" });
+    if (error) throw new Error(error.message);
+  }
+}
+
 export async function POST(req: NextRequest) {
   let step = "start";
   try {
@@ -1338,6 +1445,7 @@ export async function POST(req: NextRequest) {
     const maxTicks = typeof body?.maxTicks === "number" && Number.isFinite(body.maxTicks) && body.maxTicks > 0 ? Math.min(5, Math.floor(body.maxTicks)) : 2;
     const processLimit = typeof body?.processLimit === "number" && Number.isFinite(body.processLimit) && body.processLimit > 0 ? Math.min(500, Math.floor(body.processLimit)) : 250;
     const maxProcessTotal = typeof body?.maxProcessTotal === "number" && Number.isFinite(body.maxProcessTotal) && body.maxProcessTotal > 0 ? Math.min(1500, Math.floor(body.maxProcessTotal)) : 600;
+    const forceRebuildFromControl = body?.rebuildFromControl === true;
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
     try {
@@ -1368,12 +1476,12 @@ export async function POST(req: NextRequest) {
         .limit(1);
       if (stagedErr) return json({ ok: false, error: stagedErr.message }, { status: 500 });
       const hasStaged = Array.isArray(stagedAny) && stagedAny.length > 0;
-      if (!hasStaged && existingValidationStatus.toLowerCase() === "validated")
+      if (!hasStaged && existingValidationStatus.toLowerCase() === "validated" && !forceRebuildFromControl)
         return json(
           { ok: true, status: "completed", runId: (existingMigration as any)?.last_run_id ? String((existingMigration as any).last_run_id) : null },
           { status: 200 },
         );
-      if (!hasStaged && existingValidationStatus.toLowerCase() !== "validated") shouldRebuildFromControl = true;
+      if (!hasStaged && (existingValidationStatus.toLowerCase() !== "validated" || forceRebuildFromControl)) shouldRebuildFromControl = true;
     }
 
     step = "auth_email";
@@ -1449,6 +1557,7 @@ export async function POST(req: NextRequest) {
       step = "rebuild_control";
       for (const companyId of companyIds.slice(0, 3)) {
         await rebuildEntradasFromControlForCompany({ supabase, userId, companyId });
+        await rebuildInventariosFromControlForCompany({ supabase, userId, companyId });
       }
     }
 
