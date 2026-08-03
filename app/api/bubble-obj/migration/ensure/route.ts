@@ -290,6 +290,43 @@ async function ensureRunForUser(supabase: ReturnType<typeof getSupabaseAdmin>, a
   return runId;
 }
 
+async function discardStaleRun(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  args: { userId: string; runId?: string | null; staleAfterMs?: number },
+) {
+  const runId = String(args.runId ?? "").trim();
+  if (!runId) return false;
+
+  const { data, error } = await supabase
+    .from("bubble_obj_import_run_item")
+    .select("updated_at")
+    .eq("run_id", runId)
+    .eq("supabase_user_id", args.userId)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return false;
+
+  const lastActivityMs = Date.parse(String((data as any)?.updated_at ?? ""));
+  const staleAfterMs = Math.max(60_000, Number(args.staleAfterMs ?? 10 * 60_000));
+  if (Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs < staleAfterMs) return false;
+
+  const finishedAt = nowIso();
+  await supabase
+    .from("bubble_obj_import_run")
+    .update({ status: "failed", finished_at: finishedAt, summary: { reason: "stale_run_replaced" } } as any)
+    .eq("id", runId)
+    .eq("triggered_by_supabase_user_id", args.userId)
+    .in("status", ["running", "pending", "retrying"]);
+  await supabase
+    .from("bubble_obj_user_migration_attempt")
+    .update({ status: "failed", error_message: "stale_run_replaced", finished_at: finishedAt } as any)
+    .eq("supabase_user_id", args.userId)
+    .eq("run_id", runId)
+    .is("finished_at", null);
+  return true;
+}
+
 async function ensureCheckpointsAndRunItems(supabase: ReturnType<typeof getSupabaseAdmin>, args: { userId: string; bubbleUserId: string; userEmail: string; runId: string; objectTypes: string[] }) {
   const { userId, bubbleUserId, userEmail, runId, objectTypes } = args;
 
@@ -1507,7 +1544,11 @@ export async function POST(req: NextRequest) {
     const batchLimit = 100;
     step = "run_create";
     const migrationCanResume = ["running", "pending", "retrying"].includes(String((row as any)?.status ?? "").trim().toLowerCase());
-    const previousRunId = migrationCanResume && row.last_run_id ? String(row.last_run_id) : null;
+    let previousRunId = migrationCanResume && row.last_run_id ? String(row.last_run_id) : null;
+    if (previousRunId && (await discardStaleRun(supabase, { userId, runId: previousRunId }))) {
+      previousRunId = null;
+      shouldRebuildFromControl = true;
+    }
     const runId = await ensureRunForUser(supabase, { userId, baseUrl: creds.baseUrl, batchLimit, prevRunId: previousRunId });
 
     step = "object_types";
