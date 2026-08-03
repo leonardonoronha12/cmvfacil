@@ -297,6 +297,14 @@ async function discardStaleRun(
   const runId = String(args.runId ?? "").trim();
   if (!runId) return false;
 
+  const { data: run, error: runError } = await supabase
+    .from("bubble_obj_import_run")
+    .select("started_at")
+    .eq("id", runId)
+    .eq("triggered_by_supabase_user_id", args.userId)
+    .maybeSingle();
+  if (runError || !run) return false;
+
   const { data, error } = await supabase
     .from("bubble_obj_import_run_item")
     .select("updated_at")
@@ -308,8 +316,11 @@ async function discardStaleRun(
   if (error) return false;
 
   const lastActivityMs = Date.parse(String((data as any)?.updated_at ?? ""));
+  const startedAtMs = Date.parse(String((run as any)?.started_at ?? ""));
   const staleAfterMs = Math.max(60_000, Number(args.staleAfterMs ?? 10 * 60_000));
-  if (Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs < staleAfterMs) return false;
+  const exceededHardLimit = Number.isFinite(startedAtMs) && Date.now() - startedAtMs >= 30 * 60_000;
+  const hasRecentActivity = Number.isFinite(lastActivityMs) && Date.now() - lastActivityMs < staleAfterMs;
+  if (!exceededHardLimit && hasRecentActivity) return false;
 
   const finishedAt = nowIso();
   await supabase
