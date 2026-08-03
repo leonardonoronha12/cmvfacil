@@ -1107,6 +1107,38 @@ async function updateMigrationTotals(supabase: ReturnType<typeof getSupabaseAdmi
   return { totals, doneCount, pendingCount, errorCount, retryingCount, pendingStagedCount };
 }
 
+async function reconcileCompletedRunItems(args: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  userId: string;
+  runId: string;
+  bubbleUserId: string;
+}) {
+  const { supabase, userId, runId, bubbleUserId } = args;
+  const { data: checkpoints, error } = await supabase
+    .from("bubble_obj_import_checkpoint")
+    .select("object_type")
+    .eq("supabase_user_id", userId)
+    .eq("bubble_user_id", bubbleUserId)
+    .eq("status", "done");
+  if (error) throw new Error(error.message);
+
+  const completedTypes = Array.from(
+    new Set((checkpoints ?? []).map((row: any) => String(row?.object_type ?? "").trim()).filter(Boolean)),
+  );
+  if (!completedTypes.length) return 0;
+
+  const { data: updated, error: updateError } = await supabase
+    .from("bubble_obj_import_run_item")
+    .update({ status: "done", last_error: "" } as any)
+    .eq("run_id", runId)
+    .eq("supabase_user_id", userId)
+    .in("object_type", completedTypes)
+    .neq("status", "done")
+    .select("id");
+  if (updateError) throw new Error(updateError.message);
+  return Array.isArray(updated) ? updated.length : 0;
+}
+
 async function loadPerTypeStats(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string, runId: string) {
   const { data, error } = await supabase
     .from("bubble_obj_import_run_item")
@@ -1840,6 +1872,13 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+
+    // Old resumable runs can have a completed checkpoint while the matching
+    // run item remains "pending" after an interrupted request. The totals
+    // calculation uses run-item statuses, so that stale mismatch otherwise
+    // keeps the migration at 92% forever even though Bubble pagination ended.
+    step = "reconcile_completed_run_items";
+    await reconcileCompletedRunItems({ supabase, userId, runId, bubbleUserId });
 
     step = "totals";
     const totalsRes = await updateMigrationTotals(supabase, userId, runId);
