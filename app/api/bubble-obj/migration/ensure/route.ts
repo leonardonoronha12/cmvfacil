@@ -1382,19 +1382,40 @@ async function rebuildInventariosFromControlForCompany(args: {
 
   const loadAllControlRows = async (objectType: string) => {
     const out: any[] = [];
-    for (let from = 0; from < 50_000; from += 1_000) {
-      const { data, error } = await supabase
-        .from("bubble_obj_import_control")
-        .select("bubble_unique_id,raw_payload_json,status")
-        .eq("supabase_user_id", userId)
-        .eq("bubble_object_type", objectType)
-        .in("status", ["staged", "processed", "staged_only"])
-        .range(from, from + 999);
-      if (error) throw new Error(error.message);
-      const page = (data ?? []) as any[];
-      out.push(...page);
-      if (page.length < 1_000) break;
+    const pageSize = 1_000;
+    const maxRows = 50_000;
+    const { count, error: countError } = await supabase
+      .from("bubble_obj_import_control")
+      .select("bubble_unique_id", { count: "exact", head: true })
+      .eq("supabase_user_id", userId)
+      .eq("bubble_object_type", objectType)
+      .in("status", ["staged", "processed", "staged_only"]);
+    if (countError) throw new Error(countError.message);
+
+    const total = Math.min(maxRows, Math.max(0, Number(count ?? 0)));
+    const ranges: Array<{ from: number; to: number }> = [];
+    for (let from = 0; from < total; from += pageSize) {
+      ranges.push({ from, to: Math.min(total - 1, from + pageSize - 1) });
     }
+
+    for (let i = 0; i < ranges.length; i += 8) {
+      const pages = await Promise.all(
+        ranges.slice(i, i + 8).map(async ({ from, to }) => {
+          const { data, error } = await supabase
+            .from("bubble_obj_import_control")
+            .select("bubble_unique_id,raw_payload_json,status")
+            .eq("supabase_user_id", userId)
+            .eq("bubble_object_type", objectType)
+            .in("status", ["staged", "processed", "staged_only"])
+            .order("bubble_unique_id", { ascending: true })
+            .range(from, to);
+          if (error) throw new Error(error.message);
+          return (data ?? []) as any[];
+        }),
+      );
+      for (const page of pages) out.push(...page);
+    }
+
     return out;
   };
 
