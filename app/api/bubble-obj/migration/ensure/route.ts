@@ -1556,7 +1556,14 @@ export async function POST(req: NextRequest) {
     if (shouldRebuildFromControl && companyIds.length) {
       step = "rebuild_control";
       for (const companyId of companyIds.slice(0, 3)) {
-        await rebuildEntradasFromControlForCompany({ supabase, userId, companyId });
+        // Rebuilding all entry notes can take several minutes for larger
+        // accounts and blocks the recovery screen before it can report
+        // progress. Only do that expensive work for an explicit full rebuild.
+        // Automatic reconciliation repairs the inventory balances that caused
+        // the validation divergence.
+        if (forceRebuildFromControl) {
+          await rebuildEntradasFromControlForCompany({ supabase, userId, companyId });
+        }
         await rebuildInventariosFromControlForCompany({ supabase, userId, companyId });
       }
     }
