@@ -1721,6 +1721,12 @@ export async function POST(req: NextRequest) {
 
     const tickUrl = `${origin}/api/bubble-obj/stage/tick`;
     const deadline = Date.now() + callBudgetMs;
+    // Always reserve part of the request budget for draining staging. Without
+    // this reserve, slow Bubble pagination can consume the entire budget and
+    // leave the final staged rows untouched on every retry, pinning the UI at
+    // 92% even after every run item/checkpoint is done.
+    const stagingReserveMs = Math.min(6_000, Math.max(2_000, Math.floor(callBudgetMs / 3)));
+    const tickDeadline = deadline - stagingReserveMs;
     let lastTick: any = null;
     let tickCount = 0;
     let processedInCall = 0;
@@ -1729,9 +1735,9 @@ export async function POST(req: NextRequest) {
     await releaseDueRetries({ supabase, userId, runId, nowMs: Date.now() }).catch(() => null);
 
     step = "tick_loop";
-    while (tickCount < maxTicks && Date.now() < deadline) {
+    while (tickCount < maxTicks && Date.now() < tickDeadline) {
       tickCount += 1;
-      const remainingMs = deadline - Date.now();
+      const remainingMs = tickDeadline - Date.now();
       if (remainingMs <= 0) break;
       const tickTimeoutMs = Math.max(1000, Math.min(8000, remainingMs));
       const controller = new AbortController();
