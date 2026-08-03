@@ -405,7 +405,11 @@ export async function POST(req: NextRequest) {
 
       const diff = bubbleTotal != null && dbTotal != null ? bubbleTotal - dbTotal : null;
       const ok =
-        mappingStatus !== "final"
+        mappingStatus === "unknown"
+          ? false
+          : g.runItem.pendingReview > 0 || g.runItem.error > 0
+            ? false
+          : mappingStatus !== "final"
           ? true
           : (() => {
               if (bubbleTotal == null || dbTotal == null) return false;
@@ -413,7 +417,7 @@ export async function POST(req: NextRequest) {
               if (baseType === "inventarios") return diff != null && diff <= 0;
               return diff === 0;
             })();
-      if (!ok && mappingStatus === "final") hasDiff = true;
+      if (!ok) hasDiff = true;
       if (mappingStatus === "staged_only" || mappingStatus === "derived" || mappingStatus === "scope_only") ignoredCount += 1;
 
       perType.push({

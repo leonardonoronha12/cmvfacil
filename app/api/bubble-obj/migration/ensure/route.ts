@@ -1041,14 +1041,13 @@ async function processStagingBatch(args: {
   } else {
     for (const r of list) {
       const bubbleUniqueId = String(r.bubble_unique_id ?? "").trim();
-      if (!bubbleUniqueId) {
-        pendingReview += 1;
-        pendingIds.push(String(r.id));
-        continue;
-      }
-      processedIds.push(String(r.id));
-      processedUniqueIds.push(bubbleUniqueId);
-      processed += 1;
+      // Never acknowledge an object type that has no materializer. Previously
+      // this branch marked every unknown record as processed, which allowed a
+      // migration to reach 100% even though nothing had been written to the
+      // destination module.
+      pendingReview += 1;
+      pendingIds.push(String(r.id));
+      if (!bubbleUniqueId) errCount += 1;
     }
   }
 
