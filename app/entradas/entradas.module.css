@@ -396,6 +396,10 @@
   z-index: 220;
 }
 
+.modalOverlayNested {
+  z-index: 320;
+}
+
 .modal {
   width: 560px;
   max-width: calc(100vw - 40px);

@@ -482,9 +482,10 @@ function parseDateLabelLoose(value: string) {
   return d;
 }
 
-function normalizeDateLabelPT(value: string) {
-  const d = parseDateLabelLoose(value);
-  return d ? formatDateLabelPT(d) : value.trim();
+function normalizeDateLabelPT(value: unknown) {
+  const safeValue = String(value ?? "");
+  const d = parseDateLabelLoose(safeValue);
+  return d ? formatDateLabelPT(d) : safeValue.trim();
 }
 
 function startOfMonth(d: Date) {
@@ -495,8 +496,8 @@ function addMonths(d: Date, delta: number) {
   return new Date(d.getFullYear(), d.getMonth() + delta, 1);
 }
 
-function parseBrlToCents(input: string) {
-  const s = input.replace(/[^\d,.-]/g, "").trim();
+function parseBrlToCents(input: unknown) {
+  const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!s) return 0;
   const neg = s.includes("-");
   const cleaned = s.replace(/-/g, "");
@@ -507,8 +508,8 @@ function parseBrlToCents(input: string) {
   return neg ? -cents : cents;
 }
 
-function parsePtNumber(input: string) {
-  const s = input.replace(/[^\d,.-]/g, "").trim();
+function parsePtNumber(input: unknown) {
+  const s = String(input ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!s) return 0;
   const neg = s.includes("-");
   const cleaned = s.replace(/-/g, "");
@@ -518,8 +519,8 @@ function parsePtNumber(input: string) {
   return neg ? -n : n;
 }
 
-function parseQtyLabel(input: string) {
-  const raw = input.trim();
+function parseQtyLabel(input: unknown) {
+  const raw = String(input ?? "").trim();
   if (!raw) return { qty: 0, unit: "" };
   const m = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
   if (!m) return { qty: parsePtNumber(raw), unit: "" };
@@ -528,7 +529,7 @@ function parseQtyLabel(input: string) {
   return { qty, unit };
 }
 
-function formatMaskedPtInput(value: string, decimals: number) {
+function formatMaskedPtInput(value: unknown, decimals: number) {
   const n = parsePtNumber(value);
   return formatPtNumber(n, decimals);
 }
@@ -1290,7 +1291,7 @@ export default function EntradasClient() {
     const now = new Date();
     let maxN = 0;
     for (const r of rows) {
-      const n = Number.parseInt(r.numero.replace(/[^\d]/g, "") || "0", 10);
+      const n = Number.parseInt(String(r.numero ?? "").replace(/[^\d]/g, "") || "0", 10);
       if (n > maxN) maxN = n;
     }
     const numero = `#${maxN + 1 || 1}`;
@@ -3296,8 +3297,9 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isAddFornecedorItemOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
+        {isMounted && isAddFornecedorItemOpen
+          ? createPortal(
+          <div className={`${styles.modalOverlay} ${styles.modalOverlayNested}`} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
             <div className={`${styles.modal} ${styles.mapItemModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Configurar Vinculação</div>
@@ -3357,8 +3359,10 @@ export default function EntradasClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          </div>,
+          document.body,
+        )
+          : null}
 
         {isMounted && isFornecedorProdutosOpen && fornecedorModalKey
           ? createPortal(

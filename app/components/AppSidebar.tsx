@@ -1043,8 +1043,26 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   };
 
   const handleSidebarNavClick = (e: any) => {
-    closeDrawer();
     if (e?.metaKey || e?.ctrlKey || e?.shiftKey || e?.altKey) return;
+
+    const href = String(e?.currentTarget?.getAttribute?.("href") ?? "").trim();
+    if (!href) {
+      closeDrawer();
+      return;
+    }
+
+    e.preventDefault();
+    router.push(href);
+    closeDrawer();
+
+    // If a stalled client transition does not update the URL, fall back to a
+    // regular navigation so the sidebar never becomes unresponsive.
+    window.setTimeout(() => {
+      const target = new URL(href, window.location.origin);
+      const current = `${window.location.pathname}${window.location.search}`;
+      const expected = `${target.pathname}${target.search}`;
+      if (current !== expected) window.location.assign(target.href);
+    }, 1200);
   };
 
   const companyName = String(me?.companyName ?? "").trim() || "—";
