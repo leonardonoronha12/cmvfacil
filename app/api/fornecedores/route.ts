@@ -626,12 +626,22 @@ export async function POST(req: NextRequest) {
     if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
+    // Authentication and company scoping are validated above with the user's
+    // session. Persist through the service client so an otherwise valid member
+    // is not blocked by legacy/incomplete RLS policies on the compat tables.
+    const compatDb = (() => {
+      try {
+        return getSupabaseAdmin();
+      } catch {
+        return supabase;
+      }
+    })();
 
     const infoMap = safeObj(data.info);
     const produtosMap = safeObj(data.produtos);
     const equivMap = safeObj(data.equivalencias);
 
-    const { data: suppliersDb, error: suppliersErr } = await supabase
+    const { data: suppliersDb, error: suppliersErr } = await compatDb
       .from("suppliers")
       .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
       .eq("company_id", companyId)
@@ -780,16 +790,16 @@ export async function POST(req: NextRequest) {
     const inserts = Array.from(insertsByKey.values());
 
     if (updates.length) {
-      const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
+      const { error: upErr } = await compatDb.from("suppliers").upsert(updates as any, { onConflict: "id" });
       if (upErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_upsert", error: upErr.message, source: "compat" });
     }
 
     if (inserts.length) {
-      const { error: insErr } = await supabase.from("suppliers").insert(inserts as any);
+      const { error: insErr } = await compatDb.from("suppliers").insert(inserts as any);
       if (insErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_insert", error: insErr.message, source: "compat" });
     }
 
-    const { data: suppliersDb2, error: suppliersErr2 } = await supabase
+    const { data: suppliersDb2, error: suppliersErr2 } = await compatDb
       .from("suppliers")
       .select("id,bubble_id,nome,external_key,raw")
       .eq("company_id", companyId)
@@ -887,9 +897,9 @@ export async function POST(req: NextRequest) {
 
     const deleteIds = Array.from(deleteCandidateIds).filter(Boolean);
     if (deleteIds.length) {
-      const { error: linkDelErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
+      const { error: linkDelErr } = await compatDb.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
       if (linkDelErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_delete", error: linkDelErr.message, source: "compat" });
-      const { error: supplierDelErr } = await supabase.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
+      const { error: supplierDelErr } = await compatDb.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
       if (supplierDelErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_delete", error: supplierDelErr.message, source: "compat" });
     }
 
@@ -916,7 +926,7 @@ export async function POST(req: NextRequest) {
 
     const supplierIdsForSync = Array.from(supplierProductsById.keys()).filter(Boolean);
     if (supplierIdsForSync.length) {
-      const { data: itemsDb, error: itemsErr } = await supabase.from("items").select("id,name").eq("company_id", companyId).limit(12000);
+      const { data: itemsDb, error: itemsErr } = await compatDb.from("items").select("id,name").eq("company_id", companyId).limit(12000);
       if (itemsErr) return errJson({ status: 500, traceId, stage: "compat.items_select", error: itemsErr.message, source: "compat" });
       const itemIdByKey = new Map<string, string>();
       for (const it of itemsDb ?? []) {
@@ -963,15 +973,9 @@ export async function POST(req: NextRequest) {
       });
       // #endregion
 
-      if (missing.length) {
-        return errJson({
-          status: 400,
-          traceId,
-          stage: "compat.items_not_found",
-          error: `items_not_found: ${missing.join(" | ")}`,
-          source: "compat",
-        });
-      }
+      // Preserve unresolved legacy labels in suppliers.raw, but do not abort
+      // the entire supplier save. Only resolvable labels become relational
+      // supplier_items links.
 
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
       if (supplierIdsToClear.length) {
@@ -987,12 +991,12 @@ export async function POST(req: NextRequest) {
           supabase,
         });
         // #endregion
-        const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
+        const { error: clearErr } = await compatDb.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
         if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
       }
 
       if (desiredRows.length) {
-        const { error: linkInsErr } = await supabase
+        const { error: linkInsErr } = await compatDb
           .from("supplier_items")
           .upsert(desiredRows as any, { onConflict: "company_id,supplier_id,item_id", ignoreDuplicates: true });
         if (linkInsErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_insert", error: linkInsErr.message, source: "compat" });
