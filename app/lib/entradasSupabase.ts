@@ -95,6 +95,19 @@ export async function upsertEntradaToSupabase(row: EntradaStoreRow) {
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
 }
 
+export async function upsertEntradasBatchToSupabase(rows: EntradaStoreRow[]) {
+  const batch = rows.map(toDbRow);
+  if (!batch.length) return { savedCount: 0 };
+  const res = await fetch("/api/entradas", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ rows: batch }),
+  });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string; savedCount?: number } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save_batch");
+  return { savedCount: Number(json.savedCount ?? batch.length) };
+}
+
 export async function deleteEntradaFromSupabase(id: string) {
   const res = await fetch(`/api/entradas?id=${encodeURIComponent(id)}`, { method: "DELETE" });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;

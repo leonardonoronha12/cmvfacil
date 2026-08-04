@@ -730,18 +730,24 @@ export async function POST(req: NextRequest) {
     const { accessToken, id } = resolveUserScopedId(req);
     const prefix = id ? `${id}:` : "";
     if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
-    const entradaId = String((body as any).id ?? "").trim();
-    if (!entradaId || !entradaId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    const bodyRows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : [body];
+    if (!bodyRows.length || bodyRows.length > 100) return json({ error: "invalid_batch_size" }, { status: 400 });
+    const rows = bodyRows.filter((row) => row && typeof row === "object") as Record<string, unknown>[];
+    if (rows.length !== bodyRows.length) return json({ error: "invalid_batch_row" }, { status: 400 });
+    const invalidIds = rows
+      .map((row) => String(row.id ?? "").trim())
+      .filter((entradaId) => !entradaId || !entradaId.startsWith(prefix));
+    if (invalidIds.length) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
     const tBeforeUpsert = performance.now();
-    const { error } = await supabase.from("entradas").upsert(body as any, { onConflict: "id" });
+    const { error } = await supabase.from("entradas").upsert(rows as any, { onConflict: "id" });
     const tAfterUpsert = performance.now();
     if (error) return json({ error: error.message }, { status: 500 });
     const total = tAfterUpsert - t0;
     const jsonMs = tJson - t0;
     const upsertMs = tAfterUpsert - tBeforeUpsert;
     const serverTiming = `total;dur=${total.toFixed(1)}, json;dur=${jsonMs.toFixed(1)}, upsert;dur=${upsertMs.toFixed(1)}`;
-    return json({ ok: true }, { status: 200, headers: { "server-timing": serverTiming } });
+    return json({ ok: true, savedCount: rows.length }, { status: 200, headers: { "server-timing": serverTiming } });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

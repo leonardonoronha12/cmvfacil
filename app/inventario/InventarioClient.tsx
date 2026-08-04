@@ -14,6 +14,7 @@ import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnic
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
+import { formatBubbleDate, normalizeBubbleName, parseBubbleDecimal, readBubbleSpreadsheetFiles, repairBubbleText } from "../lib/bubbleSpreadsheetImport";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
 
@@ -172,6 +173,7 @@ function normalizeContagens(list: InventarioContagem[]) {
 const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [mounted, setMounted] = useState(false);
   const [isLoadingInventario, setIsLoadingInventario] = useState(true);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -200,6 +202,8 @@ export default function InventarioClient() {
   const [newCalRect, setNewCalRect] = useState<{ left: number; top: number } | null>(null);
   const [isDeleteContagemOpen, setIsDeleteContagemOpen] = useState(false);
   const [deleteContagemRow, setDeleteContagemRow] = useState<InventarioContagem | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   const [menuContagemId, setMenuContagemId] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -669,6 +673,111 @@ export default function InventarioClient() {
     };
   }, [menuContagemId]);
 
+  async function importInventarios(files: File[]) {
+    if (!files.length || isImporting || isReadOnly || isLoadingInventario) return;
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: 1, stage: "Lendo as planilhas..." });
+    try {
+      const importedRows = await readBubbleSpreadsheetFiles(files);
+      const inventoryRows = importedRows.filter(
+        ({ get }) => !get("inventario_id") && Boolean(get("nome")) && Boolean(get("data_contagem")) && Boolean(get("unique id", "unique_id")),
+      );
+      if (!inventoryRows.length) throw new Error("Nenhum inventário foi encontrado nas planilhas.");
+      const inventoryItems = importedRows.filter(({ get }) => get("inventario_id", "data_contagem") && get("item_id", "item_nome-migração", "item_nome_migracao", "item_nome"));
+
+      const itemCatalog = new Map<string, { categoria: string; unidade: string }>();
+      for (const item of insumosStore) {
+        itemCatalog.set(normalizeBubbleName(item.item), { categoria: normCatName(String(item.categoria ?? "")) || "Sem categoria", unidade: item.medida || "Und" });
+      }
+      for (const item of prePreparoStore) {
+        itemCatalog.set(normalizeBubbleName(item.receita), { categoria: normCatName(item.categoria) || "Pré-Preparo", unidade: parseUnitFromPrePreparo(item) });
+      }
+      for (const item of fichasTecnicasRows) {
+        itemCatalog.set(normalizeBubbleName(String(item.receita ?? "")), { categoria: "Ficha Técnica", unidade: "Und" });
+      }
+
+      const base = await loadInventarioFromSupabase().catch(() => contagens);
+      const existingByDate = new Map(base.map((row) => [row.data, row]));
+      const imported: InventarioContagem[] = [];
+      const importRunId = Date.now();
+      for (let index = 0; index < inventoryRows.length; index += 1) {
+        const { get } = inventoryRows[index];
+        const bubbleId = get("unique id", "unique_id", "bubble_id");
+        const data = formatBubbleDate(get("data_contagem")) || get("nome");
+        if (!data) continue;
+        const inventoryName = get("nome") || data;
+        const related = inventoryItems.filter(({ get: itemGet }) => {
+          const ref = itemGet("inventario_id");
+          const itemDate = formatBubbleDate(itemGet("data_contagem"));
+          return ref === bubbleId || normalizeBubbleName(ref) === normalizeBubbleName(inventoryName) || (itemDate && itemDate === data);
+        });
+        const grouped = new Map<string, InventarioItemRow[]>();
+        for (const { get: itemGet } of related) {
+          const item = repairBubbleText(itemGet("item_nome-migração", "item_nome_migracao", "item_nome", "item_id"));
+          if (!item) continue;
+          const catalog = itemCatalog.get(normalizeBubbleName(item));
+          const categoria = repairBubbleText(itemGet("categoria_nome-migração", "categoria_nome_migracao", "categoria")) || catalog?.categoria || "Sem categoria";
+          const unidade = repairBubbleText(itemGet("unidade_nome-migração", "unidade_nome_migracao", "unidade")) || catalog?.unidade || "Und";
+          const quantidadeRaw = itemGet("quantidade_contada", "estoque_final", "quantidade");
+          const quantidade = quantidadeRaw ? parseBubbleDecimal(quantidadeRaw).toLocaleString("pt-BR", { maximumFractionDigits: 3 }) : "";
+          const itemId = itemGet("unique id", "unique_id");
+          const categoryItems = grouped.get(categoria) ?? [];
+          categoryItems.push({
+            id: itemId ? `bubble:${itemId}` : `${bubbleId}:${normalizeBubbleName(item)}`,
+            item,
+            unidade,
+            estoqueFinal: quantidade,
+          });
+          grouped.set(categoria, categoryItems);
+        }
+        const categorias: InventarioCategoria[] = Array.from(grouped.entries()).map(([nome, itens], categoryIndex) => ({
+          id: `${bubbleId || data}:cat:${categoryIndex}`,
+          nome,
+          status: itens.every((item) => Boolean(item.estoqueFinal)) ? "concluida" : "pendente",
+          itens,
+        }));
+        const previous = existingByDate.get(data);
+        const nextId = previous?.id || (await buildUserScopedId(`import-inventario-${importRunId}-${index}`));
+        imported.push({
+          id: nextId,
+          data,
+          categorias: categorias.length ? categorias : previous?.categorias ?? [],
+        });
+        setImportProgress({ current: index + 1, total: inventoryRows.length, stage: "Validando inventários..." });
+        if ((index + 1) % 10 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+      if (!imported.length) throw new Error("Nenhum inventário válido foi encontrado.");
+
+      setImportProgress({ current: 0, total: imported.length, stage: "Persistindo inventários..." });
+      for (let index = 0; index < imported.length; index += 1) {
+        await upsertInventarioToSupabase(imported[index]);
+        setImportProgress({ current: index + 1, total: imported.length, stage: "Persistindo inventários..." });
+      }
+
+      const importedIds = new Set(imported.map((row) => row.id));
+      const toDelete = base.filter((row) => !importedIds.has(row.id));
+      for (let index = 0; index < toDelete.length; index += 1) {
+        await deleteInventarioFromSupabase(toDelete[index].id);
+        setImportProgress({
+          current: index + 1,
+          total: Math.max(toDelete.length, 1),
+          stage: "Substituindo contagens antigas...",
+        });
+      }
+
+      const replaced = sortContagensDesc(normalizeContagens(imported));
+      writeInventarioToStore(replaced);
+      setContagens(replaced);
+      setSelectedContagemId(replaced[0]?.id ?? null);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Não foi possível importar os inventários.");
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
+  }
+
   function openNew() {
     setNewData(formatDateNumericPT(new Date()));
     setNewError("");
@@ -999,6 +1108,25 @@ export default function InventarioClient() {
         ) : null}
         <section className={styles.layout}>
           <div className={styles.left}>
+            <input
+              ref={importFileRef}
+              type="file"
+              multiple
+              accept=".csv,.xlsx,.xls,text/csv"
+              style={{ display: "none" }}
+              onChange={(event) => {
+                const files = Array.from(event.target.files ?? []);
+                if (files.length) void importInventarios(files);
+              }}
+            />
+            <button
+              type="button"
+              className={styles.importBtn}
+              disabled={isReadOnly || isImporting || isLoadingInventario}
+              onClick={() => importFileRef.current?.click()}
+            >
+              {isImporting ? "Importando..." : "Importar planilha"}
+            </button>
             <button
               type="button"
               className={styles.newCountBtn}
@@ -1011,6 +1139,21 @@ export default function InventarioClient() {
               <img src="/dashboard/ml7hdudz-6qw4osi.svg" className={styles.newCountIcon} alt="" />
               Nova Contagem
             </button>
+
+            {importProgress ? (
+              <div className={styles.importProgressPanel} aria-live="polite">
+                <div className={styles.importProgressHeader}>
+                  <span>{importProgress.stage}</span>
+                  <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+                </div>
+                <div className={styles.importProgressTrack}>
+                  <div className={styles.importProgressFill} style={{ width: `${Math.max(2, (importProgress.current / Math.max(importProgress.total, 1)) * 100)}%` }} />
+                </div>
+                <div className={styles.importProgressCount}>
+                  {importProgress.current.toLocaleString("pt-BR")} de {importProgress.total.toLocaleString("pt-BR")}
+                </div>
+              </div>
+            ) : null}
 
             <div className={styles.leftTop}>
               <div className={styles.leftTitle}>{isCompatSource ? `Inventários (${compatInventories.length})` : `Suas contagens (${contagens.length})`}</div>
