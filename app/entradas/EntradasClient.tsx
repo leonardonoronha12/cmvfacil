@@ -655,7 +655,9 @@ export default function EntradasClient() {
   const [detailSubtotal, setDetailSubtotal] = useState("0,00");
   const [detailUnitCost, setDetailUnitCost] = useState("0,000");
   const [isItemMenuOpen, setIsItemMenuOpen] = useState(false);
-  const itemMenuRef = useRef<HTMLDivElement | null>(null);
+  const itemMenuWrapRef = useRef<HTMLDivElement | null>(null);
+  const itemMenuDropdownRef = useRef<HTMLDivElement | null>(null);
+  const [itemMenuRect, setItemMenuRect] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null);
   const [fornecedorItemMap, setFornecedorItemMap] = useState<FornecedorEquivalenciasMap>({});
   const [isAddFornecedorItemOpen, setIsAddFornecedorItemOpen] = useState(false);
   const [mapNomeNota, setMapNomeNota] = useState("");
@@ -1526,14 +1528,33 @@ export default function EntradasClient() {
 
   useEffect(() => {
     if (!isItemMenuOpen) return;
-    function onDown(e: MouseEvent) {
-      const el = itemMenuRef.current;
+    const syncItemMenuRect = () => {
+      const el = itemMenuWrapRef.current;
       if (!el) return;
-      if (e.target instanceof Node && el.contains(e.target)) return;
+      const rect = el.getBoundingClientRect();
+      const viewportPadding = 12;
+      const width = Math.min(rect.width, window.innerWidth - viewportPadding * 2);
+      const left = Math.min(Math.max(viewportPadding, rect.left), window.innerWidth - width - viewportPadding);
+      const top = Math.min(rect.bottom + 6, window.innerHeight - viewportPadding);
+      const maxHeight = Math.max(180, Math.min(420, window.innerHeight - top - viewportPadding));
+      setItemMenuRect({ left, top, width, maxHeight });
+    };
+    function onDown(e: MouseEvent) {
+      const wrapEl = itemMenuWrapRef.current;
+      const dropdownEl = itemMenuDropdownRef.current;
+      if (!(e.target instanceof Node)) return;
+      if (wrapEl?.contains(e.target) || dropdownEl?.contains(e.target)) return;
       setIsItemMenuOpen(false);
     }
+    syncItemMenuRect();
     window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
+    window.addEventListener("resize", syncItemMenuRect);
+    window.addEventListener("scroll", syncItemMenuRect, true);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("resize", syncItemMenuRect);
+      window.removeEventListener("scroll", syncItemMenuRect, true);
+    };
   }, [isItemMenuOpen]);
 
   function confirmAddFornecedor() {
@@ -2724,7 +2745,7 @@ export default function EntradasClient() {
                     </div>
 
                     <div className={styles.itemsAddRow}>
-                      <div className={styles.itemSearchWrap} ref={itemMenuRef}>
+                      <div className={styles.itemSearchWrap} ref={itemMenuWrapRef}>
                         <div className={styles.itemSearch}>
                           <span className={styles.itemSearchIcon} aria-hidden>
                             <IconSearch />
@@ -2749,8 +2770,14 @@ export default function EntradasClient() {
                           </button>
                         </div>
 
-                        {isItemMenuOpen ? (
-                          <div className={styles.itemDropdown} role="listbox" aria-label="Insumos do fornecedor">
+                        {isMounted && isItemMenuOpen && itemMenuRect ? createPortal(
+                          <div
+                            ref={itemMenuDropdownRef}
+                            className={styles.itemDropdownPortal}
+                            role="listbox"
+                            aria-label="Insumos do fornecedor"
+                            style={{ left: itemMenuRect.left, top: itemMenuRect.top, width: itemMenuRect.width, maxHeight: itemMenuRect.maxHeight }}
+                          >
                             <div className={styles.itemOptions}>
                               {filteredNotaItems.map((m) => (
                                 <button
@@ -2815,7 +2842,8 @@ export default function EntradasClient() {
                                 Gerenciar produtos do fornecedor
                               </button>
                             </div>
-                          </div>
+                          </div>,
+                          document.body,
                         ) : null}
                       </div>
 
