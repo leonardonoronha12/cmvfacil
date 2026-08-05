@@ -539,7 +539,11 @@ export function ImportarBubbleApiPanel(props?: { compact?: boolean; onApi?: (api
     setReimportingEntradas(true);
     setReimportEntradasResult("");
     try {
-      const res = await fetch("/api/bubble-import/reimport-entradas", { method: "POST" });
+      const res = await fetch("/api/bubble-import/reimport-entradas", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ bubbleUserId: filterBubbleUserId.trim() || undefined }),
+      });
       const json = (await res.json().catch(() => null)) as any;
       if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
       setReimportEntradasResult(
