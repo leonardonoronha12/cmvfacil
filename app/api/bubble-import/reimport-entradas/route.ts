@@ -90,6 +90,10 @@ function safeText(v: unknown) {
   return String(v ?? "").trim();
 }
 
+function looksLikeBubbleInternalId(value: unknown) {
+  return /^\d+x\d+$/i.test(safeText(value));
+}
+
 function extractNameFromAny(v: unknown) {
   if (!v) return "";
   if (typeof v === "string") {
@@ -160,8 +164,59 @@ async function syncEntradasFromBubbleObj(supabase: ReturnType<typeof getSupabase
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr ?? "failed_to_fetch_bubble"));
   };
 
+  const authUser = await supabase.auth.admin.getUserById(userId);
+  const email = safeText(authUser.data?.user?.email).toLowerCase();
+  if (!email) throw new Error("bubble_import_user_email_missing");
+
+  let bubbleUser: any = null;
+  for (const userType of ["user", "users", "User"]) {
+    try {
+      const page = await fetchBubbleObjPageWithConstraints({
+        creds,
+        type: userType,
+        cursor: 0,
+        limit: 10,
+        constraints: [{ key: "email", constraint_type: "equals", value: email }],
+        timeoutMs: 12_000,
+      });
+      bubbleUser = (page.results ?? []).find(
+        (row: any) => safeText(getFieldLoose(row, ["email", "Email"])).toLowerCase() === email,
+      );
+      if (bubbleUser) break;
+    } catch {
+      continue;
+    }
+  }
+  if (!bubbleUser) throw new Error("bubble_import_user_not_found");
+
+  const bubbleUserId = pickBubbleId(bubbleUser);
+  const bubbleCompanyId = extractRefId(
+    getFieldLoose(bubbleUser, ["empresa_id", "empresa", "company_id", "company", "Empresa"]),
+  );
+  if (!bubbleUserId && !bubbleCompanyId) throw new Error("bubble_import_user_scope_missing");
+
   const notasPick = await tryFetchAny(notasTypeCandidates, 100);
-  const notas = (notasPick.rows ?? []).filter((x) => x && typeof x === "object");
+  const notas = (notasPick.rows ?? [])
+    .filter((x) => x && typeof x === "object")
+    .filter((nf) => {
+      const companyId = extractRefId(
+        getFieldLoose(nf, ["empresa_id", "empresa", "company_id", "company", "Empresa"]),
+      );
+      const ownerId = extractRefId(
+        getFieldLoose(nf, ["Created By", "created_by", "createdBy", "usuario", "user_id", "responsavel"]),
+      );
+      return Boolean(
+        (bubbleCompanyId && companyId && companyId === bubbleCompanyId) ||
+          (bubbleUserId && ownerId && ownerId === bubbleUserId),
+      );
+    })
+    .sort((a, b) => {
+      const aDate =
+        parseDateLoose(getFieldLoose(a, ["data_criacao", "created_date", "createdAt", "created_at", "Created Date"]) ?? null)?.getTime() ?? 0;
+      const bDate =
+        parseDateLoose(getFieldLoose(b, ["data_criacao", "created_date", "createdAt", "created_at", "Created Date"]) ?? null)?.getTime() ?? 0;
+      return aDate - bDate || pickBubbleId(a).localeCompare(pickBubbleId(b));
+    });
   if (!notas.length) return { entradasInserted: 0 };
 
   const itensPick = await tryFetchAny(itensTypeCandidates, 1);
@@ -230,17 +285,18 @@ async function syncEntradasFromBubbleObj(supabase: ReturnType<typeof getSupabase
   const prefix = `user:${userId}:entrada:`;
   const entradaRows: any[] = [];
 
-  for (const nf of notas) {
+  for (const [notaIndex, nf] of notas.entries()) {
     const notaId = pickBubbleId(nf);
     if (!notaId) continue;
 
-    const numero = safeText(getFieldLoose(nf, ["codigo", "numero", "nota", "nf", "id_nota"]) ?? "") || "-";
+    const numeroOriginal = safeText(getFieldLoose(nf, ["codigo", "numero", "nota", "nf", "id_nota"]) ?? "");
+    const numero = numeroOriginal && !looksLikeBubbleInternalId(numeroOriginal) ? numeroOriginal.replace(/^#/, "") : String(notaIndex + 1);
     const fornecedorRef = getFieldLoose(nf, ["fornecedor", "supplier", "fornecedor_id", "id_fornecedor"]);
     const fornecedor = (await resolveSupplierName(fornecedorRef)) || safeText(getFieldLoose(nf, ["fornecedor_nome", "supplier_name", "nome_fornecedor"]) ?? "") || "-";
     const responsavel = safeText(getFieldLoose(nf, ["responsavel", "responsavel_id", "user_id", "responsavel_user_id"]) ?? "");
 
     const dtLanc = parseDateLoose(getFieldLoose(nf, ["data_recebimento", "data_lancamento", "data", "dataRecebimento", "dataLancamento"]) ?? null);
-    const dtCriacao = parseDateLoose(getFieldLoose(nf, ["data_criacao", "created_date", "createdAt", "created_at"]) ?? null);
+    const dtCriacao = parseDateLoose(getFieldLoose(nf, ["data_criacao", "created_date", "createdAt", "created_at", "Created Date"]) ?? null);
     const dataLancamento = dtLanc ? formatDateLabelDDMMYYYY(dtLanc) : "-";
     const dataCriacao = dtCriacao ? formatDateLabelDDMMYYYY(dtCriacao) : "-";
 
@@ -296,6 +352,18 @@ async function syncEntradasFromBubbleObj(supabase: ReturnType<typeof getSupabase
   }
 
   if (!entradaRows.length) return { entradasInserted: 0 };
+  const ids = new Set(entradaRows.map((row) => row.id));
+  const existing = await supabase.from("entradas").select("id").like("id", `${prefix}%`);
+  if (existing.error) throw new Error(existing.error.message);
+  const staleIds = (existing.data ?? [])
+    .map((row: any) => safeText(row?.id))
+    .filter((id) => id && !ids.has(id));
+  for (let index = 0; index < staleIds.length; index += 100) {
+    const batch = staleIds.slice(index, index + 100);
+    const removed = await supabase.from("entradas").delete().in("id", batch);
+    if (removed.error) throw new Error(removed.error.message);
+  }
+
   const { error } = await supabase.from("entradas").upsert(entradaRows as any, { onConflict: "id" });
   if (error) throw new Error(error.message);
   return { entradasInserted: entradaRows.length };
