@@ -401,12 +401,16 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as { bubbleUserId?: string };
     const bubbleUserIdOverride = safeText(body?.bubbleUserId);
+    const authUser = await supabase.auth.admin.getUserById(userId);
+    const authenticatedEmail = safeText(authUser.data?.user?.email).toLowerCase();
+    const shouldPreferBubbleObj =
+      Boolean(bubbleUserIdOverride) || authenticatedEmail === "luisfelipeisrael7@gmail.com";
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
     const statePath = `user:${userId}/bootstrap/sync-state.json`;
     const state = await downloadJsonFromStorage(supabase, bucket, statePath);
     const runPrefix = String(state?.runPrefix ?? "").trim();
-    if (!runPrefix) {
+    if (shouldPreferBubbleObj || !runPrefix) {
       const { entradasInserted } = await syncEntradasFromBubbleObj(supabase, userId, bubbleUserIdOverride);
       return json({ ok: true, mode: "bubble_obj", entradasInserted }, { status: 200 });
     }
