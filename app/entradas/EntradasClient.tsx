@@ -25,17 +25,10 @@ import {
 } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase, saveFornecedoresStateToSupabase } from "../lib/fornecedoresSupabase";
 import { readEntradasFromStore, writeEntradasToStore } from "../lib/entradasStore";
-import {
-  deleteEntradaFromSupabase,
-  deleteEntradasFromSupabase,
-  loadEntradasStateFromSupabase,
-  loadEntradasFromSupabase,
-  upsertEntradaToSupabase,
-  upsertEntradasBatchToSupabase,
-} from "../lib/entradasSupabase";
+import { deleteEntradaFromSupabase, deleteEntradasFromSupabase, loadEntradasStateFromSupabase, loadEntradasFromSupabase, upsertEntradaToSupabase } from "../lib/entradasSupabase";
 import { readInsumosFromStore, subscribeInsumos, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { loadInsumosFromSupabase } from "../lib/insumosSupabase";
-import { buildUserScopedId, requireUserScopePrefix } from "../lib/userScope";
+import { buildUserScopedId } from "../lib/userScope";
 import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import { QaModePanel } from "../lib/qaMode";
 import { maskPhoneBR } from "../lib/masks";
@@ -163,6 +156,16 @@ function looksLikeBubbleId(value: string) {
   return /^[0-9]+x[0-9x]+$/i.test(s);
 }
 
+function displayNotaNumber(row: EntradaRow, allRows: EntradaRow[]) {
+  const stored = String(row.numero ?? "").trim().replace(/^#/, "");
+  if (stored && stored !== "-" && !looksLikeBubbleId(stored) && !looksLikeUuid(stored) && !/^db:/i.test(stored)) {
+    return stored;
+  }
+
+  const index = allRows.findIndex((candidate) => candidate.id === row.id);
+  return index >= 0 ? String(allRows.length - index) : "";
+}
+
 function sanitizeUiLabel(value: string) {
   return String(value ?? "").replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
 }
@@ -173,51 +176,6 @@ function normalizeNotaItemName(value: unknown) {
   const k = raw.toLowerCase();
   if (k === "false" || k === "true" || k === "null" || k === "undefined") return "";
   return raw;
-}
-
-function normalizeImportHeader(value: unknown) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
-function parseCsvImportLine(line: string, delimiter: string) {
-  const out: string[] = [];
-  let current = "";
-  let quoted = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (quoted && line[i + 1] === '"') {
-        current += '"';
-        i += 1;
-      } else {
-        quoted = !quoted;
-      }
-    } else if (ch === delimiter && !quoted) {
-      out.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  out.push(current);
-  return out;
-}
-
-function downloadEntradaFile(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = name;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
 }
 
 function resolveNotaItemDisplayName(it: unknown, insumosById: Map<string, string>) {
@@ -689,11 +647,6 @@ export default function EntradasClient() {
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
-  const [isImportOpen, setIsImportOpen] = useState(false);
-  const [importFile, setImportFile] = useState<File | null>(null);
-  const [isImporting, setIsImporting] = useState(false);
-  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
-  const importFileRef = useRef<HTMLInputElement | null>(null);
   const [newFornecedor, setNewFornecedor] = useState("");
   const [newDataReceb, setNewDataReceb] = useState(() => formatDateLabelPT(new Date()));
   const [isRecebCalendarOpen, setIsRecebCalendarOpen] = useState(false);
@@ -1320,223 +1273,6 @@ export default function EntradasClient() {
 
     return out;
   }, [customFornecedores, fornecedorDbLabelCache, fornecedorInfoMap, rows]);
-
-  function downloadEntradasTemplateCsv() {
-    const headers = ["Número da Nota", "Data de Lançamento", "Fornecedor", "Responsável", "Data de Criação", "Item", "Quantidade", "Unidade", "Subtotal"];
-    const example = ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Farinha de Trigo", "10,000", "Kg", "389,00"];
-    const csv = `\uFEFF${[headers, example].map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(";")).join("\n")}`;
-    downloadEntradaFile(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-planilha-entradas.csv");
-  }
-
-  async function downloadEntradasTemplateXlsx() {
-    const XLSX = await import("xlsx");
-    const data = [
-      ["Número da Nota", "Data de Lançamento", "Fornecedor", "Responsável", "Data de Criação", "Item", "Quantidade", "Unidade", "Subtotal"],
-      ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Farinha de Trigo", "10,000", "Kg", "389,00"],
-      ["NF-1001", "27/07/2026", "Fornecedor Exemplo", "Nome do responsável", "27/07/2026", "Muçarela", "5,000", "Kg", "171,70"],
-    ];
-    const ws = XLSX.utils.aoa_to_sheet(data);
-    (ws as any)["!cols"] = [{ wch: 18 }, { wch: 20 }, { wch: 28 }, { wch: 24 }, { wch: 18 }, { wch: 32 }, { wch: 14 }, { wch: 12 }, { wch: 14 }];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Entradas");
-    const output = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-    downloadEntradaFile(new Blob([output], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-planilha-entradas.xlsx");
-  }
-
-  async function importEntradasFile() {
-    if (isImporting) return;
-    if (!importFile) {
-      importFileRef.current?.click();
-      return;
-    }
-    setIsImporting(true);
-    setImportProgress({ current: 0, total: 0, stage: "Lendo a planilha..." });
-    try {
-      let table: unknown[][] = [];
-      const lower = importFile.name.toLowerCase();
-      if (lower.endsWith(".csv")) {
-        const text = await importFile.text();
-        const lines = text.split(/\r?\n/).filter((line) => line.trim());
-        const first = lines[0] ?? "";
-        const delimiter = (first.match(/;/g)?.length ?? 0) >= (first.match(/,/g)?.length ?? 0) ? ";" : ",";
-        table = lines.map((line) => parseCsvImportLine(line, delimiter));
-      } else if (lower.endsWith(".xlsx") || lower.endsWith(".xls")) {
-        const XLSX = await import("xlsx");
-        const workbook = XLSX.read(await importFile.arrayBuffer(), { type: "array", cellDates: true });
-        const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
-        if (!sheet) throw new Error("Planilha inválida.");
-        table = XLSX.utils.sheet_to_json(sheet, { header: 1, raw: false, dateNF: "dd/mm/yyyy" }) as unknown[][];
-      } else {
-        throw new Error("Formato não suportado. Use .xlsx, .xls ou .csv.");
-      }
-      if (table.length < 2) throw new Error("A planilha não possui linhas para importar.");
-
-      const headers = (table[0] ?? []).map(normalizeImportHeader);
-      const find = (...names: string[]) => headers.findIndex((header) => names.includes(header));
-      const findFirstAvailable = (...names: string[]) => {
-        for (const name of names) {
-          const position = headers.indexOf(name);
-          if (position >= 0) return position;
-        }
-        return -1;
-      };
-      const isNativeBubbleExport = headers.includes("nota_id_custom_notas_fiscais");
-      const index = {
-        numero: find("numero_da_nota", "numero_nota", "numero", "nota", "nota_id", "nota_id_custom_notas_fiscais", "codigo", "nf"),
-        data: find("data_de_lancamento", "data_lancamento", "data_lan_amento_date", "data_lancamento_date", "data_de_recebimento", "data_recebimento", "data"),
-        fornecedor: findFirstAvailable(
-          "fornecedor_nome_migracao",
-          "fornecedor_nome_migracao_text",
-          "fornecedor_nome_migra_o",
-          "fornecedor_nome_migra_o_text",
-          "fornecedor",
-          "nome_fornecedor",
-          "fornecedor_id",
-          "fornecedor_id_custom_fornecedores",
-          "supplier",
-          "supplier_id",
-        ),
-        responsavel: find("responsavel", "criado_por", "usuario"),
-        criacao: find("data_de_criacao", "data_criacao", "created_date"),
-        item: findFirstAvailable(
-          "item_nome_migracao",
-          "item_nome_migracao_text",
-          "item_nome_migra_o",
-          "item_nome_migra_o_text",
-          "item",
-          "nome_do_item",
-          "nome_item",
-          "item_id",
-          "item_id_custom_itens",
-          "produto",
-          "produto_id",
-          "insumo",
-          "insumo_id",
-        ),
-        quantidade: find("quantidade", "quantidade_number", "qtd", "quantity"),
-        unidade: find("unidade", "medida", "unit"),
-        subtotal: find("subtotal", "subtotal_number", "valor_total_item", "valor_item", "total"),
-      };
-      if (index.data < 0 || index.fornecedor < 0 || index.item < 0 || index.quantidade < 0 || index.subtotal < 0) {
-        throw new Error("Colunas obrigatórias: Data de Lançamento, Fornecedor, Item, Quantidade e Subtotal.");
-      }
-
-      type ImportGroup = { numero: string; data: string; fornecedor: string; responsavel: string; criacao: string; itens: NotaItem[] };
-      const groups = new Map<string, ImportGroup>();
-      for (let line = 1; line < table.length; line += 1) {
-        const cells = table[line] ?? [];
-        const read = (column: number) => (column >= 0 ? String(cells[column] ?? "").trim() : "");
-        const numeroRaw = read(index.numero);
-        const itemRaw = read(index.item);
-        if (isNativeBubbleExport && (!numeroRaw || !itemRaw)) continue;
-        const fornecedor = read(index.fornecedor) || "SEM FORNECEDOR";
-        const item = normalizeNotaItemName(insumosById.get(itemRaw) || itemRaw);
-        const data = normalizeDateLabelPT(read(index.data));
-        const quantity = parsePtNumber(read(index.quantidade));
-        const subtotalCents = parseBrlToCents(read(index.subtotal));
-        if (!fornecedor && !item && !data) continue;
-        if (!fornecedor || !item || !data || !(quantity > 0) || !(subtotalCents > 0)) {
-          throw new Error(`Linha ${line + 1}: fornecedor, data, item, quantidade ou subtotal inválido.`);
-        }
-        const numero = numeroRaw || `IMPORT-${line}`;
-        const unidade =
-          read(index.unidade) ||
-          (itemRaw ? insumosStore.find((entry) => String(entry.id ?? "").trim() === itemRaw)?.medida : "") ||
-          "Und";
-        const key = `${numero.toLowerCase()}|${data}|${fornecedor.toLowerCase()}`;
-        const group =
-          groups.get(key) ??
-          ({
-            numero,
-            data,
-            fornecedor,
-            responsavel: read(index.responsavel),
-            criacao: normalizeDateLabelPT(read(index.criacao)) || data,
-            itens: [],
-          } satisfies ImportGroup);
-        group.itens.push({
-          id: `${Date.now()}-${line}`,
-          nome: item,
-          quantidadeLabel: `${formatPtNumber(quantity, 3)}${unidade}`,
-          subtotalLabel: formatBrlFromCents(subtotalCents),
-          custoUnitarioLabel: `R$${formatPtNumber(subtotalCents / 100 / quantity, 3)}/${unidade}`,
-        });
-        groups.set(key, group);
-      }
-      if (!groups.size) throw new Error("Nenhuma entrada válida encontrada.");
-
-      const imported: EntradaRow[] = [];
-      const importIdPrefix = await requireUserScopePrefix();
-      const importRunId = Date.now();
-      setImportProgress({ current: 0, total: groups.size, stage: "Validando e preparando as notas..." });
-      for (const group of groups.values()) {
-        const id = `${importIdPrefix}import-${importRunId}-${imported.length}`;
-        const total = group.itens.reduce((sum, item) => sum + parseBrlToCents(item.subtotalLabel), 0);
-        const fornecedorDisplay = resolveFornecedorDisplay(group.fornecedor, fornecedorInfoMap) || group.fornecedor;
-        imported.push({
-          id,
-          numero: group.numero,
-          dataLancamento: group.data,
-          fornecedor: fornecedorDisplay,
-          fornecedorNome: fornecedorDisplay,
-          valorNota: formatBrlFromCents(total),
-          itens: `${group.itens.length} ${group.itens.length === 1 ? "Item" : "Itens"}`,
-          responsavel: group.responsavel,
-          dataCriacao: group.criacao,
-          itensNota: group.itens,
-        });
-      }
-
-      const previousIds = rows.map((row) => String(row.id ?? "").trim()).filter(Boolean);
-      const batchSize = 10;
-      let saved = 0;
-      for (let offset = 0; offset < imported.length; offset += batchSize) {
-        const batch = imported.slice(offset, offset + batchSize);
-        setImportProgress({
-          current: saved,
-          total: imported.length,
-          stage: `Persistindo notas ${offset + 1} a ${Math.min(offset + batch.length, imported.length)}...`,
-        });
-        let lastError: unknown = null;
-        for (let attempt = 1; attempt <= 3; attempt += 1) {
-          try {
-            await upsertEntradasBatchToSupabase(batch as unknown as any[]);
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-            if (attempt < 3) {
-              setImportProgress({
-                current: saved,
-                total: imported.length,
-                stage: `Reconectando e tentando novamente (${attempt}/3)...`,
-              });
-              await new Promise((resolve) => window.setTimeout(resolve, attempt * 700));
-            }
-          }
-        }
-        if (lastError) throw lastError;
-        saved += batch.length;
-        setImportProgress({
-          current: saved,
-          total: imported.length,
-          stage: saved === imported.length ? "Substituindo entradas antigas..." : `${saved} notas persistidas`,
-        });
-      }
-
-      if (previousIds.length) await deleteEntradasFromSupabase(previousIds);
-      setRows(imported);
-      setIsImportOpen(false);
-      setImportFile(null);
-      if (importFileRef.current) importFileRef.current.value = "";
-      showToast(`${imported.length} nota(s) importada(s) com sucesso.`, "success", 7000);
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : String(error), "error", 9000);
-    } finally {
-      setIsImporting(false);
-      setImportProgress(null);
-    }
-  }
 
   function openNewModal() {
     if (isReadOnly) {
@@ -2477,21 +2213,6 @@ export default function EntradasClient() {
                 <button
                   type="button"
                   className={styles.secondaryBtn}
-                  disabled={isReadOnly}
-                  onClick={() => {
-                    if (isReadOnly) {
-                      showToast("Modo somente leitura.", "error");
-                      return;
-                    }
-                    setImportFile(null);
-                    setIsImportOpen(true);
-                  }}
-                >
-                  Importar planilha
-                </button>
-                <button
-                  type="button"
-                  className={styles.secondaryBtn}
                   disabled={isReadOnly || visible.length === 0}
                   onClick={() => {
                     if (isReadOnly) {
@@ -2980,7 +2701,9 @@ export default function EntradasClient() {
               <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
                 <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
-                <div className={styles.detailsTitle}>Detalhes da Nota</div>
+                <div className={styles.detailsTitle}>
+                  {`Detalhes da Nota${displayNotaNumber(detailsRow, rows) ? ` #${displayNotaNumber(detailsRow, rows)}` : ""}`}
+                </div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
                   ×
                 </button>
@@ -3313,87 +3036,6 @@ export default function EntradasClient() {
                 </div>
               </div>
             </div>
-              </div>,
-              document.body,
-            )
-          : null}
-
-        {isMounted && isImportOpen
-          ? createPortal(
-              <div
-                className={styles.modalOverlay}
-                role="presentation"
-                onClick={() => {
-                  if (!isImporting) setIsImportOpen(false);
-                }}
-              >
-                <div className={`${styles.modal} ${styles.importModal}`} role="dialog" aria-modal="true" onClick={(event) => event.stopPropagation()}>
-                  <div className={styles.modalHeader}>
-                    <div className={styles.modalTitle}>Importar Entradas por Planilha</div>
-                    <button type="button" className={styles.modalClose} aria-label="Fechar" disabled={isImporting} onClick={() => setIsImportOpen(false)}>
-                      ×
-                    </button>
-                  </div>
-                  <div className={styles.modalBody}>
-                    <div className={styles.notice}>
-                      <span className={styles.noticeIcon}>!</span>
-                      <div className={styles.noticeText}>
-                        Cada linha representa um item. A importação valida e persiste as notas primeiro; somente depois substitui as entradas antigas do usuário.
-                      </div>
-                    </div>
-                    <div className={styles.importTemplateRow}>
-                      <button type="button" className={styles.secondaryBtn} onClick={() => void downloadEntradasTemplateXlsx()}>
-                        Baixar modelo (.xlsx)
-                      </button>
-                      <button type="button" className={styles.secondaryBtn} onClick={downloadEntradasTemplateCsv}>
-                        Baixar modelo (.csv)
-                      </button>
-                    </div>
-                    <input
-                      ref={importFileRef}
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      className={styles.importFileInput}
-                      onChange={(event) => setImportFile(event.currentTarget.files?.[0] ?? null)}
-                    />
-                    {importFile ? <div className={styles.importFileName}>Arquivo selecionado: {importFile.name}</div> : null}
-                    {importProgress ? (
-                      <div className={styles.importProgressPanel} aria-live="polite">
-                        <div className={styles.importProgressHeader}>
-                          <span>{importProgress.stage}</span>
-                          <strong>{importProgress.total > 0 ? `${Math.round((importProgress.current / importProgress.total) * 100)}%` : "Preparando"}</strong>
-                        </div>
-                        <div
-                          className={styles.importProgressTrack}
-                          role="progressbar"
-                          aria-valuemin={0}
-                          aria-valuemax={importProgress.total || 1}
-                          aria-valuenow={importProgress.current}
-                        >
-                          <div
-                            className={styles.importProgressFill}
-                            style={{
-                              width: importProgress.total > 0 ? `${Math.max(2, (importProgress.current / importProgress.total) * 100)}%` : "12%",
-                            }}
-                          />
-                        </div>
-                        <div className={styles.importProgressCount}>
-                          {importProgress.total > 0
-                            ? `${importProgress.current.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")} notas`
-                            : "Organizando os dados do arquivo"}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className={`${styles.modalFooter} ${styles.importFooter}`}>
-                    <button type="button" className={styles.ghostBtn} disabled={isImporting} onClick={() => setIsImportOpen(false)}>
-                      Encerrar
-                    </button>
-                    <button type="button" className={styles.primaryBtn} disabled={isImporting} onClick={() => void importEntradasFile()}>
-                      {isImporting ? "Importando..." : importFile ? "Importar" : "Selecionar planilha"}
-                    </button>
-                  </div>
-                </div>
               </div>,
               document.body,
             )
