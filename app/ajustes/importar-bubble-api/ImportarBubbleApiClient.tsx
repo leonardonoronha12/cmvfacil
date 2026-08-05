@@ -140,6 +140,8 @@ export function ImportarBubbleApiPanel(props?: { compact?: boolean; onApi?: (api
   const [isResetting, setIsResetting] = useState(false);
   const [dangerAction, setDangerAction] = useState<null | "delete" | "rebuild">(null);
   const [dangerInFlight, setDangerInFlight] = useState<null | "delete" | "rebuild">(null);
+  const [reimportingEntradas, setReimportingEntradas] = useState(false);
+  const [reimportEntradasResult, setReimportEntradasResult] = useState("");
   const [dangerConfirm, setDangerConfirm] = useState("");
   const [globalTotals, setGlobalTotals] = useState<any>(null);
   const [globalTotalsError, setGlobalTotalsError] = useState("");
@@ -530,6 +532,25 @@ export function ImportarBubbleApiPanel(props?: { compact?: boolean; onApi?: (api
     setResetError("");
     setDangerConfirm("");
     setDangerAction("rebuild");
+  }
+
+  async function reimportEntradasFromBubble() {
+    if (reimportingEntradas || isRunning || isResetting) return;
+    setReimportingEntradas(true);
+    setReimportEntradasResult("");
+    try {
+      const res = await fetch("/api/bubble-import/reimport-entradas", { method: "POST" });
+      const json = (await res.json().catch(() => null)) as any;
+      if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_${res.status}`);
+      setReimportEntradasResult(
+        `Entradas corrigidas: ${Number(json?.entradas ?? json?.notes ?? 0)} notas e ${Number(json?.itens ?? json?.items ?? 0)} itens.`,
+      );
+      await refreshCounts();
+    } catch (error) {
+      setReimportEntradasResult(error instanceof Error ? error.message : "Falha ao reimportar entradas.");
+    } finally {
+      setReimportingEntradas(false);
+    }
   }
 
   async function confirmDanger() {
@@ -1801,7 +1822,16 @@ export function ImportarBubbleApiPanel(props?: { compact?: boolean; onApi?: (api
                       >
                         {dangerInFlight === "rebuild" ? "Reimportando..." : "Reset + Reimportar (Arquivos)"}
                       </button>
+                      <button
+                        type="button"
+                        className={styles.btn}
+                        onClick={reimportEntradasFromBubble}
+                        disabled={isRunning || isResetting || reimportingEntradas}
+                      >
+                        {reimportingEntradas ? "Corrigindo entradas..." : "Reimportar somente Entradas do Bubble"}
+                      </button>
                       {resetError ? <div className={`${styles.fileMeta} ${styles.statusErr}`}>{resetError}</div> : null}
+                      {reimportEntradasResult ? <div className={styles.fileMeta}>{reimportEntradasResult}</div> : null}
                     </div>
                     {rebuildState ? (
                       <div className={styles.fileMeta}>
