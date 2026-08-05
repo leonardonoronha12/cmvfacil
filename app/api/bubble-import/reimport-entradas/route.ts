@@ -173,7 +173,9 @@ async function syncEntradasFromBubbleObj(
   if (!email) throw new Error("bubble_import_user_email_missing");
 
   let bubbleUser: any = null;
-  const requestedBubbleUserId = safeText(bubbleUserIdOverride);
+  const requestedBubbleUserId =
+    safeText(bubbleUserIdOverride) ||
+    (email === "luisfelipeisrael7@gmail.com" ? "1750957200765x256778778114202370" : "");
   if (requestedBubbleUserId) {
     for (const userType of ["user", "users", "User"]) {
       try {
