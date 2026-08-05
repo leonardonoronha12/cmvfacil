@@ -138,7 +138,11 @@ function formatMoneyBRL3(value: number) {
   return `R$${label}`;
 }
 
-async function syncEntradasFromBubbleObj(supabase: ReturnType<typeof getSupabaseAdmin>, userId: string) {
+async function syncEntradasFromBubbleObj(
+  supabase: ReturnType<typeof getSupabaseAdmin>,
+  userId: string,
+  bubbleUserIdOverride?: string,
+) {
   const creds = await getBubbleObjCredentials();
   const notasTypeCandidates = ["notas_fiscais", "notas-fiscais", "notasfiscais", "notas"];
   const itensTypeCandidates = ["itens_notas", "itens-notas", "itensnota", "itens_nota", "itens_notas_fiscais"];
@@ -169,7 +173,19 @@ async function syncEntradasFromBubbleObj(supabase: ReturnType<typeof getSupabase
   if (!email) throw new Error("bubble_import_user_email_missing");
 
   let bubbleUser: any = null;
+  const requestedBubbleUserId = safeText(bubbleUserIdOverride);
+  if (requestedBubbleUserId) {
+    for (const userType of ["user", "users", "User"]) {
+      try {
+        bubbleUser = await fetchBubbleObjById(creds, userType, requestedBubbleUserId);
+        if (bubbleUser) break;
+      } catch {
+        continue;
+      }
+    }
+  }
   for (const userType of ["user", "users", "User"]) {
+    if (bubbleUser) break;
     try {
       const page = await fetchBubbleObjPageWithConstraints({
         creds,
@@ -381,13 +397,15 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: "supabase_not_configured" }, { status: 500 });
     }
 
+    const body = (await req.json().catch(() => ({}))) as { bubbleUserId?: string };
+    const bubbleUserIdOverride = safeText(body?.bubbleUserId);
     const bucket = "bubble-imports";
     await ensureBucket(supabase, bucket);
     const statePath = `user:${userId}/bootstrap/sync-state.json`;
     const state = await downloadJsonFromStorage(supabase, bucket, statePath);
     const runPrefix = String(state?.runPrefix ?? "").trim();
     if (!runPrefix) {
-      const { entradasInserted } = await syncEntradasFromBubbleObj(supabase, userId);
+      const { entradasInserted } = await syncEntradasFromBubbleObj(supabase, userId, bubbleUserIdOverride);
       return json({ ok: true, mode: "bubble_obj", entradasInserted }, { status: 200 });
     }
 
