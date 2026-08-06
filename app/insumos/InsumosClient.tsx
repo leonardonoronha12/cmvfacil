@@ -132,10 +132,70 @@ function parseCsvLine(line: string, delimiter: "," | ";" = ",") {
 
 function detectColumnMap(headers: unknown[]) {
   const idx: Record<string, number> = {};
+  const normalized = headers.map(normalizeHeader);
+
+  const findExact = (...names: string[]) => {
+    for (const name of names) {
+      const index = normalized.indexOf(name);
+      if (index >= 0) return index;
+    }
+    return undefined;
+  };
+
+  idx.item = findExact(
+    "nome_text",
+    "nome text",
+    "item_nome-migracao",
+    "item nome-migracao",
+    "item_nome_migracao",
+    "nome",
+    "item",
+    "insumo",
+  )!;
+  idx.medida = findExact(
+    "unidade_medida_option_unidadesdemedida",
+    "unidade medida option unidadesdemedida",
+    "unidade_nome-migracao",
+    "unidade nome-migracao",
+    "unidade_nome_migracao",
+    "medida",
+    "unidade",
+  )!;
+  idx.custoMedio = findExact(
+    "custo_medio_number",
+    "custo medio number",
+    "custo_medio",
+    "custo medio",
+    "custo médio",
+    "preco",
+    "preço",
+  )!;
+  idx.categoria = findExact(
+    "categoria_nome-migracao",
+    "categoria nome-migracao",
+    "categoria_nome_migracao",
+    "categoria",
+  )!;
+  idx.especificacao = findExact(
+    "descricao_text",
+    "descricao text",
+    "especificacao",
+    "especificação",
+    "descricao",
+    "descrição",
+  )!;
+  idx.ocultar = findExact(
+    "ocultar_cmv_boolean",
+    "ocultar cmv boolean",
+    "boolean_ocultar_cmv",
+    "ocultar",
+    "oculto",
+  )!;
+
   for (let i = 0; i < headers.length; i++) {
-    const h = normalizeHeader(headers[i]);
+    const h = normalized[i] ?? "";
     if (!h) continue;
-    if (idx.item == null && (h === "item" || h === "insumo" || h.includes("nome"))) idx.item = i;
+    if (idx.item == null && (h === "item" || h === "insumo" || h === "nome")) idx.item = i;
     if (idx.medida == null && (h === "medida" || h === "unidade" || h.includes("unid"))) idx.medida = i;
     if (
       idx.custoMedio == null &&
@@ -149,12 +209,36 @@ function detectColumnMap(headers: unknown[]) {
   return idx;
 }
 
+function looksLikeBubbleId(value: unknown) {
+  const text = String(value ?? "").trim();
+  return /\b\d{13}x\d{10,}\b/.test(text) || /^db:[0-9a-f-]{20,}$/i.test(text);
+}
+
 function parseRowsFromTable(table: unknown[][]) {
   const safe = table.filter((r) => Array.isArray(r) && r.some((c) => String(c ?? "").trim() !== ""));
   if (!safe.length) return [];
 
   const map = detectColumnMap(safe[0] ?? []);
   const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
+  const normalizedHeaders = (safe[0] ?? []).map(normalizeHeader);
+  const isBubbleExport = normalizedHeaders.some(
+    (header) =>
+      header.includes("_text") ||
+      header.includes("_number") ||
+      header.includes("_boolean") ||
+      header.includes("_custom_") ||
+      header.includes("_option_"),
+  );
+  if (isBubbleExport && map.item == null) {
+    throw new Error(
+      'A planilha do Bubble não possui a coluna legível do insumo. Exporte o campo "nome_text" (ou "item_nome-migração") e tente novamente.',
+    );
+  }
+  if (isBubbleExport && map.categoria == null) {
+    throw new Error(
+      'A planilha do Bubble não possui o nome legível da categoria. Exporte o campo "categoria_nome-migração"; o unique ID não será importado como categoria.',
+    );
+  }
   const startIndex = hasHeader ? 1 : 0;
 
   const fallback = { item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
@@ -165,6 +249,12 @@ function parseRowsFromTable(table: unknown[][]) {
     const row = safe[i] ?? [];
     const item = String(row[getIndex("item")] ?? "").trim();
     if (!item) continue;
+    const categoria = String(row[getIndex("categoria")] ?? "").trim() || "-";
+    if (looksLikeBubbleId(item) || looksLikeBubbleId(categoria)) {
+      throw new Error(
+        `A linha ${i + 1} contém um unique ID do Bubble no lugar de um nome. Corrija os campos de migração antes de importar.`,
+      );
+    }
     const ocultarRaw = row[getIndex("ocultar")];
     const ocultar =
       typeof ocultarRaw === "boolean"
@@ -177,7 +267,7 @@ function parseRowsFromTable(table: unknown[][]) {
       item,
       medida: String(row[getIndex("medida")] ?? "").trim() || "-",
       custoMedio: toMoney(row[getIndex("custoMedio")]) || "-",
-      categoria: String(row[getIndex("categoria")] ?? "").trim() || "-",
+      categoria,
       especificacao: String(row[getIndex("especificacao")] ?? "").trim() || "-",
     });
   }
@@ -745,32 +835,29 @@ export default function InsumosClient() {
         }
         return next;
       })();
+      if (!isReadOnly && !isBootstrapRunning()) {
+        setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
+        await saveInsumosStateToSupabase({
+          rows: imported.map((r) => ({
+            id: r.id,
+            item: r.item,
+            medida: r.medida,
+            custoMedio: r.custoMedio,
+            categoria: r.categoria,
+            especificacao: r.especificacao,
+            ocultar: r.ocultar,
+          })) as any,
+          categories: mergedCategories,
+        });
+        saveErrorShownRef.current = false;
+      }
       setDataRows(imported);
       setCategories(mergedCategories);
       setIsImportOpen(false);
       setSelectedFile(null);
       setSelectedFileName(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
-      if (!isReadOnly && !isBootstrapRunning()) {
-        try {
-          await saveInsumosStateToSupabase({
-            rows: imported.map((r) => ({
-              id: r.id,
-              item: r.item,
-              medida: r.medida,
-              custoMedio: r.custoMedio,
-              categoria: r.categoria,
-              especificacao: r.especificacao,
-              ocultar: r.ocultar,
-            })) as any,
-            categories: mergedCategories,
-          });
-          saveErrorShownRef.current = false;
-          showToast(`Importação concluída: ${imported.length} item(ns).`, "success");
-        } catch (err) {
-          showToast(saveErrorMessage(err), "error");
-        }
-      }
+      showToast(`Importação concluída: ${imported.length} item(ns).`, "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
