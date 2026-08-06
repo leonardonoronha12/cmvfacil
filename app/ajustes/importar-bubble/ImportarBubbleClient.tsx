@@ -371,7 +371,16 @@ export default function ImportarBubbleClient() {
     setIsImporting(true);
     setImportResult(null);
     try {
-      const res = await fetch("/api/bubble-import/import", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+      const filePaths = uploads.filter((u) => u.status === "uploaded" && u.path).map((u) => String(u.path));
+      const targetUserId = importAsUserId.trim();
+      const res = await fetch("/api/bubble-import/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          filePaths: filePaths.length ? filePaths : undefined,
+          targetUserId: targetUserId || undefined,
+        }),
+      });
       const text = await res.text();
       const json = ((): Record<string, unknown> | null => {
         try {
@@ -397,7 +406,12 @@ export default function ImportarBubbleClient() {
       const res = await fetch("/api/bubble-import/import", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ only: ["fichas_tecnicas", "pre_preparo", "inventario"], includeUnknown: true }),
+        body: JSON.stringify({
+          only: ["fichas_tecnicas", "pre_preparo", "inventario"],
+          includeUnknown: true,
+          filePaths: uploads.filter((u) => u.status === "uploaded" && u.path).map((u) => String(u.path)),
+          targetUserId: importAsUserId.trim() || undefined,
+        }),
       });
       const text = await res.text();
       const json = ((): Record<string, unknown> | null => {

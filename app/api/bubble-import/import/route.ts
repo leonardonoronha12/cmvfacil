@@ -578,6 +578,9 @@ export async function POST(req: NextRequest) {
     const includeUnknown = typeof (body as any)?.includeUnknown === "boolean" ? Boolean((body as any).includeUnknown) : true;
     const kinds = Array.isArray((body as any)?.kinds) ? ((body as any).kinds as unknown[]).map((x) => String(x ?? "").trim().toLowerCase()).filter(Boolean) : null;
     const requestedPrefix = typeof (body as any)?.prefix === "string" ? String((body as any).prefix).trim().replace(/^\/+|\/+$/g, "") : "";
+    const requestedFilePaths = Array.isArray((body as any)?.filePaths)
+      ? ((body as any).filePaths as unknown[]).map((x) => String(x ?? "").trim().replace(/^\/+/, "")).filter(Boolean)
+      : [];
     const targetUserIdRaw = typeof (body as any)?.targetUserId === "string" ? String((body as any).targetUserId).trim() : "";
     const mappingPath = typeof (body as any)?.mappingPath === "string" ? String((body as any).mappingPath).trim() : "";
 
@@ -644,7 +647,13 @@ export async function POST(req: NextRequest) {
     const userPrefix = `user:${userId}`;
 
     const prefixToUse = requestedPrefix && requestedPrefix.startsWith(`${userPrefix}/`) ? requestedPrefix : userPrefix;
-    const files = await listAllPaths(supabase, bucket, prefixToUse);
+    const exactFilePaths = [...new Set(requestedFilePaths)].filter((path) => path.startsWith(`${userPrefix}/`));
+    if (requestedFilePaths.length && exactFilePaths.length !== requestedFilePaths.length) {
+      return json({ ok: false, error: "invalid_file_path" }, { status: 400 });
+    }
+    const files = exactFilePaths.length
+      ? exactFilePaths.map((path) => ({ path, name: path.split("/").pop() || path }))
+      : await listAllPaths(supabase, bucket, prefixToUse);
     const hasImportFile = files.some((f) => {
       const n = String(f?.name ?? "").toLowerCase();
       if (n.endsWith(".csv") || n.endsWith(".xlsx") || n.endsWith(".xls")) return true;
