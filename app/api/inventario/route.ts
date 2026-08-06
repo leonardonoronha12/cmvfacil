@@ -78,6 +78,64 @@ function resolveUserScopedId(req: NextRequest) {
   return { accessToken, id: null as string | null, rawUserId: userId };
 }
 
+async function resolveSharedInventoryScope(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  userId: string,
+) {
+  const ownPrefix = `user:${userId}:`;
+  const { data: ownMemberships, error: ownMembershipsError } = await supabase
+    .from("company_members")
+    .select("company_id,role,permission_level")
+    .eq("user_id", userId)
+    .limit(50);
+
+  if (ownMembershipsError) throw new Error(ownMembershipsError.message);
+  const companyId = pickBestCompanyId((ownMemberships ?? []) as any[]);
+  if (!companyId) return { companyId: null as string | null, prefixes: [ownPrefix] };
+
+  const { data: companyMembers, error: companyMembersError } = await supabase
+    .from("company_members")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .limit(500);
+  if (companyMembersError) throw new Error(companyMembersError.message);
+
+  const prefixes = new Set<string>([ownPrefix, `company:${companyId}:`]);
+  for (const member of companyMembers ?? []) {
+    const memberUserId = String((member as any)?.user_id ?? "").trim();
+    if (isUuid(memberUserId)) prefixes.add(`user:${memberUserId}:`);
+  }
+  return { companyId, prefixes: Array.from(prefixes) };
+}
+
+async function loadSharedLegacyInventoryRows(
+  supabase: ReturnType<typeof getSupabaseServerClient>,
+  prefixes: string[],
+) {
+  const batches = await Promise.all(
+    prefixes.map(async (prefix) => {
+      const { data, error } = await supabase
+        .from("inventario")
+        .select("*")
+        .like("id", `${prefix}%`)
+        .order("created_at", { ascending: false });
+      if (error) throw new Error(error.message);
+      return data ?? [];
+    }),
+  );
+
+  const byId = new Map<string, any>();
+  for (const row of batches.flat()) {
+    const rowId = String((row as any)?.id ?? "").trim();
+    if (rowId) byId.set(rowId, row);
+  }
+  return Array.from(byId.values()).sort((a: any, b: any) => {
+    const aTime = new Date(String(a?.updated_at ?? a?.created_at ?? "")).getTime();
+    const bTime = new Date(String(b?.updated_at ?? b?.created_at ?? "")).getTime();
+    return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0);
+  });
+}
+
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
   return false;
 }
@@ -276,10 +334,18 @@ export async function GET(req: NextRequest) {
       return json({ source: "compat", readOnly: true, rows: legacyRows, compat: { totals, inventories: compatInventories } }, { status: 200 });
     }
 
-    const prefix = `${id}:`;
-    const { data, error } = await supabase.from("inventario").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+    const sharedScope = await resolveSharedInventoryScope(supabase, userId);
+    const rows = await loadSharedLegacyInventoryRows(supabase, sharedScope.prefixes);
+    return json(
+      {
+        source: "legacy",
+        readOnly: false,
+        rows,
+        scope: sharedScope.companyId ? "company" : "user",
+        companyId: sharedScope.companyId,
+      },
+      { status: 200 },
+    );
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -292,11 +358,26 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as unknown;
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
     const { accessToken, id } = resolveUserScopedId(req);
-    const prefix = id ? `${id}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    const ownPrefix = id ? `${id}:` : "";
+    if (!ownPrefix) return json({ error: "unauthorized" }, { status: 401 });
     const invId = String((body as any).id ?? "").trim();
-    if (!invId || !invId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    if (!invId) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
+    const userId = id!.slice("user:".length);
+    const sharedScope = await resolveSharedInventoryScope(supabase, userId);
+    if (!sharedScope.prefixes.some((prefix) => invId.startsWith(prefix))) {
+      return json({ error: "invalid_id_scope" }, { status: 400 });
+    }
+
+    const inventoryDate = String((body as any)?.data ?? "").trim();
+    if (inventoryDate) {
+      const existingRows = await loadSharedLegacyInventoryRows(supabase, sharedScope.prefixes);
+      const duplicate = existingRows.some(
+        (row: any) => String(row?.id ?? "").trim() !== invId && String(row?.data ?? "").trim() === inventoryDate,
+      );
+      if (duplicate) return json({ error: "inventario_date_exists" }, { status: 409 });
+    }
+
     const { error } = await supabase.from("inventario").upsert(body as any, { onConflict: "id" });
     if (error) return json({ error: error.message }, { status: 500 });
     return json({ ok: true }, { status: 200 });
@@ -313,10 +394,14 @@ export async function DELETE(req: NextRequest) {
     const id = (url.searchParams.get("id") ?? "").trim();
     if (!id) return json({ error: "missing_id" }, { status: 400 });
     const { accessToken, id: userScopedId } = resolveUserScopedId(req);
-    const prefix = userScopedId ? `${userScopedId}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
-    if (!id.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    const ownPrefix = userScopedId ? `${userScopedId}:` : "";
+    if (!ownPrefix) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    const userId = userScopedId!.slice("user:".length);
+    const sharedScope = await resolveSharedInventoryScope(supabase, userId);
+    if (!sharedScope.prefixes.some((prefix) => id.startsWith(prefix))) {
+      return json({ error: "invalid_id_scope" }, { status: 400 });
+    }
     const { error } = await supabase.from("inventario").delete().eq("id", id);
     if (error) return json({ error: error.message }, { status: 500 });
     return json({ ok: true }, { status: 200 });
