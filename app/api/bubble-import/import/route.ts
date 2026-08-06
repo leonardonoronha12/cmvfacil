@@ -461,6 +461,13 @@ function buildDateLabel(value: string) {
   return d ? formatDateLabelDDMMYYYY(d) : String(value ?? "").trim();
 }
 
+function buildDateTimeLabel(value: string) {
+  const d = parseDateLoose(value);
+  if (!d) return String(value ?? "").trim();
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `${formatDateLabelDDMMYYYY(d)} ${time}`;
+}
+
 async function upsertInBatches<T extends Record<string, unknown>>(supabase: ReturnType<typeof getSupabaseAdmin>, table: string, rows: T[], batchSize = 500) {
   let inserted = 0;
   for (let i = 0; i < rows.length; i += batchSize) {
@@ -581,6 +588,7 @@ export async function POST(req: NextRequest) {
     const requestedFilePaths = Array.isArray((body as any)?.filePaths)
       ? ((body as any).filePaths as unknown[]).map((x) => String(x ?? "").trim().replace(/^\/+/, "")).filter(Boolean)
       : [];
+    const replaceEntradas = Boolean((body as any)?.replaceEntradas);
     const targetUserIdRaw = typeof (body as any)?.targetUserId === "string" ? String((body as any).targetUserId).trim() : "";
     const mappingPath = typeof (body as any)?.mappingPath === "string" ? String((body as any).mappingPath).trim() : "";
 
@@ -1318,6 +1326,84 @@ export async function POST(req: NextRequest) {
     }
 
     const entradasRows: any[] = [];
+    const flatEntradaByNota = new Map<string, any>();
+    const flatEntradaItemIds = new Map<string, Set<string>>();
+    function handleFlatEntradaItem(row: CsvObjectRow) {
+      if (!enableEntradas) return;
+      const uid = resolveTargetUserId(row);
+      const notaRaw =
+        pickFirst(row, ["nota_id_custom_notas_fiscais", "nota_id", "nota_fiscal_id", "nota_fiscal", "nota", "entrada_id"]) ||
+        pickKeyLike(row, ["nota_id", "nota_fiscal", "entrada_id"]);
+      const notaId = notaRaw ? extractBubbleRefId(String(notaRaw)) || extractBubbleIdFromText(String(notaRaw)) || String(notaRaw).trim() : "";
+      if (!notaId) return;
+
+      const fornecedor =
+        pickFirst(row, [
+          "fornecedor_nome_migra_o_text",
+          "fornecedor_nome_migracao_text",
+          "fornecedor_nome_migra├º├úo_text",
+          "fornecedor_nome",
+          "nome_fornecedor",
+          "fornecedor",
+        ]) || "-";
+      const dataLancamento = buildDateLabel(
+        pickFirst(row, ["data_lan_amento_date", "data_lancamento_date", "data_lan├ºamento_date", "data_lancamento", "data"]) || "",
+      );
+      const dataCriacao = buildDateTimeLabel(pickFirst(row, ["created_date", "data_criacao", "created_at"]) || "");
+      const responsavel =
+        pickFirst(row, ["created_by_name", "responsavel_nome", "responsavel", "created_by_email"]) || "Luis Felipe Israel";
+      const itemNome =
+        pickFirst(row, [
+          "item_nome_migra_o_text",
+          "item_nome_migracao_text",
+          "item_nome_migra├º├úo_text",
+          "item_nome_text",
+          "item_nome",
+          "nome_item",
+          "item",
+        ]) || "";
+      if (!itemNome) return;
+      const itemIdRaw = pickFirst(row, ["item_id_custom_itens", "item_id", "id_item"]) || "";
+      const itemId = itemIdRaw ? extractBubbleRefId(String(itemIdRaw)) || extractBubbleIdFromText(String(itemIdRaw)) || String(itemIdRaw).trim() : "";
+      const rowId = String(pickBubbleId(row) || stableKeyFromParts([notaId, itemId, itemNome, pickFirst(row, ["quantidade_number", "quantidade"])]));
+      const key = `${uid}:${notaId}`;
+      const seen = flatEntradaItemIds.get(key) ?? new Set<string>();
+      if (seen.has(rowId)) return;
+      seen.add(rowId);
+      flatEntradaItemIds.set(key, seen);
+
+      const quantidade = parsePtNumber(pickFirst(row, ["quantidade_number", "quantidade", "qtd"]) || "");
+      const subtotal = parsePtNumber(pickFirst(row, ["subtotal_number", "subtotal", "total"]) || "");
+      const custoUnitario = parsePtNumber(pickFirst(row, ["custo_unitario_number", "custo_unitario", "preco_unitario"]) || "");
+      const unidade = pickFirst(row, ["unidade_text", "unidade", "medida"]) || "Und";
+      const current =
+        flatEntradaByNota.get(key) ??
+        ({
+          id: `user:${uid}:entrada:${notaId}`,
+          user_id: uid,
+          numero: `NF-${notaId.slice(-8)}`,
+          data_lancamento: dataLancamento || "-",
+          fornecedor: fornecedor || "-",
+          valor_nota: "R$0,00",
+          itens: "0 Itens",
+          responsavel,
+          data_criacao: dataCriacao || dataLancamento || "-",
+          itens_nota: [],
+          __total: 0,
+        } as any);
+      current.itens_nota.push({
+        id: `user:${uid}:nota_item:${rowId}`,
+        itemId: itemId || undefined,
+        nome: itemNome,
+        quantidadeLabel: `${quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })}${unidade}`,
+        subtotalLabel: formatMoneyBRL(subtotal),
+        custoUnitarioLabel: formatMoneyBRL(custoUnitario),
+      });
+      current.__total += subtotal;
+      current.valor_nota = formatMoneyBRL(current.__total);
+      current.itens = `${current.itens_nota.length} ${current.itens_nota.length === 1 ? "Item" : "Itens"}`;
+      flatEntradaByNota.set(key, current);
+    }
     function handleNotaFiscal(row: CsvObjectRow) {
       if (!enableEntradas) return;
     const uid = resolveTargetUserId(row);
@@ -2131,6 +2217,7 @@ export async function POST(req: NextRequest) {
     function detectUnknownKind(row: CsvObjectRow) {
     const keys = Object.keys(row).map((k) => k.toLowerCase());
     const has = (p: string) => keys.some((k) => k.includes(p));
+    if (has("nota_id") && has("item") && has("quantidade") && has("subtotal")) return "entradas_flat";
     if (has("email") && (has("user") || has("usuario") || has("created_by") || has("owner"))) return "users";
     if ((has("empresa") || has("company") || has("restaurante")) && (has("cnpj") || has("fantasy") || has("razao") || has("legal") || has("ramo"))) return "empresas";
     if (has("valor_nota") || (has("fornecedor") && (has("numero") || has("nf")) && has("data"))) return "notas_fiscais";
@@ -2174,6 +2261,7 @@ export async function POST(req: NextRequest) {
           for (const r of rows) {
             if (kind === "notas_fiscais" && enableEntradas) handleNotaFiscal(r);
             else if (kind === "itens_notas" && enableEntradas) handleNotaItem(r);
+            else if (kind === "entradas_flat" && enableEntradas) handleFlatEntradaItem(r);
             else if (kind === "fornecedores" && enableFornecedores) handleFornecedorInfo(r);
             else if (kind === "itens_fornecedores" && enableFornecedores) handleFornecedorProduto(r);
             else if (kind === "equivalencias" && enableFornecedores) handleEquivalencia(r);
@@ -2457,6 +2545,14 @@ export async function POST(req: NextRequest) {
 
     await processCsvGroups("itens_notas", (row) => handleNotaItem(row));
     await processCsvGroups("notas_fiscais", (row) => handleNotaFiscal(row));
+    for (const row of flatEntradaByNota.values()) {
+      delete row.__total;
+      entradasRows.push(row);
+    }
+    if (replaceEntradas && entradasRows.length && overrideTargetUserId) {
+      const del = await supabase.from("entradas").delete().eq("user_id", overrideTargetUserId);
+      if (del.error) return json({ ok: false, error: `entradas_replace:${del.error.message}`, stage }, { status: 500 });
+    }
     const entradasInserted = enableEntradas && entradasRows.length ? await upsertInBatches(supabase, "entradas", entradasRows, 300) : 0;
     if (enableEntradas && entradasRows.length) {
       const uids = Array.from(new Set(entradasRows.map((r) => String((r as any)?.user_id ?? "").trim()).filter(Boolean)));

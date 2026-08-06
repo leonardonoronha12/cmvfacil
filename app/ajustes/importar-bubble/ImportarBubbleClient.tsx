@@ -373,12 +373,16 @@ export default function ImportarBubbleClient() {
     try {
       const filePaths = uploads.filter((u) => u.status === "uploaded" && u.path).map((u) => String(u.path));
       const targetUserId = importAsUserId.trim();
+      const uploadedNames = uploads.filter((u) => u.status === "uploaded").map((u) => u.file.name.toLowerCase());
+      const isEntriesOnly = uploadedNames.length > 0 && uploadedNames.every((name) => name.includes("entrada"));
       const res = await fetch("/api/bubble-import/import", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           filePaths: filePaths.length ? filePaths : undefined,
           targetUserId: targetUserId || undefined,
+          only: isEntriesOnly ? ["entradas"] : undefined,
+          replaceEntradas: isEntriesOnly,
         }),
       });
       const text = await res.text();
