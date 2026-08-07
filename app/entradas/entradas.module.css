@@ -1814,3 +1814,74 @@
 .toastError {
   border-color: rgba(239, 68, 68, 0.35);
 }
+.importModal {
+  width: 620px;
+}
+
+.importTemplateRow {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.importFileInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px dashed #b8c7c5;
+  border-radius: 10px;
+  background: #f8fbfa;
+  padding: 14px;
+  color: #20312f;
+}
+
+.importFileName {
+  font-size: 12px;
+  font-weight: 800;
+  color: #20312f;
+}
+
+.importProgressPanel {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid #dbe7e4;
+  border-radius: 12px;
+  background: #f8fbfa;
+}
+
+.importProgressHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #20312f;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.importProgressTrack {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d7e6e3;
+  box-shadow: inset 0 1px 2px rgba(17, 72, 61, 0.12);
+}
+
+.importProgressFill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #00a982, #00c79a);
+  transition: width 160ms ease;
+}
+
+.importProgressCount {
+  color: #536563;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.importFooter {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
