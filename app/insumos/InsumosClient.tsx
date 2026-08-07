@@ -1270,7 +1270,7 @@ export default function InsumosClient() {
     setDataRows((prev) => prev.map((r) => (normalizeCategoryName(r.categoria ?? "").toLowerCase() === fromKey ? { ...r, categoria: name } : r)));
     if (newCategory === from) setNewCategory(name);
     cancelEditCategory();
-  }
+
 
   function openDeleteCategory(name: string) {
     if (isReadOnly) {
