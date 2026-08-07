@@ -15,17 +15,26 @@ import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
-import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
+import { writePrePreparoEtiquetasToStore, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
+import {
+  formatBubbleDate,
+  normalizeBubbleName,
+  parseBubbleDecimal,
+  readBubbleSpreadsheetFiles,
+  repairBubbleText,
+  splitBubbleList,
+} from "../lib/bubbleSpreadsheetImport";
 
 type PrePreparoRow = {
   id: string;
   categoria: string;
   receita: string;
+  especificacao?: string;
   recipeImage?: string;
   custoTotal: string;
   rendimento: string;
@@ -641,6 +650,7 @@ export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
+  const importFileRef = useRef<HTMLInputElement | null>(null);
   const prePreparoLoadedRef = useRef(false);
   const etiquetasLoadedRef = useRef(false);
   const autoSyncDetailsRef = useRef<Set<string>>(new Set());
@@ -689,6 +699,8 @@ export default function PrePreparoClient() {
   const [etiquetasResponsavelFilter, setEtiquetasResponsavelFilter] = useState("Responsável");
   const [etiquetasSortMode, setEtiquetasSortMode] = useState<"Mais Antigo (Validade)" | "Mais Novo (Validade)">("Mais Antigo (Validade)");
   const [isSyncingDetails, setIsSyncingDetails] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -713,6 +725,131 @@ export default function PrePreparoClient() {
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
     return `Não foi possível carregar do Supabase (${msg}).`;
+  }
+
+  async function importPrePreparos(files: File[]) {
+    if (!files.length || isImporting || isReadOnly) return;
+    if (isLoadingPrePreparo) {
+      showToast("Aguarde o carregamento dos pré-preparos antes de importar.", "error");
+      return;
+    }
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: 1, stage: "Lendo as planilhas..." });
+    try {
+      const importedRows = await readBubbleSpreadsheetFiles(files);
+      if (!importedRows.length) throw new Error("As planilhas não possuem dados válidos.");
+      const recipeRows = importedRows.filter(({ get }) => {
+        const flag = normalizeBubbleName(get("boolean_item_receita", "item_receita"));
+        const category = normalizeBubbleName(get("categoria_nome-migração", "categoria_nome_migracao", "categoria_id", "categoria"));
+        return (flag === "sim" || flag === "true" || flag === "1") && category === "pre preparo";
+      });
+      if (!recipeRows.length) throw new Error("Nenhum pré-preparo foi encontrado nas planilhas.");
+
+      const ingredientById = new Map(
+        importedRows
+          .filter(({ get }) => get("unique id", "unique_id") && get("item_id", "item_nome-migração", "item_nome_migracao", "item_nome"))
+          .map((row) => [row.get("unique id", "unique_id"), row] as const),
+      );
+      const optionByName = new Map(ingredientOptions.map((option) => [normalizeBubbleName(option.item), option]));
+      const persisted = await loadPrePreparoStateFromSupabase().catch(() => null);
+      if (persisted?.meta?.readOnly || persisted?.meta?.source === "compat") throw new Error("Esta origem está em modo somente leitura.");
+      const baseRows = (persisted?.rows?.length ? persisted.rows : rows) as PrePreparoRow[];
+      const existingByName = new Map(baseRows.map((row) => [normalizeBubbleName(row.receita), row]));
+      const imported: PrePreparoRow[] = [];
+      const idToRecipe = new Map<string, PrePreparoRow>();
+
+      for (let index = 0; index < recipeRows.length; index += 1) {
+        const { get } = recipeRows[index];
+        const receita = repairBubbleText(get("nome", "receita"));
+        if (!receita) continue;
+        const previous = existingByName.get(normalizeBubbleName(receita));
+        const bubbleId = get("unique id", "unique_id", "bubble_id");
+        const rendimentoNumber = Math.max(parseBubbleDecimal(get("rendimento")) || 1, 0.000001);
+        const unidade = repairBubbleText(get("unidade_nome-migração", "unidade_nome_migracao", "unidade_medida", "unidade")) || "Und";
+        const custoTotalNumber = Math.max(0, parseBubbleDecimal(get("custo_total_receita", "custo_total")));
+        const ingredientes = splitBubbleList(get("lista_ingredientes", "ingredientes")).flatMap((ingredientId) => {
+          const source = ingredientById.get(ingredientId);
+          if (!source) return [];
+          const item = repairBubbleText(source.get("item_nome-migração", "item_nome_migracao", "item_nome", "item_id", "ingrediente_nome"));
+          if (!item) return [];
+          const option = optionByName.get(normalizeBubbleName(item));
+          const quantidade = parseBubbleDecimal(source.get("quantidade"));
+          const custo = Math.max(0, parseBubbleDecimal(source.get("custo", "custo_total")));
+          return [{
+            id: `bubble:${ingredientId}`,
+            item,
+            quantidade: quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
+            unidade: option?.unidade || repairBubbleText(source.get("unidade", "unidade_nome-migração", "unidade_nome_migracao")) || "Und",
+            custoCents: Math.round(custo * 100),
+          } satisfies IngredienteRow];
+        });
+        const finalIngredients = ingredientes.length ? ingredientes : previous?.ingredientes ?? [];
+        const finalTotal = ingredientes.length ? ingredientes.reduce((sum, row) => sum + row.custoCents, 0) / 100 : custoTotalNumber;
+        const row: PrePreparoRow = {
+          id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
+          categoria: repairBubbleText(get("categoria_nome-migração", "categoria_nome_migracao", "categoria_id", "categoria")) || "Pré-Preparo",
+          receita,
+          especificacao: repairBubbleText(get("descricao", "especificacao")) || undefined,
+          recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
+          custoTotal: finalTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          rendimento: `${rendimentoNumber.toLocaleString("pt-BR", { maximumFractionDigits: 3 })} ${unidade}`,
+          custoUnitario: `${(finalTotal / rendimentoNumber).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${unidade}`,
+          validadeDias: Math.max(0, Math.round(parseBubbleDecimal(get("validade_dias", "dias_validade")))) || undefined,
+          ingredientes: finalIngredients,
+          modoPreparo: repairBubbleText(get("modo_preparo", "modo de preparo")) || previous?.modoPreparo || "",
+        };
+        imported.push(row);
+        if (bubbleId) idToRecipe.set(bubbleId, row);
+        setImportProgress({ current: index + 1, total: recipeRows.length, stage: "Preparando pré-preparos..." });
+        if ((index + 1) % 20 === 0) await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      }
+      if (!imported.length) throw new Error("Nenhum pré-preparo válido foi encontrado.");
+      const importedNames = new Set(imported.map((row) => normalizeBubbleName(row.receita)));
+      const merged = [...baseRows.filter((row) => !importedNames.has(normalizeBubbleName(row.receita))), ...imported];
+      setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando pré-preparos..." });
+      await savePrePreparoToSupabase(merged as any);
+
+      const labelRows = importedRows.filter(({ get }) => get("item_id", "item_nome", "item_nome-migração", "item_nome_migracao") && get("data_validade"));
+      const existingLabels = await loadPrePreparoEtiquetasFromSupabase().catch(() => etiquetasRows);
+      const importedLabels: PrePreparoEtiquetaRow[] = [];
+      for (const { get } of labelRows) {
+        const bubbleRecipeId = get("item_id");
+        const recipeName = repairBubbleText(get("item_nome-migração", "item_nome_migracao", "item_nome", "receita"));
+        const recipe = idToRecipe.get(bubbleRecipeId) ?? imported.find((row) => normalizeBubbleName(row.receita) === normalizeBubbleName(recipeName));
+        if (!recipe) continue;
+        const bubbleLabelId = get("unique id", "unique_id");
+        const quantity = parseBubbleDecimal(get("quantidade_produzida", "quantidade"));
+        importedLabels.push({
+          id: bubbleLabelId ? `bubble:${bubbleLabelId}` : crypto.randomUUID(),
+          recipeId: recipe.id,
+          receita: recipe.receita,
+          responsavel: repairBubbleText(get("responsavel_nome_completo", "responsavel")) || "-",
+          quantidade: quantity.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
+          unidade: recipe.rendimento.split(/\s+/).pop() || "Und",
+          custo: recipe.custoTotal,
+          dataProducao: formatBubbleDate(get("data_producao")),
+          dataValidade: formatBubbleDate(get("data_validade")),
+          code: get("codigo") || undefined,
+          createdAt: get("data_criacao_log", "creation date", "created date") || undefined,
+          wasteStatus: "pending",
+        });
+      }
+      if (importedLabels.length) {
+        const importedLabelIds = new Set(importedLabels.map((row) => row.id));
+        const labelsMerged = [...existingLabels.filter((row) => !importedLabelIds.has(row.id)), ...importedLabels];
+        await savePrePreparoEtiquetasToSupabase(labelsMerged);
+        writePrePreparoEtiquetasToStore(labelsMerged);
+        setEtiquetasRows(labelsMerged);
+      }
+      setRows(merged);
+      showToast(`${imported.length} pré-preparo(s) importado(s) com sucesso.`, "success", 7000);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Não foi possível importar as planilhas.", "error", 9000);
+    } finally {
+      setIsImporting(false);
+      setImportProgress(null);
+      if (importFileRef.current) importFileRef.current.value = "";
+    }
   }
 
   function buildDetailsUrl(recipeId: string, tab: "ingredientes" | "preparo" | "etiquetas") {
@@ -1353,6 +1490,9 @@ export default function PrePreparoClient() {
         if (!ingredientes.length) return row;
         let ingredientesChanged = false;
         const nextIngredientes = ingredientes.map((ing) => {
+          // A saved recipe owns its historical ingredient subtotal. Repricing it
+          // on every load loses imported precision and changes past recipes.
+          if (clampNonNegativeInt(ing.custoCents) > 0) return ing;
           const byName = insumosByName.get(String(ing.item ?? "").toLowerCase());
           const byKey = insumosByKey.get(normalizeNameKey(String(ing.item ?? "")));
           const ins = byName ?? byKey ?? null;
@@ -1363,7 +1503,7 @@ export default function PrePreparoClient() {
           const unitForCost = String(stats?.unit ?? ins.medida ?? "Und").trim() || "Und";
           const unitCents =
             stats && stats.sumQty > 0 && stats.sumCents > 0
-              ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+              ? stats.sumCents / stats.sumQty
               : clampNonNegativeInt(parseCurrencyBRLToCents(String(ins.custoMedio ?? "")));
           if (unitCents <= 0) return ing;
           const fromUnit = String(ing.unidade ?? unitForCost).trim() || unitForCost;
@@ -1416,7 +1556,7 @@ export default function PrePreparoClient() {
         setIngredientCost("0,00");
         return;
       }
-      const unitCents = clampNonNegativeInt(Math.round(totalCents / yieldQty));
+      const unitCents = totalCents / yieldQty;
       const cents = clampNonNegativeInt(Math.round(unitCents * qty));
       setIngredientCost(formatBRLValueFromCents(cents));
       return;
@@ -1805,7 +1945,7 @@ export default function PrePreparoClient() {
       const stats = averageCostByInsumo.get(selected.item.toLowerCase()) ?? null;
       const unitCents =
         stats && stats.sumQty > 0 && stats.sumCents > 0
-          ? clampNonNegativeInt(Math.round(stats.sumCents / stats.sumQty))
+          ? stats.sumCents / stats.sumQty
           : clampNonNegativeInt(Math.round(parseMoneyLabel(selected.custoMedio || "0") * 100));
       const qtyInStatsUnit = stats?.unit ? convertQty(qty, selected.unidade, stats.unit) : qty;
       const finalQty = Number.isFinite(qtyInStatsUnit) && qtyInStatsUnit > 0 ? qtyInStatsUnit : qty;
@@ -3241,6 +3381,25 @@ export default function PrePreparoClient() {
               </div>
 
               <div className={styles.actions}>
+                <input
+                  ref={importFileRef}
+                  type="file"
+                  multiple
+                  accept=".csv,.xlsx,.xls,text/csv"
+                  className={ft.hiddenFileInput}
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    if (files.length) void importPrePreparos(files);
+                  }}
+                />
+                <button
+                  type="button"
+                  className={ft.importButton}
+                  disabled={isImporting || isLoadingPrePreparo || isReadOnly}
+                  onClick={() => importFileRef.current?.click()}
+                >
+                  {isImporting ? "Importando..." : "Importar planilha"}
+                </button>
                 <button
                   type="button"
                   className={styles.secondaryBtn}
@@ -3257,6 +3416,21 @@ export default function PrePreparoClient() {
                 </button>
               </div>
             </section>
+
+            {importProgress ? (
+              <section className={ft.importProgressPanel} aria-live="polite">
+                <div className={ft.importProgressHeader}>
+                  <span>{importProgress.stage}</span>
+                  <strong>{Math.round((importProgress.current / Math.max(importProgress.total, 1)) * 100)}%</strong>
+                </div>
+                <div className={ft.importProgressTrack}>
+                  <div className={ft.importProgressFill} style={{ width: `${Math.max(2, (importProgress.current / Math.max(importProgress.total, 1)) * 100)}%` }} />
+                </div>
+                <div className={ft.importProgressCount}>
+                  {importProgress.current.toLocaleString("pt-BR")} de {importProgress.total.toLocaleString("pt-BR")}
+                </div>
+              </section>
+            ) : null}
 
             <QaModePanel screen="pre-preparo" ui={qaUi} />
 
