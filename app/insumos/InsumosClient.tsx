@@ -1,4 +1,5 @@
-"use client";
+}
+  "use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -1272,7 +1273,7 @@ export default function InsumosClient() {
     cancelEditCategory();
 
 
-  function openDeleteCategory(name: string) {
+  
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
