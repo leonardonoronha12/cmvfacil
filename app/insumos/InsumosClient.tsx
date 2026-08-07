@@ -1,4 +1,3 @@
-}
   "use client";
 
 import Link from "next/link";
@@ -837,8 +836,7 @@ export default function InsumosClient() {
         return next;
       })();
       if (!isReadOnly && !isBootstrapRunning()) {
-        setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
-        await saveInsumosStateToSupabase({
+                await saveInsumosStateToSupabase({
           rows: imported.map((r) => ({
             id: r.id,
             item: r.item,
@@ -1271,6 +1269,9 @@ export default function InsumosClient() {
     setDataRows((prev) => prev.map((r) => (normalizeCategoryName(r.categoria ?? "").toLowerCase() === fromKey ? { ...r, categoria: name } : r)));
     if (newCategory === from) setNewCategory(name);
     cancelEditCategory();
+  }
+
+  function openDeleteCategory(name: string) {
 
 
   
