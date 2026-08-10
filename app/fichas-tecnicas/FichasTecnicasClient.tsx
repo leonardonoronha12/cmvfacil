@@ -16,6 +16,7 @@ import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/
 import { loadFichasTecnicasFromSupabase, loadFichasTecnicasStateFromSupabase, saveFichasTecnicasToSupabase, type FichaTecnicaCompatRecipe } from "../lib/fichasTecnicasSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
+import { parseBubbleDecimal, repairBubbleText } from "../lib/bubbleSpreadsheetImport";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./fichas-tecnicas.module.css";
 
@@ -333,7 +334,7 @@ function RecipeThumb({ type, src }: { type: ThumbType; src?: string }) {
 }
 
 function normalizeText(value: string) {
-  return value
+  return repairBubbleText(value)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
@@ -951,7 +952,7 @@ export default function FichasTecnicasClient({
         const get = (...keys: string[]) => {
           for (const key of keys) {
             const found = values.find(([candidate]) => candidate === normalizeText(key));
-            if (found) return String(found[1] ?? "").trim();
+            if (found) return repairBubbleText(String(found[1] ?? "")).trim();
           }
           return "";
         };
@@ -972,11 +973,11 @@ export default function FichasTecnicasClient({
           const receita = get("nome", "receita");
           if (!receita) continue;
           const previous = existingByName.get(normalizeText(receita));
-          const precoVendaNumber = parseDecimalInput(get("preco_venda_total", "preco_venda", "preco venda"));
-          const rendimentoNumber = Math.max(parseDecimalInput(get("rendimento")) || 1, 0.000001);
-          const custoTotalNumber = parseDecimalInput(get("custo_total_receita", "custo_total"));
+          const precoVendaNumber = parseBubbleDecimal(get("preco_venda_total", "preco_venda", "preco venda"));
+          const rendimentoNumber = Math.max(parseBubbleDecimal(get("rendimento")) || 1, 0.000001);
+          const custoTotalNumber = parseBubbleDecimal(get("custo_total_receita", "custo_total"));
           const custoUnitarioNumber = custoTotalNumber / rendimentoNumber;
-          const cmvMetaNumber = parseDecimalInput(get("cmv_desejado", "cmv_meta"));
+          const cmvMetaNumber = parseBubbleDecimal(get("cmv_desejado", "cmv_meta"));
           const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
           const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
           const bubbleId = get("unique id", "unique_id", "bubble_id");
