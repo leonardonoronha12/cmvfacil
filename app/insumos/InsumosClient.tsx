@@ -1377,6 +1377,10 @@ export default function InsumosClient() {
               if (isUuidValue(v)) ids.push(v);
               continue;
             }
+            if (isUuidValue(s)) {
+              ids.push(s);
+              continue;
+            }
             if (/^\d{6,}x\d{6,}$/.test(s)) bubbleIds.push(s);
           }
           const res = await deleteInsumosBatchFromSupabase({ ids, bubbleIds, source: "compat" });
@@ -1494,6 +1498,10 @@ export default function InsumosClient() {
         if (s.startsWith("db:")) {
           const v = s.slice("db:".length);
           if (isUuidValue(v)) ids.push(v);
+          continue;
+        }
+        if (isUuidValue(s)) {
+          ids.push(s);
           continue;
         }
         if (/^\d{6,}x\d{6,}$/.test(s)) bubbleIds.push(s);
