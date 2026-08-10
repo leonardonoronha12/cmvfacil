@@ -92,8 +92,13 @@ export async function loadInsumosStateFromSupabase(userId?: string, opts?: { sou
   return { rows: normalizeRows(json.rows), categories: normalizeCategories(json.categories), meta: { source: sourceLabel, readOnly: Boolean(json.readOnly) } };
 }
 
-export async function saveInsumosStateToSupabase(payload: { rows: InsumoStoreItem[]; categories?: string[] }) {
-  const res = await fetch("/api/insumos", {
+export async function saveInsumosStateToSupabase(
+  payload: { rows: InsumoStoreItem[]; categories?: string[] },
+  opts?: { source?: "compat" | "legacy" },
+) {
+  const source = String(opts?.source ?? "").trim();
+  const url = source ? `/api/insumos?source=${encodeURIComponent(source)}` : "/api/insumos";
+  const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),

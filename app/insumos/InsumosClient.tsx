@@ -1,4 +1,4 @@
-  "use client";
+"use client";
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -142,6 +142,9 @@ function detectColumnMap(headers: unknown[]) {
     return undefined;
   };
 
+  // Bubble exports many relationship/ID columns before the human-readable
+  // migration fields. Prefer the exact readable fields so values never shift
+  // into the wrong columns.
   idx.item = findExact(
     "nome_text",
     "nome text",
@@ -454,6 +457,7 @@ export default function InsumosClient() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
   const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
@@ -794,6 +798,7 @@ export default function InsumosClient() {
     }
 
     setImporting(true);
+    setImportProgress({ current: 0, total: 0, stage: "Lendo a planilha..." });
     try {
       const name = selectedFile.name.toLowerCase();
       let table: unknown[][] = [];
@@ -817,10 +822,26 @@ export default function InsumosClient() {
 
       const importedRaw = parseRowsFromTable(table);
       if (!importedRaw.length) throw new Error("Nenhum item encontrado na planilha.");
-      const imported = importedRaw.map((row, idx) => ({
-        ...row,
-        id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${Date.now()}-${idx}`,
-      }));
+      const imported: InsumoRow[] = [];
+      const importRunId = Date.now();
+      const prepareChunkSize = 100;
+      setImportProgress({ current: 0, total: importedRaw.length, stage: "Preparando os insumos..." });
+      for (let offset = 0; offset < importedRaw.length; offset += prepareChunkSize) {
+        const chunk = importedRaw.slice(offset, offset + prepareChunkSize);
+        for (let index = 0; index < chunk.length; index += 1) {
+          const row = chunk[index]!;
+          imported.push({
+            ...row,
+            id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${importRunId}-${offset + index}`,
+          });
+        }
+        setImportProgress({
+          current: imported.length,
+          total: importedRaw.length,
+          stage: `${imported.length.toLocaleString("pt-BR")} insumos preparados`,
+        });
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+      }
       const mergedCategories = (() => {
         const seen = new Set(categories.map((c) => c.toLowerCase()));
         const next = [...categories];
@@ -836,7 +857,7 @@ export default function InsumosClient() {
         return next;
       })();
       if (!isReadOnly && !isBootstrapRunning()) {
-                await saveInsumosStateToSupabase({
+        await saveInsumosStateToSupabase({
           rows: imported.map((r) => ({
             id: r.id,
             item: r.item,
@@ -850,6 +871,7 @@ export default function InsumosClient() {
         });
         saveErrorShownRef.current = false;
       }
+      // A tabela visível só é substituída depois que o banco confirma a gravação.
       setDataRows(imported);
       setCategories(mergedCategories);
       setIsImportOpen(false);
@@ -861,6 +883,7 @@ export default function InsumosClient() {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
       setImporting(false);
+      setImportProgress(null);
     }
   }
 
@@ -1272,9 +1295,6 @@ export default function InsumosClient() {
   }
 
   function openDeleteCategory(name: string) {
-
-
-  
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -1342,7 +1362,7 @@ export default function InsumosClient() {
     });
   }
 
-  function deleteSelected() {
+  async function deleteSelected() {
     if (!selectedIds.size) return;
     if (isCompatSource) {
       void (async () => {
@@ -1404,40 +1424,31 @@ export default function InsumosClient() {
       })();
       return;
     }
-    setDataRows((prev) => {
-      const nextRows = prev.filter((r) => !selectedIds.has(r.id));
-      writeInsumosToStore(
-        nextRows.map((r) => ({
-          id: r.id,
-          item: r.item,
-          medida: r.medida,
-          custoMedio: r.custoMedio,
-          categoria: r.categoria,
-          especificacao: r.especificacao,
-          ocultar: r.ocultar,
-        })),
+    const previousRows = dataRows;
+    const nextRows = previousRows.filter((r) => !selectedIds.has(r.id));
+    const storeRows = nextRows.map((r) => ({
+      id: r.id,
+      item: r.item,
+      medida: r.medida,
+      custoMedio: r.custoMedio,
+      categoria: r.categoria,
+      especificacao: r.especificacao,
+      ocultar: r.ocultar,
+    }));
+    if (isBootstrapRunning()) return;
+    try {
+      await saveInsumosStateToSupabase(
+        { rows: storeRows as any, categories },
+        { source: "legacy" },
       );
-      if (isBootstrapRunning()) return nextRows;
-      void saveInsumosStateToSupabase({
-        rows: nextRows.map((r) => ({
-          id: r.id,
-          item: r.item,
-          medida: r.medida,
-          custoMedio: r.custoMedio,
-          categoria: r.categoria,
-          especificacao: r.especificacao,
-          ocultar: r.ocultar,
-        })) as any,
-        categories,
-      })
-        .then(() => {
-          saveErrorShownRef.current = false;
-        })
-        .catch((err) => {
-          showToast(saveErrorMessage(err), "error");
-        });
-      return nextRows;
-    });
+      setDataRows(nextRows);
+      writeInsumosToStore(storeRows);
+      saveErrorShownRef.current = false;
+    } catch (err) {
+      setDataRows(previousRows);
+      showToast(saveErrorMessage(err), "error");
+      throw err;
+    }
     setSelectedIds(new Set());
     setBulkDeleteMode(false);
   }
@@ -1448,11 +1459,17 @@ export default function InsumosClient() {
 
   async function confirmBulkDelete() {
     if (!isCompatSource) {
-      flushSync(() => {
-        deleteSelected();
-        setIsBulkDeleteOpen(false);
+      if (isBulkDeleting) return;
+      setIsBulkDeleting(true);
+      setIsBulkDeleteOpen(false);
+      try {
+        await deleteSelected();
         showToast("Insumos excluídos com sucesso.", "success");
-      });
+      } catch {
+        // Mantém a lista intacta quando o Supabase rejeita a exclusão.
+      } finally {
+        setIsBulkDeleting(false);
+      }
       return;
     }
     if (!selectedIds.size) return;
@@ -2138,11 +2155,11 @@ export default function InsumosClient() {
 
         {mounted && isImportOpen ? (
           createPortal(
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!importing) setIsImportOpen(false); }}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Itens por Planilha</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" disabled={importing} onClick={() => setIsImportOpen(false)}>
                   ×
                 </button>
               </div>
@@ -2178,10 +2195,44 @@ export default function InsumosClient() {
                 />
 
                 {selectedFileName ? <div className={styles.fileName}>Arquivo selecionado: {selectedFileName}</div> : null}
+                {importProgress ? (
+                  <div className={styles.importProgressPanel} aria-live="polite">
+                    <div className={styles.importProgressHeader}>
+                      <span>{importProgress.stage}</span>
+                      <strong>
+                        {importProgress.total > 0
+                          ? `${Math.round((importProgress.current / importProgress.total) * 100)}%`
+                          : "Preparando"}
+                      </strong>
+                    </div>
+                    <div
+                      className={styles.importProgressTrack}
+                      role="progressbar"
+                      aria-valuemin={0}
+                      aria-valuemax={importProgress.total || 1}
+                      aria-valuenow={importProgress.current}
+                    >
+                      <div
+                        className={styles.importProgressFill}
+                        style={{
+                          width:
+                            importProgress.total > 0
+                              ? `${Math.max(2, (importProgress.current / importProgress.total) * 100)}%`
+                              : "12%",
+                        }}
+                      />
+                    </div>
+                    <div className={styles.importProgressCount}>
+                      {importProgress.total > 0
+                        ? `${importProgress.current.toLocaleString("pt-BR")} de ${importProgress.total.toLocaleString("pt-BR")} insumos`
+                        : "Organizando os dados do arquivo"}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.modalCancel} onClick={() => setIsImportOpen(false)}>
+                <button type="button" className={styles.modalCancel} disabled={importing} onClick={() => setIsImportOpen(false)}>
                   Encerrar
                 </button>
                 <button type="button" className={styles.modalPrimary} onClick={onImport} disabled={importing}>
