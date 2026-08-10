@@ -16,8 +16,8 @@ import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/
 import { loadFichasTecnicasFromSupabase, loadFichasTecnicasStateFromSupabase, saveFichasTecnicasToSupabase, type FichaTecnicaCompatRecipe } from "../lib/fichasTecnicasSupabase";
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
-import { parseBubbleDecimal, repairBubbleText } from "../lib/bubbleSpreadsheetImport";
 import { QaModePanel } from "../lib/qaMode";
+import { parseBubbleDecimal, readBubbleSpreadsheetFiles, repairBubbleText } from "../lib/bubbleSpreadsheetImport";
 import styles from "./fichas-tecnicas.module.css";
 
 function isMissingTableError(err: unknown, table: string) {
@@ -342,9 +342,7 @@ function normalizeText(value: string) {
 }
 
 function parseDecimalInput(value: string) {
-  const normalized = String(value ?? "").replace(/\./g, "").replace(",", ".");
-  const num = Number(normalized);
-  return Number.isFinite(num) ? num : 0;
+  return parseBubbleDecimal(value);
 }
 
 function formatDecimal3(value: number) {
@@ -942,22 +940,7 @@ export default function FichasTecnicasClient({
     setIsImporting(true);
     setImportProgress({ current: 0, total: 1, stage: "Lendo a planilha..." });
     try {
-      const XLSX = await import("xlsx");
-      const workbook = XLSX.read(await file.arrayBuffer(), { type: "array" });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      if (!sheet) throw new Error("A planilha não possui uma aba válida.");
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-      const normalizedRows = rawRows.map((raw) => {
-        const values = Object.entries(raw).map(([key, value]) => [normalizeText(key), value] as const);
-        const get = (...keys: string[]) => {
-          for (const key of keys) {
-            const found = values.find(([candidate]) => candidate === normalizeText(key));
-            if (found) return repairBubbleText(String(found[1] ?? "")).trim();
-          }
-          return "";
-        };
-        return { get };
-      });
+      const normalizedRows = await readBubbleSpreadsheetFiles([file]);
       const recipes = normalizedRows.filter(({ get }) => {
         const flag = normalizeText(get("boolean_item_do_cardapio", "item_do_cardapio"));
         return flag === "true" || flag === "sim" || flag === "1";
@@ -976,13 +959,7 @@ export default function FichasTecnicasClient({
           const precoVendaNumber = parseBubbleDecimal(get("preco_venda_total", "preco_venda", "preco venda"));
           const rendimentoNumber = Math.max(parseBubbleDecimal(get("rendimento")) || 1, 0.000001);
           const custoUnitarioNumber = parseBubbleDecimal(
-            get(
-              "custo_medio",
-              "custo_médio",
-              "custo_unitario",
-              "custo_total_receita",
-              "custo_total"
-            )
+            get("custo_medio", "custo_médio", "custo_unitario", "custo_total_receita", "custo_total"),
           );
           const custoTotalNumber = custoUnitarioNumber * rendimentoNumber;
           const cmvMetaNumber = parseBubbleDecimal(get("cmv_desejado", "cmv_meta"));
@@ -1015,12 +992,10 @@ export default function FichasTecnicasClient({
         await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
       }
 
-      const importedNames = new Set(imported.map((row) => normalizeText(row.receita)));
-      const merged = [...tableRows.filter((row) => !importedNames.has(normalizeText(row.receita))), ...imported];
       setImportProgress({ current: imported.length, total: imported.length, stage: "Salvando no banco de dados..." });
-      writeFichasTecnicasToStore(merged as any);
-      if (isSupabaseFichasEnabled) await saveFichasTecnicasToSupabase(merged as any);
-      setTableRows(merged);
+      writeFichasTecnicasToStore(imported as any);
+      if (isSupabaseFichasEnabled) await saveFichasTecnicasToSupabase(imported as any);
+      setTableRows(imported);
       setPage(1);
       showToast(`${imported.length} ficha(s) técnica(s) importada(s) com sucesso.`, "success", 7000);
     } catch (err) {
