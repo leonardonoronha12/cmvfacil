@@ -959,7 +959,7 @@ export default function FichasTecnicasClient({
         return { get };
       });
       const recipes = normalizedRows.filter(({ get }) => {
-        const flag = normalizeText(get("boolean_item_receita", "item_receita"));
+        const flag = normalizeText(get("boolean_item_do_cardapio", "item_do_cardapio"));
         return flag === "true" || flag === "sim" || flag === "1";
       });
       if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
@@ -975,8 +975,16 @@ export default function FichasTecnicasClient({
           const previous = existingByName.get(normalizeText(receita));
           const precoVendaNumber = parseBubbleDecimal(get("preco_venda_total", "preco_venda", "preco venda"));
           const rendimentoNumber = Math.max(parseBubbleDecimal(get("rendimento")) || 1, 0.000001);
-          const custoTotalNumber = parseBubbleDecimal(get("custo_total_receita", "custo_total"));
-          const custoUnitarioNumber = custoTotalNumber / rendimentoNumber;
+          const custoUnitarioNumber = parseBubbleDecimal(
+            get(
+              "custo_medio",
+              "custo_médio",
+              "custo_unitario",
+              "custo_total_receita",
+              "custo_total"
+            )
+          );
+          const custoTotalNumber = custoUnitarioNumber * rendimentoNumber;
           const cmvMetaNumber = parseBubbleDecimal(get("cmv_desejado", "cmv_meta"));
           const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
           const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
