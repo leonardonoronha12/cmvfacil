@@ -993,7 +993,7 @@ export default function FichasTecnicasClient({
             thumb: previous?.thumb ?? "burger",
             recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
             popularidade: pop,
-            ingredientsTotal: previous?.ingredientsTotal ?? custoTotalNumber,
+            ingredientsTotal: custoTotalNumber,
             recipeYield: rendimentoNumber,
             ingredientRows: previous?.ingredientRows ?? [],
             modoPreparo: get("modo_preparo", "modo de preparo") || previous?.modoPreparo || "",
