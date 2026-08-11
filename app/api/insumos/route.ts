@@ -632,6 +632,7 @@ export async function POST(req: NextRequest) {
 
     const rows = Array.isArray((body as any).rows) ? ((body as any).rows as unknown[]) : null;
     if (!rows) return json({ error: "missing_rows" }, { status: 400 });
+    const replace = (body as any).replace === true;
     const categoriesProvided = (body as any).categories;
     let categories: unknown[] = Array.isArray(categoriesProvided) ? (categoriesProvided as unknown[]) : [];
 
@@ -769,6 +770,34 @@ export async function POST(req: NextRequest) {
       if (upsertById.length) {
         const { error } = await db.from("items").upsert(upsertById as any, { onConflict: "id" });
         if (error) return json({ error: error.message }, { status: 500 });
+      }
+
+      if (replace) {
+        const desiredCategoryIds = new Set(
+          Array.from(categoryNames)
+            .map((name) => categoryIdByKey.get(normalizeNameKey(name)) ?? "")
+            .filter(Boolean),
+        );
+        const { data: usedRows, error: usedErr } = await db
+          .from("items")
+          .select("category_id")
+          .eq("company_id", companyId)
+          .not("category_id", "is", null);
+        if (usedErr) return json({ error: usedErr.message }, { status: 500 });
+        const usedCategoryIds = new Set(
+          (usedRows ?? []).map((row: any) => String(row?.category_id ?? "").trim()).filter(Boolean),
+        );
+        const staleCategoryIds = (categoriesDb ?? [])
+          .map((row: any) => String(row?.id ?? "").trim())
+          .filter((categoryId) => categoryId && !desiredCategoryIds.has(categoryId) && !usedCategoryIds.has(categoryId));
+        for (let offset = 0; offset < staleCategoryIds.length; offset += 200) {
+          const { error: deleteCategoriesError } = await db
+            .from("categories")
+            .delete()
+            .eq("company_id", companyId)
+            .in("id", staleCategoryIds.slice(offset, offset + 200));
+          if (deleteCategoriesError) return json({ error: deleteCategoriesError.message }, { status: 500 });
+        }
       }
 
       return json(
@@ -937,14 +966,100 @@ async function deleteOneCompatItem(args: {
 
   const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
   if (delRes.error) return { status: 500, body: { ...base, ok: false, error: delRes.error.message } };
-  const deletedIds = (delRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
-  if (!deletedIds.length) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
-
   const verify = await args.supabase.from("items").select("id").eq("company_id", args.companyId).eq("id", itemId).maybeSingle();
   if (verify.error) return { status: 500, body: { ...base, ok: false, error: verify.error.message } };
   if (verify.data) return { status: 500, body: { ...base, ok: false, error: "delete_not_applied" } };
 
-  return { status: 200, body: { ...base, ok: true, deletedCount: deletedIds.length, deletedIds } };
+  // Supabase/PostgREST can legitimately return an empty representation for a
+  // successful DELETE (depending on RLS/Prefer headers). The authoritative
+  // signal is the follow-up query above: if the row no longer exists, the
+  // deletion succeeded.
+  return { status: 200, body: { ...base, ok: true, deletedCount: 1, deletedIds: [itemId] } };
+}
+
+async function deleteCompatItemsBatch(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  targets: DeleteTarget[];
+}) {
+  const ids = Array.from(new Set(args.targets.map((t) => t.id).filter((v): v is string => Boolean(v))));
+  const bubbleIds = Array.from(new Set(args.targets.map((t) => t.bubbleId).filter((v): v is string => Boolean(v))));
+  const resolved = new Map<string, string>();
+
+  for (let offset = 0; offset < ids.length; offset += 200) {
+    const chunk = ids.slice(offset, offset + 200);
+    const { data, error } = await args.supabase
+      .from("items")
+      .select("id")
+      .eq("company_id", args.companyId)
+      .in("id", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = String((row as any)?.id ?? "").trim();
+      if (id) resolved.set(`id:${id}`, id);
+    }
+  }
+  for (let offset = 0; offset < bubbleIds.length; offset += 200) {
+    const chunk = bubbleIds.slice(offset, offset + 200);
+    const { data, error } = await args.supabase
+      .from("items")
+      .select("id,bubble_id")
+      .eq("company_id", args.companyId)
+      .in("bubble_id", chunk);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const id = String((row as any)?.id ?? "").trim();
+      const bubbleId = String((row as any)?.bubble_id ?? "").trim();
+      if (id && bubbleId) resolved.set(`bubble:${bubbleId}`, id);
+    }
+  }
+
+  const targetIdByKey = new Map<string, string>();
+  for (const target of args.targets) {
+    const lookup = target.id ? `id:${target.id}` : `bubble:${target.bubbleId}`;
+    const itemId = resolved.get(lookup);
+    if (itemId) targetIdByKey.set(target.key, itemId);
+  }
+
+  const resolvedIds = Array.from(new Set(targetIdByKey.values()));
+  const failedById = new Map<string, string>();
+  for (let offset = 0; offset < resolvedIds.length; offset += 100) {
+    const chunk = resolvedIds.slice(offset, offset + 100);
+    const { error } = await args.supabase
+      .from("items")
+      .delete()
+      .eq("company_id", args.companyId)
+      .in("id", chunk);
+    if (error) {
+      for (const id of chunk) failedById.set(id, error.message);
+      continue;
+    }
+    const { data: remaining, error: verifyError } = await args.supabase
+      .from("items")
+      .select("id")
+      .eq("company_id", args.companyId)
+      .in("id", chunk);
+    if (verifyError) {
+      for (const id of chunk) failedById.set(id, verifyError.message);
+      continue;
+    }
+    for (const row of remaining ?? []) {
+      const id = String((row as any)?.id ?? "").trim();
+      if (id) failedById.set(id, "delete_not_applied");
+    }
+  }
+
+  const results = args.targets.map((target) => {
+    const itemId = targetIdByKey.get(target.key);
+    if (!itemId) return { key: target.key, ok: false, status: 404, error: "not_found", deletedCount: 0, deletedIds: [] };
+    const error = failedById.get(itemId);
+    if (error) return { key: target.key, ok: false, status: 409, error, deletedCount: 0, deletedIds: [] };
+    return { key: target.key, ok: true, status: 200, deletedCount: 1, deletedIds: [itemId] };
+  });
+  const deletedIds = Array.from(
+    new Set(results.flatMap((r) => (r.ok ? r.deletedIds : []))),
+  );
+  return { results, deletedIds, deletedCount: deletedIds.length };
 }
 
 export async function DELETE(req: NextRequest) {
@@ -992,13 +1107,7 @@ export async function DELETE(req: NextRequest) {
     );
 
     if (batchTargets.length) {
-      const results: any[] = [];
-      for (const t of batchTargets) {
-        const r = await deleteOneCompatItem({ supabase, companyId, target: t });
-        results.push({ key: t.key, ...r.body, status: r.status });
-      }
-      const deletedCount = results.reduce((acc, r) => acc + (typeof r.deletedCount === "number" ? r.deletedCount : 0), 0);
-      const deletedIds = results.flatMap((r) => (Array.isArray(r.deletedIds) ? r.deletedIds : [])).filter(Boolean);
+      const { results, deletedCount, deletedIds } = await deleteCompatItemsBatch({ supabase, companyId, targets: batchTargets });
       return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
     }
 

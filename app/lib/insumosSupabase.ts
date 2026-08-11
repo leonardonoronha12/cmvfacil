@@ -93,7 +93,7 @@ export async function loadInsumosStateFromSupabase(userId?: string, opts?: { sou
 }
 
 export async function saveInsumosStateToSupabase(
-  payload: { rows: InsumoStoreItem[]; categories?: string[] },
+  payload: { rows: InsumoStoreItem[]; categories?: string[]; replace?: boolean },
   opts?: { source?: "compat" | "legacy" },
 ) {
   const source = String(opts?.source ?? "").trim();

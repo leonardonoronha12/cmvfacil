@@ -145,6 +145,7 @@ function detectColumnMap(headers: unknown[]) {
   // Bubble exports many relationship/ID columns before the human-readable
   // migration fields. Prefer the exact readable fields so values never shift
   // into the wrong columns.
+  idx.id = findExact("unique id", "unique_id", "bubble_unique_id", "bubble unique id")!;
   idx.item = findExact(
     "nome_text",
     "nome text",
@@ -177,6 +178,10 @@ function detectColumnMap(headers: unknown[]) {
     "categoria_nome-migracao",
     "categoria nome-migracao",
     "categoria_nome_migracao",
+    "categoria_nome_text",
+    "categoria nome text",
+    "nome_categoria_text",
+    "nome categoria text",
     "categoria",
   )!;
   idx.especificacao = findExact(
@@ -205,7 +210,15 @@ function detectColumnMap(headers: unknown[]) {
       (h.includes("custo medio") || h.includes("custo_medio") || (h.includes("custo") && !h.includes("custo total")) || h.includes("preco"))
     )
       idx.custoMedio = i;
-    if (idx.categoria == null && h.includes("categoria")) idx.categoria = i;
+    if (
+      idx.categoria == null &&
+      h.includes("categoria") &&
+      !h.includes("_id") &&
+      !h.includes(" id") &&
+      !h.includes("custom") &&
+      !h.includes("unique")
+    )
+      idx.categoria = i;
     if (idx.especificacao == null && h.includes("especificacao")) idx.especificacao = i;
     if (idx.ocultar == null && (h.includes("ocultar") || h.includes("oculto"))) idx.ocultar = i;
   }
@@ -222,7 +235,7 @@ function parseRowsFromTable(table: unknown[][]) {
   if (!safe.length) return [];
 
   const map = detectColumnMap(safe[0] ?? []);
-  const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
+  const hasHeader = map.id != null || map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
   const normalizedHeaders = (safe[0] ?? []).map(normalizeHeader);
   const isBubbleExport = normalizedHeaders.some(
     (header) =>
@@ -244,7 +257,7 @@ function parseRowsFromTable(table: unknown[][]) {
   }
   const startIndex = hasHeader ? 1 : 0;
 
-  const fallback = { item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
+  const fallback = { id: -1, item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
   const getIndex = (key: keyof typeof fallback) => (map[key] != null ? map[key]! : fallback[key]);
 
   const out: InsumoRow[] = [];
@@ -265,7 +278,7 @@ function parseRowsFromTable(table: unknown[][]) {
         : ["1", "true", "sim", "yes", "y"].includes(String(ocultarRaw ?? "").trim().toLowerCase());
 
     out.push({
-      id: String(out.length + 1),
+      id: map.id != null ? String(row[getIndex("id")] ?? "").trim() || String(out.length + 1) : String(out.length + 1),
       ocultar: Boolean(ocultar),
       item,
       medida: String(row[getIndex("medida")] ?? "").trim() || "-",
@@ -830,9 +843,16 @@ export default function InsumosClient() {
         const chunk = importedRaw.slice(offset, offset + prepareChunkSize);
         for (let index = 0; index < chunk.length; index += 1) {
           const row = chunk[index]!;
+          const sourceId = String(row.id ?? "").trim();
           imported.push({
             ...row,
-            id: typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : `${importRunId}-${offset + index}`,
+            // Preserve the Bubble unique id so repeated imports update the
+            // same record instead of creating another UUID duplicate.
+            id: looksLikeBubbleId(sourceId)
+              ? sourceId
+              : typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? (crypto as any).randomUUID()
+                : `${importRunId}-${offset + index}`,
           });
         }
         setImportProgress({
@@ -843,8 +863,8 @@ export default function InsumosClient() {
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
       const mergedCategories = (() => {
-        const seen = new Set(categories.map((c) => c.toLowerCase()));
-        const next = [...categories];
+        const seen = new Set<string>();
+        const next: string[] = [];
         for (const r of imported) {
           const name = normalizeCategoryName(r.categoria ?? "");
           if (!name || name === "-") continue;
@@ -868,6 +888,7 @@ export default function InsumosClient() {
             ocultar: r.ocultar,
           })) as any,
           categories: mergedCategories,
+          replace: true,
         });
         saveErrorShownRef.current = false;
       }
