@@ -730,6 +730,25 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      const existingIdByName = new Map<string, string>();
+      const duplicateNameKeys = new Set<string>();
+      const { data: existingByNameRows, error: existingByNameErr } = await db
+        .from("items")
+        .select("id,name")
+        .eq("company_id", companyId);
+      if (existingByNameErr) return json({ error: existingByNameErr.message }, { status: 500 });
+      for (const item of existingByNameRows ?? []) {
+        const id0 = String((item as any)?.id ?? "").trim();
+        const key = normalizeNameKey(String((item as any)?.name ?? ""));
+        if (!id0 || !key) continue;
+        if (existingIdByName.has(key)) {
+          duplicateNameKeys.add(key);
+          existingIdByName.delete(key);
+        } else if (!duplicateNameKeys.has(key)) {
+          existingIdByName.set(key, id0);
+        }
+      }
+
       const upsertByBubble: any[] = [];
       const upsertById: any[] = [];
 
@@ -744,7 +763,8 @@ export async function POST(req: NextRequest) {
 
         const bubbleId = looksLikeBubbleId(rawId) ? rawId : null;
         const dbId = rawId.startsWith("db:") ? rawId.slice("db:".length) : isUuid(rawId) ? rawId : "";
-        const existingId = bubbleId ? existingIdByBubbleId.get(bubbleId) ?? "" : dbId && existingIdById.has(dbId) ? dbId : "";
+        const existingBubbleId = bubbleId ? existingIdByBubbleId.get(bubbleId) ?? "" : "";
+        const existingId = existingBubbleId || (dbId && existingIdById.has(dbId) ? dbId : "") || existingIdByName.get(normalizeNameKey(name)) || "";
 
         const patch = {
           company_id: companyId,
@@ -759,7 +779,7 @@ export async function POST(req: NextRequest) {
           item_receita: false,
           item_do_cardapio: false,
         };
-        if (bubbleId) upsertByBubble.push(patch);
+        if (bubbleId && existingBubbleId) upsertByBubble.push(patch);
         else upsertById.push(patch);
       }
 
@@ -1023,16 +1043,22 @@ async function deleteCompatItemsBatch(args: {
 
   const resolvedIds = Array.from(new Set(targetIdByKey.values()));
   const failedById = new Map<string, string>();
-  for (let offset = 0; offset < resolvedIds.length; offset += 100) {
-    const chunk = resolvedIds.slice(offset, offset + 100);
+  const deleteChunk = async (chunk: string[]): Promise<void> => {
+    if (!chunk.length) return;
     const { error } = await args.supabase
       .from("items")
       .delete()
       .eq("company_id", args.companyId)
       .in("id", chunk);
     if (error) {
-      for (const id of chunk) failedById.set(id, error.message);
-      continue;
+      if (chunk.length === 1) {
+        failedById.set(chunk[0]!, error.message);
+        return;
+      }
+      const middle = Math.ceil(chunk.length / 2);
+      await deleteChunk(chunk.slice(0, middle));
+      await deleteChunk(chunk.slice(middle));
+      return;
     }
     const { data: remaining, error: verifyError } = await args.supabase
       .from("items")
@@ -1041,12 +1067,15 @@ async function deleteCompatItemsBatch(args: {
       .in("id", chunk);
     if (verifyError) {
       for (const id of chunk) failedById.set(id, verifyError.message);
-      continue;
+      return;
     }
     for (const row of remaining ?? []) {
       const id = String((row as any)?.id ?? "").trim();
       if (id) failedById.set(id, "delete_not_applied");
     }
+  };
+  for (let offset = 0; offset < resolvedIds.length; offset += 100) {
+    await deleteChunk(resolvedIds.slice(offset, offset + 100));
   }
 
   const results = args.targets.map((target) => {
