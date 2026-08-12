@@ -16,8 +16,6 @@ import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCa
 import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { writePrePreparoEtiquetasToStore, type PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
-import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
-import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -733,15 +731,34 @@ export default function PrePreparoClient() {
       showToast("Aguarde o carregamento dos pré-preparos antes de importar.", "error");
       return;
     }
+    // Prevent an autosave scheduled with the old list from overwriting the
+    // freshly imported rows after the direct import save finishes.
+    if (savePrePreparoTimeoutRef.current) {
+      window.clearTimeout(savePrePreparoTimeoutRef.current);
+      savePrePreparoTimeoutRef.current = null;
+    }
     setIsImporting(true);
     setImportProgress({ current: 0, total: 1, stage: "Lendo as planilhas..." });
     try {
       const importedRows = await readBubbleSpreadsheetFiles(files);
       if (!importedRows.length) throw new Error("As planilhas não possuem dados válidos.");
+      // Bubble exports may include the preferred migration column with an
+      // empty value. Resolve aliases one by one so a blank column does not
+      // suppress a valid fallback value.
+      const firstNonEmpty = (get: (...keys: string[]) => string, ...keys: string[]) => {
+        for (const key of keys) {
+          const value = String(get(key) ?? "").trim();
+          if (value) return value;
+        }
+        return "";
+      };
       const recipeRows = importedRows.filter(({ get }) => {
         const flag = normalizeBubbleName(get("boolean_item_receita", "item_receita"));
-        const category = normalizeBubbleName(get("categoria_nome-migração", "categoria_nome_migracao", "categoria_id", "categoria"));
-        return (flag === "sim" || flag === "true" || flag === "1") && category === "pre preparo";
+        const menuFlag = normalizeBubbleName(get("boolean_item_do_cardapio", "item_do_cardapio"));
+        const category = normalizeBubbleName(firstNonEmpty(get, "categoria_nome-migração", "categoria_nome_migracao", "categoria"));
+        const isRecipe = flag === "sim" || flag === "true" || flag === "1";
+        const isMenuItem = menuFlag === "sim" || menuFlag === "true" || menuFlag === "1";
+        return isRecipe && !isMenuItem && (!category || category === "pre preparo");
       });
       if (!recipeRows.length) throw new Error("Nenhum pré-preparo foi encontrado nas planilhas.");
 
@@ -765,29 +782,36 @@ export default function PrePreparoClient() {
         const previous = existingByName.get(normalizeBubbleName(receita));
         const bubbleId = get("unique id", "unique_id", "bubble_id");
         const rendimentoNumber = Math.max(parseBubbleDecimal(get("rendimento")) || 1, 0.000001);
-        const unidade = repairBubbleText(get("unidade_nome-migração", "unidade_nome_migracao", "unidade_medida", "unidade")) || "Und";
+        const unidade = repairBubbleText(firstNonEmpty(get, "unidade_nome-migração", "unidade_nome_migracao", "unidade_medida", "unidade")) || "Und";
         const custoTotalNumber = Math.max(0, parseBubbleDecimal(get("custo_total_receita", "custo_total")));
         const ingredientes = splitBubbleList(get("lista_ingredientes", "ingredientes")).flatMap((ingredientId) => {
           const source = ingredientById.get(ingredientId);
           if (!source) return [];
-          const item = repairBubbleText(source.get("item_nome-migração", "item_nome_migracao", "item_nome", "item_id", "ingrediente_nome"));
+          const item = repairBubbleText(firstNonEmpty(source.get, "item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome", "item_id"));
           if (!item) return [];
           const option = optionByName.get(normalizeBubbleName(item));
           const quantidade = parseBubbleDecimal(source.get("quantidade"));
-          const custo = Math.max(0, parseBubbleDecimal(source.get("custo", "custo_total")));
+          const importedCost = Math.max(0, parseBubbleDecimal(firstNonEmpty(source.get, "custo", "custo_total")));
+          // Bubble shows the recipe using each ingredient's current cost. The
+          // ingredient export contains a historical snapshot, so prefer the
+          // currently loaded insumo/pre-preparo cost whenever it is resolved.
+          const currentUnitCostCents = option ? parseCurrencyBRLToCents(option.custoMedio || "0") : 0;
+          const custoCents = currentUnitCostCents > 0
+            ? Math.round(currentUnitCostCents * quantidade)
+            : Math.round(importedCost * 100);
           return [{
             id: `bubble:${ingredientId}`,
             item,
             quantidade: quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
-            unidade: option?.unidade || repairBubbleText(source.get("unidade", "unidade_nome-migração", "unidade_nome_migracao")) || "Und",
-            custoCents: Math.round(custo * 100),
+            unidade: option?.unidade || repairBubbleText(firstNonEmpty(source.get, "unidade", "unidade_nome-migração", "unidade_nome_migracao")) || "Und",
+            custoCents,
           } satisfies IngredienteRow];
         });
         const finalIngredients = ingredientes.length ? ingredientes : previous?.ingredientes ?? [];
         const finalTotal = ingredientes.length ? ingredientes.reduce((sum, row) => sum + row.custoCents, 0) / 100 : custoTotalNumber;
         const row: PrePreparoRow = {
           id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
-          categoria: repairBubbleText(get("categoria_nome-migração", "categoria_nome_migracao", "categoria_id", "categoria")) || "Pré-Preparo",
+          categoria: repairBubbleText(firstNonEmpty(get, "categoria_nome-migração", "categoria_nome_migracao", "categoria")) || "Pré-Preparo",
           receita,
           especificacao: repairBubbleText(get("descricao", "especificacao")) || undefined,
           recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
@@ -796,7 +820,7 @@ export default function PrePreparoClient() {
           custoUnitario: `${(finalTotal / rendimentoNumber).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${unidade}`,
           validadeDias: Math.max(0, Math.round(parseBubbleDecimal(get("validade_dias", "dias_validade")))) || undefined,
           ingredientes: finalIngredients,
-          modoPreparo: repairBubbleText(get("modo_preparo", "modo de preparo")) || previous?.modoPreparo || "",
+          modoPreparo: repairBubbleText(firstNonEmpty(get, "modo_preparo", "modo de preparo")) || previous?.modoPreparo || "",
         };
         imported.push(row);
         if (bubbleId) idToRecipe.set(bubbleId, row);
@@ -1177,42 +1201,18 @@ export default function PrePreparoClient() {
   useEffect(() => {
     void (async () => {
       try {
-        let fichas = readFichasTecnicasFromStore();
-        if (!fichas.length) {
-          try {
-            fichas = await loadFichasTecnicasFromSupabase();
-            if (fichas.length) writeFichasTecnicasToStore(fichas);
-          } catch {}
-        }
-        const fichaNameKeys = new Set<string>();
-        for (const r of fichas) {
-          const k = normalizeNameKey(String((r as any)?.receita ?? ""));
-          if (k) fichaNameKeys.add(k);
-        }
         const st = await loadPrePreparoStateFromSupabase();
         if (st.meta) setSourceMeta(st.meta);
         if (st.meta?.source === "compat") {
           const list = Array.isArray((st.compat as any)?.prePreparos) ? ((st.compat as any).prePreparos as PrePreparoCompatRow[]) : [];
           setCompatRows(list);
           setSelectedCompatId(list[0]?.id ?? null);
-          const filtered = Array.isArray(st.rows)
-            ? (st.rows as any[]).filter((row) => {
-                const key = normalizeNameKey(String((row as any)?.receita ?? ""));
-                return !key || !fichaNameKeys.has(key);
-              })
-            : [];
-          setRows(filtered as any);
+          setRows(Array.isArray(st.rows) ? (st.rows as any[]) : []);
           prePreparoLoadErrorShownRef.current = false;
           prePreparoLoadedRef.current = true;
           return;
         }
-        const filtered = Array.isArray(st.rows)
-          ? (st.rows as any[]).filter((row) => {
-              const key = normalizeNameKey(String((row as any)?.receita ?? ""));
-              return !key || !fichaNameKeys.has(key);
-            })
-          : [];
-        setRows(filtered as any);
+        setRows(Array.isArray(st.rows) ? (st.rows as any[]) : []);
         prePreparoLoadErrorShownRef.current = false;
         prePreparoLoadedRef.current = true;
       } catch (err) {
@@ -1243,7 +1243,7 @@ export default function PrePreparoClient() {
   }, [isReadOnly]);
 
   useEffect(() => {
-    if (isReadOnly) return;
+    if (isReadOnly || isImporting) return;
     if (!prePreparoLoadedRef.current) return;
     if (savePrePreparoTimeoutRef.current) window.clearTimeout(savePrePreparoTimeoutRef.current);
     savePrePreparoTimeoutRef.current = window.setTimeout(() => {
@@ -1264,7 +1264,13 @@ export default function PrePreparoClient() {
           }
         });
     }, 700);
-  }, [isReadOnly, rows]);
+    return () => {
+      if (savePrePreparoTimeoutRef.current) {
+        window.clearTimeout(savePrePreparoTimeoutRef.current);
+        savePrePreparoTimeoutRef.current = null;
+      }
+    };
+  }, [isImporting, isReadOnly, rows]);
 
   useEffect(() => {
     writePrePreparoHiddenMap(hiddenMap);
@@ -1617,7 +1623,7 @@ export default function PrePreparoClient() {
     const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
     setDraftCategory(match);
     setDraftImageUrl(String(row.recipeImage ?? "").trim());
-    setDraftSpec("");
+    setDraftSpec(String(row.especificacao ?? ""));
     const parsedYield = parseQtyLabel(String(row.rendimento ?? ""));
     setDraftUnit((parsedYield.unit || "Und").trim() || "Und");
     setDraftValidity("7");
@@ -1839,7 +1845,17 @@ export default function PrePreparoClient() {
   function confirmDelete() {
     const id = deletingId;
     if (!id) return;
-    setRows((prev) => prev.filter((r) => r.id !== id));
+    const nextRows = rows.filter((r) => r.id !== id);
+    if (nextRows.length === 0) {
+      if (savePrePreparoTimeoutRef.current) {
+        window.clearTimeout(savePrePreparoTimeoutRef.current);
+        savePrePreparoTimeoutRef.current = null;
+      }
+      void savePrePreparoToSupabase([]).catch((err) => {
+        showToast(supabaseSaveErrorMessage(err), "error");
+      });
+    }
+    setRows(nextRows);
     setIsDeleteOpen(false);
     setDeletingId(null);
     setDeletingName("");
@@ -3493,7 +3509,7 @@ export default function PrePreparoClient() {
                         <div className={styles.recipeMeta}>
                           <div className={styles.recipeCategory}>{r.categoria}</div>
                           <div className={styles.recipeName}>{r.receita}</div>
-                          <div className={styles.recipeDash}>-</div>
+                          <div className={styles.recipeDash}>{r.especificacao || "-"}</div>
                         </div>
                       </div>
                       <div className={styles.menuWrap} ref={openMenuId === r.id ? menuWrapRef : undefined} onClick={(e) => e.stopPropagation()}>
@@ -3727,6 +3743,7 @@ export default function PrePreparoClient() {
                               return recomputeRowMetrics({
                                 ...r,
                                 receita: name,
+                                especificacao: draftSpec.trim() || undefined,
                                 categoria: draftCategory,
                                 recipeImage: draftImageUrl ? draftImageUrl : undefined,
                                 rendimento,
@@ -4331,6 +4348,7 @@ export default function PrePreparoClient() {
                           id: nextId,
                           categoria: newRecipeCategory,
                           receita: newRecipeName.trim(),
+                          especificacao: newRecipeSpec.trim() || undefined,
                           recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
                           custoTotal: totalLabel,
                           rendimento: rendimentoLabel,
