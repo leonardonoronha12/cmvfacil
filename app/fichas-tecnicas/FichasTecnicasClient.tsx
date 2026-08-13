@@ -942,10 +942,16 @@ export default function FichasTecnicasClient({
     setImportProgress({ current: 0, total: files.length, stage: "Lendo as planilhas..." });
     try {
       const normalizedRows = await readBubbleSpreadsheetFiles(files);
-      const recipes = normalizedRows.filter(({ get }) => {
-        const flag = normalizeText(get("boolean_item_do_cardapio", "item_do_cardapio"));
-        return flag === "true" || flag === "sim" || flag === "1";
-      });
+      const recipes = Array.from(
+        new Map(
+          normalizedRows
+            .filter(({ get }) => {
+              const flag = normalizeText(get("boolean_item_do_cardapio", "item_do_cardapio"));
+              return flag === "true" || flag === "sim" || flag === "1";
+            })
+            .map((row) => [row.get("unique id", "unique_id") || normalizeText(row.get("nome", "receita")), row] as const),
+        ).values(),
+      );
       if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
 
       const ingredientById = new Map(
@@ -963,6 +969,11 @@ export default function FichasTecnicasClient({
         const ids = String(option.id).match(/\d{6,}x\d{6,}/g) ?? [];
         for (const id of ids) optionByBubbleId.set(id, option);
       }
+      const exportedItemByBubbleId = new Map(
+        normalizedRows
+          .filter(({ get }) => Boolean(get("unique id", "unique_id") && get("nome", "item_nome-migração", "item_nome_migracao")))
+          .map((row) => [row.get("unique id", "unique_id"), row] as const),
+      );
 
       const existingByName = new Map(tableRows.map((row) => [normalizeText(row.receita), row]));
       const imported: RecipeRow[] = [];
@@ -986,8 +997,11 @@ export default function FichasTecnicasClient({
             const source = ingredientById.get(ingredientId);
             if (!source) return [];
             const sourceItemId = source.get("item_id", "item id", "insumo_id", "insumo id");
+            const exportedItem = exportedItemByBubbleId.get(sourceItemId);
             const sourceItemName = repairBubbleText(
-              source.get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome"),
+              source.get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome") ||
+                exportedItem?.get("nome", "item_nome-migração", "item_nome_migracao") ||
+                "",
             ).trim();
             const option = optionByBubbleId.get(sourceItemId) ?? optionByName.get(normalizeText(sourceItemName));
             const item = option?.item || sourceItemName;
@@ -1004,7 +1018,14 @@ export default function FichasTecnicasClient({
                 minimumFractionDigits: 3,
                 maximumFractionDigits: 3,
               }),
-              unidade: option?.medida || repairBubbleText(source.get("unidade", "unidade_nome-migração", "unidade_nome_migracao")) || "Und",
+              unidade:
+                option?.medida ||
+                repairBubbleText(
+                  source.get("unidade", "unidade_nome-migração", "unidade_nome_migracao") ||
+                    exportedItem?.get("unidade_medida", "unidade_nome-migração", "unidade_nome_migracao") ||
+                    "",
+                ) ||
+                "Und",
               custoTotal: currentUnitCost > 0 ? currentUnitCost * quantidadeNumber : importedCost,
             } satisfies ModalIngredientRow];
           });
