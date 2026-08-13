@@ -70,7 +70,7 @@ async function loadAllLegacyEntriesForUser(db: any, userId: string) {
     const { data, error } = await db
       .from("entradas")
       .select("id,data_lancamento,data_criacao,fornecedor,itens_nota")
-      .eq("user_id", userId)
+      .like("id", `user:${userId}:%`)
       .order("created_at", { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) throw error;
