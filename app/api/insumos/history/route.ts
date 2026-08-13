@@ -13,6 +13,29 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
+function normalizeItemName(value: unknown) {
+  return String(value ?? "")
+    .replace(/^\s*This\s+itens?_notas?/i, "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function rawItemName(raw: any) {
+  const source = raw?.bubble && typeof raw.bubble === "object" ? { ...raw, ...raw.bubble } : raw;
+  return String(
+    source?.nome ??
+      source?.item_nome_migra__o_text ??
+      source?.item_nome_migracao_text ??
+      source?.["item_nome_migração_text"] ??
+      source?.["item_nome_migraÃ§Ã£o_text"] ??
+      source?.item_nome_text ??
+      "",
+  ).trim();
+}
+
 function pickCompany(rows: any[]) {
   const score = (row: any) => {
     const level = Number(row?.permission_level ?? 0) || 0;
@@ -57,13 +80,26 @@ export async function GET(req: NextRequest) {
     if (!item?.id) return json({ error: "item_not_found" }, { status: 404 });
 
     const itemId = String(item.id);
-    const { data: invoiceItems, error: invoiceItemsError } = await db
+    let { data: invoiceItems, error: invoiceItemsError } = await db
       .from("invoice_items")
       .select("id,invoice_id,quantidade,custo_unitario,subtotal,raw")
       .eq("company_id", companyId)
       .eq("item_id", itemId)
       .limit(5000);
     if (invoiceItemsError) return json({ error: invoiceItemsError.message }, { status: 500 });
+
+    // Some Bubble imports predate item_id linking. Recover those historical
+    // rows by the readable item name stored in raw instead of hiding them.
+    if (!(invoiceItems ?? []).length) {
+      const { data: legacyInvoiceItems, error: legacyInvoiceItemsError } = await db
+        .from("invoice_items")
+        .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw")
+        .eq("company_id", companyId)
+        .limit(5000);
+      if (legacyInvoiceItemsError) return json({ error: legacyInvoiceItemsError.message }, { status: 500 });
+      const wantedName = normalizeItemName(item.name);
+      invoiceItems = (legacyInvoiceItems ?? []).filter((row: any) => normalizeItemName(rawItemName(row?.raw)) === wantedName);
+    }
 
     const invoiceIds = Array.from(new Set((invoiceItems ?? []).map((row: any) => String(row?.invoice_id ?? "").trim()).filter(Boolean)));
     const { data: invoices, error: invoicesError } = invoiceIds.length
