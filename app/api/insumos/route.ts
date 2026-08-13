@@ -793,41 +793,81 @@ export async function POST(req: NextRequest) {
       }
 
       if (replace) {
+        const desiredRows = [...upsertByBubble, ...upsertById];
         const desiredItemIds = new Set(
-          [...upsertByBubble, ...upsertById]
+          desiredRows
             .map((row: any) => String(row?.id ?? "").trim())
             .filter(Boolean),
         );
+        const desiredItemIdByName = new Map<string, string>();
+        for (const row of desiredRows) {
+          const itemId = String((row as any)?.id ?? "").trim();
+          const nameKey = normalizeNameKey(String((row as any)?.name ?? ""));
+          if (itemId && nameKey) desiredItemIdByName.set(nameKey, itemId);
+        }
+        const existingNameById = new Map<string, string>();
+        for (const row of existingByNameRows ?? []) {
+          const itemId = String((row as any)?.id ?? "").trim();
+          const nameKey = normalizeNameKey(String((row as any)?.name ?? ""));
+          if (itemId && nameKey) existingNameById.set(itemId, nameKey);
+        }
         const staleItemIds = (existingByNameRows ?? [])
           .map((row: any) => String(row?.id ?? "").trim())
           .filter((itemId) => itemId && !desiredItemIds.has(itemId));
 
-        // A spreadsheet replacement is authoritative. Remove catalog rows that
-        // are no longer present, while retaining historical rows by clearing
-        // their optional item reference first. Raw invoice/inventory payloads
-        // continue to preserve the original labels and values.
-        for (let offset = 0; offset < staleItemIds.length; offset += 100) {
-          const chunk = staleItemIds.slice(offset, offset + 100);
+        // When the export replaces duplicated catalog rows, move every relation
+        // to the canonical imported item with the same normalized name. Only
+        // genuinely absent items are detached before deletion.
+        for (const staleItemId of staleItemIds) {
+          const targetItemId = desiredItemIdByName.get(existingNameById.get(staleItemId) ?? "") ?? "";
+          const replacementItemId = targetItemId && targetItemId !== staleItemId ? targetItemId : null;
+
           for (const table of ["invoice_items", "inventory_items", "wastes", "shopping_list_items", "avg_cost_events"] as const) {
-            const { error } = await db.from(table).update({ item_id: null } as any).eq("company_id", companyId).in("item_id", chunk);
-            if (error) return json({ error: error.message, stage: `replace_detach_${table}` }, { status: 500 });
+            const { error } = await db
+              .from(table)
+              .update({ item_id: replacementItemId } as any)
+              .eq("company_id", companyId)
+              .eq("item_id", staleItemId);
+            if (error) return json({ error: error.message, stage: `replace_remap_${table}` }, { status: 500 });
           }
-          const { error: recipeAsIngredientErr } = await db
-            .from("recipe_ingredients")
-            .update({ ingredient_item_id: null } as any)
+
+          for (const column of ["ingredient_item_id", "recipe_item_id"] as const) {
+            const { error } = await db
+              .from("recipe_ingredients")
+              .update({ [column]: replacementItemId } as any)
+              .eq("company_id", companyId)
+              .eq(column, staleItemId);
+            if (error) return json({ error: error.message, stage: `replace_remap_recipe_${column}` }, { status: 500 });
+          }
+
+          if (replacementItemId) {
+            const { data: supplierLinks, error: supplierLinksReadErr } = await db
+              .from("supplier_items")
+              .select("supplier_id")
+              .eq("company_id", companyId)
+              .eq("item_id", staleItemId);
+            if (supplierLinksReadErr) return json({ error: supplierLinksReadErr.message, stage: "replace_read_supplier_links" }, { status: 500 });
+            const replacementLinks = (supplierLinks ?? [])
+              .map((link: any) => String(link?.supplier_id ?? "").trim())
+              .filter(Boolean)
+              .map((supplierId) => ({ company_id: companyId, supplier_id: supplierId, item_id: replacementItemId }));
+            if (replacementLinks.length) {
+              const { error: supplierLinksUpsertErr } = await db
+                .from("supplier_items")
+                .upsert(replacementLinks as any, { onConflict: "company_id,supplier_id,item_id", ignoreDuplicates: true });
+              if (supplierLinksUpsertErr) return json({ error: supplierLinksUpsertErr.message, stage: "replace_remap_supplier_links" }, { status: 500 });
+            }
+          }
+
+          const { error: supplierLinksErr } = await db
+            .from("supplier_items")
+            .delete()
             .eq("company_id", companyId)
-            .in("ingredient_item_id", chunk);
-          if (recipeAsIngredientErr) return json({ error: recipeAsIngredientErr.message, stage: "replace_detach_recipe_ingredient" }, { status: 500 });
-          const { error: recipeAsRecipeErr } = await db
-            .from("recipe_ingredients")
-            .update({ recipe_item_id: null } as any)
-            .eq("company_id", companyId)
-            .in("recipe_item_id", chunk);
-          if (recipeAsRecipeErr) return json({ error: recipeAsRecipeErr.message, stage: "replace_detach_recipe" }, { status: 500 });
-          const { error: supplierLinksErr } = await db.from("supplier_items").delete().eq("company_id", companyId).in("item_id", chunk);
-          if (supplierLinksErr) return json({ error: supplierLinksErr.message, stage: "replace_delete_supplier_links" }, { status: 500 });
-          const { error: deleteItemsErr } = await db.from("items").delete().eq("company_id", companyId).in("id", chunk);
-          if (deleteItemsErr) return json({ error: deleteItemsErr.message, stage: "replace_delete_stale_items" }, { status: 500 });
+            .eq("item_id", staleItemId);
+          if (supplierLinksErr) return json({ error: supplierLinksErr.message, stage: "replace_delete_stale_supplier_links" }, { status: 500 });
+
+          const { error: deleteItemsErr } = await db.from("items").delete().eq("company_id", companyId).eq("id", staleItemId);
+          if (deleteItemsErr) return json({ error: deleteItemsErr.message, stage: "replace_delete_stale_item" }, { status: 500 });
         }
 
         const desiredCategoryIds = new Set(

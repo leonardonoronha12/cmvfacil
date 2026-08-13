@@ -1643,7 +1643,8 @@ export default function InsumosClient() {
       // The catalog must show the snapshot imported from Bubble. Recalculating
       // it from entry history here makes the migrated catalog diverge by a few
       // cents even when the spreadsheet was imported correctly.
-      out.set(r.id, r.custoMedio);
+      const value = parseCurrencyToNumber(r.custoMedio);
+      out.set(r.id, Number.isFinite(value) ? formatBrlFromCents(Math.round(value * 100)) : r.custoMedio);
     }
     return out;
   }, [dataRows]);
