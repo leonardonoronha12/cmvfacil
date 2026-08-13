@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, getSupabaseServerClient } from "../../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../../lib/requestUserId";
+import { parsePtNumber } from "../../../lib/bubbleCsv";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -53,6 +54,24 @@ async function loadAllInvoiceItemsForCompany(db: any, companyId: string) {
       .from("invoice_items")
       .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw,item:items(name,bubble_id)")
       .eq("company_id", companyId)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as any[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
+async function loadAllLegacyEntriesForUser(db: any, userId: string) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from("entradas")
+      .select("id,data_lancamento,data_criacao,fornecedor,itens_nota")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
       .range(from, from + pageSize - 1);
     if (error) throw error;
     const page = (data ?? []) as any[];
@@ -153,6 +172,33 @@ export async function GET(req: NextRequest) {
         subtotal: Number(row?.subtotal ?? 0) || 0,
       };
     });
+
+    // The production Entries screen still uses the legacy `entradas` table for
+    // migrated Bubble accounts. Read the same source so the item modal does not
+    // hide valid history merely because no compat invoice_item was generated.
+    if (!history.length) {
+      const wantedName = normalizeItemName(item.name);
+      const legacyEntries = await loadAllLegacyEntriesForUser(db, userId);
+      for (const entry of legacyEntries) {
+        const entryItems = Array.isArray(entry?.itens_nota) ? entry.itens_nota : [];
+        for (const legacyItem of entryItems) {
+          const equivalentName = normalizeItemName(legacyItem?.insumoEquivalente);
+          const invoiceName = normalizeItemName(legacyItem?.nomeNaNota);
+          if (equivalentName !== wantedName && invoiceName !== wantedName) continue;
+          const quantity = parsePtNumber(String(legacyItem?.equivalenteQuantidade ?? legacyItem?.quantidade ?? "")) || 0;
+          const unitCost = parsePtNumber(String(legacyItem?.custoUnitario ?? legacyItem?.custo_unitario ?? "")) || 0;
+          const subtotal = parsePtNumber(String(legacyItem?.subtotal ?? "")) || (quantity > 0 ? quantity * unitCost : 0);
+          history.push({
+            id: String(legacyItem?.id ?? `${entry?.id ?? "entry"}:${history.length}`),
+            date: entry?.data_lancamento ?? entry?.data_criacao ?? null,
+            supplier: String(entry?.fornecedor ?? "").trim() || "-",
+            quantity,
+            unitCost,
+            subtotal,
+          });
+        }
+      }
+    }
 
     return json({
       ok: true,
