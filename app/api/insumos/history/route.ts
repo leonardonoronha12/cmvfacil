@@ -182,12 +182,26 @@ export async function GET(req: NextRequest) {
       for (const entry of legacyEntries) {
         const entryItems = Array.isArray(entry?.itens_nota) ? entry.itens_nota : [];
         for (const legacyItem of entryItems) {
-          const equivalentName = normalizeItemName(legacyItem?.insumoEquivalente);
-          const invoiceName = normalizeItemName(legacyItem?.nomeNaNota);
-          if (equivalentName !== wantedName && invoiceName !== wantedName) continue;
-          const quantity = parsePtNumber(String(legacyItem?.equivalenteQuantidade ?? legacyItem?.quantidade ?? "")) || 0;
-          const unitCost = parsePtNumber(String(legacyItem?.custoUnitario ?? legacyItem?.custo_unitario ?? "")) || 0;
-          const subtotal = parsePtNumber(String(legacyItem?.subtotal ?? "")) || (quantity > 0 ? quantity * unitCost : 0);
+          const legacyItemId = String(legacyItem?.itemId ?? legacyItem?.insumoId ?? "").replace(/^db:/i, "").trim();
+          const candidateNames = [
+            legacyItem?.insumoEquivalente,
+            legacyItem?.nomeNaNota,
+            legacyItem?.nome,
+            legacyItem?.item_nome_migra__o_text,
+            legacyItem?.item_nome_migracao_text,
+            legacyItem?.item_nome_text,
+          ].map(normalizeItemName);
+          const idMatches =
+            legacyItemId === String(item.bubble_id ?? "").trim() ||
+            legacyItemId === itemId ||
+            legacyItemId === `db:${itemId}`;
+          if (!idMatches && !candidateNames.includes(wantedName)) continue;
+          const quantity =
+            parsePtNumber(String(legacyItem?.equivalenteQuantidade ?? legacyItem?.quantidadeLabel ?? legacyItem?.quantidade ?? "")) || 0;
+          const unitCost =
+            parsePtNumber(String(legacyItem?.custoUnitario ?? legacyItem?.custoUnitarioLabel ?? legacyItem?.custo_unitario ?? "")) || 0;
+          const subtotal =
+            parsePtNumber(String(legacyItem?.subtotal ?? legacyItem?.subtotalLabel ?? "")) || (quantity > 0 ? quantity * unitCost : 0);
           history.push({
             id: String(legacyItem?.id ?? `${entry?.id ?? "entry"}:${history.length}`),
             date: entry?.data_lancamento ?? entry?.data_criacao ?? null,
