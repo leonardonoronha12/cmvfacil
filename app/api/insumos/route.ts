@@ -1040,6 +1040,50 @@ async function getLinksBlockingDelete(args: { supabase: ReturnType<typeof getSup
   return out;
 }
 
+async function detachItemReferences(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  itemIds: string[];
+}) {
+  const itemIds = Array.from(new Set(args.itemIds.map((id) => String(id ?? "").trim()).filter(Boolean)));
+  if (!itemIds.length) return;
+
+  const nullableRefs = [
+    { table: "invoice_items", column: "item_id" },
+    { table: "inventory_items", column: "item_id" },
+    { table: "wastes", column: "item_id" },
+    { table: "shopping_list_items", column: "item_id" },
+    { table: "avg_cost_events", column: "item_id" },
+  ] as const;
+
+  for (const ref of nullableRefs) {
+    const { error } = await args.supabase
+      .from(ref.table)
+      .update({ [ref.column]: null })
+      .eq("company_id", args.companyId)
+      .in(ref.column, itemIds);
+    if (error && !isMissingTableError(error)) throw new Error(`${ref.table}.${ref.column}: ${error.message}`);
+  }
+
+  const { error: supplierItemsError } = await args.supabase
+    .from("supplier_items")
+    .delete()
+    .eq("company_id", args.companyId)
+    .in("item_id", itemIds);
+  if (supplierItemsError && !isMissingTableError(supplierItemsError)) {
+    throw new Error(`supplier_items.item_id: ${supplierItemsError.message}`);
+  }
+
+  for (const column of ["recipe_item_id", "ingredient_item_id"] as const) {
+    const { error } = await args.supabase
+      .from("recipe_ingredients")
+      .delete()
+      .eq("company_id", args.companyId)
+      .in(column, itemIds);
+    if (error && !isMissingTableError(error)) throw new Error(`recipe_ingredients.${column}: ${error.message}`);
+  }
+}
+
 async function deleteOneCompatItem(args: {
   supabase: ReturnType<typeof getSupabaseServerClient>;
   companyId: string;
@@ -1054,8 +1098,7 @@ async function deleteOneCompatItem(args: {
   if (!itemId) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
 
   try {
-    const links = await getLinksBlockingDelete({ supabase: args.supabase, companyId: args.companyId, itemId });
-    if (links.length) return { status: 409, body: { ...base, ok: false, error: "conflict_links", links } };
+    await detachItemReferences({ supabase: args.supabase, companyId: args.companyId, itemIds: [itemId] });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { status: 500, body: { ...base, ok: false, error: msg } };
@@ -1122,6 +1165,18 @@ async function deleteCompatItemsBatch(args: {
   const failedById = new Map<string, string>();
   const deleteChunk = async (chunk: string[]): Promise<void> => {
     if (!chunk.length) return;
+    try {
+      await detachItemReferences({ supabase: args.supabase, companyId: args.companyId, itemIds: chunk });
+    } catch (err) {
+      if (chunk.length === 1) {
+        failedById.set(chunk[0]!, err instanceof Error ? err.message : String(err));
+        return;
+      }
+      const middle = Math.ceil(chunk.length / 2);
+      await deleteChunk(chunk.slice(0, middle));
+      await deleteChunk(chunk.slice(middle));
+      return;
+    }
     const { error } = await args.supabase
       .from("items")
       .delete()
