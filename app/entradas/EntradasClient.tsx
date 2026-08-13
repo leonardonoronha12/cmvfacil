@@ -161,7 +161,9 @@ function sanitizeUiLabel(value: string) {
 }
 
 function normalizeNotaItemName(value: unknown) {
-  const raw = sanitizeUiLabel(String(value ?? ""));
+  const raw = sanitizeUiLabel(String(value ?? ""))
+    .replace(/^This\s+itens?_notas?/i, "")
+    .trim();
   if (!raw) return "";
   const k = raw.toLowerCase();
   if (k === "false" || k === "true" || k === "null" || k === "undefined") return "";
@@ -2669,7 +2671,7 @@ export default function EntradasClient() {
               <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
                 <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
-                <div className={styles.detailsTitle}>{`Detalhes da Nota ${detailsRow.numero}`}</div>
+                <div className={styles.detailsTitle}>Detalhes da Nota</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
                   ×
                 </button>
