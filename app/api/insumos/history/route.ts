@@ -63,20 +63,28 @@ async function loadAllInvoiceItemsForCompany(db: any, companyId: string) {
   return rows;
 }
 
-async function loadAllLegacyEntriesForUser(db: any, userId: string) {
+async function loadAllLegacyEntriesForPrefixes(db: any, prefixes: string[]) {
   const pageSize = 1000;
   const rows: any[] = [];
-  for (let from = 0; ; from += pageSize) {
-    const { data, error } = await db
-      .from("entradas")
-      .select("id,data_lancamento,data_criacao,fornecedor,itens_nota")
-      .like("id", `user:${userId}:%`)
-      .order("created_at", { ascending: false })
-      .range(from, from + pageSize - 1);
-    if (error) throw error;
-    const page = (data ?? []) as any[];
-    rows.push(...page);
-    if (page.length < pageSize) break;
+  const seen = new Set<string>();
+  for (const prefix of Array.from(new Set(prefixes.filter(Boolean)))) {
+    for (let from = 0; ; from += pageSize) {
+      const { data, error } = await db
+        .from("entradas")
+        .select("id,data_lancamento,data_criacao,fornecedor,itens_nota")
+        .like("id", `${prefix}%`)
+        .order("created_at", { ascending: false })
+        .range(from, from + pageSize - 1);
+      if (error) throw error;
+      const page = (data ?? []) as any[];
+      for (const row of page) {
+        const id = String(row?.id ?? "").trim();
+        if (!id || seen.has(id)) continue;
+        seen.add(id);
+        rows.push(row);
+      }
+      if (page.length < pageSize) break;
+    }
   }
   return rows;
 }
@@ -99,12 +107,37 @@ export async function GET(req: NextRequest) {
 
     const { data: memberships, error: membershipError } = await db
       .from("company_members")
-      .select("company_id,role,permission_level")
+      .select("company_id,user_id,bubble_user_id,role,permission_level")
       .eq("user_id", userId)
       .limit(50);
     if (membershipError) return json({ error: membershipError.message }, { status: 500 });
     const companyId = pickCompany((memberships ?? []) as any[]);
     if (!companyId) return json({ error: "missing_company" }, { status: 404 });
+
+    const { data: companyMembers, error: companyMembersError } = await db
+      .from("company_members")
+      .select("user_id,bubble_user_id")
+      .eq("company_id", companyId)
+      .limit(200);
+    if (companyMembersError) return json({ error: companyMembersError.message }, { status: 500 });
+    const companyUserIds = Array.from(
+      new Set((companyMembers ?? []).map((row: any) => String(row?.user_id ?? "").trim()).filter((id: string) => isUuid(id))),
+    );
+    const { data: profiles, error: profilesError } = companyUserIds.length
+      ? await db.from("user_profiles").select("user_id,email,bubble_user_id").in("user_id", companyUserIds).limit(250)
+      : { data: [] as any[], error: null };
+    if (profilesError) return json({ error: profilesError.message }, { status: 500 });
+    const profileByUserId = new Map((profiles ?? []).map((row: any) => [String(row?.user_id ?? "").trim(), row]));
+    const legacyPrefixes: string[] = [];
+    for (const member of companyMembers ?? []) {
+      const memberUserId = String((member as any)?.user_id ?? "").trim();
+      const profile = profileByUserId.get(memberUserId) as any;
+      const email = String(profile?.email ?? "").trim().toLowerCase();
+      const bubbleUserId = String((member as any)?.bubble_user_id ?? profile?.bubble_user_id ?? "").trim();
+      if (memberUserId) legacyPrefixes.push(`user:${memberUserId}:`);
+      if (email) legacyPrefixes.push(`user:${email}:`);
+      if (bubbleUserId) legacyPrefixes.push(`user:${bubbleUserId}:`);
+    }
 
     const cleanDbId = requestedId.toLowerCase().startsWith("db:") ? requestedId.slice(3) : requestedId;
     let itemQuery = db.from("items").select("id,bubble_id,name,unidade_medida").eq("company_id", companyId);
@@ -178,7 +211,7 @@ export async function GET(req: NextRequest) {
     // hide valid history merely because no compat invoice_item was generated.
     if (!history.length) {
       const wantedName = normalizeItemName(item.name);
-      const legacyEntries = await loadAllLegacyEntriesForUser(db, userId);
+      const legacyEntries = await loadAllLegacyEntriesForPrefixes(db, legacyPrefixes);
       for (const entry of legacyEntries) {
         const entryItems = Array.isArray(entry?.itens_nota) ? entry.itens_nota : [];
         for (const legacyItem of entryItems) {
