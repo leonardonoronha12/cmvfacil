@@ -17,7 +17,7 @@ import { loadFichasTecnicasFromSupabase, loadFichasTecnicasStateFromSupabase, sa
 import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, type PrePreparoStoreRow } from "../lib/prePreparoStore";
 import { loadPrePreparoFromSupabase } from "../lib/prePreparoSupabase";
 import { QaModePanel } from "../lib/qaMode";
-import { parseBubbleDecimal, readBubbleSpreadsheetFiles, repairBubbleText } from "../lib/bubbleSpreadsheetImport";
+import { parseBubbleDecimal, readBubbleSpreadsheetFiles, repairBubbleText, splitBubbleList } from "../lib/bubbleSpreadsheetImport";
 import styles from "./fichas-tecnicas.module.css";
 
 function isMissingTableError(err: unknown, table: string) {
@@ -935,17 +935,29 @@ export default function FichasTecnicasClient({
     }, durationMs);
   }
 
-  async function importFichasFile(file: File) {
+  async function importFichasFiles(files: File[]) {
     if (isImporting || isReadOnly) return;
+    if (!files.length) return;
     setIsImporting(true);
-    setImportProgress({ current: 0, total: 1, stage: "Lendo a planilha..." });
+    setImportProgress({ current: 0, total: files.length, stage: "Lendo as planilhas..." });
     try {
-      const normalizedRows = await readBubbleSpreadsheetFiles([file]);
+      const normalizedRows = await readBubbleSpreadsheetFiles(files);
       const recipes = normalizedRows.filter(({ get }) => {
         const flag = normalizeText(get("boolean_item_do_cardapio", "item_do_cardapio"));
         return flag === "true" || flag === "sim" || flag === "1";
       });
       if (!recipes.length) throw new Error("Nenhuma ficha técnica foi encontrada na planilha.");
+
+      const ingredientById = new Map(
+        normalizedRows
+          .filter(({ get }) => {
+            const id = get("unique id", "unique_id");
+            const item = get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome", "item_id");
+            return Boolean(id && item);
+          })
+          .map((row) => [row.get("unique id", "unique_id"), row] as const),
+      );
+      const optionByName = new Map(ingredientOptions.map((option) => [normalizeText(option.item), option]));
 
       const existingByName = new Map(tableRows.map((row) => [normalizeText(row.receita), row]));
       const imported: RecipeRow[] = [];
@@ -963,24 +975,53 @@ export default function FichasTecnicasClient({
           );
           const custoTotalNumber = custoUnitarioNumber * rendimentoNumber;
           const cmvMetaNumber = parseBubbleDecimal(get("cmv_desejado", "cmv_meta"));
-          const cmvAtualNumber = precoVendaNumber > 0 ? (custoUnitarioNumber / precoVendaNumber) * 100 : 0;
           const pop = normalizePopularidade(get("popularidade") || previous?.popularidade || "baixa");
           const bubbleId = get("unique id", "unique_id", "bubble_id");
+          const importedIngredientRows = splitBubbleList(get("lista_ingredientes", "ingredientes")).flatMap((ingredientId) => {
+            const source = ingredientById.get(ingredientId);
+            if (!source) return [];
+            const item = repairBubbleText(
+              source.get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome", "item_id"),
+            ).trim();
+            if (!item) return [];
+            const option = optionByName.get(normalizeText(item));
+            const quantidadeNumber = parseBubbleDecimal(source.get("quantidade"));
+            if (!(quantidadeNumber > 0)) return [];
+            const importedCost = Math.max(0, parseBubbleDecimal(source.get("custo", "custo_total")));
+            const currentUnitCost = option ? parseBrlToCents(option.custoMedio || "0") / 100 : 0;
+            return [{
+              id: `bubble:${ingredientId}`,
+              ingredientId: option?.id || `bubble:${ingredientId}`,
+              item,
+              quantidade: quantidadeNumber.toLocaleString("pt-BR", {
+                minimumFractionDigits: 3,
+                maximumFractionDigits: 3,
+              }),
+              unidade: option?.medida || repairBubbleText(source.get("unidade", "unidade_nome-migração", "unidade_nome_migracao")) || "Und",
+              custoTotal: currentUnitCost > 0 ? currentUnitCost * quantidadeNumber : importedCost,
+            } satisfies ModalIngredientRow];
+          });
+          const finalIngredientRows = importedIngredientRows.length ? importedIngredientRows : previous?.ingredientRows ?? [];
+          const finalIngredientsTotal = importedIngredientRows.length
+            ? importedIngredientRows.reduce((sum, ingredient) => sum + ingredient.custoTotal, 0)
+            : custoTotalNumber;
+          const finalUnitCost = finalIngredientsTotal / rendimentoNumber;
+          const finalCmvAtual = precoVendaNumber > 0 ? (finalUnitCost / precoVendaNumber) * 100 : 0;
           imported.push({
             id: previous?.id || (bubbleId ? `bubble:${bubbleId}` : crypto.randomUUID()),
             receita,
             precoVenda: formatMoney(precoVendaNumber),
-            custoUnitario: formatMoney(custoUnitarioNumber),
+            custoUnitario: formatMoney(finalUnitCost),
             cmvMeta: `${cmvMetaNumber.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} %`,
-            cmvAtual: `${formatPercent1(cmvAtualNumber)}%`,
-            cmvDelta: buildCmvDeltaLabel(cmvAtualNumber, cmvMetaNumber),
-            bcg: computeBcg(pop, cmvAtualNumber, cmvMetaNumber),
+            cmvAtual: `${formatPercent1(finalCmvAtual)}%`,
+            cmvDelta: buildCmvDeltaLabel(finalCmvAtual, cmvMetaNumber),
+            bcg: computeBcg(pop, finalCmvAtual, cmvMetaNumber),
             thumb: previous?.thumb ?? "burger",
             recipeImage: get("imagem_receita", "imagem") || previous?.recipeImage,
             popularidade: pop,
-            ingredientsTotal: custoTotalNumber,
+            ingredientsTotal: finalIngredientsTotal,
             recipeYield: rendimentoNumber,
-            ingredientRows: previous?.ingredientRows ?? [],
+            ingredientRows: finalIngredientRows,
             modoPreparo: get("modo_preparo", "modo de preparo") || previous?.modoPreparo || "",
           });
         }
@@ -2723,11 +2764,12 @@ export default function FichasTecnicasClient({
                 <input
                   ref={importFileRef}
                   type="file"
+                  multiple
                   accept=".csv,.xlsx,.xls,text/csv"
                   className={styles.hiddenFileInput}
                   onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) void importFichasFile(file);
+                    const files = Array.from(event.target.files ?? []);
+                    if (files.length) void importFichasFiles(files);
                   }}
                 />
                 <button
