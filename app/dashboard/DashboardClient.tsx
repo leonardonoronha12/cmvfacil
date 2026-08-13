@@ -2639,7 +2639,9 @@ export default function DashboardClient() {
           continue;
         }
 
-        const rawNome = String(it.nome ?? "").trim();
+        const rawNome = String(it.nome ?? "")
+          .replace(/^\s*This\s+itens?_notas?/i, "")
+          .trim();
         const resolvedNome = (itemId && insumoNameById.get(itemId)) || (rawNome && insumoNameById.get(rawNome)) || rawNome;
         const rawKey = normalizeKey(resolvedNome);
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
