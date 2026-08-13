@@ -99,6 +99,15 @@ function parseDateOnlyLoose(v: unknown) {
   return dt.toISOString().slice(0, 10);
 }
 
+function parseDateTimeKey(v: unknown) {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const dt = new Date(s);
+  const t = dt.getTime();
+  if (!Number.isFinite(t)) return null;
+  return String(Math.floor(t / 60_000));
+}
+
 function parseCsvEnv(value: string | undefined) {
   return String(value ?? "")
     .split(/[,\n;]/g)
@@ -224,6 +233,8 @@ export async function POST(req: NextRequest) {
 
     const invoiceIdByBubbleId = new Map<string, string>();
     const invoiceIdBySupplierDate = new Map<string, string>();
+    const invoiceIdsByDate = new Map<string, string[]>();
+    const invoiceIdsByDateTime = new Map<string, string[]>();
     const invoiceSupplierIdById = new Map<string, string>();
     for (const inv of (invoicesRes.data ?? []) as any[]) {
       const id = String(inv?.id ?? "").trim();
@@ -231,10 +242,22 @@ export async function POST(req: NextRequest) {
       const supplierId = String(inv?.fornecedor_id ?? "").trim();
       const d1 = parseDateOnlyLoose(inv?.data_criacao);
       const d2 = parseDateOnlyLoose(inv?.data_recebimento);
+      const dt1 = parseDateTimeKey(inv?.data_criacao);
+      const dt2 = parseDateTimeKey(inv?.data_recebimento);
       if (id && b) invoiceIdByBubbleId.set(b, id);
       if (id && supplierId && d1) invoiceIdBySupplierDate.set(`${supplierId}|${String(d1).toLowerCase()}`, id);
       if (id && supplierId && d2) invoiceIdBySupplierDate.set(`${supplierId}|${String(d2).toLowerCase()}`, id);
       if (id && supplierId) invoiceSupplierIdById.set(id, supplierId);
+      for (const d of new Set([d1, d2].filter(Boolean) as string[])) {
+        const list = invoiceIdsByDate.get(d) ?? [];
+        if (!list.includes(id)) list.push(id);
+        invoiceIdsByDate.set(d, list);
+      }
+      for (const dt of new Set([dt1, dt2].filter(Boolean) as string[])) {
+        const list = invoiceIdsByDateTime.get(dt) ?? [];
+        if (!list.includes(id)) list.push(id);
+        invoiceIdsByDateTime.set(dt, list);
+      }
     }
 
     const results: any[] = [];
@@ -271,31 +294,32 @@ export async function POST(req: NextRequest) {
       const explicitInvoiceBubbleId = looksLikeBubbleId(explicitInvoiceText) ? extractBubbleId(explicitInvoiceRaw) : "";
       const explicitInvoiceDate = explicitInvoiceText ? parseDateOnlyLoose(explicitInvoiceText) : null;
 
-      const dataLancamento = parseDateOnlyLoose(pickAny(raw, ["data_lancamento", "data_lancamento_custom_itens_notas", "Created Date"]) ?? "");
+      const dataRaw = pickAny(raw, ["data_lan_amento_date", "data_lancamento_date", "data_lancamento", "data_lancamento_custom_itens_notas", "Created Date"]) ?? "";
+      const dataLancamento = parseDateOnlyLoose(dataRaw);
+      const dataTimeKey = parseDateTimeKey(dataRaw);
 
-      const quantidade = parseNumber(pickAny(raw, ["quantidade", "quantidade_custom_itens_notas"]));
-      const custoUnitario = parseNumber(pickAny(raw, ["custo_unitario", "custo_unitario_custom_itens_notas"]));
-      const subtotal = parseNumber(pickAny(raw, ["subtotal", "subtotal_custom_itens_notas"]));
+      const quantidade = parseNumber(pickAny(raw, ["quantidade_number", "quantidade", "quantidade_custom_itens_notas"]));
+      const custoUnitario = parseNumber(pickAny(raw, ["custo_unitario_number", "custo_unitario", "custo_unitario_custom_itens_notas"]));
+      const subtotal = parseNumber(pickAny(raw, ["subtotal_number", "subtotal", "subtotal_custom_itens_notas"]));
+
+      const resolvedByBubble = explicitInvoiceBubbleId ? invoiceIdByBubbleId.get(explicitInvoiceBubbleId) ?? null : null;
+      const dtKey = explicitInvoiceDate ?? dataLancamento ?? null;
+      const resolvedBySupplierDate = dtKey && supplierId ? invoiceIdBySupplierDate.get(`${supplierId}|${String(dtKey).toLowerCase()}`) ?? null : null;
+      const exactTimeCandidates = dataTimeKey ? invoiceIdsByDateTime.get(dataTimeKey) ?? [] : [];
+      const dateCandidates = dtKey ? invoiceIdsByDate.get(dtKey) ?? [] : [];
+      const resolvedByTime = exactTimeCandidates.length === 1 ? exactTimeCandidates[0] : null;
+      const resolvedByUniqueDate = dateCandidates.length === 1 ? dateCandidates[0] : null;
+      const invoiceId = resolvedByBubble ?? resolvedBySupplierDate ?? resolvedByTime ?? resolvedByUniqueDate ?? null;
+      const inferredSupplierId = invoiceId ? invoiceSupplierIdById.get(invoiceId) ?? null : null;
+      const supplierIdFinal = supplierId ?? inferredSupplierId;
 
       const reason = (() => {
         if (!bubbleId) return "missing_bubble_id";
-        if (!supplierId) return "csv_orphan_missing_supplier";
-        if (!explicitInvoiceDate && !explicitInvoiceBubbleId) return "csv_orphan_missing_invoice";
-        const resolvedByBubble = explicitInvoiceBubbleId ? invoiceIdByBubbleId.get(explicitInvoiceBubbleId) ?? null : null;
-        if (resolvedByBubble) return null;
-        const dt = explicitInvoiceDate ?? dataLancamento ?? null;
-        if (!dt) return "missing_invoice_date";
-        const inv = invoiceIdBySupplierDate.get(`${supplierId}|${String(dt).toLowerCase()}`) ?? null;
-        if (!inv) return "missing_invoice_relation";
+        if (!invoiceId) return "missing_invoice_relation";
+        if (!supplierIdFinal) return "csv_orphan_missing_supplier";
         if (!itemId) return "missing_item_relation";
         return null;
       })();
-
-      const resolvedInvoiceId =
-        explicitInvoiceBubbleId ? invoiceIdByBubbleId.get(explicitInvoiceBubbleId) ?? null : null;
-      const dtKey = explicitInvoiceDate ?? dataLancamento ?? null;
-      const invoiceId =
-        resolvedInvoiceId ?? (dtKey && supplierId ? invoiceIdBySupplierDate.get(`${supplierId}|${String(dtKey).toLowerCase()}`) ?? null : null);
 
       const resolved = {
         bubble_id: bubbleId || null,
@@ -316,7 +340,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      const fornecedorIdFinal = invoiceId ? invoiceSupplierIdById.get(invoiceId) ?? supplierId : supplierId;
+      const fornecedorIdFinal = invoiceId ? invoiceSupplierIdById.get(invoiceId) ?? supplierIdFinal : supplierIdFinal;
 
       const row = {
         company_id: companyId,
