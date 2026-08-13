@@ -223,6 +223,18 @@ async function seedCompanyItemsFromLegacy(args: { supabase: ReturnType<typeof ge
       const { data, error } = await db.from("insumos_state").select("*").eq("id", legacyId).maybeSingle();
       if (!error && data) {
         const payload = (data as any)?.payload;
+        if (payload?.compatIntentionallyEmpty === true) {
+          if (diagOut) {
+            diagOut.chosen = {
+              companyId,
+              chosenUserId: candidateUserId,
+              legacyKey: legacyId,
+              foundFrom: "insumos_state",
+              intentionalEmpty: true,
+            };
+          }
+          return { ok: false, diag: diagOut, intentionalEmpty: true };
+        }
         const rows = Array.isArray(payload?.rows) ? (payload.rows as any[]) : [];
         const categories = Array.isArray(payload?.categories) ? (payload.categories as any[]) : [];
         if (rows.length) {
@@ -1223,6 +1235,34 @@ async function deleteCompatItemsBatch(args: {
   return { results, deletedIds, deletedCount: deletedIds.length };
 }
 
+async function markCompatCatalogIntentionallyEmpty(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  stateId: string;
+}) {
+  const { count, error: countError } = await args.supabase
+    .from("items")
+    .select("id", { count: "exact", head: true })
+    .eq("company_id", args.companyId)
+    .or("item_receita.is.null,item_receita.eq.false");
+  if (countError) throw countError;
+  if ((count ?? 0) > 0) return;
+
+  const { error: markerError } = await args.supabase.from("insumos_state").upsert(
+    {
+      id: args.stateId,
+      payload: {
+        rows: [],
+        categories: [],
+        compatIntentionallyEmpty: true,
+        updatedAt: new Date().toISOString(),
+      },
+    } as any,
+    { onConflict: "id" },
+  );
+  if (markerError) throw markerError;
+}
+
 export async function DELETE(req: NextRequest) {
   try {
     const { accessToken, id } = resolveUserScopedId(req);
@@ -1269,6 +1309,9 @@ export async function DELETE(req: NextRequest) {
 
     if (batchTargets.length) {
       const { results, deletedCount, deletedIds } = await deleteCompatItemsBatch({ supabase, companyId, targets: batchTargets });
+      if (deletedCount > 0) {
+        await markCompatCatalogIntentionallyEmpty({ supabase, companyId, stateId: id });
+      }
       return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
     }
 
@@ -1277,6 +1320,9 @@ export async function DELETE(req: NextRequest) {
     }
 
     const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget });
+    if (res.body.ok && res.body.deletedCount > 0) {
+      await markCompatCatalogIntentionallyEmpty({ supabase, companyId, stateId: id });
+    }
     return json(res.body, { status: res.status });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
