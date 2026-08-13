@@ -2619,13 +2619,26 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const itemId = String((it as any)?.itemId ?? "").trim();
+        const rawItem = it as any;
+        const itemId = String(
+          rawItem?.itemId ??
+            rawItem?.item_id ??
+            rawItem?.insumoId ??
+            rawItem?.insumo_id ??
+            rawItem?.item_id_custom_itens ??
+            "",
+        ).trim();
+        const quantidadeLabel = String(rawItem?.quantidadeLabel ?? rawItem?.quantidade_number ?? rawItem?.quantidade ?? "").trim();
+        const custoUnitarioLabel = String(
+          rawItem?.custoUnitarioLabel ?? rawItem?.custo_unitario_number ?? rawItem?.custo_unitario ?? "",
+        ).trim();
+        const subtotalLabel = String(rawItem?.subtotalLabel ?? rawItem?.subtotal_number ?? rawItem?.subtotal ?? "").trim();
         if (itemId && itemId === historyItem.insumoId) {
-          const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+          const { qty, unit } = parseQtyLabel(quantidadeLabel);
           if (!Number.isFinite(qty) || qty <= 0) continue;
           const unitLabel = formatUnitLabelForUI(String(unit || baseUnit).trim() || baseUnit);
-          let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
-          const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
+          let subtotalCents = parseBrlToCents(subtotalLabel);
+          const unitFromLabel = parseBrlToCents(custoUnitarioLabel);
           if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
           const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
           out.push({
@@ -2634,12 +2647,19 @@ export default function DashboardClient() {
             fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
-            subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
+            subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : subtotalLabel,
           });
           continue;
         }
 
-        const rawNome = String(it.nome ?? "")
+        const rawNome = String(
+          rawItem?.nome ??
+            rawItem?.item_nome_migra__o_text ??
+            rawItem?.item_nome_migracao_text ??
+            rawItem?.["item_nome_migração_text"] ??
+            rawItem?.item_nome_text ??
+            "",
+        )
           .replace(/^\s*This\s+itens?_notas?/i, "")
           .trim();
         const resolvedNome = (itemId && insumoNameById.get(itemId)) || (rawNome && insumoNameById.get(rawNome)) || rawNome;
@@ -2648,11 +2668,11 @@ export default function DashboardClient() {
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
         if (!isLooseKeyMatch(mappedKey, key)) continue;
 
-        const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+        const { qty, unit } = parseQtyLabel(quantidadeLabel);
         if (!Number.isFinite(qty) || qty <= 0) continue;
         const unitLabel = formatUnitLabelForUI(String(unit || baseUnit).trim() || baseUnit);
-        let subtotalCents = parseBrlToCents(it.subtotalLabel ?? "");
-        const unitFromLabel = parseBrlToCents(it.custoUnitarioLabel ?? "");
+        let subtotalCents = parseBrlToCents(subtotalLabel);
+        const unitFromLabel = parseBrlToCents(custoUnitarioLabel);
         if (!subtotalCents && unitFromLabel) subtotalCents = Math.round(unitFromLabel * qty);
         const unitCostCents = subtotalCents > 0 && qty > 0 ? Math.round(subtotalCents / qty) : unitFromLabel;
         out.push({
@@ -2661,7 +2681,7 @@ export default function DashboardClient() {
           fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
-          subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
+          subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : subtotalLabel,
         });
       }
     }
