@@ -45,6 +45,23 @@ function pickCompany(rows: any[]) {
   return String(rows.slice().sort((a, b) => score(b) - score(a))[0]?.company_id ?? "").trim();
 }
 
+async function loadAllInvoiceItemsForCompany(db: any, companyId: string) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await db
+      .from("invoice_items")
+      .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw,item:items(name,bubble_id)")
+      .eq("company_id", companyId)
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as any[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return rows;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { accessToken, userId } = getUserIdFromRequest(req);
@@ -91,14 +108,9 @@ export async function GET(req: NextRequest) {
     // Some Bubble imports predate item_id linking. Recover those historical
     // rows by the readable item name stored in raw instead of hiding them.
     if (!(invoiceItems ?? []).length) {
-      const { data: legacyInvoiceItems, error: legacyInvoiceItemsError } = await db
-        .from("invoice_items")
-        .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw,item:items(name,bubble_id)")
-        .eq("company_id", companyId)
-        .limit(5000);
-      if (legacyInvoiceItemsError) return json({ error: legacyInvoiceItemsError.message }, { status: 500 });
+      const legacyInvoiceItems = await loadAllInvoiceItemsForCompany(db, companyId);
       const wantedName = normalizeItemName(item.name);
-      invoiceItems = (legacyInvoiceItems ?? []).filter((row: any) => {
+      invoiceItems = legacyInvoiceItems.filter((row: any) => {
         const linkedName = normalizeItemName(row?.item?.name);
         const storedName = normalizeItemName(rawItemName(row?.raw));
         return linkedName === wantedName || storedName === wantedName;
