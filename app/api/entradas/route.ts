@@ -197,6 +197,29 @@ function pickBestCompanyId(memberRows: unknown[]) {
   return bestCompanyId;
 }
 
+async function loadAllLegacyEntradas(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  prefix: string;
+}) {
+  const pageSize = 1000;
+  const rows: any[] = [];
+
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await args.supabase
+      .from("entradas")
+      .select("*")
+      .like("id", `${args.prefix}%`)
+      .order("created_at", { ascending: false })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as any[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows;
+}
+
 function isAdminUserId(userId: string) {
   const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
   const emails = new Set(
@@ -276,9 +299,8 @@ export async function GET(req: NextRequest) {
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
       if (!companyId) {
         const prefix = `${id}:`;
-        const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-        if (error) return json({ error: error.message }, { status: 500 });
-        return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+        const rows = await loadAllLegacyEntradas({ supabase, prefix });
+        return json({ source: "legacy", readOnly: false, rows }, { status: 200 });
       }
 
       const { data: invoicesDb, error: invErr } = await supabase
@@ -339,9 +361,8 @@ export async function GET(req: NextRequest) {
 
       if (!visibleInvoicesDb.length) {
         const prefix = `${id}:`;
-        const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-        if (error) return json({ error: error.message }, { status: 500 });
-        return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+        const rows = await loadAllLegacyEntradas({ supabase, prefix });
+        return json({ source: "legacy", readOnly: false, rows }, { status: 200 });
       }
 
       const invoiceIds = visibleInvoicesDb.map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
@@ -466,8 +487,7 @@ export async function GET(req: NextRequest) {
     }
 
     const prefix = `${id}:`;
-    const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-    if (error) return json({ error: error.message }, { status: 500 });
+    const data = await loadAllLegacyEntradas({ supabase, prefix });
 
     let companyId = "";
     try {
