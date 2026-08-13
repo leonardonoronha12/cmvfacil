@@ -793,6 +793,43 @@ export async function POST(req: NextRequest) {
       }
 
       if (replace) {
+        const desiredItemIds = new Set(
+          [...upsertByBubble, ...upsertById]
+            .map((row: any) => String(row?.id ?? "").trim())
+            .filter(Boolean),
+        );
+        const staleItemIds = (existingByNameRows ?? [])
+          .map((row: any) => String(row?.id ?? "").trim())
+          .filter((itemId) => itemId && !desiredItemIds.has(itemId));
+
+        // A spreadsheet replacement is authoritative. Remove catalog rows that
+        // are no longer present, while retaining historical rows by clearing
+        // their optional item reference first. Raw invoice/inventory payloads
+        // continue to preserve the original labels and values.
+        for (let offset = 0; offset < staleItemIds.length; offset += 100) {
+          const chunk = staleItemIds.slice(offset, offset + 100);
+          for (const table of ["invoice_items", "inventory_items", "wastes", "shopping_list_items", "avg_cost_events"] as const) {
+            const { error } = await db.from(table).update({ item_id: null } as any).eq("company_id", companyId).in("item_id", chunk);
+            if (error) return json({ error: error.message, stage: `replace_detach_${table}` }, { status: 500 });
+          }
+          const { error: recipeAsIngredientErr } = await db
+            .from("recipe_ingredients")
+            .update({ ingredient_item_id: null } as any)
+            .eq("company_id", companyId)
+            .in("ingredient_item_id", chunk);
+          if (recipeAsIngredientErr) return json({ error: recipeAsIngredientErr.message, stage: "replace_detach_recipe_ingredient" }, { status: 500 });
+          const { error: recipeAsRecipeErr } = await db
+            .from("recipe_ingredients")
+            .update({ recipe_item_id: null } as any)
+            .eq("company_id", companyId)
+            .in("recipe_item_id", chunk);
+          if (recipeAsRecipeErr) return json({ error: recipeAsRecipeErr.message, stage: "replace_detach_recipe" }, { status: 500 });
+          const { error: supplierLinksErr } = await db.from("supplier_items").delete().eq("company_id", companyId).in("item_id", chunk);
+          if (supplierLinksErr) return json({ error: supplierLinksErr.message, stage: "replace_delete_supplier_links" }, { status: 500 });
+          const { error: deleteItemsErr } = await db.from("items").delete().eq("company_id", companyId).in("id", chunk);
+          if (deleteItemsErr) return json({ error: deleteItemsErr.message, stage: "replace_delete_stale_items" }, { status: 500 });
+        }
+
         const desiredCategoryIds = new Set(
           Array.from(categoryNames)
             .map((name) => categoryIdByKey.get(normalizeNameKey(name)) ?? "")

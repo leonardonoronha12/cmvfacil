@@ -1640,12 +1640,13 @@ export default function InsumosClient() {
   const displayCostLabelById = useMemo(() => {
     const out = new Map<string, string>();
     for (const r of dataRows) {
-      const avgCents = avgUnitCostCentsById.get(r.id) ?? 0;
-      if (avgCents > 0) out.set(r.id, formatBrlFromCents(avgCents));
-      else out.set(r.id, r.custoMedio);
+      // The catalog must show the snapshot imported from Bubble. Recalculating
+      // it from entry history here makes the migrated catalog diverge by a few
+      // cents even when the spreadsheet was imported correctly.
+      out.set(r.id, r.custoMedio);
     }
     return out;
-  }, [avgUnitCostCentsById, dataRows]);
+  }, [dataRows]);
 
   const visibleRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();

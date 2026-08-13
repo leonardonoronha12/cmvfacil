@@ -2625,7 +2625,7 @@ export default function DashboardClient() {
           out.push({
             t,
             data: normalizeHistoryDateLabel(e.dataLancamento),
-            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+            fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
             qtd: formatQtyLabelBubble(qty, unitLabel),
             preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
             subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2650,7 +2650,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: normalizeHistoryDateLabel(e.dataLancamento),
-          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedor),
+          fornecedor: sanitizeFornecedorLabelForUI(e.fornecedorNome || e.fornecedor),
           qtd: formatQtyLabelBubble(qty, unitLabel),
           preco: unitCostCents ? `${formatBrlFromCents(unitCostCents)} / ${unitLabel}` : `- / ${unitLabel}`,
           subtotal: subtotalCents ? formatBrlFromCents(subtotalCents) : it.subtotalLabel,
@@ -2740,11 +2740,18 @@ export default function DashboardClient() {
       const key = rawKey.trim().toUpperCase();
       if (!key) return;
       const info = fornecedorInfoMap[key];
+      const resolvedLabel = info?.fornecedor?.trim() || "";
+      const rawLabel = rawKey.trim();
+      const isUnresolvedTechnicalKey =
+        !resolvedLabel &&
+        (/^DB:[0-9A-F-]{20,}$/i.test(rawLabel) ||
+          /^[0-9A-F]{8}-[0-9A-F]{4}-[1-5][0-9A-F]{3}-[89AB][0-9A-F]{3}-[0-9A-F]{12}$/i.test(rawLabel));
+      if (isUnresolvedTechnicalKey) return;
       const prev = byFornecedor.get(key);
       if (!prev) {
         byFornecedor.set(key, {
           key,
-          fornecedor: info?.fornecedor?.trim() || rawKey.trim() || key,
+          fornecedor: resolvedLabel || rawLabel || key,
           vendedor: info?.vendedor?.trim() || "-",
           endereco: info?.endereco?.trim() || "-",
           totalProdutos: fornecedorProdutosMap[key]?.length ?? 0,
@@ -2811,9 +2818,12 @@ export default function DashboardClient() {
 
   const selectedInsumoCustoMedioLabel = useMemo(() => {
     if (!selectedInsumo) return "-";
-    const cents = avgUnitCostCentsByInsumoId.get(selectedInsumo.id) ?? parseBrlToCents(String(selectedInsumo.custoMedio ?? ""));
+    // Keep the item detail consistent with the imported Bubble catalog. The
+    // CMV calculation can still use entry history, but the catalog snapshot
+    // shown to the user must not be silently replaced by another calculation.
+    const cents = parseBrlToCents(String(selectedInsumo.custoMedio ?? ""));
     return cents ? formatBrlFromCents(cents) : "-";
-  }, [avgUnitCostCentsByInsumoId, selectedInsumo]);
+  }, [selectedInsumo]);
 
   function toggleOcultarSelecionado() {
     if (!selectedInsumo) return;
