@@ -958,6 +958,11 @@ export default function FichasTecnicasClient({
           .map((row) => [row.get("unique id", "unique_id"), row] as const),
       );
       const optionByName = new Map(ingredientOptions.map((option) => [normalizeText(option.item), option]));
+      const optionByBubbleId = new Map<string, IngredientOption>();
+      for (const option of ingredientOptions) {
+        const ids = String(option.id).match(/\d{6,}x\d{6,}/g) ?? [];
+        for (const id of ids) optionByBubbleId.set(id, option);
+      }
 
       const existingByName = new Map(tableRows.map((row) => [normalizeText(row.receita), row]));
       const imported: RecipeRow[] = [];
@@ -980,11 +985,13 @@ export default function FichasTecnicasClient({
           const importedIngredientRows = splitBubbleList(get("lista_ingredientes", "ingredientes")).flatMap((ingredientId) => {
             const source = ingredientById.get(ingredientId);
             if (!source) return [];
-            const item = repairBubbleText(
-              source.get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome", "item_id"),
+            const sourceItemId = source.get("item_id", "item id", "insumo_id", "insumo id");
+            const sourceItemName = repairBubbleText(
+              source.get("item_nome-migração", "item_nome_migracao", "item_nome", "ingrediente_nome"),
             ).trim();
+            const option = optionByBubbleId.get(sourceItemId) ?? optionByName.get(normalizeText(sourceItemName));
+            const item = option?.item || sourceItemName;
             if (!item) return [];
-            const option = optionByName.get(normalizeText(item));
             const quantidadeNumber = parseBubbleDecimal(source.get("quantidade"));
             if (!(quantidadeNumber > 0)) return [];
             const importedCost = Math.max(0, parseBubbleDecimal(source.get("custo", "custo_total")));
