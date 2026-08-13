@@ -302,6 +302,9 @@ export default function ImportacaoManualClient() {
   const [wipeConfirm, setWipeConfirm] = useState("");
   const [wipeResult, setWipeResult] = useState<any>(null);
   const [wipeError, setWipeError] = useState("");
+  const [isRepairingInvoiceItems, setIsRepairingInvoiceItems] = useState(false);
+  const [repairInvoiceItemsResult, setRepairInvoiceItemsResult] = useState<any>(null);
+  const [repairInvoiceItemsError, setRepairInvoiceItemsError] = useState("");
 
   const moduleOptions: Array<{ key: ModuleKey; label: string; enabled: boolean }> = useMemo(
     () => [
@@ -3259,6 +3262,28 @@ export default function ImportacaoManualClient() {
     }
   }
 
+  async function repairInvoiceItems() {
+    if (!resolved?.companyId) return;
+    setIsRepairingInvoiceItems(true);
+    setRepairInvoiceItemsResult(null);
+    setRepairInvoiceItemsError("");
+    try {
+      const res = await fetch("/api/admin/importacao-manual/repair-invoice-items", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: resolved.email, companyId: resolved.companyId }),
+      });
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        setRepairInvoiceItemsError(String(json?.error ?? `Falha ao reparar itens de notas (HTTP ${res.status}).`));
+        return;
+      }
+      setRepairInvoiceItemsResult(json);
+    } finally {
+      setIsRepairingInvoiceItems(false);
+    }
+  }
+
   async function analyze() {
     setAnalysisError("");
     setAnalysis(null);
@@ -3855,6 +3880,29 @@ export default function ImportacaoManualClient() {
                 </div>
                 <div>
                   <strong>Empresa:</strong> {resolved.companyName ?? "(sem nome)"} <span style={{ color: "#777" }}>({resolved.companyId})</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => void repairInvoiceItems()}
+                    disabled={isRepairingInvoiceItems}
+                    style={{
+                      border: "1px solid #0a7a50",
+                      background: isRepairingInvoiceItems ? "#eef7f3" : "#0a7a50",
+                      color: isRepairingInvoiceItems ? "#567" : "#fff",
+                      borderRadius: 10,
+                      padding: "9px 12px",
+                      cursor: isRepairingInvoiceItems ? "default" : "pointer",
+                    }}
+                  >
+                    {isRepairingInvoiceItems ? "Reparando itens de notas..." : "Reparar itens de notas do Bubble"}
+                  </button>
+                  {repairInvoiceItemsResult?.summary ? (
+                    <span style={{ color: "#176b45" }}>
+                      Reparado: {repairInvoiceItemsResult.summary.upserted} de {repairInvoiceItemsResult.summary.attempted}; ignorados: {repairInvoiceItemsResult.summary.skipped}; falhas: {repairInvoiceItemsResult.summary.failed}.
+                    </span>
+                  ) : null}
+                  {repairInvoiceItemsError ? <span style={{ color: "#b00020" }}>{repairInvoiceItemsError}</span> : null}
                 </div>
                 <div>
                   <strong>Módulo:</strong>{" "}
