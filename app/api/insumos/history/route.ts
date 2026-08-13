@@ -93,12 +93,16 @@ export async function GET(req: NextRequest) {
     if (!(invoiceItems ?? []).length) {
       const { data: legacyInvoiceItems, error: legacyInvoiceItemsError } = await db
         .from("invoice_items")
-        .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw")
+        .select("id,invoice_id,item_id,quantidade,custo_unitario,subtotal,raw,item:items(name,bubble_id)")
         .eq("company_id", companyId)
         .limit(5000);
       if (legacyInvoiceItemsError) return json({ error: legacyInvoiceItemsError.message }, { status: 500 });
       const wantedName = normalizeItemName(item.name);
-      invoiceItems = (legacyInvoiceItems ?? []).filter((row: any) => normalizeItemName(rawItemName(row?.raw)) === wantedName);
+      invoiceItems = (legacyInvoiceItems ?? []).filter((row: any) => {
+        const linkedName = normalizeItemName(row?.item?.name);
+        const storedName = normalizeItemName(rawItemName(row?.raw));
+        return linkedName === wantedName || storedName === wantedName;
+      });
     }
 
     const invoiceIds = Array.from(new Set((invoiceItems ?? []).map((row: any) => String(row?.invoice_id ?? "").trim()).filter(Boolean)));
