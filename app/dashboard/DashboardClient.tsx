@@ -1509,7 +1509,13 @@ export default function DashboardClient() {
       if (!e.itensNota?.length) continue;
       const equivalencias = getEquivalenciasForFornecedor(String(e.fornecedor ?? ""));
       for (const it of e.itensNota) {
-        const rawNome = String(it.nome ?? "").trim();
+        // Bubble CSV exports can prefix the readable item name with the data
+        // type label (for example: "This itens_notasAbacaxi Calda"). Strip
+        // that migration artifact so historical invoice items can still be
+        // matched to the canonical imported catalog item.
+        const rawNome = String(it.nome ?? "")
+          .replace(/^\s*This\s+itens?_notas?/i, "")
+          .trim();
         const resolvedNome = (rawNome && insumoNameById.get(rawNome)) || rawNome;
         const rawKey = normalizeKey(resolvedNome);
         let mappedKey = rawKey;
