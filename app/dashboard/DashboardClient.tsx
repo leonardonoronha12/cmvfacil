@@ -1040,6 +1040,9 @@ export default function DashboardClient() {
   const [calcError, setCalcError] = useState<string>("");
   const [isLoadingTables, setIsLoadingTables] = useState(true);
   const [historyItem, setHistoryItem] = useState<{ insumoId: string; item: string } | null>(null);
+  const [directItemHistory, setDirectItemHistory] = useState<Array<{ t: number; data: string; fornecedor: string; qtd: string; preco: string; subtotal: string }> | null>(null);
+  const [directItemSuppliers, setDirectItemSuppliers] = useState<Array<{ key: string; fornecedor: string; vendedor: string; endereco: string }> | null>(null);
+  const [isDirectItemLoading, setIsDirectItemLoading] = useState(false);
   const [detailsTab, setDetailsTab] = useState<"entradas" | "fornecedores">("entradas");
   const [hideAlert, setHideAlert] = useState<{ item: string; tone: "hide" | "show" } | null>(null);
   const [isItemMenuOpen, setIsItemMenuOpen] = useState(false);
@@ -2545,6 +2548,7 @@ export default function DashboardClient() {
   const historicoEntradas = useMemo(() => {
     if (!historyItem) return [];
     const isPrePreparoItem = historyItem.insumoId.startsWith("prep:");
+    if (!isPrePreparoItem && directItemHistory) return directItemHistory;
     if (isPrePreparoItem) {
       const recipeId = historyItem.insumoId.slice("prep:".length).trim();
       const list = prePreparoEtiquetas.filter((e) => String(e.recipeId ?? "").trim() === recipeId);
@@ -2697,7 +2701,55 @@ export default function DashboardClient() {
       if (labelFromState) return { ...x, fornecedor: labelFromState };
       return { ...x, fornecedor: raw };
     });
-  }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
+  }, [directItemHistory, entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
+
+  useEffect(() => {
+    if (!historyItem || historyItem.insumoId.startsWith("prep:")) {
+      setDirectItemHistory(null);
+      setDirectItemSuppliers(null);
+      setIsDirectItemLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setDirectItemHistory(null);
+    setDirectItemSuppliers(null);
+    setIsDirectItemLoading(true);
+    const params = new URLSearchParams({ itemId: historyItem.insumoId, name: historyItem.item });
+    void fetch(`/api/insumos/history?${params.toString()}`, { cache: "no-store", signal: controller.signal })
+      .then(async (res) => {
+        const payload = (await res.json().catch(() => null)) as any;
+        if (!res.ok || !payload?.ok) throw new Error(String(payload?.error ?? "failed_to_load_item_history"));
+        const unit = formatUnitLabelForUI(String(payload?.item?.unit ?? "Und"));
+        const rows = (Array.isArray(payload.history) ? payload.history : []).map((row: any) => {
+          const qty = Number(row?.quantity ?? 0) || 0;
+          const unitCost = Number(row?.unitCost ?? 0) || 0;
+          const subtotal = Number(row?.subtotal ?? 0) || unitCost * qty;
+          const date = row?.date ? new Date(row.date) : null;
+          const t = date && !Number.isNaN(date.getTime()) ? startOfDay(date).getTime() : 0;
+          return {
+            t,
+            data: date && !Number.isNaN(date.getTime()) ? date.toLocaleDateString("pt-BR") : "-",
+            fornecedor: String(row?.supplier ?? "-").trim() || "-",
+            qtd: formatQtyLabelBubble(qty, unit),
+            preco: unitCost > 0 ? `${formatBrlFromCents(Math.round(unitCost * 100))} / ${unit}` : `- / ${unit}`,
+            subtotal: subtotal > 0 ? formatBrlFromCents(Math.round(subtotal * 100)) : "-",
+          };
+        });
+        rows.sort((a: any, b: any) => b.t - a.t);
+        setDirectItemHistory(rows);
+        setDirectItemSuppliers(Array.isArray(payload.suppliers) ? payload.suppliers : []);
+      })
+      .catch((error) => {
+        if (error?.name !== "AbortError") {
+          setDirectItemHistory([]);
+          setDirectItemSuppliers([]);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setIsDirectItemLoading(false);
+      });
+    return () => controller.abort();
+  }, [historyItem]);
 
   const historicoHasFornecedorIds = useMemo(() => {
     return historicoEntradas.some((h) => {
@@ -2764,6 +2816,10 @@ export default function DashboardClient() {
       { key: string; fornecedor: string; vendedor: string; endereco: string; totalProdutos: number; t: number }
     >();
 
+    for (const supplier of directItemSuppliers ?? []) {
+      byFornecedor.set(supplier.key, { ...supplier, totalProdutos: 1, t: 0 });
+    }
+
     const ensureFornecedor = (rawKey: string, t: number) => {
       const key = rawKey.trim().toUpperCase();
       if (!key) return;
@@ -2814,7 +2870,7 @@ export default function DashboardClient() {
     }
 
     return [...byFornecedor.values()].sort((a, b) => b.t - a.t);
-  }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap, historicoEntradas, historyItem]);
+  }, [directItemSuppliers, fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap, historicoEntradas, historyItem]);
 
   const fornecedorModalProdutos = useMemo(() => {
     const key = fornecedorModalKey.trim().toUpperCase();
@@ -3552,7 +3608,7 @@ export default function DashboardClient() {
                       <>
                         <div className={styles.historyTitle}>Histórico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
-                          {isLoadingTables ? (
+                          {isDirectItemLoading ? (
                             <div className={styles.loadingOverlay}>
                               <LoadingSpinner />
                             </div>
@@ -3565,7 +3621,7 @@ export default function DashboardClient() {
                             <div className={styles.historyThRight}>Subtotal</div>
                           </div>
 
-                          {isLoadingTables ? null : historicoEntradas.length ? (
+                          {isDirectItemLoading ? null : historicoEntradas.length ? (
                             historicoEntradas.map((h, idx) => (
                               <div key={`${h.data}-${idx}`} className={styles.historyRow}>
                                 <div className={styles.historyCell}>{h.data}</div>
