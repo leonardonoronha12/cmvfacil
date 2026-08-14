@@ -1082,6 +1082,28 @@ export default function EntradasClient() {
     return rows.find((r) => r.id === detailsId) ?? null;
   }, [detailsId, rows]);
 
+  const detailsNoteNumber = useMemo(() => {
+    if (!detailsRow) return "";
+
+    const rawNumber = sanitizeUiLabel(detailsRow.numero);
+    const readableNumber = rawNumber.match(/^(?:#|NF[-\s]*)?(\d{1,9})$/i);
+    if (readableNumber) return `#${readableNumber[1]}`;
+
+    const timestamp = (row: EntradaRow) => {
+      for (const value of [row.dataCriacao, row.dataLancamento]) {
+        const parsed = parseDateLabelLoose(value);
+        if (parsed) return parsed.getTime();
+        const nativeTime = Date.parse(value);
+        if (Number.isFinite(nativeTime)) return nativeTime;
+      }
+      return 0;
+    };
+
+    const chronologicalRows = [...rows].sort((a, b) => timestamp(a) - timestamp(b) || a.id.localeCompare(b.id));
+    const index = chronologicalRows.findIndex((row) => row.id === detailsRow.id);
+    return index >= 0 ? `#${index + 1}` : "";
+  }, [detailsRow, rows]);
+
   const insumosByName = useMemo(() => {
     const map = new Map<string, InsumoStoreItem>();
     for (const i of insumosStore) map.set(i.item.toLowerCase(), i);
@@ -2671,7 +2693,7 @@ export default function EntradasClient() {
               <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
                 <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
-                <div className={styles.detailsTitle}>Detalhes da Nota</div>
+                <div className={styles.detailsTitle}>{`Detalhes da Nota${detailsNoteNumber ? ` ${detailsNoteNumber}` : ""}`}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
                   ×
                 </button>
