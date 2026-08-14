@@ -13,6 +13,8 @@ import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnicasToStore, type FichaTecnicaRow } from "../lib/fichasTecnicasStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
 import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
+import { readSectorsFromStore, writeSectorsToStore, subscribeSectors, type SectorRow } from "../lib/sectorsStore";
+import { loadSectorsFromSupabase, saveInventorySectorCountToSupabase } from "../lib/sectorsSupabase";
 import { buildUserScopedId } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
@@ -97,6 +99,28 @@ function parseDateNumericLoose(value: string) {
 
 function normCatName(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeSectorName(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function parsePtNumber(value: string): number {
+  const raw = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+  if (!raw) return 0;
+  const normalized = raw.replace(/\./g, "").replace(",", ".");
+  const n = Number(normalized);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatDecimal3Places(value: number): string {
+  if (!Number.isFinite(value)) return "";
+  const fixed = value.toFixed(3);
+  const [intPart, decPart] = fixed.split(".");
+  const intFormatted = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const dec = String(decPart ?? "000").slice(0, 3).padEnd(3, "0");
+  const cleanDec = dec.replace(/0+$/, "");
+  return `${intFormatted},${cleanDec || "000"}`;
 }
 
 function normalizeNameKey(value: string) {
@@ -189,6 +213,31 @@ export default function InventarioClient() {
   const [selectedContagemId, setSelectedContagemId] = useState<string | null>(initialContagens[0]?.id ?? null);
   const [query, setQuery] = useState("");
   const [categoriaFilter, setCategoriaFilter] = useState("Categorias pendentes");
+  const [sectors, setSectors] = useState<SectorRow[]>(() => readSectorsFromStore());
+  const [selectedSectorId, setSelectedSectorId] = useState<string>("Todos");
+  const [sectorSaveErrorMsg, setSectorSaveErrorMsg] = useState<string>("");
+  const sectorInventorySyncVersionRef = useRef(0);
+  const sectorSavingLockRef = useRef<Set<string>>(new Set());
+
+  const sectorsSorted = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    return [...sectors].sort((a, b) => {
+      const ag = normalizeSectorName(a.name).toLowerCase() === "geral" ? 0 : 1;
+      const bg = normalizeSectorName(b.name).toLowerCase() === "geral" ? 0 : 1;
+      if (ag !== bg) return ag - bg;
+      return collator.compare(a.name, b.name);
+    });
+  }, [sectors]);
+
+  const geralSector = useMemo<SectorRow | null>(() => sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral") ?? null, [sectorsSorted]);
+
+  function showSectorNotice(msg: string, isError = false) {
+    setSectorSaveErrorMsg(msg);
+    window.setTimeout(() => {
+      setSectorSaveErrorMsg((cur) => (cur === msg ? "" : cur));
+    }, isError ? 5500 : 2800);
+  }
+
 
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [newData, setNewData] = useState(() => formatDateNumericPT(new Date()));
@@ -436,6 +485,89 @@ export default function InventarioClient() {
   useEffect(() => {
     pendingDraftsRef.current = pendingDrafts;
   }, [pendingDrafts]);
+
+  useEffect(() => {
+    setSectors(readSectorsFromStore());
+    void (async () => {
+      try {
+        const loaded = await loadSectorsFromSupabase();
+        if (loaded.sectors.length) writeSectorsToStore(loaded.sectors);
+        setSectors(loaded.sectors);
+      } catch {}
+    })();
+    return subscribeSectors((rows) => setSectors(rows));
+  }, []);
+
+  useEffect(() => {
+    if (!selectedContagemId) {
+      sectorInventorySyncVersionRef.current += 1;
+      return;
+    }
+    if (isCompatSource) return;
+    const version = ++sectorInventorySyncVersionRef.current;
+    const invId = selectedContagemId;
+    void (async () => {
+      try {
+        const geralId = geralSector?.id ?? sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
+        const res = await fetch(`/api/inventario/sectors?inventoryId=${encodeURIComponent(invId)}`, { cache: "no-store" });
+        let apiCounts: Array<{ inventory_id: string; item_id: string; sector_id: string; quantity: string; counted_by_user_id?: string | null; counted_at?: string | null }> = [];
+        if (res.ok) {
+          const json = await res.json().catch(() => ({}));
+          apiCounts = Array.isArray(json?.counts) ? json.counts : [];
+        }
+        if (version !== sectorInventorySyncVersionRef.current) return;
+        const byItemSector = new Map<string, Map<string, string>>();
+        for (const row of apiCounts) {
+          const perItem = byItemSector.get(row.item_id) ?? new Map<string, string>();
+          perItem.set(row.sector_id, row.quantity);
+          byItemSector.set(row.item_id, perItem);
+        }
+        const legacyUpsertPayload: Array<{ inventoryId: string; itemId: string; sectorId: string; quantity: string }> = [];
+        setContagens((prev) => {
+          const next = prev.map((c) => {
+            if (c.id !== invId) return c;
+            const categorias = (c.categorias ?? []).map((cat) => {
+              const itens = (cat.itens ?? []).map((origIt) => {
+                const it = { ...origIt };
+                const perSector = byItemSector.get(String(it.id)) ?? new Map<string, string>();
+                let sc: Record<string, string> = { ...(it.sectorCounts ?? {}) };
+                for (const [sid, qty] of perSector.entries()) {
+                  const v = typeof qty === "string" || typeof qty === "number" ? String(qty) : "";
+                  if (v.trim()) sc[sid] = formatDecimal3Places(parsePtNumber(v));
+                }
+                const hasAnySc = Boolean(Object.keys(sc).length);
+                const hasLegacyQty = Boolean(String(it.estoqueFinal ?? "").trim());
+                if (!hasAnySc && hasLegacyQty && geralId) {
+                  sc[geralId] = formatDecimal3Places(parsePtNumber(String(it.estoqueFinal ?? "")));
+                  legacyUpsertPayload.push({ inventoryId: invId, itemId: String(it.id), sectorId: geralId, quantity: String(it.estoqueFinal ?? "") });
+                }
+                it.sectorCounts = sc;
+                const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
+                it.estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
+                return it;
+              });
+              return { ...cat, itens };
+            });
+            return { ...c, categorias };
+          });
+          return normalizeContagens(next);
+        });
+        if (legacyUpsertPayload.length && geralId) {
+          try {
+            await fetch("/api/inventario/sectors", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ bulk: legacyUpsertPayload }),
+              cache: "no-store",
+            }).catch(() => {});
+          } catch {}
+        }
+      } catch {}
+    })();
+    return () => {
+      sectorInventorySyncVersionRef.current += 1;
+    };
+  }, [selectedContagemId, isCompatSource, geralSector?.id]);
 
   useEffect(() => {
     setPendingDrafts({});
@@ -782,32 +914,96 @@ export default function InventarioClient() {
     })();
   }
 
-  function updateItemQty(itemId: string, value: string) {
-    const cId = selectedContagem?.id;
-    if (!cId) return;
-    setContagens((prev) => {
-      const next = prev.map((c) => {
-        if (c.id !== cId) return c;
-        const categorias = (c.categorias ?? []).map((cat) => ({ ...cat, itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, estoqueFinal: value } : it)) }));
-        return { ...c, categorias };
-      });
-      const normalized = normalizeContagens(next);
-      const updated = normalized.find((x) => x.id === cId);
-      if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-      return normalized;
-    });
+  function resolveActiveSectorId(): string | null {
+    if (selectedSectorId && selectedSectorId !== "Todos") return selectedSectorId;
+    return geralSector?.id ?? sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
   }
 
-  function commitPendingDraft(itemId: string) {
+  async function persistItemQtySectorThenState(inventoryId: string, itemId: string, desiredValueRaw: string, opts?: { skipLockCheck?: boolean }): Promise<boolean> {
+    const sectorId = resolveActiveSectorId();
+    if (!sectorId) {
+      showSectorNotice("Setor Geral não encontrado. Salvo cancelado.", true);
+      return false;
+    }
+    const lockKey = `${inventoryId}|${itemId}|${sectorId}`;
+    if (!opts?.skipLockCheck && sectorSavingLockRef.current.has(lockKey)) return false;
+    sectorSavingLockRef.current.add(lockKey);
+    try {
+      await saveInventorySectorCountToSupabase({
+        inventoryId,
+        itemId,
+        sectorId,
+        quantityRaw: desiredValueRaw,
+      });
+      const cleanedValue = String(desiredValueRaw ?? "").trim();
+      const numericValue = parsePtNumber(cleanedValue);
+      setContagens((prev) => {
+        const next = prev.map((c) => {
+          if (c.id !== inventoryId) return c;
+          const categorias = (c.categorias ?? []).map((cat) => {
+            const itens = (cat.itens ?? []).map((origIt) => {
+              if (origIt.id !== itemId) return origIt;
+              const sc: Record<string, string> = { ...(origIt.sectorCounts ?? {}) };
+              if (cleanedValue && numericValue > 0) {
+                sc[sectorId] = formatDecimal3Places(numericValue);
+              } else {
+                delete sc[sectorId];
+              }
+              const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
+              const estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
+              return { ...origIt, sectorCounts: sc, estoqueFinal };
+            });
+            return { ...cat, itens };
+          });
+          return { ...c, categorias };
+        });
+        const normalized = normalizeContagens(next);
+        const updated = normalized.find((x) => x.id === inventoryId);
+        if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
+        return normalized;
+      });
+      return true;
+    } catch (err: any) {
+      const msg = String(err?.message ?? err ?? "Erro ao salvar contagem").slice(0, 160);
+      showSectorNotice(`Falha na persistência: ${msg}`, true);
+      return false;
+    } finally {
+      sectorSavingLockRef.current.delete(lockKey);
+    }
+  }
+
+  async function updateItemQty(itemId: string, value: string) {
+    const cId = selectedContagem?.id;
+    if (!cId) return;
+    const ok = await persistItemQtySectorThenState(cId, itemId, value);
+    if (!ok) {
+      let fallback = "";
+      const cats = selectedContagem?.categorias ?? [];
+      for (let i = 0; i < cats.length; i += 1) {
+        const it = (cats[i].itens ?? []).find((x) => x.id === itemId);
+        if (it) {
+          fallback = String(it.estoqueFinal ?? "");
+          break;
+        }
+      }
+      setEditingValue(fallback);
+    }
+  }
+
+  async function commitPendingDraft(itemId: string) {
     if (!(itemId in pendingDraftsRef.current)) return;
     const value = String(pendingDraftsRef.current[itemId] ?? "").trim();
-    updateItemQty(itemId, value);
-    setPendingDrafts((prev) => {
-      if (!(itemId in prev)) return prev;
-      const next = { ...prev };
-      delete next[itemId];
-      return next;
-    });
+    const cId = selectedContagem?.id;
+    if (!cId) return;
+    const ok = await persistItemQtySectorThenState(cId, itemId, value);
+    if (ok) {
+      setPendingDrafts((prev) => {
+        if (!(itemId in prev)) return prev;
+        const next = { ...prev };
+        delete next[itemId];
+        return next;
+      });
+    }
   }
 
   function removeItem(itemId: string) {
@@ -818,7 +1014,7 @@ export default function InventarioClient() {
         if (c.id !== cId) return c;
         const categorias = (c.categorias ?? []).map((cat) => ({
           ...cat,
-          itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, removido: true, estoqueFinal: "" } : it)),
+          itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, removido: true, estoqueFinal: "", sectorCounts: {} } : it)),
         }));
         return { ...c, categorias };
       });
@@ -828,7 +1024,7 @@ export default function InventarioClient() {
     });
   }
 
-  function uncountItem(itemId: string) {
+  async function uncountItem(itemId: string) {
     setEditingItemId(null);
     setEditingValue("");
     setPendingDrafts((prev) => {
@@ -837,7 +1033,9 @@ export default function InventarioClient() {
       delete next[itemId];
       return next;
     });
-    updateItemQty(itemId, "");
+    const cId = selectedContagem?.id;
+    if (!cId) return;
+    await persistItemQtySectorThenState(cId, itemId, "");
   }
 
   function deleteContagem(id: string) {
@@ -1150,6 +1348,24 @@ export default function InventarioClient() {
               </div>
             </div>
 
+            {sectorSaveErrorMsg ? (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: sectorSaveErrorMsg.startsWith("Falha") || sectorSaveErrorMsg.includes("cancelado") ? "#fef2f2" : "#ecfdf5",
+                  color: sectorSaveErrorMsg.startsWith("Falha") || sectorSaveErrorMsg.includes("cancelado") ? "#b91c1c" : "#047857",
+                  border: `1px solid ${sectorSaveErrorMsg.startsWith("Falha") || sectorSaveErrorMsg.includes("cancelado") ? "#fecaca" : "#a7f3d0"}`,
+                  fontSize: 12,
+                  fontWeight: 600,
+                }}
+                role="status"
+              >
+                {sectorSaveErrorMsg}
+              </div>
+            ) : null}
+
             {isCompatSource ? null : (
               <div className={styles.topFilters}>
                 <div className={styles.search}>
@@ -1166,8 +1382,43 @@ export default function InventarioClient() {
                     </option>
                   ))}
                 </select>
+
+                <select
+                  className={styles.select}
+                  value={selectedSectorId}
+                  onChange={(e) => {
+                    setSelectedSectorId(e.target.value);
+                    setEditingItemId(null);
+                    setEditingValue("");
+                  }}
+                  style={{ minWidth: 150 }}
+                >
+                  <option value="Todos">Todos / Consolidado</option>
+                  {sectorsSorted.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      Setor: {s.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
+
+            {!isCompatSource && selectedSectorId === "Todos" ? (
+              <div
+                style={{
+                  marginTop: 6,
+                  fontSize: 11,
+                  color: "#92400e",
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  padding: "6px 10px",
+                  borderRadius: 6,
+                  fontWeight: 600,
+                }}
+              >
+                Dica: para editar as contagens, selecione acima um setor específico. No modo “Todos” você visualiza apenas o total consolidado.
+              </div>
+            ) : null}
 
             {isCompatSource ? (
               <div className={styles.compatTableWrap} data-qa-grid="inventario:itens">
@@ -1217,25 +1468,78 @@ export default function InventarioClient() {
             {isCompatSource ? null : (
             <div className={styles.cols}>
               <div className={styles.col}>
-                <div className={styles.colHeadPending}>Pendentes</div>
+                <div className={styles.colHeadPending}>
+                  Pendentes
+                  {selectedSectorId !== "Todos" ? (
+                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, opacity: 0.85 }}>
+                      · Setor: {sectorsSorted.find((s) => s.id === selectedSectorId)?.name ?? "-"}
+                    </span>
+                  ) : (
+                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, opacity: 0.75 }}>· Consolidado (só visualização)</span>
+                  )}
+                </div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
-                  {pendentes.map((r) => (
+                  {pendentes.map((r) => {
+                    const sc: Record<string, string> = (r as any).sectorCounts ?? {};
+                    const activeSectorValue =
+                      selectedSectorId !== "Todos"
+                        ? String(pendingDrafts[r.id] ?? sc[selectedSectorId] ?? "")
+                        : String(pendingDrafts[r.id] ?? r.estoqueFinal ?? "");
+                    const editDisabled = selectedSectorId === "Todos" || isReadOnly;
+                    return (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
                         <div className={styles.dotPending} aria-hidden />
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
                             <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
+                            {(() => {
+                              const entries = Object.entries(sc).filter(([, v]) => String(v ?? "").trim());
+                              if (!entries.length) return null;
+                              const byId = new Map(sectorsSorted.map((s) => [s.id, s]));
+                              return (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                                  {entries.slice(0, 5).map(([sid, qty]) => {
+                                    const s = byId.get(sid);
+                                    const totalNum = Object.values(sc).reduce((a, v) => a + parsePtNumber(String(v ?? "")), 0);
+                                    const isSel = selectedSectorId === sid;
+                                    return (
+                                      <span
+                                        key={sid}
+                                        title={s?.name ?? sid}
+                                        style={{
+                                          fontSize: 10,
+                                          padding: "1px 6px",
+                                          borderRadius: 999,
+                                          background: isSel ? "#1f6feb" : "#eef2f7",
+                                          color: isSel ? "#fff" : "#1f2937",
+                                          fontWeight: isSel ? 700 : 600,
+                                          lineHeight: 1.5,
+                                        }}
+                                      >
+                                        {s?.name ?? "?"}: {String(qty).replace(/\.000$/, "").trim() || "0"}
+                                        {totalNum > 0 && isSel ? ` · Σ ${formatDecimal3Places(totalNum)}` : ""}
+                                      </span>
+                                    );
+                                  })}
+                                  {entries.length > 5 ? (
+                                    <span style={{ fontSize: 10, color: "#6b7280" }}>+{entries.length - 5}</span>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                         </div>
                       </div>
                       <div className={styles.itemRight}>
                         <input
-                          data-inv-pending="1"
+                          data-inv-pending={editDisabled ? "0" : "1"}
                           className={styles.qtyInput}
-                          value={pendingDrafts[r.id] ?? r.estoqueFinal}
+                          value={activeSectorValue}
+                          disabled={editDisabled}
                           onChange={(e) => setPendingDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
-                          onBlur={() => commitPendingDraft(r.id)}
+                          onBlur={() => { if (!editDisabled) commitPendingDraft(r.id); }}
                           onKeyDown={(e) => {
+                            if (editDisabled) return;
                             if (e.key === "Enter") {
                               e.preventDefault();
                               const root = pendingColBodyRef.current;
@@ -1262,20 +1566,44 @@ export default function InventarioClient() {
                               e.currentTarget.blur();
                             }
                           }}
-                          placeholder="0"
+                          placeholder={editDisabled ? "Selecione setor" : "0"}
+                          title={editDisabled ? "Selecione um setor específico para editar" : ""}
+                          style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: "not-allowed" } : undefined}
                         />
                         <div className={styles.unitPill}>{r.unidade}</div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   {pendentes[0] ? null : <div className={styles.emptyCol}>Sem itens pendentes</div>}
                 </div>
               </div>
 
               <div className={styles.col}>
-                <div className={styles.colHeadDone}>Contabilizados</div>
+                <div className={styles.colHeadDone}>
+                  Contabilizados
+                  {selectedSectorId !== "Todos" ? (
+                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, opacity: 0.85 }}>
+                      · Setor: {sectorsSorted.find((s) => s.id === selectedSectorId)?.name ?? "-"}
+                    </span>
+                  ) : null}
+                </div>
                 <div className={styles.colBody}>
-                  {contabilizados.map((r) => (
+                  {contabilizados.map((r) => {
+                    const sc: Record<string, string> = (r as any).sectorCounts ?? {};
+                    const sectorEntries = Object.entries(sc).filter(([, v]) => String(v ?? "").trim());
+                    const byId = new Map(sectorsSorted.map((s) => [s.id, s]));
+                    const totalNum = sectorEntries.reduce((a, [, v]) => a + parsePtNumber(String(v ?? "")), 0);
+                    const editDisabled = selectedSectorId === "Todos" || isReadOnly;
+                    const activeSectorDisplay =
+                      selectedSectorId !== "Todos"
+                        ? editingItemId === r.id
+                          ? editingValue
+                          : String(sc[selectedSectorId] ?? "")
+                        : String(r.estoqueFinal ?? "");
+                    const activeEditOriginal =
+                      selectedSectorId !== "Todos" ? String(sc[selectedSectorId] ?? "") : String(r.estoqueFinal ?? "");
+                    return (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
                         <div className={styles.dotDone} aria-hidden>
@@ -1284,6 +1612,53 @@ export default function InventarioClient() {
                         <div className={styles.itemText}>
                           <div className={styles.itemTitle}>{r.item}</div>
                             <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
+                            {(() => {
+                              if (!sectorEntries.length) return null;
+                              return (
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 4 }}>
+                                  {sectorEntries.slice(0, 5).map(([sid, qty]) => {
+                                    const s = byId.get(sid);
+                                    const isSel = selectedSectorId === sid;
+                                    return (
+                                      <span
+                                        key={sid}
+                                        title={s?.name ?? sid}
+                                        style={{
+                                          fontSize: 10,
+                                          padding: "1px 6px",
+                                          borderRadius: 999,
+                                          background: isSel ? "#1f6feb" : "#eef2f7",
+                                          color: isSel ? "#fff" : "#1f2937",
+                                          fontWeight: isSel ? 700 : 600,
+                                          lineHeight: 1.5,
+                                        }}
+                                      >
+                                        {s?.name ?? "?"}: {String(qty).replace(/\.000$/, "").trim() || "0"}
+                                      </span>
+                                    );
+                                  })}
+                                  {sectorEntries.length > 5 ? (
+                                    <span style={{ fontSize: 10, color: "#6b7280" }}>+{sectorEntries.length - 5}</span>
+                                  ) : null}
+                                  {sectorEntries.length >= 1 && totalNum > 0 ? (
+                                    <span
+                                      style={{
+                                        fontSize: 10,
+                                        padding: "1px 6px",
+                                        borderRadius: 999,
+                                        background: "#fef3c7",
+                                        color: "#92400e",
+                                        fontWeight: 800,
+                                        marginLeft: "auto",
+                                      }}
+                                      title="Total geral consolidado"
+                                    >
+                                      Σ {formatDecimal3Places(totalNum)} {r.unidade}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              );
+                            })()}
                         </div>
                       </div>
                       <div className={styles.itemRight}>
@@ -1293,8 +1668,11 @@ export default function InventarioClient() {
                               ref={editInputRef}
                               className={styles.qtyInput}
                               value={editingValue}
+                              disabled={editDisabled}
                               onChange={(e) => setEditingValue(e.target.value)}
+                              style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: "not-allowed" } : undefined}
                               onKeyDown={(e) => {
+                                if (editDisabled) return;
                                 if (e.key === "Enter") {
                                   e.preventDefault();
                                   editCancelledRef.current = false;
@@ -1309,6 +1687,10 @@ export default function InventarioClient() {
                                 }
                               }}
                               onBlur={() => {
+                                if (editDisabled) {
+                                  setEditingItemId(null);
+                                  return;
+                                }
                                 if (editCancelledRef.current) {
                                   editCancelledRef.current = false;
                                   setEditingItemId(null);
@@ -1324,26 +1706,37 @@ export default function InventarioClient() {
                           <div
                             className={styles.qtyLabel}
                             onClick={() => {
+                              if (editDisabled) return;
                               editCancelledRef.current = false;
-                              editOriginalValueRef.current = String(r.estoqueFinal ?? "");
+                              editOriginalValueRef.current = activeEditOriginal;
                               setEditingItemId(r.id);
-                              setEditingValue(String(r.estoqueFinal ?? ""));
+                              setEditingValue(activeEditOriginal);
                               setTimeout(() => editInputRef.current?.focus(), 0);
                             }}
                             role="button"
-                            tabIndex={0}
+                            tabIndex={editDisabled ? -1 : 0}
                             onKeyDown={(e) => {
+                              if (editDisabled) return;
                               if (e.key === "Enter") {
                                 e.preventDefault();
                                 editCancelledRef.current = false;
-                                editOriginalValueRef.current = String(r.estoqueFinal ?? "");
+                                editOriginalValueRef.current = activeEditOriginal;
                                 setEditingItemId(r.id);
-                                setEditingValue(String(r.estoqueFinal ?? ""));
+                                setEditingValue(activeEditOriginal);
                                 setTimeout(() => editInputRef.current?.focus(), 0);
                               }
                             }}
+                            style={editDisabled ? { cursor: "default", opacity: 0.85 } : undefined}
+                            title={editDisabled ? "Selecione um setor específico para editar" : "Clique para editar"}
                           >
-                            {`${r.estoqueFinal} ${r.unidade}`}
+                            <div>
+                              {editingItemId !== r.id && selectedSectorId !== "Todos" && sectorEntries.length > 1 ? (
+                                <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 2 }}>
+                                  Setor atual · Total geral: {formatDecimal3Places(totalNum)} {r.unidade}
+                                </div>
+                              ) : null}
+                              <div>{`${activeSectorDisplay || "0"} ${r.unidade}`}</div>
+                            </div>
                           </div>
                         )}
                         <div className={styles.actions}>
@@ -1351,10 +1744,12 @@ export default function InventarioClient() {
                             type="button"
                             className={styles.iconBtn}
                             aria-label="Editar"
+                            disabled={editDisabled}
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
                             onClick={() => {
+                              if (editDisabled) return;
                               if (editingItemId === r.id) {
                                 editCancelledRef.current = false;
                                 updateItemQty(r.id, editingValue);
@@ -1362,29 +1757,32 @@ export default function InventarioClient() {
                                 return;
                               }
                               editCancelledRef.current = false;
-                              editOriginalValueRef.current = String(r.estoqueFinal ?? "");
+                              editOriginalValueRef.current = activeEditOriginal;
                               setEditingItemId(r.id);
-                              setEditingValue(String(r.estoqueFinal ?? ""));
+                              setEditingValue(activeEditOriginal);
                               setTimeout(() => editInputRef.current?.focus(), 0);
                             }}
+                            title={editDisabled ? "Selecione um setor específico para editar" : ""}
                           >
                             <IconPencil />
                           </button>
                           <button
                             type="button"
                             className={styles.iconBtn}
-                            aria-label="Excluir"
+                            aria-label="Zerar contagem"
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
-                            onClick={() => removeItem(r.id)}
+                            onClick={() => uncountItem(r.id)}
+                            title="Zerar contagem do item/setor"
                           >
                             <IconTrash />
                           </button>
                         </div>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                   {contabilizados[0] ? null : <div className={styles.emptyCol}>Sem itens contabilizados</div>}
                 </div>
               </div>

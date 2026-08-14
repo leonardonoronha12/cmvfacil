@@ -6,6 +6,7 @@ export type InventarioItemRow = {
   unidade: string;
   estoqueFinal: string;
   removido?: boolean;
+  sectorCounts?: Record<string, string>;
 };
 
 export type InventarioCategoria = {
@@ -38,6 +39,14 @@ function normalizeItem(input: unknown): InventarioItemRow | null {
     unidade: String(r.unidade ?? "").trim() || "Und",
     estoqueFinal: String(r.estoqueFinal ?? "").trim(),
     removido: Boolean(r.removido),
+    sectorCounts: typeof r.sectorCounts === "object" && r.sectorCounts != null
+      ? (() => {
+          const obj = r.sectorCounts as Record<string, unknown>;
+          const out: Record<string, string> = {};
+          for (const k of Object.keys(obj)) out[k] = String(obj[k] ?? "");
+          return out;
+        })()
+      : undefined,
   };
 }
 

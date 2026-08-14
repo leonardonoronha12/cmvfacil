@@ -8,7 +8,7 @@ import SystemToast from "../components/SystemToast";
 import LoadingSpinner from "../components/LoadingSpinner";
 import useCappedLoading from "../components/useCappedLoading";
 import usePagination from "../components/usePagination";
-import { readInsumosFromStore, writeInsumosToStore } from "../lib/insumosStore";
+import { readInsumosFromStore, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import {
   deleteInsumoFromSupabase,
@@ -21,6 +21,13 @@ import { readEntradasFromStore, subscribeEntradas, writeEntradasToStore, type En
 import { loadEntradasFromSupabase } from "../lib/entradasSupabase";
 import { readFornecedorEquivalenciasMap, subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type FornecedorEquivalenciasMap } from "../lib/fornecedoresStore";
 import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
+import { readSectorsFromStore, subscribeSectors, writeSectorsToStore, type SectorRow } from "../lib/sectorsStore";
+import {
+  deleteSectorFromSupabase,
+  loadSectorsFromSupabase,
+  saveItemSectorsToSupabase,
+  saveSectorToSupabase,
+} from "../lib/sectorsSupabase";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./insumos.module.css";
 
@@ -32,6 +39,7 @@ type InsumoRow = {
   custoMedio: string;
   categoria: string;
   especificacao: string;
+  sectorIds?: string[];
 };
 
 function isUuidValue(value: string) {
@@ -40,6 +48,60 @@ function isUuidValue(value: string) {
 
 function normalizeCategoryName(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeSectorName(value: string) {
+  return value.replace(/\s+/g, " ").trim().slice(0, 80);
+}
+
+function getSectorItemCount(sectorId: string, links: Array<{ itemId: string; sectorId: string }>): number {
+  let c = 0;
+  for (const l of links) if (l.sectorId === sectorId) c++;
+  return c;
+}
+
+function resolveSectorNamesToIds(
+  names: string[] | undefined,
+  sectors: SectorRow[],
+): string[] {
+  if (!names?.length) return [];
+  const byName = new Map<string, string>();
+  for (const s of sectors) byName.set(normalizeSectorName(s.name).toLowerCase(), s.id);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    const key = normalizeSectorName(raw).toLowerCase();
+    if (!key) continue;
+    const id = byName.get(key);
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+function buildItemSectorIds(
+  dataRows: InsumoRow[],
+  loadedLinks: Array<{ itemId: string; sectorId: string }>,
+  loadedSectors: SectorRow[],
+  geralId: string | null,
+): Map<string, string[]> {
+  const byItem = new Map<string, string[]>();
+  for (const r of dataRows) {
+    if (r.sectorIds?.length) {
+      const ids = resolveSectorNamesToIds(r.sectorIds, loadedSectors);
+      if (ids.length) {
+        byItem.set(r.id, ids);
+        continue;
+      }
+    }
+    const fromLinks = loadedLinks.filter((l) => l.itemId === r.id).map((l) => l.sectorId);
+    const uniq = Array.from(new Set(fromLinks)).filter(Boolean);
+    if (uniq.length) byItem.set(r.id, uniq);
+    else if (geralId) byItem.set(r.id, [geralId]);
+  }
+  return byItem;
 }
 
 function getUniqueCategoriesFromRows(rows: InsumoRow[]) {
@@ -145,6 +207,7 @@ function detectColumnMap(headers: unknown[]) {
     if (idx.categoria == null && h.includes("categoria")) idx.categoria = i;
     if (idx.especificacao == null && h.includes("especificacao")) idx.especificacao = i;
     if (idx.ocultar == null && (h.includes("ocultar") || h.includes("oculto"))) idx.ocultar = i;
+    if (idx.setores == null && (h.includes("setor") || h.includes("sector") || h.includes("area") || h.includes("ambiente"))) idx.setores = i;
   }
   return idx;
 }
@@ -154,11 +217,12 @@ function parseRowsFromTable(table: unknown[][]) {
   if (!safe.length) return [];
 
   const map = detectColumnMap(safe[0] ?? []);
-  const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null;
+  const hasHeader = map.item != null || map.medida != null || map.custoMedio != null || map.categoria != null || map.especificacao != null || map.setores != null;
   const startIndex = hasHeader ? 1 : 0;
 
   const fallback = { item: 0, medida: 1, custoMedio: 2, categoria: 3, especificacao: 4, ocultar: 5 };
   const getIndex = (key: keyof typeof fallback) => (map[key] != null ? map[key]! : fallback[key]);
+  const sectorIdx = map.setores ?? null;
 
   const out: InsumoRow[] = [];
   for (let i = startIndex; i < safe.length; i++) {
@@ -171,6 +235,15 @@ function parseRowsFromTable(table: unknown[][]) {
         ? ocultarRaw
         : ["1", "true", "sim", "yes", "y"].includes(String(ocultarRaw ?? "").trim().toLowerCase());
 
+    const sectorNamesRaw = sectorIdx != null ? String(row[sectorIdx] ?? "").trim() : "";
+    let sectorNames: string[] | undefined = undefined;
+    if (sectorNamesRaw) {
+      sectorNames = sectorNamesRaw
+        .split(/[|;,]/g)
+        .map((s) => s.replace(/\s+/g, " ").trim())
+        .filter(Boolean);
+    }
+
     out.push({
       id: String(out.length + 1),
       ocultar: Boolean(ocultar),
@@ -179,6 +252,7 @@ function parseRowsFromTable(table: unknown[][]) {
       custoMedio: toMoney(row[getIndex("custoMedio")]) || "-",
       categoria: String(row[getIndex("categoria")] ?? "").trim() || "-",
       especificacao: String(row[getIndex("especificacao")] ?? "").trim() || "-",
+      sectorIds: sectorNames?.length ? sectorNames : undefined,
     });
   }
   return out;
@@ -385,11 +459,25 @@ export default function InsumosClient() {
   const [newSpec, setNewSpec] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newInitialCost, setNewInitialCost] = useState("");
+  const [newSectorIds, setNewSectorIds] = useState<string[]>([]);
+  const [editSectorIds, setEditSectorIds] = useState<string[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
+  const [sectors, setSectors] = useState<SectorRow[]>([]);
+  const [itemSectorLinks, setItemSectorLinks] = useState<Array<{ itemId: string; sectorId: string }>>([]);
+  const [isSectorsOpen, setIsSectorsOpen] = useState(false);
+  const [sectorNewDraft, setSectorNewDraft] = useState("");
+  const [editingSectorId, setEditingSectorId] = useState<string | null>(null);
+  const [editingSectorDraft, setEditingSectorDraft] = useState("");
+  const [isDeleteSectorOpen, setIsDeleteSectorOpen] = useState(false);
+  const [deletingSectorId, setDeletingSectorId] = useState<string | null>(null);
+  const [deletingSectorName, setDeletingSectorName] = useState("");
+  const [deletingSectorLinks, setDeletingSectorLinks] = useState<{ itemLinks: number; counts: number }>({ itemLinks: 0, counts: 0 });
+  const [sectorSearch, setSectorSearch] = useState("");
+  const itemSectorSyncRef = useRef<number | null>(null);
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
@@ -530,6 +618,31 @@ export default function InsumosClient() {
   }, []);
 
   useEffect(() => {
+    setSectors(readSectorsFromStore());
+    void (async () => {
+      try {
+        const loaded = await loadSectorsFromSupabase();
+        if (loaded.sectors.length) writeSectorsToStore(loaded.sectors);
+        setSectors(loaded.sectors);
+        setItemSectorLinks(loaded.itemLinks ?? []);
+        if (rowsReadyRef.current) {
+          setDataRows((prev) => {
+            const geralId = loaded.sectors.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
+            const resolved = buildItemSectorIds(prev, loaded.itemLinks ?? [], loaded.sectors, geralId);
+            return prev.map((r) => {
+              const sec = resolved.get(r.id) ?? (geralId ? [geralId] : []);
+              if (!sec.length || (r.sectorIds?.length && String(r.sectorIds) === String(sec))) return r;
+              if (!r.sectorIds && sec.length === 1 && sec[0] === geralId) return r;
+              return { ...r, sectorIds: sec };
+            });
+          });
+        }
+      } catch {}
+    })();
+    return subscribeSectors((rows) => setSectors(rows));
+  }, []);
+
+  useEffect(() => {
     if (!categoriesReadyRef.current) return;
     writeInsumoCategoriasToStore(categories);
   }, [categories]);
@@ -545,6 +658,7 @@ export default function InsumosClient() {
         categoria: r.categoria,
         especificacao: r.especificacao,
         ocultar: r.ocultar,
+        sectorIds: r.sectorIds,
       })),
     );
   }, [dataRows]);
@@ -554,6 +668,7 @@ export default function InsumosClient() {
     if (isReadOnly) return;
     if (isBootstrapRunning()) return;
     if (syncTimeoutRef.current) window.clearTimeout(syncTimeoutRef.current);
+    if (itemSectorSyncRef.current) window.clearTimeout(itemSectorSyncRef.current);
     syncTimeoutRef.current = window.setTimeout(() => {
       const storeRows = dataRows.map((r) => ({
         id: r.id,
@@ -563,6 +678,7 @@ export default function InsumosClient() {
         categoria: r.categoria,
         especificacao: r.especificacao,
         ocultar: r.ocultar,
+        sectorIds: r.sectorIds,
       }));
       void saveInsumosStateToSupabase({ rows: storeRows as any, categories })
         .then(() => {
@@ -574,7 +690,22 @@ export default function InsumosClient() {
           showToast(saveErrorMessage(err), "error");
         });
     }, 650);
-  }, [dataRows, categories, isReadOnly]);
+    itemSectorSyncRef.current = window.setTimeout(() => {
+      const geralId = sectors.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
+      const payload: Array<{ itemId: string; sectorIds: string[] }> = [];
+      for (const r of dataRows) {
+        let ids = Array.isArray(r.sectorIds) ? r.sectorIds.filter((x) => isUuidValue(x)) : [];
+        if (!ids.length && geralId) ids = [geralId];
+        payload.push({ itemId: r.id, sectorIds: ids });
+      }
+      if (!payload.length) return;
+      void saveItemSectorsToSupabase(payload)
+        .then(() => {})
+        .catch((err) => {
+          showToast(`Não foi possível salvar vínculos de setor (${err?.message ?? err}).`, "error");
+        });
+    }, 900);
+  }, [dataRows, categories, isReadOnly, sectors]);
 
   useEffect(() => {
     const fromRows = getUniqueCategoriesFromRows(dataRows);
@@ -790,9 +921,9 @@ export default function InsumosClient() {
     } catch {}
     const sep = ";";
     const rows = [
-      ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
-      ["Álcool", "L", "4,39", "Limpeza", "-", "false"],
-      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", "false"],
+      ["Item", "Medida", "Custo Médio", "Categoria", "Setores", "Especificação", "Ocultar"],
+      ["Álcool", "L", "4,39", "Limpeza", "Geral", "-", "false"],
+      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "Geral|Cozinha", "-", "false"],
     ];
     const csv = "\uFEFF" + rows.map((r) => r.map((c) => `"${String(c).replaceAll('"', '""')}"`).join(sep)).join("\n");
     downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "modelo-planilha-insumos.csv");
@@ -837,16 +968,22 @@ export default function InsumosClient() {
       .filter((c) => c && c !== "-")
       .slice(0, 50)
       .map((c) => c.replaceAll('"', "").replaceAll(",", " "));
+    const sectorOptions = sectorsSorted
+      .map((s) => normalizeSectorName(s.name))
+      .filter(Boolean)
+      .slice(0, 50)
+      .map((c) => c.replaceAll('"', "").replaceAll(",", " ").replaceAll("|", " "));
     const categoryList = categoryOptions.length ? categoryOptions : ["-"];
-    const listMax = Math.max(unitOptions.length, categoryOptions.length, 1);
-    const listRows: (string | null)[][] = [["Medidas", "Categorias"]];
+    const sectorList = sectorOptions.length ? sectorOptions : ["Geral"];
+    const listMax = Math.max(unitOptions.length, categoryOptions.length, sectorOptions.length, 1);
+    const listRows: (string | null)[][] = [["Medidas", "Categorias", "Setores"]];
     for (let i = 0; i < listMax; i++) {
-      listRows.push([unitOptions[i] ?? "", categoryList[i] ?? ""]);
+      listRows.push([unitOptions[i] ?? "", categoryList[i] ?? "", sectorList[i] ?? ""]);
     }
     const rows = [
-      ["Item", "Medida", "Custo Médio", "Categoria", "Especificação", "Ocultar"],
-      ["Álcool", "L", "4,39", "Limpeza", "-", false],
-      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "-", false],
+      ["Item", "Medida", "Custo Médio", "Categoria", "Setores", "Especificação", "Ocultar"],
+      ["Álcool", "L", "4,39", "Limpeza", "Geral", "-", false],
+      ["Amido de milho", "Kg", "38,15", "Matéria Prima", "Geral|Cozinha", "-", false],
     ];
     const ws = XLSX.utils.aoa_to_sheet(rows);
     const wsLists = XLSX.utils.aoa_to_sheet(listRows);
@@ -855,16 +992,18 @@ export default function InsumosClient() {
     XLSX.utils.book_append_sheet(wb, wsLists, "Listas");
     const unitRef = `Listas!$A$2:$A$${unitOptions.length + 1}`;
     const catRef = `Listas!$B$2:$B$${categoryList.length + 1}`;
+    const secRef = `Listas!$C$2:$C$${sectorList.length + 1}`;
     (wb as any).Workbook = {
       Names: [
         { Name: "Medidas", Ref: unitRef },
         { Name: "Categorias", Ref: catRef },
+        { Name: "Setores", Ref: secRef },
       ],
     };
     (ws as any)["!dataValidation"] = [
       { type: "list", allowBlank: 1, sqref: "B2:B500", formulas: ["Medidas"] },
       { type: "list", allowBlank: 1, sqref: "D2:D500", formulas: ["Categorias"] },
-      { type: "list", allowBlank: 1, sqref: "F2:F500", formulas: ['"FALSE,TRUE"'] },
+      { type: "list", allowBlank: 1, sqref: "G2:G500", formulas: ['"FALSE,TRUE"'] },
     ];
     const array = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
     downloadBlob(new Blob([array], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), "modelo-planilha-insumos.xlsx");
@@ -886,6 +1025,7 @@ export default function InsumosClient() {
     setNewSpec("");
     setNewUnit("");
     setNewInitialCost("");
+    setNewSectorIds(geralSector?.id ? [geralSector.id] : []);
     setIsNewItemOpen(true);
   }
 
@@ -900,13 +1040,23 @@ export default function InsumosClient() {
     const categoria = normalizeCategoryName(newCategory) || "-";
     const especificacao = newSpec.trim() || "-";
     const custoMedio = newInitialCost.trim() ? (newInitialCost.trim().startsWith("R$") ? newInitialCost.trim() : `R$${newInitialCost.trim()}`) : "-";
+    const effectiveSectorIds = getEffectiveDraftIds("new");
 
     const nextCategories =
       categoria !== "-" && !categories.some((c) => c.toLowerCase() === categoria.toLowerCase()) ? [...categories, categoria] : categories;
     if (nextCategories !== categories) setCategories(nextCategories);
 
     const id = typeof crypto !== "undefined" && "randomUUID" in crypto ? (crypto as any).randomUUID() : String(Date.now());
-    const row: InsumoRow = { id, ocultar: false, item, medida, custoMedio, categoria, especificacao };
+    const row: InsumoRow = {
+      id,
+      ocultar: false,
+      item,
+      medida,
+      custoMedio,
+      categoria,
+      especificacao,
+      sectorIds: effectiveSectorIds.length ? effectiveSectorIds : undefined,
+    };
     setDataRows((prev) => {
       const nextRows = [row, ...prev];
       writeInsumosToStore(
@@ -918,6 +1068,7 @@ export default function InsumosClient() {
           categoria: r.categoria,
           especificacao: r.especificacao,
           ocultar: r.ocultar,
+          sectorIds: r.sectorIds,
         })),
       );
       void saveInsumosStateToSupabase({
@@ -929,6 +1080,7 @@ export default function InsumosClient() {
           categoria: r.categoria,
           especificacao: r.especificacao,
           ocultar: r.ocultar,
+          sectorIds: r.sectorIds,
         })) as any,
         categories: nextCategories,
       })
@@ -963,6 +1115,11 @@ export default function InsumosClient() {
     setNewSpec(row.especificacao === "-" ? "" : row.especificacao);
     setNewUnit(row.medida === "-" ? "" : row.medida);
     setNewInitialCost(String(row.custoMedio ?? "").replace(/^R\$\s?/, "").trim().replace(".", ","));
+    const linksFor = itemSectorLinks.filter((l) => l.itemId === row.id).map((l) => l.sectorId);
+    const fallback = geralSector?.id ? [geralSector.id] : [];
+    const editIds: string[] = (Array.isArray(row.sectorIds) ? row.sectorIds : []).filter((x) => isUuidValue(x));
+    const merged = Array.from(new Set([...editIds, ...linksFor])).filter(Boolean);
+    setEditSectorIds(merged.length ? merged : fallback);
     setIsEditItemOpen(true);
 
     const categoria = normalizeCategoryName(row.categoria ?? "");
@@ -1090,6 +1247,7 @@ export default function InsumosClient() {
     const categoria = normalizeCategoryName(newCategory) || "-";
     const especificacao = newSpec.trim() || "-";
     const custoMedio = newInitialCost.trim() ? (newInitialCost.trim().startsWith("R$") ? newInitialCost.trim() : `R$${newInitialCost.trim()}`) : "-";
+    const effectiveSectorIds = getEffectiveDraftIds("edit");
 
     if (categoria !== "-") {
       setCategories((prev) => {
@@ -1109,6 +1267,7 @@ export default function InsumosClient() {
               categoria,
               especificacao,
               custoMedio,
+              sectorIds: effectiveSectorIds.length ? effectiveSectorIds : r.sectorIds,
             }
           : r,
       ),
@@ -1220,6 +1379,180 @@ export default function InsumosClient() {
     if (newCategory === name) setNewCategory("");
     if (editingCategoryOriginal === name) cancelEditCategory();
     cancelDeleteCategory();
+  }
+
+  const sectorsSorted = useMemo(() => {
+    const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
+    return [...sectors].sort((a, b) => {
+      const aGeral = normalizeSectorName(a.name).toLowerCase() === "geral" ? 0 : 1;
+      const bGeral = normalizeSectorName(b.name).toLowerCase() === "geral" ? 0 : 1;
+      if (aGeral !== bGeral) return aGeral - bGeral;
+      return collator.compare(a.name, b.name);
+    });
+  }, [sectors]);
+
+  const sectorCounts = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const l of itemSectorLinks) {
+      map.set(l.sectorId, (map.get(l.sectorId) ?? 0) + 1);
+    }
+    for (const r of dataRows) {
+      if (r.sectorIds?.length) {
+        for (const sid of r.sectorIds) {
+          if (!map.has(sid)) map.set(sid, 0);
+        }
+      }
+    }
+    return map;
+  }, [itemSectorLinks, dataRows]);
+
+  const geralSector = useMemo(
+    () => sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral") ?? null,
+    [sectorsSorted],
+  );
+
+  function openSectors() {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    setSectorNewDraft("");
+    setEditingSectorId(null);
+    setEditingSectorDraft("");
+    setIsDeleteSectorOpen(false);
+    setDeletingSectorId(null);
+    setDeletingSectorName("");
+    setDeletingSectorLinks({ itemLinks: 0, counts: 0 });
+    setIsSectorsOpen(true);
+  }
+
+  async function addSector() {
+    const name = normalizeSectorName(sectorNewDraft);
+    if (!name) return;
+    try {
+      const created = await saveSectorToSupabase({ name });
+      setSectors((prev) => [...prev, created]);
+      if (created.id) setSectors((prev) => { writeSectorsToStore(prev); return prev; });
+      writeSectorsToStore([...sectors, created]);
+    } catch (err) {
+      showToast(`Não foi possível criar o setor (${(err as any)?.message ?? String(err)}).`, "error");
+      return;
+    }
+    setSectorNewDraft("");
+  }
+
+  function editSector(row: SectorRow) {
+    setEditingSectorId(row.id);
+    setEditingSectorDraft(row.name);
+  }
+
+  function cancelEditSector() {
+    setEditingSectorId(null);
+    setEditingSectorDraft("");
+  }
+
+  async function confirmEditSector() {
+    const id = editingSectorId;
+    if (!id) return;
+    const name = normalizeSectorName(editingSectorDraft);
+    if (!name) return;
+    try {
+      const updated = await saveSectorToSupabase({ id, name });
+      setSectors((prev) => {
+        const next = prev.map((s) => (s.id === id ? { ...s, name: updated.name ?? s.name } : s));
+        writeSectorsToStore(next);
+        return next;
+      });
+    } catch (err) {
+      showToast(`Não foi possível renomear o setor (${(err as any)?.message ?? String(err)}).`, "error");
+      return;
+    }
+    cancelEditSector();
+  }
+
+  async function openDeleteSector(row: SectorRow) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    if (normalizeSectorName(row.name).toLowerCase() === "geral") {
+      showToast("Não é possível excluir o setor Geral.", "error");
+      return;
+    }
+    const localLinks = sectorCounts.get(row.id) ?? 0;
+    let apiLinks = localLinks;
+    let apiCounts = 0;
+    try {
+      await deleteSectorFromSupabase(row.id);
+    } catch (err) {
+      const payload = (err as any)?.payload;
+      if (payload?.links && typeof payload.links === "object") {
+        apiLinks = typeof payload.links.itemLinks === "number" ? payload.links.itemLinks : localLinks;
+        apiCounts = typeof payload.links.counts === "number" ? payload.links.counts : 0;
+      }
+      if ((err as any)?.error === "sector_in_use" || (err as any)?.message === "sector_in_use" || (err as any)?.message?.includes("sector_in_use")) {
+        const total = apiLinks + apiCounts;
+        showToast(`Setor em uso: ${total} vínculo(s). Não é possível excluir.`, "error");
+        return;
+      }
+    }
+    if (apiLinks || apiCounts) {
+      showToast(`Setor em uso: ${apiLinks + apiCounts} vínculo(s). Não é possível excluir.`, "error");
+      return;
+    }
+    setDeletingSectorId(row.id);
+    setDeletingSectorName(row.name);
+    setDeletingSectorLinks({ itemLinks: apiLinks, counts: apiCounts });
+    setIsDeleteSectorOpen(true);
+  }
+
+  function cancelDeleteSector() {
+    setIsDeleteSectorOpen(false);
+    setDeletingSectorId(null);
+    setDeletingSectorName("");
+    setDeletingSectorLinks({ itemLinks: 0, counts: 0 });
+  }
+
+  async function confirmDeleteSector() {
+    const id = deletingSectorId;
+    if (!id) return;
+    try {
+      await deleteSectorFromSupabase(id);
+      setSectors((prev) => {
+        const next = prev.filter((s) => s.id !== id);
+        writeSectorsToStore(next);
+        return next;
+      });
+      setItemSectorLinks((prev) => prev.filter((l) => l.sectorId !== id));
+      setDataRows((prev) =>
+        prev.map((r) => {
+          if (!r.sectorIds?.length) return r;
+          const next = r.sectorIds.filter((sid) => sid !== id);
+          if (next.length === r.sectorIds.length) return r;
+          return { ...r, sectorIds: next };
+        }),
+      );
+    } catch (err) {
+      showToast(`Não foi possível excluir o setor (${(err as any)?.message ?? String(err)}).`, "error");
+    }
+    cancelDeleteSector();
+  }
+
+  function toggleDraftSectorId(target: "new" | "edit", id: string) {
+    const setter = target === "new" ? setNewSectorIds : setEditSectorIds;
+    const current = target === "new" ? newSectorIds : editSectorIds;
+    setter((prev) => {
+      const has = prev.includes(id);
+      return has ? prev.filter((x) => x !== id) : [...prev, id];
+    });
+  }
+
+  function getEffectiveDraftIds(target: "new" | "edit"): string[] {
+    const raw = target === "new" ? newSectorIds : editSectorIds;
+    const geral = geralSector?.id;
+    const valid = raw.filter((x) => isUuidValue(x));
+    if (!valid.length && geral) return [geral];
+    return valid;
   }
 
   const selectedCount = selectedIds.size;
@@ -1722,6 +2055,37 @@ export default function InsumosClient() {
               <div className={styles.kpiLabel}>CATEGORIAS</div>
             </div>
           </div>
+
+          <div className={styles.kpiCard}>
+            <div className={styles.kpiIcon}>
+              <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+                <path
+                  d="M3 3h8v8H3V3Zm10 0h8v8h-8V3ZM3 13h8v8H3v-8Zm10 2h8v-2h-8Zm0 4h8v-2h-8Zm0 4h8v-2h-8Z"
+                  fill="currentColor"
+                />
+              </svg>
+            </div>
+            <div className={styles.kpiBody}>
+              <div className={styles.kpiValueRow}>
+                <span className={styles.kpiValue}>{sectorsSorted.length}</span>
+                <button
+                  type="button"
+                  className={styles.kpiLink}
+                  disabled={isReadOnly}
+                  onClick={() => {
+                    if (isReadOnly) {
+                      showToast("Modo somente leitura.", "error");
+                      return;
+                    }
+                    openSectors();
+                  }}
+                >
+                  Ver Setores
+                </button>
+              </div>
+              <div className={styles.kpiLabel}>SETORES</div>
+            </div>
+          </div>
         </section>
 
         <section className={styles.filters}>
@@ -1905,7 +2269,37 @@ export default function InsumosClient() {
                     }
                     if (col === "medida") return <div key={col} className={styles.td}>{r.medida}</div>;
                     if (col === "custoMedio") return <div key={col} className={styles.tdStrong}>{displayCostLabelById.get(r.id) ?? r.custoMedio}</div>;
-                    if (col === "categoria") return <div key={col} className={styles.td}>{r.categoria}</div>;
+                    if (col === "categoria") return (
+                      <div key={col} className={styles.td}>
+                        <div>{r.categoria}</div>
+                        {(() => {
+                          const ids = r.sectorIds ?? [];
+                          const names = sectorsSorted
+                            .filter((s) => ids.includes(s.id))
+                            .map((s) => s.name);
+                          if (!names.length) return null;
+                          return (
+                            <div
+                              title={`Setores: ${names.join(", ")}`}
+                              style={{
+                                marginTop: 4,
+                                fontSize: 10,
+                                color: "#6b7280",
+                                background: "#eef2ff",
+                                padding: "2px 6px",
+                                borderRadius: 4,
+                                display: "inline-block",
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              {names.length > 3
+                                ? `${names.slice(0, 3).join(", ")} +${names.length - 3}`
+                                : names.join(", ")}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    );
                     return (
                       <div key={col} className={styles.tdMuted}>
                         {r.especificacao}
@@ -2156,6 +2550,61 @@ export default function InsumosClient() {
                 </div>
 
                 <div className={styles.formField}>
+                  <div className={styles.formLabelRow}>
+                    <div className={styles.formLabel}>Setores (múltiplo)</div>
+                    <button type="button" className={styles.addCategory} onClick={openSectors}>
+                      Gerenciar Setores
+                    </button>
+                  </div>
+                  <input
+                    className={styles.formInput}
+                    placeholder="Pesquisar setor..."
+                    value={sectorSearch}
+                    onChange={(e) => setSectorSearch(e.target.value)}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(() => {
+                      const q = sectorSearch.trim().toLowerCase();
+                      const filtered = sectorsSorted.filter((s) => !q || normalizeSectorName(s.name).toLowerCase().includes(q));
+                      const effective = getEffectiveDraftIds("new");
+                      if (!filtered.length) {
+                        return <div className={styles.tdMuted} style={{ fontSize: 12 }}>Nenhum setor encontrado. Clique em “Gerenciar Setores” para cadastrar.</div>;
+                      }
+                      return filtered.map((s) => {
+                        const selected = effective.includes(s.id);
+                        const isGeral = normalizeSectorName(s.name).toLowerCase() === "geral";
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => toggleDraftSectorId("new", s.id)}
+                            style={{
+                              border: "none",
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              background: selected ? (isGeral ? "#1f6feb" : "#2563eb") : "#eef2f7",
+                              color: selected ? "#fff" : "#1f2937",
+                              fontWeight: selected ? 600 : 400,
+                              lineHeight: 1,
+                              userSelect: "none",
+                            }}
+                          >
+                            {selected ? "✓ " : ""}
+                            {s.name}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                  {getEffectiveDraftIds("new").length <= 1 && !newSectorIds.length ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>Aviso: será usado o setor “Geral” automaticamente.</div>
+                  ) : null}
+                </div>
+
+                <div className={styles.formField}>
                   <div className={styles.formLabel}>Especificação</div>
                   <input
                     className={styles.formInput}
@@ -2258,6 +2707,61 @@ export default function InsumosClient() {
                       </option>
                     ))}
                   </select>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabelRow}>
+                    <div className={styles.formLabel}>Setores (múltiplo)</div>
+                    <button type="button" className={styles.addCategory} onClick={openSectors}>
+                      Gerenciar Setores
+                    </button>
+                  </div>
+                  <input
+                    className={styles.formInput}
+                    placeholder="Pesquisar setor..."
+                    value={sectorSearch}
+                    onChange={(e) => setSectorSearch(e.target.value)}
+                    style={{ marginBottom: 10 }}
+                  />
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {(() => {
+                      const q = sectorSearch.trim().toLowerCase();
+                      const filtered = sectorsSorted.filter((s) => !q || normalizeSectorName(s.name).toLowerCase().includes(q));
+                      const effective = getEffectiveDraftIds("edit");
+                      if (!filtered.length) {
+                        return <div className={styles.tdMuted} style={{ fontSize: 12 }}>Nenhum setor encontrado. Clique em “Gerenciar Setores” para cadastrar.</div>;
+                      }
+                      return filtered.map((s) => {
+                        const selected = effective.includes(s.id);
+                        const isGeral = normalizeSectorName(s.name).toLowerCase() === "geral";
+                        return (
+                          <button
+                            key={s.id}
+                            type="button"
+                            onClick={() => toggleDraftSectorId("edit", s.id)}
+                            style={{
+                              border: "none",
+                              padding: "6px 10px",
+                              borderRadius: 999,
+                              fontSize: 12,
+                              cursor: "pointer",
+                              background: selected ? (isGeral ? "#1f6feb" : "#2563eb") : "#eef2f7",
+                              color: selected ? "#fff" : "#1f2937",
+                              fontWeight: selected ? 600 : 400,
+                              lineHeight: 1,
+                              userSelect: "none",
+                            }}
+                          >
+                            {selected ? "✓ " : ""}
+                            {s.name}
+                          </button>
+                        );
+                      });
+                    })()}
+                  </div>
+                  {getEffectiveDraftIds("edit").length <= 1 && !editSectorIds.length ? (
+                    <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>Aviso: será usado o setor “Geral” automaticamente.</div>
+                  ) : null}
                 </div>
 
                 <div className={styles.formField}>
@@ -2442,6 +2946,168 @@ export default function InsumosClient() {
                   Excluir
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={cancelDeleteCategory}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+          )
+        ) : null}
+
+        {mounted && isSectorsOpen ? (
+          createPortal(
+          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsSectorsOpen(false)}>
+            <div className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Setores de Itens</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsSectorsOpen(false)}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.categoriesBody}>
+                <div className={styles.categoriesLabel}>Nome do Setor</div>
+                <div className={styles.categoriesRow}>
+                  <input
+                    className={styles.categoriesInput}
+                    placeholder="Ex: Salão, Bar, Cozinha"
+                    value={sectorNewDraft}
+                    onChange={(e) => setSectorNewDraft(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    className={styles.categoriesAddBtn}
+                    onClick={addSector}
+                    disabled={!normalizeSectorName(sectorNewDraft) || isReadOnly}
+                  >
+                    <IconPlus /> ADD
+                  </button>
+                </div>
+                <div className={styles.categoriesDivider} />
+
+                <div className={styles.categoriesList}>
+                  {sectorsSorted.map((s) => {
+                    const count = sectorCounts.get(s.id) ?? 0;
+                    const isGeral = normalizeSectorName(s.name).toLowerCase() === "geral";
+                    return (
+                      <div key={s.id} className={styles.categoryItem}>
+                        {editingSectorId === s.id ? (
+                          <>
+                            <input
+                              className={styles.categoryInlineInput}
+                              value={editingSectorDraft}
+                              onChange={(e) => setEditingSectorDraft(e.target.value)}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") confirmEditSector();
+                                if (e.key === "Escape") cancelEditSector();
+                              }}
+                              autoFocus
+                            />
+                            <div className={styles.categoryCount} />
+                            <div className={styles.categoryActions}>
+                              <button
+                                type="button"
+                                className={`${styles.categoryIconBtn} ${styles.categoryIconBtnConfirm}`}
+                                aria-label="Confirmar edição"
+                                onClick={confirmEditSector}
+                                disabled={!normalizeSectorName(editingSectorDraft)}
+                              >
+                                <IconCheck />
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className={styles.categoryName}>
+                              {isGeral ? <strong style={{ color: "#1f6feb" }}>{s.name}</strong> : s.name}
+                              {isGeral ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontSize: 10,
+                                    background: "#eef2ff",
+                                    color: "#1f6feb",
+                                    padding: "2px 6px",
+                                    borderRadius: 999,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  PADRÃO
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className={styles.categoryCount}>{count}</div>
+                            <div className={styles.categoryActions}>
+                              <button
+                                type="button"
+                                className={styles.categoryIconBtn}
+                                aria-label="Editar setor"
+                                onClick={() => editSector(s)}
+                                disabled={isReadOnly || isGeral}
+                                title={isGeral ? "O setor Geral não pode ser renomeado." : ""}
+                              >
+                                <IconEdit />
+                              </button>
+                              <button
+                                type="button"
+                                className={styles.categoryIconBtn}
+                                aria-label="Excluir setor"
+                                disabled={isReadOnly || isGeral}
+                                onClick={() => openDeleteSector(s)}
+                                title={isGeral ? "O setor Geral não pode ser excluído." : count > 0 ? `Existem ${count} vínculo(s) neste setor.` : ""}
+                              >
+                                <IconTrash />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body,
+          )
+        ) : null}
+
+        {mounted && isDeleteSectorOpen ? (
+          createPortal(
+          <div className={styles.modalOverlay} role="presentation" onClick={cancelDeleteSector}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+              <div className={styles.modalHeader}>
+                <div className={styles.modalTitle}>Excluir Setor?</div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={cancelDeleteSector}>
+                  ×
+                </button>
+              </div>
+
+              <div className={styles.confirmBody}>
+                <div className={styles.confirmIcon}>
+                  <IconTrash />
+                </div>
+                <div className={styles.confirmText}>
+                  Caso exclua o setor <strong>“{deletingSectorName}”</strong> não poderá recuperá-lo.
+                  {(deletingSectorLinks?.itemLinks ?? 0) > 0 || (deletingSectorLinks?.counts ?? 0) > 0 ? (
+                    <>
+                      <br />
+                      Existem <strong>{deletingSectorLinks?.itemLinks ?? 0} vínculos em itens</strong>
+                      {(deletingSectorLinks?.counts ?? 0) > 0 ? (
+                        <> e <strong>{deletingSectorLinks?.counts} contagens em inventários</strong></>
+                      ) : null}
+                      . Esses vínculos serão perdidos.
+                    </>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className={styles.confirmActions}>
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteSector}>
+                  Excluir
+                </button>
+                <button type="button" className={styles.confirmCancel} onClick={cancelDeleteSector}>
                   Cancelar
                 </button>
               </div>
