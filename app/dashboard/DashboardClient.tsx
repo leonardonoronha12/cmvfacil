@@ -522,6 +522,8 @@ type CalcSnapshot = {
 };
 
 type PeriodFlowSnapshot = {
+  startIso?: string;
+  endIso?: string;
   initialCents: number;
   comprasCents: number;
   finalCents: number;
@@ -1092,13 +1094,7 @@ export default function DashboardClient() {
     desperdiciosCents: number;
     rows: Row[];
   } | null>(() => readCmvRealSnapshot()?.calc ?? null);
-  const [periodFlow, setPeriodFlow] = useState<{
-    initialCents: number;
-    comprasCents: number;
-    finalCents: number;
-    saidasCents: number;
-    rows: Row[];
-  } | null>(() => readCmvRealSnapshot()?.periodFlow ?? null);
+  const [periodFlow, setPeriodFlow] = useState<PeriodFlowSnapshot | null>(() => readCmvRealSnapshot()?.periodFlow ?? null);
 
   function closeHistoryPanel() {
     setHistoryItem(null);
@@ -1641,12 +1637,14 @@ export default function DashboardClient() {
     for (const [id, u] of unitStartById.entries()) if (!unitById.has(id)) unitById.set(id, u);
 
     const insumoIdByKey = new Map<string, string>();
+    const insumoByNameKey = new Map<string, InsumoStoreItem>();
     const ocultarByInsumoId = new Map<string, boolean>();
     const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
       const key = normalizeKey(i.item);
       if (!key) continue;
+      if (!insumoByNameKey.has(key)) insumoByNameKey.set(key, i);
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
       const id = String(i.id ?? "").trim();
       if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
@@ -1696,7 +1694,7 @@ export default function DashboardClient() {
       for (const ing of safeArray<any>((r as any).ingredientes)) {
         const itemKey = normalizeKey(String(ing.item ?? ""));
         if (!itemKey) continue;
-        const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
+        const ins = insumoByNameKey.get(itemKey) ?? null;
         if (!ins) continue;
         const unitCost = avgUnitCostCentsByInsumoId.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
         if (!unitCost) continue;
@@ -1779,6 +1777,8 @@ export default function DashboardClient() {
     }
 
     setPeriodFlow({
+      startIso: startOpt.iso,
+      endIso: endOpt.iso,
       initialCents,
       comprasCents,
       finalCents,
@@ -1866,6 +1866,47 @@ export default function DashboardClient() {
       const contagemEnd = contagens.find((c) => c.data === endOpt.label) ?? null;
       if (!contagemStart || !contagemEnd) {
         setCalcError("Não foi possível localizar os inventários selecionados.");
+        return;
+      }
+
+      // O fluxo do período já foi calculado quando as datas foram selecionadas.
+      // Reaproveitá-lo evita repetir toda a varredura de inventários, entradas,
+      // insumos e pré-preparos no clique, que bloqueava contas com muitos dados.
+      if (periodFlow?.startIso === startOpt.iso && periodFlow?.endIso === endOpt.iso) {
+        const revenueCents = parseBrlToCents(revenue);
+        const targetCmvPercent = targetCmvProvided && targetCmvValue >= 1 && targetCmvValue <= 99 ? targetCmvValue : null;
+        const cmvPercent = revenueCents > 0 ? (periodFlow.saidasCents / revenueCents) * 100 : 0;
+        const deltaPp = targetCmvPercent != null ? cmvPercent - targetCmvPercent : 0;
+        let desperdiciosCents = 0;
+        for (const d of desperdiciosIntegrados) {
+          const dd = parseDateLabelLoose(d.data);
+          if (!dd) continue;
+          const t = startOfDay(dd).getTime();
+          if (t < minT || t > maxT) continue;
+          desperdiciosCents += parseBrlToCents(d.custo ?? "");
+        }
+
+        setLastCalc(readLastCalc());
+        setCalc({
+          cmvPercent,
+          deltaPp,
+          targetCmvPercent,
+          initialCents: periodFlow.initialCents,
+          comprasCents: periodFlow.comprasCents,
+          finalCents: periodFlow.finalCents,
+          saidasCents: periodFlow.saidasCents,
+          revenueCents,
+          desperdiciosCents,
+          rows: periodFlow.rows,
+        });
+        const computedAt = Date.now();
+        setCalcComputedAt(computedAt);
+        writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
+        showToast("Cálculo feito.", "success");
+        if (!searchParams.get("itemId") && !searchParams.get("item")) {
+          setHistoryItem(null);
+          setDetailsTab("entradas");
+        }
         return;
       }
 
