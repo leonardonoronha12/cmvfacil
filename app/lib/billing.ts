@@ -471,14 +471,40 @@ export async function createOrReuseCheckoutUrl(params: {
   const { supabase, company, companyId, userId, planKey, origin } = params;
 
   const checkoutUrl = String(company.checkout_url ?? "").trim();
-  const startedAt = String(company.checkout_started_at ?? "").trim();
-  const startedMs = startedAt ? Date.parse(startedAt) : NaN;
-  if (origin !== "signup" && checkoutUrl && startedAt && Number.isFinite(startedMs) && Date.now() - startedMs < 30 * 60 * 1000) {
-    const status = String(company.checkout_status ?? "").trim().toLowerCase();
-    if (status === "open" || !status) return checkoutUrl;
+  const stripe = getStripe();
+  const checkoutSessionId = String(company.stripe_checkout_session_id ?? "").trim();
+  const checkoutStatus = String(company.checkout_status ?? "").trim().toLowerCase();
+  const checkoutPlan = String(company.checkout_plan ?? "").trim().toLowerCase();
+
+  // A URL persistida pode apontar para uma sessão já expirada. A Stripe é a
+  // fonte de verdade: só reutilize a sessão quando ela ainda estiver aberta e
+  // corresponder ao plano solicitado.
+  if (origin !== "signup" && checkoutUrl && checkoutSessionId && (checkoutStatus === "open" || !checkoutStatus)) {
+    try {
+      const existingSession = await stripe.checkout.sessions.retrieve(checkoutSessionId);
+      const existingPlan = String(existingSession.metadata?.plan_key ?? checkoutPlan).trim().toLowerCase();
+      const existingUrl = String(existingSession.url ?? checkoutUrl).trim();
+      if (existingSession.status === "open" && existingPlan === planKey && existingUrl) {
+        return existingUrl;
+      }
+    } catch {
+      // Sessão ausente/inválida: descarte o snapshot local e crie outra.
+    }
+
+    await supabase
+      .from("companies")
+      .update({
+        checkout_status: "expired",
+        checkout_plan: null,
+        checkout_url: null,
+        stripe_checkout_session_id: null,
+        checkout_started_at: null,
+        checkout_abandoned_at: new Date().toISOString(),
+        subscription_updated_at: new Date().toISOString(),
+      } as any)
+      .eq("id", companyId);
   }
 
-  const stripe = getStripe();
   const customerId = await ensureStripeCustomerId({ supabase, stripe, company, companyId, userId });
   const priceId = getAllowedPriceId(planKey);
 
@@ -487,8 +513,9 @@ export async function createOrReuseCheckoutUrl(params: {
   const successUrl = `${returnUrl}?checkout=success&origin=${origin}&session_id={CHECKOUT_SESSION_ID}`;
   const cancelUrl = `${returnUrl}?checkout=cancel&origin=${origin}`;
 
-  const bucket = Math.floor(Date.now() / (30 * 60 * 1000));
-  const idempotencyKey = `checkout:create:${companyId}:${planKey}:${bucket}`;
+  // Uma tentativa nova não pode compartilhar a chave da sessão expirada;
+  // caso contrário a Stripe devolve novamente a mesma Checkout Session.
+  const idempotencyKey = `checkout:create:${companyId}:${planKey}:${Date.now()}`;
 
   const session = await stripe.checkout.sessions.create(
     {

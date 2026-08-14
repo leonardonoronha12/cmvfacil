@@ -483,15 +483,8 @@ export default function AjustesClient() {
     setBillingAction(planKey === "pro_monthly" ? "checkout_monthly" : "checkout_yearly");
     setBillingError("");
     try {
-      const existingUrl = String(billingAccess?.checkout?.url ?? "").trim();
-      const existingStatus = String(billingAccess?.checkout?.status ?? "").trim().toLowerCase();
-      if (existingUrl && existingStatus === "open") {
-        window.location.assign(existingUrl);
-        return;
-      }
-      if (existingStatus === "open") {
-        throw new Error("checkout_in_progress");
-      }
+      // Sempre passe pelo backend. Ele confirma na Stripe se a sessão salva
+      // ainda está aberta antes de devolver ou substituir a URL de checkout.
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
