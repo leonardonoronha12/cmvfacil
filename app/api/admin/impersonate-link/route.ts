@@ -287,17 +287,17 @@ export async function GET(req: NextRequest) {
     }
     if (error) return json({ ok: false, error: error.message }, { status: 500 });
 
-    const actionLink = (data as any)?.properties?.action_link ? String((data as any).properties.action_link) : "";
-    if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
+    const props = (data as any)?.properties ?? {};
+    const tokenHash = String(props?.hashed_token ?? props?.token_hash ?? "").trim();
+    const verificationType = String(props?.verification_type ?? props?.type ?? "").trim();
 
     if (mode === "redirect" || mode === "session") {
-      const verifyRes = await fetch(actionLink, { method: "GET", redirect: "manual", cache: "no-store" });
-      const location = String(verifyRes.headers.get("location") ?? "").trim();
-      const hash = location.includes("#") ? location.slice(location.indexOf("#") + 1) : "";
-      const params = new URLSearchParams(hash);
-      const accessToken = String(params.get("access_token") ?? "").trim();
-      const refreshToken = String(params.get("refresh_token") ?? "").trim();
-      if (!accessToken) return json({ ok: false, error: "missing_access_token_from_verify_redirect" }, { status: 500 });
+      if (!tokenHash || !verificationType) return json({ ok: false, error: "missing_impersonation_token" }, { status: 500 });
+      const verified = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: verificationType as any });
+      if (verified.error) return json({ ok: false, error: verified.error.message }, { status: 500 });
+      const accessToken = String(verified?.data?.session?.access_token ?? "").trim();
+      const refreshToken = String(verified?.data?.session?.refresh_token ?? "").trim();
+      if (!accessToken) return json({ ok: false, error: "missing_access_token_from_verify_otp" }, { status: 500 });
 
       const res =
         mode === "session"
@@ -311,7 +311,8 @@ export async function GET(req: NextRequest) {
       return res;
     }
 
-    return json({ ok: true, email, redirectTo, actionLink }, { status: 200 });
+    const actionLink = props?.action_link ? String(props.action_link) : "";
+    return json({ ok: true, email, redirectTo, ...(actionLink ? { actionLink } : {}) }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
