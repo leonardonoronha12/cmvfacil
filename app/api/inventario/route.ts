@@ -82,6 +82,97 @@ async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnT
   return false;
 }
 
+type CompanyScope = {
+  companyId: string | null;
+  userIds: string[];
+  bubbles: string[];
+  allowedPrefixes: string[];
+};
+
+async function resolveCompanyScope(supabase: ReturnType<typeof getSupabaseServerClient>, userId: string): Promise<CompanyScope> {
+  const empty: CompanyScope = { companyId: null, userIds: [userId], bubbles: [], allowedPrefixes: [`user:${userId}:`] };
+  if (!userId) return empty;
+  const uidRaw = String(userId).trim();
+  if (!isUuid(uidRaw)) return empty;
+
+  try {
+    let { data: myRows, error: myErr } = await supabase
+      .from("company_members")
+      .select("company_id,user_id,bubble_user_id,role,permission_level")
+      .eq("user_id", uidRaw)
+      .limit(50);
+    if (myErr) return empty;
+    if (!myRows?.length) {
+      const pf = await supabase
+        .from("user_profiles")
+        .select("bubble_user_id")
+        .eq("user_id", uidRaw)
+        .maybeSingle();
+      const bub = String((pf.data as any)?.bubble_user_id ?? "").trim();
+      if (bub) {
+        const fallback = await supabase
+          .from("company_members")
+          .select("company_id,user_id,bubble_user_id,role,permission_level")
+          .eq("bubble_user_id", bub)
+          .limit(50);
+        myRows = fallback.data ?? [];
+      }
+    }
+    if (!myRows?.length) return empty;
+    const cid = pickBestCompanyId(myRows as any[]);
+    if (!cid) return empty;
+
+    const { data: allMembers, error: allErr } = await supabase
+      .from("company_members")
+      .select("company_id,user_id,bubble_user_id")
+      .eq("company_id", cid)
+      .limit(500);
+    if (allErr) return empty;
+
+    const userIdsSet = new Set<string>();
+    const bubblesSet = new Set<string>();
+    for (const m of (allMembers ?? []) as any[]) {
+      const u = String(m?.user_id ?? "").trim();
+      if (u && isUuid(u)) userIdsSet.add(u);
+      const b = String(m?.bubble_user_id ?? "").trim();
+      if (b) bubblesSet.add(b);
+    }
+    if (!userIdsSet.has(uidRaw)) userIdsSet.add(uidRaw);
+    const userIds = Array.from(userIdsSet);
+    const bubbles = Array.from(bubblesSet);
+
+    const allowedPrefixes = userIds.map((u) => `user:${u}:`);
+    allowedPrefixes.push(`company:${cid}:`);
+
+    return { companyId: cid, userIds, bubbles, allowedPrefixes };
+  } catch {
+    return empty;
+  }
+}
+
+function parseDataContagemToTs(raw: unknown): number {
+  const s = String(raw ?? "").trim();
+  if (!s) return 0;
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})$/);
+  if (!m) {
+    const ts = Date.parse(s);
+    return Number.isFinite(ts) ? ts : 0;
+  }
+  let dd = Number(m[1]);
+  let mm = Number(m[2]);
+  let yyyy = Number(m[3]);
+  if (yyyy < 100) yyyy += 2000;
+  const d = new Date(yyyy, mm - 1, dd, 0, 0, 0, 0);
+  const ts = d.getTime();
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function inventoryAllowedForScope(id: string, scope: CompanyScope) {
+  const s = String(id ?? "").trim();
+  if (!s) return false;
+  return scope.allowedPrefixes.some((p) => s.startsWith(p));
+}
+
 function formatDateNumericPT(d: Date) {
   const day = String(d.getDate()).padStart(2, "0");
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -276,10 +367,25 @@ export async function GET(req: NextRequest) {
       return json({ source: "compat", readOnly: true, rows: legacyRows, compat: { totals, inventories: compatInventories } }, { status: 200 });
     }
 
+    const scope = await resolveCompanyScope(supabase, userId);
     const prefix = `${id}:`;
-    const { data, error } = await supabase.from("inventario").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
+
+    const parts = scope.allowedPrefixes.length ? scope.allowedPrefixes : [prefix];
+    const orClause = parts.map((p) => `id.like.${p}%`).join(",");
+    const { data, error } = await supabase.from("inventario").select("*").or(orClause);
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ source: "legacy", readOnly: false, rows: data ?? [] }, { status: 200 });
+
+    const rowsFiltered = (data ?? []).filter((r: any) => inventoryAllowedForScope((r as any)?.id, scope));
+    const rowsSorted = (rowsFiltered as any[]).slice().sort((a: any, b: any) => {
+      const tsa = parseDataContagemToTs(a?.data);
+      const tsb = parseDataContagemToTs(b?.data);
+      if (tsa !== tsb) return tsb - tsa;
+      const ca = a?.created_at ? Date.parse(String(a.created_at)) : 0;
+      const cb = b?.created_at ? Date.parse(String(b.created_at)) : 0;
+      if (ca !== cb) return cb - ca;
+      return String(a?.id ?? "").localeCompare(String(b?.id ?? ""));
+    });
+    return json({ source: "legacy", readOnly: false, rows: rowsSorted, scope: { companyId: scope.companyId, userIdsCount: scope.userIds.length, prefixesCount: scope.allowedPrefixes.length } }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -291,15 +397,24 @@ export async function POST(req: NextRequest) {
     if (src === "compat") return json({ error: "read_only" }, { status: 403 });
     const body = (await req.json().catch(() => null)) as unknown;
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
-    const { accessToken, id } = resolveUserScopedId(req);
-    const prefix = id ? `${id}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    const { accessToken, id, rawUserId } = resolveUserScopedId(req);
+    const myPrefix = id ? `${id}:` : "";
+    if (!myPrefix) return json({ error: "unauthorized" }, { status: 401 });
     const invId = String((body as any).id ?? "").trim();
-    if (!invId || !invId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    if (!invId) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
+    const myUserId = id!.slice("user:".length);
+    const scope = await resolveCompanyScope(supabase, myUserId);
+    if (!inventoryAllowedForScope(invId, scope)) {
+      if (rawUserId && isAdminUserId(rawUserId) && invId.startsWith(myPrefix)) {
+        // admin impersonating self explicitly still allowed
+      } else {
+        return json({ error: "invalid_id_scope" }, { status: 400 });
+      }
+    }
     const { error } = await supabase.from("inventario").upsert(body as any, { onConflict: "id" });
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    return json({ ok: true, matchedCompanyId: scope.companyId }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -312,14 +427,19 @@ export async function DELETE(req: NextRequest) {
     if (src === "compat") return json({ error: "read_only" }, { status: 403 });
     const id = (url.searchParams.get("id") ?? "").trim();
     if (!id) return json({ error: "missing_id" }, { status: 400 });
-    const { accessToken, id: userScopedId } = resolveUserScopedId(req);
-    const prefix = userScopedId ? `${userScopedId}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
-    if (!id.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    const { accessToken, id: userScopedId, rawUserId } = resolveUserScopedId(req);
+    const myPrefix = userScopedId ? `${userScopedId}:` : "";
+    if (!myPrefix) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    const myUserId = userScopedId!.slice("user:".length);
+    const scope = await resolveCompanyScope(supabase, myUserId);
+    if (!inventoryAllowedForScope(id, scope)) {
+      const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
+      if (!(isAdmin && id.startsWith(myPrefix))) return json({ error: "invalid_id_scope" }, { status: 400 });
+    }
     const { error } = await supabase.from("inventario").delete().eq("id", id);
     if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true }, { status: 200 });
+    return json({ ok: true, matchedCompanyId: scope.companyId }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
