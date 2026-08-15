@@ -289,11 +289,10 @@ export async function GET(req: NextRequest) {
 
     const props = (data as any)?.properties ?? {};
     const tokenHash = String(props?.hashed_token ?? props?.token_hash ?? "").trim();
-    const verificationType = String(props?.verification_type ?? props?.type ?? "").trim();
 
     if (mode === "redirect" || mode === "session") {
-      if (!tokenHash || !verificationType) return json({ ok: false, error: "missing_impersonation_token" }, { status: 500 });
-      const verified = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: verificationType as any });
+      if (!tokenHash) return json({ ok: false, error: "missing_impersonation_token" }, { status: 500 });
+      const verified = await supabase.auth.verifyOtp({ token_hash: tokenHash, type: "email" });
       if (verified.error) return json({ ok: false, error: verified.error.message }, { status: 500 });
       const accessToken = String(verified?.data?.session?.access_token ?? "").trim();
       const refreshToken = String(verified?.data?.session?.refresh_token ?? "").trim();
