@@ -231,6 +231,29 @@ export default function InventarioClient() {
 
   const geralSector = useMemo<SectorRow | null>(() => sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral") ?? null, [sectorsSorted]);
 
+  const knownSectorIds = useMemo(() => new Set(sectorsSorted.map((s) => String(s.id ?? "").trim()).filter(Boolean)), [sectorsSorted]);
+  function getItemSectorIds(r: InventarioItemRow): Set<string> {
+    const out = new Set<string>();
+    const explicitSectorIds = Array.isArray((r as any).sectorIds) ? ((r as any).sectorIds as any[]) : [];
+    for (const s of explicitSectorIds) {
+      const x = String(s ?? "").trim();
+      if (x) out.add(x);
+    }
+    const sc = (r as any).sectorCounts as Record<string, string> | undefined;
+    if (sc && typeof sc === "object") {
+      for (const sid of Object.keys(sc)) {
+        const key = String(sid ?? "").trim();
+        if (!key) continue;
+        if (!knownSectorIds.has(key)) continue;
+        if (String(sc[sid] ?? "").trim()) out.add(key);
+      }
+    }
+    return out;
+  }
+  function itemHasSectors(r: InventarioItemRow): boolean {
+    return getItemSectorIds(r).size > 0;
+  }
+
   function showSectorNotice(msg: string, isError = false) {
     setSectorSaveErrorMsg(msg);
     window.setTimeout(() => {
@@ -342,21 +365,39 @@ export default function InventarioClient() {
         out.push(it);
       }
     }
+    return out;
+  }, [fichaTecnicaNameKeys, inventoryCatalogIds, selectedContagem?.categorias]);
+
+  const filteredItems = useMemo(() => {
+    let rows = allItems;
+    if (isCompatSource) {
+      const q = query.trim().toLowerCase();
+      const afterQuery = q ? rows.filter((r) => r.item.toLowerCase().includes(q)) : rows;
+      if (categoriaFilter !== "Categorias pendentes") {
+        const desired = normCatName(categoriaFilter).toLowerCase();
+        return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
+      }
+      return afterQuery;
+    }
+    const inSelectedSectorMode = selectedSectorId && selectedSectorId !== "Todos";
+    if (inSelectedSectorMode) {
+      rows = rows.filter((r) => getItemSectorIds(r).has(String(selectedSectorId)));
+    }
     const q = query.trim().toLowerCase();
-    const afterQuery = q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
+    const afterQuery = q ? rows.filter((r) => r.item.toLowerCase().includes(q)) : rows;
     if (categoriaFilter !== "Categorias pendentes") {
       const desired = normCatName(categoriaFilter).toLowerCase();
       return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
     }
     return afterQuery;
-  }, [categoriaFilter, fichaTecnicaNameKeys, inventoryCatalogIds, itemCategoryMap, query, selectedContagem?.categorias]);
+  }, [allItems, categoriaFilter, isCompatSource, itemCategoryMap, query, selectedSectorId]);
 
-  const pendentes = useMemo(() => allItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [allItems]);
+  const pendentes = useMemo(() => filteredItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [filteredItems]);
   const contabilizados = useMemo(() => {
-    const list = allItems.filter((r) => String(r.estoqueFinal ?? "").trim());
+    const list = filteredItems.filter((r) => String(r.estoqueFinal ?? "").trim());
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
     return [...list].sort((a, b) => collator.compare(a.item, b.item));
-  }, [allItems]);
+  }, [filteredItems]);
 
   const qaUi = useMemo(() => {
     if (isCompatSource) {
@@ -1416,7 +1457,7 @@ export default function InventarioClient() {
                   fontWeight: 600,
                 }}
               >
-                Dica: para editar as contagens, selecione acima um setor específico. No modo “Todos” você visualiza apenas o total consolidado.
+                Itens com setores são contabilizados separadamente. Itens sem setor podem ser contados diretamente no Geral.
               </div>
             ) : null}
 
@@ -1475,7 +1516,7 @@ export default function InventarioClient() {
                       · Setor: {sectorsSorted.find((s) => s.id === selectedSectorId)?.name ?? "-"}
                     </span>
                   ) : (
-                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, opacity: 0.75 }}>· Consolidado (só visualização)</span>
+                    <span style={{ marginLeft: 10, fontSize: 11, fontWeight: 700, opacity: 0.75 }}>· Consolidado</span>
                   )}
                 </div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
@@ -1485,7 +1526,14 @@ export default function InventarioClient() {
                       selectedSectorId !== "Todos"
                         ? String(pendingDrafts[r.id] ?? sc[selectedSectorId] ?? "")
                         : String(pendingDrafts[r.id] ?? r.estoqueFinal ?? "");
-                    const editDisabled = selectedSectorId === "Todos" || isReadOnly;
+                    const rowHasSectors = itemHasSectors(r);
+                    const editDisabled = isReadOnly || (selectedSectorId === "Todos" && rowHasSectors);
+                    const disabledReason = (() => {
+                      if (!editDisabled) return "";
+                      if (selectedSectorId === "Todos" && rowHasSectors) return "Item com setores: contabilize em um setor específico.";
+                      if (isReadOnly) return "Somente leitura.";
+                      return "";
+                    })();
                     return (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
@@ -1566,9 +1614,9 @@ export default function InventarioClient() {
                               e.currentTarget.blur();
                             }
                           }}
-                          placeholder={editDisabled ? "Selecione setor" : "0"}
-                          title={editDisabled ? "Selecione um setor específico para editar" : ""}
-                          style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: "not-allowed" } : undefined}
+                          placeholder={editDisabled ? (rowHasSectors && selectedSectorId === "Todos" ? "Contar em setor" : "0") : "0"}
+                          title={disabledReason}
+                          style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: rowHasSectors && selectedSectorId === "Todos" ? "not-allowed" : "text" } : undefined}
                         />
                         <div className={styles.unitPill}>{r.unidade}</div>
                       </div>
@@ -1594,7 +1642,14 @@ export default function InventarioClient() {
                     const sectorEntries = Object.entries(sc).filter(([, v]) => String(v ?? "").trim());
                     const byId = new Map(sectorsSorted.map((s) => [s.id, s]));
                     const totalNum = sectorEntries.reduce((a, [, v]) => a + parsePtNumber(String(v ?? "")), 0);
-                    const editDisabled = selectedSectorId === "Todos" || isReadOnly;
+                    const rowHasSectors = itemHasSectors(r);
+                    const editDisabled = isReadOnly || (selectedSectorId === "Todos" && rowHasSectors);
+                    const disabledReason = (() => {
+                      if (!editDisabled) return "";
+                      if (selectedSectorId === "Todos" && rowHasSectors) return "Item com setores: contabilize em um setor específico.";
+                      if (isReadOnly) return "Somente leitura.";
+                      return "";
+                    })();
                     const activeSectorDisplay =
                       selectedSectorId !== "Todos"
                         ? editingItemId === r.id
@@ -1670,7 +1725,9 @@ export default function InventarioClient() {
                               value={editingValue}
                               disabled={editDisabled}
                               onChange={(e) => setEditingValue(e.target.value)}
-                              style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: "not-allowed" } : undefined}
+                              style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: rowHasSectors && selectedSectorId === "Todos" ? "not-allowed" : "text" } : undefined}
+                              placeholder={editDisabled && rowHasSectors && selectedSectorId === "Todos" ? "Contar em setor" : undefined}
+                              title={disabledReason}
                               onKeyDown={(e) => {
                                 if (editDisabled) return;
                                 if (e.key === "Enter") {
@@ -1727,7 +1784,7 @@ export default function InventarioClient() {
                               }
                             }}
                             style={editDisabled ? { cursor: "default", opacity: 0.85 } : undefined}
-                            title={editDisabled ? "Selecione um setor específico para editar" : "Clique para editar"}
+                            title={editDisabled ? disabledReason || "Selecione um setor específico para editar" : "Clique para editar"}
                           >
                             <div>
                               {editingItemId !== r.id && selectedSectorId !== "Todos" && sectorEntries.length > 1 ? (

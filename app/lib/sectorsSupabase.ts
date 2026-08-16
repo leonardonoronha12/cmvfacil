@@ -65,8 +65,17 @@ export async function saveSectorToSupabase(sector: { id?: string; name: string }
     headers: { "content-type": "application/json" },
     body: JSON.stringify(sector),
   });
-  const json = (await res.json().catch(() => null)) as { sector?: unknown; ok?: boolean; error?: string } | null;
-  if (!res.ok || !json?.ok || !json.sector) throw new Error(json?.error || `failed_to_save_sector_${res.status}`);
+  const json = (await res.json().catch(() => null)) as { sector?: unknown; ok?: boolean; error?: string; message?: string } | null;
+  if (!res.ok || !json?.ok || !json.sector) {
+    const code = String(json?.error ?? `failed_to_save_sector_${res.status}`);
+    if (code === "duplicate_sector") throw new Error("duplicate_sector");
+    if (code === "missing_name") throw new Error("missing_name");
+    if (code === "missing_scope") throw new Error("missing_scope");
+    if (code === "not_found") throw new Error("not_found");
+    if (code === "cannot_delete_geral") throw new Error("cannot_delete_geral");
+    if (code === "forbidden") throw new Error("forbidden");
+    throw new Error(String(json?.error || json?.message || `failed_to_save_sector_${res.status}`));
+  }
   const s = json.sector as Record<string, unknown>;
   return {
     id: String(s.id ?? "").trim(),

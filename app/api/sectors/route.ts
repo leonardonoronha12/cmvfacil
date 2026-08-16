@@ -85,6 +85,70 @@ function normalizeSectorName(value: string) {
   return value.replace(/\s+/g, " ").trim().slice(0, 80);
 }
 
+async function resolveCompanyFor(db: any, userId: string): Promise<{ companyId: string | null; userIds: Set<string>; bubbles: Set<string> }> {
+  const empty = { companyId: null as string | null, userIds: new Set<string>(), bubbles: new Set<string>() };
+  if (!userId || !isUuid(userId)) return empty;
+  try {
+    let { data: mine, error: myErr } = await db
+      .from("company_members")
+      .select("company_id,user_id,bubble_user_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (myErr) return empty;
+    if (!mine?.length) {
+      try {
+        const pf = await db.from("user_profiles").select("bubble_user_id").eq("user_id", userId).maybeSingle();
+        const bub = String((pf.data as any)?.bubble_user_id ?? "").trim();
+        if (bub) {
+          const byBubble = await db
+            .from("company_members")
+            .select("company_id,user_id,bubble_user_id,role,permission_level")
+            .eq("bubble_user_id", bub)
+            .limit(50);
+          mine = byBubble.data ?? [];
+        }
+      } catch {}
+    }
+    if (!mine?.length) return empty;
+    const cid = pickBestCompanyId(mine as any[]);
+    if (!cid) return empty;
+    const all = await db
+      .from("company_members")
+      .select("company_id,user_id,bubble_user_id")
+      .eq("company_id", cid)
+      .limit(500);
+    if (all.error) return empty;
+    const userIds = new Set<string>();
+    const bubbles = new Set<string>();
+    for (const r of (all.data ?? []) as any[]) {
+      const u = String(r?.user_id ?? "").trim();
+      if (u && isUuid(u)) userIds.add(u);
+      const b = String(r?.bubble_user_id ?? "").trim();
+      if (b) bubbles.add(b);
+    }
+    if (!userIds.has(userId)) userIds.add(userId);
+    return { companyId: cid, userIds, bubbles };
+  } catch {
+    return empty;
+  }
+}
+
+function mapSupabaseSectorErrorToCode(dbError: any): { code: string; message: string } {
+  const msg = String(dbError?.message ?? "").toLowerCase();
+  const code = String(dbError?.code ?? "");
+  const details = String(dbError?.details ?? "").toLowerCase();
+  if (code === "23505" || msg.includes("duplicate") || details.includes("duplicate")) {
+    return { code: "duplicate_sector", message: "duplicate_sector" };
+  }
+  if (msg.includes("violates row-level security") || msg.includes("rls")) {
+    return { code: "forbidden", message: "forbidden" };
+  }
+  if (code === "23502" || msg.includes("violates not-null")) {
+    return { code: "missing_scope", message: "missing_scope" };
+  }
+  return { code: "db_error", message: String(dbError?.message ?? String(dbError)) };
+}
+
 async function ensureGeralSector(db: any, scope: { companyId: string | null; userScopeId: string | null }) {
   try {
     const selectQ = db.from("sectors").select("id,name");
@@ -126,8 +190,8 @@ export async function GET(req: NextRequest) {
 
     let companyId: string | null = null;
     if (isUuid(userId)) {
-      const { data: memberRows, error } = await db.from("company_members").select("company_id,role,permission_level").eq("user_id", userId).limit(50);
-      if (!error) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      const r = await resolveCompanyFor(db, userId);
+      companyId = r.companyId;
     }
     const scope = { companyId, userScopeId: userScopeId && !companyId ? userScopeId : null };
 
@@ -203,16 +267,16 @@ export async function POST(req: NextRequest) {
 
     let companyId: string | null = null;
     if (isUuid(userId)) {
-      const { data: memberRows, error } = await db.from("company_members").select("company_id,role,permission_level").eq("user_id", userId).limit(50);
-      if (!error) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      const r = await resolveCompanyFor(db, userId);
+      companyId = r.companyId;
     }
     const scope = { companyId, userScopeId: userScopeId && !companyId ? userScopeId : null };
 
     const body = (await req.json().catch(() => null)) as any;
-    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
+    if (!body || typeof body !== "object") return json({ ok: false, error: "invalid_body" }, { status: 400 });
     const idRaw = String(body.id ?? "").trim();
     const name = normalizeSectorName(String(body.name ?? ""));
-    if (!name) return json({ error: "missing_name" }, { status: 400 });
+    if (!name) return json({ ok: false, error: "missing_name" }, { status: 400 });
 
     if (idRaw && isUuid(idRaw)) {
       const updateQ = db.from("sectors").update({ name }).eq("id", idRaw);
@@ -220,19 +284,44 @@ export async function POST(req: NextRequest) {
         ? await updateQ.eq("company_id", scope.companyId).select("id,name").maybeSingle()
         : scope.userScopeId
           ? await updateQ.eq("user_scope_id", scope.userScopeId).select("id,name").maybeSingle()
-          : { data: null, error: new Error("no_scope") };
-      if (updateRes.error) return json({ error: updateRes.error.message }, { status: 500 });
-      if (!updateRes.data) return json({ error: "not_found" }, { status: 404 });
+          : { data: null, error: new Error("no_scope") as any };
+      if (updateRes.error) {
+        const mapped = mapSupabaseSectorErrorToCode(updateRes.error);
+        return json({ ok: false, error: mapped.code, message: mapped.message }, { status: /^duplicate_/i.test(mapped.code) ? 409 : 500 });
+      }
+      if (!updateRes.data) return json({ ok: false, error: "not_found" }, { status: 404 });
       return json({ ok: true, sector: updateRes.data });
+    }
+
+    const nameNorm = normalizeSectorName(name).toLowerCase();
+    const matchLike = "%" + nameNorm.replace(/[%_\\]/g, (c) => `\\${c}`) + "%";
+    if (scope.companyId) {
+      try {
+        const chk = await db.from("sectors").select("id,name").eq("company_id", scope.companyId).ilike("name", matchLike).limit(100);
+        if (!chk.error && Array.isArray(chk.data)) {
+          for (const s of chk.data) if (normalizeSectorName(String((s as any).name ?? "")).toLowerCase() === nameNorm) return json({ ok: false, error: "duplicate_sector" }, { status: 409 });
+        }
+      } catch {}
+    } else if (scope.userScopeId) {
+      try {
+        const chk = await db.from("sectors").select("id,name").eq("user_scope_id", scope.userScopeId).ilike("name", matchLike).limit(100);
+        if (!chk.error && Array.isArray(chk.data)) {
+          for (const s of chk.data) if (normalizeSectorName(String((s as any).name ?? "")).toLowerCase() === nameNorm) return json({ ok: false, error: "duplicate_sector" }, { status: 409 });
+        }
+      } catch {}
     }
 
     const insert: any = { name };
     if (scope.companyId) insert.company_id = scope.companyId;
     else if (scope.userScopeId) insert.user_scope_id = scope.userScopeId;
-    else return json({ error: "missing_scope" }, { status: 400 });
-    const { data, error } = await db.from("sectors").insert([insert]).select("id,name,company_id,user_scope_id").maybeSingle();
-    if (error) return json({ error: error.message }, { status: 500 });
-    return json({ ok: true, sector: (data as any) ?? null });
+    else return json({ ok: false, error: "missing_scope" }, { status: 400 });
+    const insertRes = await db.from("sectors").insert([insert]).select("id,name,company_id,user_scope_id").maybeSingle();
+    if (insertRes.error) {
+      const mapped = mapSupabaseSectorErrorToCode(insertRes.error);
+      const status = mapped.code === "duplicate_sector" ? 409 : 500;
+      return json({ ok: false, error: mapped.code }, { status });
+    }
+    return json({ ok: true, sector: (insertRes.data as any) ?? null });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
@@ -253,8 +342,8 @@ export async function DELETE(req: NextRequest) {
 
     let companyId: string | null = null;
     if (isUuid(userId)) {
-      const { data: memberRows, error } = await db.from("company_members").select("company_id,role,permission_level").eq("user_id", userId).limit(50);
-      if (!error) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      const r = await resolveCompanyFor(db, userId);
+      companyId = r.companyId;
     }
     const scope = { companyId, userScopeId: userScopeId && !companyId ? userScopeId : null };
 

@@ -1426,16 +1426,41 @@ export default function InsumosClient() {
     setIsSectorsOpen(true);
   }
 
+  function describeSectorError(code: string): string {
+    switch (String(code ?? "")) {
+      case "duplicate_sector":
+        return "Já existe um setor com este nome na sua empresa.";
+      case "missing_name":
+        return "Informe o nome do setor.";
+      case "missing_scope":
+        return "Não foi possível identificar sua empresa. Recarregue e tente novamente.";
+      case "not_found":
+        return "Setor não encontrado.";
+      case "cannot_delete_geral":
+        return "Não é possível excluir o setor Geral.";
+      case "sector_in_use":
+        return "O setor está em uso e não pode ser excluído.";
+      case "forbidden":
+        return "Acesso negado. Contate o administrador.";
+      default:
+        return "";
+    }
+  }
+
   async function addSector() {
     const name = normalizeSectorName(sectorNewDraft);
     if (!name) return;
     try {
       const created = await saveSectorToSupabase({ name });
-      setSectors((prev) => [...prev, created]);
-      if (created.id) setSectors((prev) => { writeSectorsToStore(prev); return prev; });
-      writeSectorsToStore([...sectors, created]);
+      setSectors((prev) => {
+        const next = [...prev, created];
+        writeSectorsToStore(next);
+        return next;
+      });
     } catch (err) {
-      showToast(`Não foi possível criar o setor (${(err as any)?.message ?? String(err)}).`, "error");
+      const raw = String((err as any)?.message ?? String(err) ?? "");
+      const msg = describeSectorError(raw) || `Não foi possível criar o setor (${raw}).`;
+      showToast(msg, "error");
       return;
     }
     setSectorNewDraft("");
@@ -1464,7 +1489,9 @@ export default function InsumosClient() {
         return next;
       });
     } catch (err) {
-      showToast(`Não foi possível renomear o setor (${(err as any)?.message ?? String(err)}).`, "error");
+      const raw = String((err as any)?.message ?? String(err) ?? "");
+      const msg = describeSectorError(raw) || `Não foi possível renomear o setor (${raw}).`;
+      showToast(msg, "error");
       return;
     }
     cancelEditSector();
