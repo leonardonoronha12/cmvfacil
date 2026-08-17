@@ -81,6 +81,10 @@ function resolveSectorNamesToIds(
   return out;
 }
 
+function canonicalItemId(value: unknown): string {
+  return String(value ?? "").trim().replace(/^db:/i, "");
+}
+
 function buildItemSectorIds(
   dataRows: InsumoRow[],
   loadedLinks: Array<{ itemId: string; sectorId: string }>,
@@ -96,7 +100,8 @@ function buildItemSectorIds(
         continue;
       }
     }
-    const fromLinks = loadedLinks.filter((l) => l.itemId === r.id).map((l) => l.sectorId);
+    const rowItemId = canonicalItemId(r.id);
+    const fromLinks = loadedLinks.filter((l) => canonicalItemId(l.itemId) === rowItemId).map((l) => l.sectorId);
     const uniq = Array.from(new Set(fromLinks)).filter(Boolean);
     if (uniq.length) byItem.set(r.id, uniq);
     else if (geralId) byItem.set(r.id, [geralId]);
@@ -696,11 +701,15 @@ export default function InsumosClient() {
       for (const r of dataRows) {
         let ids = Array.isArray(r.sectorIds) ? r.sectorIds.filter((x) => isUuidValue(x)) : [];
         if (!ids.length && geralId) ids = [geralId];
-        payload.push({ itemId: r.id, sectorIds: ids });
+        payload.push({ itemId: canonicalItemId(r.id), sectorIds: ids });
       }
       if (!payload.length) return;
       void saveItemSectorsToSupabase(payload)
-        .then(() => {})
+        .then(() => {
+          setItemSectorLinks(
+            payload.flatMap((entry) => entry.sectorIds.map((sectorId) => ({ itemId: entry.itemId, sectorId }))),
+          );
+        })
         .catch((err) => {
           showToast(`Não foi possível salvar vínculos de setor (${err?.message ?? err}).`, "error");
         });
@@ -1115,7 +1124,8 @@ export default function InsumosClient() {
     setNewSpec(row.especificacao === "-" ? "" : row.especificacao);
     setNewUnit(row.medida === "-" ? "" : row.medida);
     setNewInitialCost(String(row.custoMedio ?? "").replace(/^R\$\s?/, "").trim().replace(".", ","));
-    const linksFor = itemSectorLinks.filter((l) => l.itemId === row.id).map((l) => l.sectorId);
+    const rowItemId = canonicalItemId(row.id);
+    const linksFor = itemSectorLinks.filter((l) => canonicalItemId(l.itemId) === rowItemId).map((l) => l.sectorId);
     const fallback = geralSector?.id ? [geralSector.id] : [];
     const editIds: string[] = (Array.isArray(row.sectorIds) ? row.sectorIds : []).filter((x) => isUuidValue(x));
     const merged = Array.from(new Set([...editIds, ...linksFor])).filter(Boolean);
@@ -1393,18 +1403,15 @@ export default function InsumosClient() {
 
   const sectorCounts = useMemo(() => {
     const map = new Map<string, number>();
-    for (const l of itemSectorLinks) {
-      map.set(l.sectorId, (map.get(l.sectorId) ?? 0) + 1);
-    }
     for (const r of dataRows) {
       if (r.sectorIds?.length) {
         for (const sid of r.sectorIds) {
-          if (!map.has(sid)) map.set(sid, 0);
+          map.set(sid, (map.get(sid) ?? 0) + 1);
         }
       }
     }
     return map;
-  }, [itemSectorLinks, dataRows]);
+  }, [dataRows]);
 
   const geralSector = useMemo(
     () => sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral") ?? null,

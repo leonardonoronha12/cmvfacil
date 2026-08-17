@@ -214,6 +214,7 @@ export default function InventarioClient() {
   const [query, setQuery] = useState("");
   const [categoriaFilter, setCategoriaFilter] = useState("Categorias pendentes");
   const [sectors, setSectors] = useState<SectorRow[]>(() => readSectorsFromStore());
+  const [itemSectorLinks, setItemSectorLinks] = useState<Array<{ itemId: string; sectorId: string }>>([]);
   const [selectedSectorId, setSelectedSectorId] = useState<string>("Todos");
   const [sectorSaveErrorMsg, setSectorSaveErrorMsg] = useState<string>("");
   const sectorInventorySyncVersionRef = useRef(0);
@@ -231,13 +232,31 @@ export default function InventarioClient() {
 
   const geralSector = useMemo<SectorRow | null>(() => sectorsSorted.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral") ?? null, [sectorsSorted]);
 
-  const knownSectorIds = useMemo(() => new Set(sectorsSorted.map((s) => String(s.id ?? "").trim()).filter(Boolean)), [sectorsSorted]);
+  const knownSectorIds = useMemo(
+    () =>
+      new Set(
+        sectorsSorted
+          .filter((s) => normalizeSectorName(s.name).toLowerCase() !== "geral")
+          .map((s) => String(s.id ?? "").trim())
+          .filter(Boolean),
+      ),
+    [sectorsSorted],
+  );
+  function canonicalItemId(value: unknown): string {
+    return String(value ?? "").trim().replace(/^db:/i, "");
+  }
   function getItemSectorIds(r: InventarioItemRow): Set<string> {
     const out = new Set<string>();
     const explicitSectorIds = Array.isArray((r as any).sectorIds) ? ((r as any).sectorIds as any[]) : [];
     for (const s of explicitSectorIds) {
       const x = String(s ?? "").trim();
-      if (x) out.add(x);
+      if (x && knownSectorIds.has(x)) out.add(x);
+    }
+    const rowItemId = canonicalItemId(r.id);
+    for (const link of itemSectorLinks) {
+      if (canonicalItemId(link.itemId) !== rowItemId) continue;
+      const sectorId = String(link.sectorId ?? "").trim();
+      if (knownSectorIds.has(sectorId)) out.add(sectorId);
     }
     const sc = (r as any).sectorCounts as Record<string, string> | undefined;
     if (sc && typeof sc === "object") {
@@ -534,6 +553,7 @@ export default function InventarioClient() {
         const loaded = await loadSectorsFromSupabase();
         if (loaded.sectors.length) writeSectorsToStore(loaded.sectors);
         setSectors(loaded.sectors);
+        setItemSectorLinks(loaded.itemLinks ?? []);
       } catch {}
     })();
     return subscribeSectors((rows) => setSectors(rows));
@@ -1435,7 +1455,7 @@ export default function InventarioClient() {
                   style={{ minWidth: 150 }}
                 >
                   <option value="Todos">Todos / Consolidado</option>
-                  {sectorsSorted.map((s) => (
+                  {sectorsSorted.filter((s) => normalizeSectorName(s.name).toLowerCase() !== "geral").map((s) => (
                     <option key={s.id} value={s.id}>
                       Setor: {s.name}
                     </option>
