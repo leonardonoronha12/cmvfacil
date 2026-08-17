@@ -654,6 +654,7 @@ export default function PrePreparoClient() {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>([]);
+  const [isSavingNewRecipe, setIsSavingNewRecipe] = useState(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
     if (typeof window === "undefined") return { source: "legacy", readOnly: false };
     const params = new URLSearchParams(window.location.search);
@@ -4138,8 +4139,8 @@ export default function PrePreparoClient() {
                 <button
                   type="button"
                   className={styles.recipeNextBtn}
-                  disabled={newRecipeStep === 1 ? !canGoNextRecipe : newRecipeStep === 2 ? !canGoNextRecipeStep2 : false}
-                  onClick={() => {
+                  disabled={isSavingNewRecipe || (newRecipeStep === 1 ? !canGoNextRecipe : newRecipeStep === 2 ? !canGoNextRecipeStep2 : false)}
+                  onClick={async () => {
                     if (newRecipeStep === 1 && !canGoNextRecipe) return;
                     if (newRecipeStep === 2 && !canGoNextRecipeStep2) return;
                     if (newRecipeStep === 3) {
@@ -4152,21 +4153,30 @@ export default function PrePreparoClient() {
                       const totalLabel = formatCurrencyBRLFromCents(recipeTotalCents);
                       const rendimentoLabel = `${formatPtQty(recipeYieldValue)}${newRecipeYieldUnit}`;
                       const unitCostLabel = `${recipeUnitCost.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} / ${newRecipeYieldUnit}`;
-                      setRows((prev) => [
-                        {
-                          id: nextId,
-                          categoria: newRecipeCategory,
-                          receita: newRecipeName.trim(),
-                          recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
-                          custoTotal: totalLabel,
-                          rendimento: rendimentoLabel,
-                          custoUnitario: unitCostLabel,
-                          validadeDias: clampNonNegativeInt(Number.parseInt(newRecipeValidity.replace(/[^\d]/g, "") || "0", 10)) || 7,
-                          modoPreparo: "",
-                          ingredientes: newRecipeIngredients,
-                        },
-                        ...prev,
-                      ]);
+                      const newRow: PrePreparoRow = {
+                        id: nextId,
+                        categoria: newRecipeCategory,
+                        receita: newRecipeName.trim(),
+                        recipeImage: newRecipeImageUrl ? newRecipeImageUrl : undefined,
+                        custoTotal: totalLabel,
+                        rendimento: rendimentoLabel,
+                        custoUnitario: unitCostLabel,
+                        validadeDias: clampNonNegativeInt(Number.parseInt(newRecipeValidity.replace(/[^\d]/g, "") || "0", 10)) || 7,
+                        modoPreparo: "",
+                        ingredientes: newRecipeIngredients,
+                      };
+                      const nextRows = [newRow, ...rows];
+                      setIsSavingNewRecipe(true);
+                      try {
+                        await savePrePreparoToSupabase(nextRows as any);
+                        setRows(nextRows);
+                        prePreparoSaveErrorShownRef.current = false;
+                      } catch (error) {
+                        showToast(supabaseSaveErrorMessage(error), "error");
+                        return;
+                      } finally {
+                        setIsSavingNewRecipe(false);
+                      }
                       setSelectedCategory("Categorias");
                       setQuery("");
                       setIsNewRecipeOpen(false);
@@ -4175,7 +4185,7 @@ export default function PrePreparoClient() {
                     setNewRecipeStep((s) => (s === 1 ? 2 : s === 2 ? 3 : 3));
                   }}
                 >
-                  {newRecipeStep === 3 ? "Salvar" : "Próximo"}
+                  {newRecipeStep === 3 ? (isSavingNewRecipe ? "Salvando..." : "Salvar") : "Próximo"}
                 </button>
               </div>
             </div>
