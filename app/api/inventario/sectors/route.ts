@@ -179,6 +179,44 @@ function toCountedRows(items: BulkItem[], meta: { scope: { companyId?: string | 
     .filter(Boolean) as any[];
 }
 
+async function updateExistingCount(db: any, row: any) {
+  let query = db
+    .from("inventory_item_sector_counts")
+    .update({
+      quantity: row.quantity,
+      counted_by_user_id: row.counted_by_user_id,
+      counted_at: row.counted_at,
+    })
+    .eq("inventory_id", row.inventory_id)
+    .eq("item_id", row.item_id)
+    .eq("sector_id", row.sector_id);
+
+  query = row.company_id
+    ? query.eq("company_id", row.company_id)
+    : query.eq("user_scope_id", row.user_scope_id);
+
+  return await query.select("id").limit(1);
+}
+
+async function persistCountRow(db: any, row: any): Promise<string | null> {
+  const updated = await updateExistingCount(db, row);
+  if (updated.error) return updated.error.message;
+  if ((updated.data ?? []).length > 0) return null;
+
+  const inserted = await db.from("inventory_item_sector_counts").insert(row);
+  if (!inserted.error) return null;
+
+  // The unique index protects concurrent writes. If another request inserted
+  // this key between UPDATE and INSERT, finish by updating that row.
+  if (String(inserted.error.code ?? "") === "23505") {
+    const retried = await updateExistingCount(db, row);
+    if (!retried.error && (retried.data ?? []).length > 0) return null;
+    return retried.error?.message ?? inserted.error.message;
+  }
+
+  return inserted.error.message;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const scopeCtx = resolveScope(req);
@@ -207,18 +245,14 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => null)) as any;
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
 
-    const conflict = scope.companyId
-      ? "company_id,inventory_id,item_id,sector_id"
-      : "user_scope_id,inventory_id,item_id,sector_id";
-
     if (Array.isArray(body.bulk)) {
       const rows = toCountedRows(body.bulk as BulkItem[], { scope, countedByUserId, nowIso });
       if (rows.length) {
-        const CHUNK = 500;
+        const CHUNK = 25;
         for (let i = 0; i < rows.length; i += CHUNK) {
           const chunk = rows.slice(i, i + CHUNK);
-          const { error } = await db.from("inventory_item_sector_counts").upsert(chunk, { onConflict: conflict });
-          if (error) return json({ error: error.message }, { status: 500 });
+          const errors = (await Promise.all(chunk.map((row) => persistCountRow(db, row)))).filter(Boolean);
+          if (errors.length) return json({ error: errors[0] }, { status: 500 });
         }
       }
       return json({ ok: true, countedAt: nowIso, bulkCount: rows.length });
@@ -241,8 +275,8 @@ export async function POST(req: NextRequest) {
     };
     if (scope.companyId) insert.company_id = scope.companyId;
     else if (scope.userScopeId) insert.user_scope_id = scope.userScopeId;
-    const { error } = await db.from("inventory_item_sector_counts").upsert([insert], { onConflict: conflict });
-    if (error) return json({ error: error.message }, { status: 500 });
+    const error = await persistCountRow(db, insert);
+    if (error) return json({ error }, { status: 500 });
     return json({ ok: true, countedAt: insert.counted_at });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
