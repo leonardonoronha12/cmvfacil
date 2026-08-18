@@ -989,8 +989,33 @@ export default function InventarioClient() {
   async function persistItemQtySectorThenState(inventoryId: string, itemId: string, desiredValueRaw: string, opts?: { skipLockCheck?: boolean }): Promise<boolean> {
     const sectorId = resolveActiveSectorId();
     if (!sectorId) {
-      showSectorNotice("Setor Geral não encontrado. Salvo cancelado.", true);
-      return false;
+      const currentInventory = contagens.find((c) => c.id === inventoryId);
+      const currentItem = currentInventory?.categorias
+        ?.flatMap((cat) => cat.itens ?? [])
+        .find((it) => it.id === itemId);
+      if (!currentInventory || !currentItem || itemHasSectors(currentItem)) {
+        showSectorNotice("Selecione um setor válido para salvar a contagem.", true);
+        return false;
+      }
+
+      // Empresas sem setores cadastrados continuam usando o inventário geral
+      // legado. Persistimos primeiro e só então refletimos o valor na tela.
+      const categorias = (currentInventory.categorias ?? []).map((cat) => ({
+        ...cat,
+        itens: (cat.itens ?? []).map((it) =>
+          it.id === itemId ? { ...it, estoqueFinal: String(desiredValueRaw ?? "").trim() } : it,
+        ),
+      }));
+      const updated = normalizeContagens([{ ...currentInventory, categorias }])[0];
+      try {
+        await upsertInventarioToSupabase(updated);
+        setContagens((prev) => normalizeContagens(prev.map((c) => (c.id === inventoryId ? updated : c))));
+        return true;
+      } catch (err: any) {
+        const msg = String(err?.message ?? err ?? "Erro ao salvar contagem").slice(0, 160);
+        showSectorNotice(`Falha na persistência: ${msg}`, true);
+        return false;
+      }
     }
     const lockKey = `${inventoryId}|${itemId}|${sectorId}`;
     if (!opts?.skipLockCheck && sectorSavingLockRef.current.has(lockKey)) return false;
@@ -1610,7 +1635,11 @@ export default function InventarioClient() {
                           className={styles.qtyInput}
                           value={activeSectorValue}
                           disabled={editDisabled}
-                          onChange={(e) => setPendingDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            pendingDraftsRef.current = { ...pendingDraftsRef.current, [r.id]: value };
+                            setPendingDrafts((prev) => ({ ...prev, [r.id]: value }));
+                          }}
                           onBlur={() => { if (!editDisabled) commitPendingDraft(r.id); }}
                           onKeyDown={(e) => {
                             if (editDisabled) return;
