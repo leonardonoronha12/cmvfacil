@@ -626,12 +626,19 @@ export async function POST(req: NextRequest) {
     if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
+    const db = (() => {
+      try {
+        return getSupabaseAdmin();
+      } catch {
+        return supabase;
+      }
+    })();
 
     const infoMap = safeObj(data.info);
     const produtosMap = safeObj(data.produtos);
     const equivMap = safeObj(data.equivalencias);
 
-    const { data: suppliersDb, error: suppliersErr } = await supabase
+    const { data: suppliersDb, error: suppliersErr } = await db
       .from("suppliers")
       .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
       .eq("company_id", companyId)
@@ -780,16 +787,16 @@ export async function POST(req: NextRequest) {
     const inserts = Array.from(insertsByKey.values());
 
     if (updates.length) {
-      const { error: upErr } = await supabase.from("suppliers").upsert(updates as any, { onConflict: "id" });
+      const { error: upErr } = await db.from("suppliers").upsert(updates as any, { onConflict: "id" });
       if (upErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_upsert", error: upErr.message, source: "compat" });
     }
 
     if (inserts.length) {
-      const { error: insErr } = await supabase.from("suppliers").insert(inserts as any);
+      const { error: insErr } = await db.from("suppliers").insert(inserts as any);
       if (insErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_insert", error: insErr.message, source: "compat" });
     }
 
-    const { data: suppliersDb2, error: suppliersErr2 } = await supabase
+    const { data: suppliersDb2, error: suppliersErr2 } = await db
       .from("suppliers")
       .select("id,bubble_id,nome,external_key,raw")
       .eq("company_id", companyId)
@@ -812,13 +819,6 @@ export async function POST(req: NextRequest) {
     }
 
     if (tombstonesUpper.length || tombstoneSupplierId) {
-      const db = (() => {
-        try {
-          return getSupabaseAdmin();
-        } catch {
-          return supabase;
-        }
-      })();
       let tombId = tombstoneSupplierId;
       if (!tombId) {
         const { data: tombSupplierDb } = await db
@@ -887,9 +887,9 @@ export async function POST(req: NextRequest) {
 
     const deleteIds = Array.from(deleteCandidateIds).filter(Boolean);
     if (deleteIds.length) {
-      const { error: linkDelErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
+      const { error: linkDelErr } = await db.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", deleteIds);
       if (linkDelErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_delete", error: linkDelErr.message, source: "compat" });
-      const { error: supplierDelErr } = await supabase.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
+      const { error: supplierDelErr } = await db.from("suppliers").delete().eq("company_id", companyId).in("id", deleteIds);
       if (supplierDelErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_delete", error: supplierDelErr.message, source: "compat" });
     }
 
@@ -916,7 +916,7 @@ export async function POST(req: NextRequest) {
 
     const supplierIdsForSync = Array.from(supplierProductsById.keys()).filter(Boolean);
     if (supplierIdsForSync.length) {
-      const { data: itemsDb, error: itemsErr } = await supabase.from("items").select("id,name").eq("company_id", companyId).limit(12000);
+      const { data: itemsDb, error: itemsErr } = await db.from("items").select("id,name").eq("company_id", companyId).limit(12000);
       if (itemsErr) return errJson({ status: 500, traceId, stage: "compat.items_select", error: itemsErr.message, source: "compat" });
       const itemIdByKey = new Map<string, string>();
       for (const it of itemsDb ?? []) {
@@ -987,12 +987,12 @@ export async function POST(req: NextRequest) {
           supabase,
         });
         // #endregion
-        const { error: clearErr } = await supabase.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
+        const { error: clearErr } = await db.from("supplier_items").delete().eq("company_id", companyId).in("supplier_id", supplierIdsToClear);
         if (clearErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_clear", error: clearErr.message, source: "compat" });
       }
 
       if (desiredRows.length) {
-        const { error: linkInsErr } = await supabase
+        const { error: linkInsErr } = await db
           .from("supplier_items")
           .upsert(desiredRows as any, { onConflict: "company_id,supplier_id,item_id", ignoreDuplicates: true });
         if (linkInsErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_insert", error: linkInsErr.message, source: "compat" });

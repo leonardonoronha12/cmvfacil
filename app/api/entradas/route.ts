@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { performance } from "node:perf_hooks";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { formatMoneyBRL, parsePtNumber } from "../../lib/bubbleCsv";
 
@@ -195,6 +195,67 @@ function pickBestCompanyId(memberRows: unknown[]) {
     }
   }
   return bestCompanyId;
+}
+
+async function resolveCompanyEntryScope(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  userId: string;
+}) {
+  const { data: ownMemberships, error: ownMembershipError } = await args.supabase
+    .from("company_members")
+    .select("company_id,role,permission_level")
+    .eq("user_id", args.userId)
+    .limit(50);
+  if (ownMembershipError) throw ownMembershipError;
+
+  const companyId = pickBestCompanyId((ownMemberships ?? []) as any[]);
+  if (!companyId) return { companyId: "", userIds: [args.userId], db: args.supabase };
+
+  let db: ReturnType<typeof getSupabaseServerClient> = args.supabase;
+  try {
+    db = getSupabaseAdmin();
+  } catch {}
+
+  const { data: companyMembers, error: companyMembersError } = await db
+    .from("company_members")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .limit(5000);
+  if (companyMembersError) throw companyMembersError;
+
+  const userIds = Array.from(
+    new Set(
+      [args.userId, ...(companyMembers ?? []).map((row: any) => String(row?.user_id ?? "").trim())]
+        .filter(isUuid)
+        .map((value) => value.toLowerCase()),
+    ),
+  );
+  return { companyId, userIds, db };
+}
+
+async function loadCompanyLegacyEntradas(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  userIds: string[];
+}) {
+  const byId = new Map<string, any>();
+  for (const userId of args.userIds) {
+    const prefix = `user:${userId}:`;
+    const { data, error } = await args.supabase
+      .from("entradas")
+      .select("*")
+      .like("id", `${prefix}%`)
+      .order("created_at", { ascending: false });
+    const rows = (error ? [] : (data ?? [])) as any[];
+    for (const row of rows) {
+      const id = String(row?.id ?? "").trim();
+      if (id) byId.set(id, row);
+    }
+  }
+  return Array.from(byId.values()).sort((a, b) => {
+    const aTime = Date.parse(String(a?.created_at ?? a?.data_criacao ?? "")) || 0;
+    const bTime = Date.parse(String(b?.created_at ?? b?.data_criacao ?? "")) || 0;
+    return bTime - aTime;
+  });
 }
 
 function isAdminUserId(userId: string) {
@@ -465,21 +526,22 @@ export async function GET(req: NextRequest) {
       return json({ source: "compat", readOnly: true, rows }, { status: 200 });
     }
 
-    const prefix = `${id}:`;
-    const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-    if (error) return json({ error: error.message }, { status: 500 });
+    const companyScope = await resolveCompanyEntryScope({ supabase, userId });
+    const data = await loadCompanyLegacyEntradas({ supabase: companyScope.db, userIds: companyScope.userIds });
 
-    let companyId = "";
+    let companyId = companyScope.companyId;
     try {
-      const { data: memberRows, error: memberErr } = await supabase
-        .from("company_members")
-        .select("company_id,role,permission_level")
-        .eq("user_id", userId)
-        .limit(50);
-      if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      if (!companyId) {
+        const { data: memberRows, error: memberErr } = await supabase
+          .from("company_members")
+          .select("company_id,role,permission_level")
+          .eq("user_id", userId)
+          .limit(50);
+        if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      }
     } catch {}
 
-    const rowsDb = (data ?? []) as any[];
+    const rowsDb = data as any[];
     const supplierIds = Array.from(
       new Set(
         rowsDb
