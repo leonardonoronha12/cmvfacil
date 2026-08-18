@@ -776,12 +776,18 @@ export default function InventarioClient() {
           const prevIt = existingById.get(id) ?? null;
           const categoria = src?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
           const catKey = categoria.toLowerCase();
+          // Preserve inventory-specific state while reconciling an old count
+          // with the current catalog. Retroactively added pre-preparations can
+          // receive sector quantities after the count was created; rebuilding
+          // the row from catalog fields alone made those values disappear.
           const nextRow: InventarioItemRow = {
+            ...(prevIt ?? {}),
             id,
             item: src?.item ?? String(prevIt?.item ?? ""),
             unidade: (src?.unidade ?? String(prevIt?.unidade ?? "")) || "Und",
             estoqueFinal: String(prevIt?.estoqueFinal ?? ""),
             removido: prevIt?.removido,
+            sectorCounts: prevIt?.sectorCounts ? { ...prevIt.sectorCounts } : undefined,
           };
           if (prevIt) {
             const prevCat = (existingCatById.get(id) ?? "Sem categoria").toLowerCase();
