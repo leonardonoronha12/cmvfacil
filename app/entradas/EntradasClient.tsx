@@ -1224,15 +1224,15 @@ export default function EntradasClient() {
   const filteredNotaItems = useMemo(() => {
     const list = fornecedorItensNaNota;
     const q = detailItemName.trim().toLowerCase();
-    if (!q) return list.slice(0, 6);
-    return list.filter((m) => m.nomeNaNota.toLowerCase().includes(q)).slice(0, 6);
+    if (!q) return list;
+    return list.filter((m) => m.nomeNaNota.toLowerCase().includes(q));
   }, [detailItemName, fornecedorItensNaNota]);
 
   const filteredFornecedorProdutos = useMemo(() => {
     const list = fornecedorProdutos;
     const q = detailItemName.trim().toLowerCase();
-    if (!q) return list.slice(0, 6);
-    return list.filter((n) => n.toLowerCase().includes(q)).slice(0, 6);
+    if (!q) return list;
+    return list.filter((n) => n.toLowerCase().includes(q));
   }, [detailItemName, fornecedorProdutos]);
 
   const canAddNotaItem = useMemo(() => {
