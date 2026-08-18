@@ -120,6 +120,7 @@ export async function loadMeFromApi() {
       const authRes = await fetch(`/api/auth/me?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const authJson = (await authRes.json().catch(() => null)) as any;
       const sessionUserId = String(authJson?.userId ?? "").trim();
+      const sessionEmail = String(authJson?.email ?? "").trim().toLowerCase();
       if (!sessionUserId) {
         clearMeStore();
         return null;
@@ -131,8 +132,35 @@ export async function loadMeFromApi() {
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok) {
         const keep = prev && prev.userId === sessionUserId ? prev : null;
-        if (!keep) clearMeStore();
-        return keep;
+        if (keep) return keep;
+        if (!sessionEmail) {
+          clearMeStore();
+          return null;
+        }
+
+        const fallback: MeProfile = {
+          userId: sessionUserId,
+          email: sessionEmail,
+          nome: "",
+          sobrenome: "",
+          nomeCompleto: "",
+          whatsapp: "",
+          avatarUrl: "",
+          companyId: "",
+          companyName: "",
+          companyLogoUrl: "",
+          companyCnpj: "",
+          companyEmail: "",
+          companyWhatsapp: "",
+          companyIndustry: "",
+          role: "Colaborador",
+          planType: "",
+          planStatus: "",
+          cardLast4: "",
+          members: [],
+        };
+        writeMeToStore(fallback);
+        return fallback;
       }
       const next: MeProfile = {
         userId: String(j.userId ?? "").trim(),

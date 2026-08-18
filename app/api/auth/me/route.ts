@@ -36,13 +36,25 @@ async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmi
 
 export async function GET(req: NextRequest) {
   const { userId } = getUserIdFromRequest(req);
-  if (!userId) return json({ userId: null }, { status: 200 });
+  if (!userId) return json({ userId: null, email: null }, { status: 200 });
 
   const raw = String(userId ?? "").trim();
-  if (isUuid(raw)) return json({ userId: raw }, { status: 200 });
+  if (isUuid(raw)) {
+    let supabase: ReturnType<typeof getSupabaseAdmin> | null = null;
+    try {
+      supabase = getSupabaseAdmin();
+    } catch {
+      supabase = null;
+    }
+    if (!supabase) return json({ userId: raw, email: null }, { status: 200 });
+
+    const { data } = await supabase.auth.admin.getUserById(raw);
+    const email = safeEmail(data?.user?.email);
+    return json({ userId: raw, email: email || null }, { status: 200 });
+  }
 
   const email = safeEmail(raw);
-  if (!email) return json({ userId: null }, { status: 200 });
+  if (!email) return json({ userId: null, email: null }, { status: 200 });
 
   let supabase: ReturnType<typeof getSupabaseAdmin> | null = null;
   try {
@@ -50,14 +62,14 @@ export async function GET(req: NextRequest) {
   } catch {
     supabase = null;
   }
-  if (!supabase) return json({ userId: null }, { status: 200 });
+  if (!supabase) return json({ userId: null, email }, { status: 200 });
 
   const { data: profileDb } = await supabase.from("user_profiles").select("user_id").ilike("email", email).maybeSingle();
   const fromProfile = String((profileDb as any)?.user_id ?? "").trim();
-  if (fromProfile && isUuid(fromProfile)) return json({ userId: fromProfile }, { status: 200 });
+  if (fromProfile && isUuid(fromProfile)) return json({ userId: fromProfile, email }, { status: 200 });
 
   const fromAuth = await findAuthUserIdByEmail(supabase, email);
-  if (fromAuth && isUuid(fromAuth)) return json({ userId: fromAuth }, { status: 200 });
+  if (fromAuth && isUuid(fromAuth)) return json({ userId: fromAuth, email }, { status: 200 });
 
-  return json({ userId: null }, { status: 200 });
+  return json({ userId: null, email }, { status: 200 });
 }
