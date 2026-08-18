@@ -342,6 +342,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const bootstrapSkipUntilRef = useRef(0);
   const bootstrapControlRef = useRef<{ tickUrl: string; statePath: string } | null>(null);
   const bootstrapStopRef = useRef(false);
+  const tabHiddenAtRef = useRef(0);
+  const tabResumedAtRef = useRef(0);
   const bubbleObjOverlayKey = "cmvfacil:bubbleObjMigrationOverlayHidden:v1";
   const bubbleObjEnsureKey = "cmvfacil:bubbleObjEnsureStarted:v1";
   const [bubbleObjOverlayVisible, setBubbleObjOverlayVisible] = useState(true);
@@ -880,6 +882,47 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, [pathname, router]);
 
   useEffect(() => {
+    const resumeAfterSuspension = () => {
+      if (document.visibilityState !== "visible") return;
+      const hiddenAt = tabHiddenAtRef.current;
+      if (!hiddenAt) return;
+
+      tabHiddenAtRef.current = 0;
+      if (Date.now() - hiddenAt < 15_000) return;
+
+      tabResumedAtRef.current = Date.now();
+      try {
+        router.refresh();
+      } catch {}
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        tabHiddenAtRef.current = Date.now();
+        return;
+      }
+      resumeAfterSuspension();
+    };
+
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      tabResumedAtRef.current = Date.now();
+      try {
+        router.refresh();
+      } catch {}
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", resumeAfterSuspension);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", resumeAfterSuspension);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [router]);
+
+  useEffect(() => {
     if (isCompatInsumosMode()) return;
     if (!isBubbleObjMigrationPage()) return;
     void refreshBubbleObjStatus();
@@ -1043,8 +1086,33 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   };
 
   const handleSidebarNavClick = (e: any) => {
-    closeDrawer();
     if (e?.metaKey || e?.ctrlKey || e?.shiftKey || e?.altKey) return;
+
+    const href = String(e?.currentTarget?.getAttribute?.("href") ?? "").trim();
+    if (!href) {
+      closeDrawer();
+      return;
+    }
+
+    e.preventDefault();
+    const target = new URL(href, window.location.origin);
+    const resumedRecently = Date.now() - tabResumedAtRef.current < 15_000;
+    if (document.visibilityState !== "visible" || resumedRecently) {
+      closeDrawer();
+      window.location.assign(target.href);
+      return;
+    }
+
+    router.push(href);
+    closeDrawer();
+
+    // If a stalled client transition does not update the URL, fall back to a
+    // regular navigation so the sidebar never becomes unresponsive.
+    window.setTimeout(() => {
+      const current = `${window.location.pathname}${window.location.search}`;
+      const expected = `${target.pathname}${target.search}`;
+      if (current !== expected) window.location.assign(target.href);
+    }, 1200);
   };
 
   const companyName = String(me?.companyName ?? "").trim() || "—";
