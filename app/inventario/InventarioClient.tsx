@@ -219,6 +219,56 @@ export default function InventarioClient() {
   const [sectorSaveErrorMsg, setSectorSaveErrorMsg] = useState<string>("");
   const sectorInventorySyncVersionRef = useRef(0);
   const sectorSavingLockRef = useRef<Set<string>>(new Set());
+  type SaveStatus = "saving" | "saved" | "error";
+  const [savingKeys, setSavingKeys] = useState<Record<string, SaveStatus>>({});
+  const savingKeysRef = useRef<Record<string, SaveStatus>>({});
+  useEffect(() => {
+    savingKeysRef.current = savingKeys;
+  }, [savingKeys]);
+  function setKeySaving(inventoryId: string, itemId: string, sectorId: string, status: SaveStatus) {
+    const k = `${inventoryId}|${itemId}|${sectorId}`;
+    savingKeysRef.current = { ...savingKeysRef.current, [k]: status };
+    setSavingKeys((prev) => ({ ...prev, [k]: status }));
+  }
+  function clearKeySaving(inventoryId: string, itemId: string, sectorId: string, delayMs = 900) {
+    const k = `${inventoryId}|${itemId}|${sectorId}`;
+    if (delayMs <= 0) {
+      const next = { ...savingKeysRef.current };
+      delete next[k];
+      savingKeysRef.current = next;
+      setSavingKeys(next);
+      return;
+    }
+    window.setTimeout(() => {
+      savingKeysRef.current = ((cur) => {
+        if (!(k in cur)) return cur;
+        const next = { ...cur };
+        delete next[k];
+        return next;
+      })(savingKeysRef.current);
+      setSavingKeys((prev) => {
+        if (!(k in prev)) return prev;
+        const next = { ...prev };
+        delete next[k];
+        return next;
+      });
+    }, delayMs);
+  }
+  function getKeySaving(inventoryId: string, itemId: string, sectorId: string | null): SaveStatus | null {
+    if (!sectorId) return null;
+    return savingKeysRef.current[`${inventoryId}|${itemId}|${sectorId}`] ?? null;
+  }
+  function buildOptimisticRow(origIt: InventarioItemRow, sectorId: string, cleanedValue: string, numericValue: number): InventarioItemRow {
+    const sc: Record<string, string> = { ...(origIt.sectorCounts ?? {}) };
+    if (cleanedValue && numericValue > 0) {
+      sc[sectorId] = formatDecimal3Places(numericValue);
+    } else {
+      delete sc[sectorId];
+    }
+    const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
+    const estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
+    return { ...origIt, sectorCounts: sc, estoqueFinal };
+  }
 
   const sectorsSorted = useMemo(() => {
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
@@ -589,10 +639,17 @@ export default function InventarioClient() {
             if (c.id !== invId) return c;
             const categorias = (c.categorias ?? []).map((cat) => {
               const itens = (cat.itens ?? []).map((origIt) => {
+                const itemKey = String(origIt.id);
+                const inFlightForAnySector = Object.keys(savingKeysRef.current).some((k) => k.startsWith(`${invId}|${itemKey}|`));
+                if (inFlightForAnySector) {
+                  return origIt;
+                }
                 const it = { ...origIt };
-                const perSector = byItemSector.get(String(it.id)) ?? new Map<string, string>();
+                const perSector = byItemSector.get(itemKey) ?? new Map<string, string>();
                 let sc: Record<string, string> = { ...(it.sectorCounts ?? {}) };
                 for (const [sid, qty] of perSector.entries()) {
+                  const sectorLockKey = `${invId}|${itemKey}|${sid}`;
+                  if (savingKeysRef.current[sectorLockKey]) continue;
                   const v = typeof qty === "string" || typeof qty === "number" ? String(qty) : "";
                   if (v.trim()) sc[sid] = formatDecimal3Places(parsePtNumber(v));
                 }
@@ -600,7 +657,7 @@ export default function InventarioClient() {
                 const hasLegacyQty = Boolean(String(it.estoqueFinal ?? "").trim());
                 if (!hasAnySc && hasLegacyQty && geralId) {
                   sc[geralId] = formatDecimal3Places(parsePtNumber(String(it.estoqueFinal ?? "")));
-                  legacyUpsertPayload.push({ inventoryId: invId, itemId: String(it.id), sectorId: geralId, quantity: String(it.estoqueFinal ?? "") });
+                  legacyUpsertPayload.push({ inventoryId: invId, itemId: itemKey, sectorId: geralId, quantity: String(it.estoqueFinal ?? "") });
                 }
                 it.sectorCounts = sc;
                 const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
@@ -707,6 +764,7 @@ export default function InventarioClient() {
     setContagens((prev) => {
       let changed = false;
       const next = prev.map((c) => {
+        const cid = c.id;
         const prevCats: InventarioCategoria[] = Array.isArray(c.categorias) ? c.categorias : [];
         const existingById = new Map<string, InventarioItemRow>();
         const existingCatById = new Map<string, string>();
@@ -776,23 +834,29 @@ export default function InventarioClient() {
           const prevIt = existingById.get(id) ?? null;
           const categoria = src?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
           const catKey = categoria.toLowerCase();
-          // Preserve inventory-specific state while reconciling an old count
-          // with the current catalog. Retroactively added pre-preparations can
-          // receive sector quantities after the count was created; rebuilding
-          // the row from catalog fields alone made those values disappear.
-          const nextRow: InventarioItemRow = {
-            ...(prevIt ?? {}),
-            id,
-            item: src?.item ?? String(prevIt?.item ?? ""),
-            unidade: (src?.unidade ?? String(prevIt?.unidade ?? "")) || "Und",
-            estoqueFinal: String(prevIt?.estoqueFinal ?? ""),
-            removido: prevIt?.removido,
-            sectorCounts: prevIt?.sectorCounts ? { ...prevIt.sectorCounts } : undefined,
-          };
+          const inFlight = cid && Object.keys(savingKeysRef.current).some((k) => k.startsWith(`${cid}|${id}|`));
+          const baseRow = (prevIt ?? {}) as Partial<InventarioItemRow>;
+          const nextRow: InventarioItemRow = inFlight
+            ? {
+                id,
+                item: (src?.item ?? String(baseRow.item ?? "")) || String(baseRow.item ?? ""),
+                unidade: ((src?.unidade ?? String(baseRow.unidade ?? "")) || "Und") || String(baseRow.unidade ?? ""),
+                estoqueFinal: String(baseRow.estoqueFinal ?? ""),
+                removido: baseRow.removido,
+                sectorCounts: baseRow.sectorCounts ? { ...baseRow.sectorCounts } : undefined,
+              }
+            : {
+                id,
+                item: src?.item ?? String(baseRow.item ?? ""),
+                unidade: (src?.unidade ?? String(baseRow.unidade ?? "")) || "Und",
+                estoqueFinal: String(baseRow.estoqueFinal ?? ""),
+                removido: baseRow.removido,
+                sectorCounts: baseRow.sectorCounts ? { ...baseRow.sectorCounts } : undefined,
+              };
           if (prevIt) {
             const prevCat = (existingCatById.get(id) ?? "Sem categoria").toLowerCase();
             if (prevCat !== catKey) changed = true;
-            if (String(prevIt.item ?? "") !== nextRow.item || String(prevIt.unidade ?? "") !== nextRow.unidade) changed = true;
+            if (!inFlight && (String(prevIt.item ?? "") !== nextRow.item || String(prevIt.unidade ?? "") !== nextRow.unidade)) changed = true;
           } else {
             changed = true;
           }
@@ -988,6 +1052,11 @@ export default function InventarioClient() {
 
   async function persistItemQtySectorThenState(inventoryId: string, itemId: string, desiredValueRaw: string, opts?: { skipLockCheck?: boolean }): Promise<boolean> {
     const sectorId = resolveActiveSectorId();
+    const cleanedValue = String(desiredValueRaw ?? "").trim();
+    const numericValue = parsePtNumber(cleanedValue);
+    let optimisticApplied = false;
+    let rollbackSnapshot: { inventoryId: string; itemId: string; sectorId: string; origRow: InventarioItemRow } | null = null;
+
     if (!sectorId) {
       const currentInventory = contagens.find((c) => c.id === inventoryId);
       const currentItem = currentInventory?.categorias
@@ -997,67 +1066,96 @@ export default function InventarioClient() {
         showSectorNotice("Selecione um setor válido para salvar a contagem.", true);
         return false;
       }
-
-      // Empresas sem setores cadastrados continuam usando o inventário geral
-      // legado. Persistimos primeiro e só então refletimos o valor na tela.
-      const categorias = (currentInventory.categorias ?? []).map((cat) => ({
-        ...cat,
-        itens: (cat.itens ?? []).map((it) =>
-          it.id === itemId ? { ...it, estoqueFinal: String(desiredValueRaw ?? "").trim() } : it,
-        ),
-      }));
-      const updated = normalizeContagens([{ ...currentInventory, categorias }])[0];
+      rollbackSnapshot = { inventoryId, itemId, sectorId: "__legacy_geral__", origRow: { ...currentItem } };
+      setContagens((prev) => normalizeContagens(prev.map((c) => {
+        if (c.id !== inventoryId) return c;
+        return {
+          ...c,
+          categorias: (c.categorias ?? []).map((cat) => ({
+            ...cat,
+            itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, estoqueFinal: cleanedValue } : it)),
+          })),
+        };
+      })));
+      optimisticApplied = true;
       try {
+        const categorias = (currentInventory.categorias ?? []).map((cat) => ({
+          ...cat,
+          itens: (cat.itens ?? []).map((it) =>
+            it.id === itemId ? { ...it, estoqueFinal: cleanedValue } : it,
+          ),
+        }));
+        const updated = normalizeContagens([{ ...currentInventory, categorias }])[0];
         await upsertInventarioToSupabase(updated);
-        setContagens((prev) => normalizeContagens(prev.map((c) => (c.id === inventoryId ? updated : c))));
         return true;
       } catch (err: any) {
         const msg = String(err?.message ?? err ?? "Erro ao salvar contagem").slice(0, 160);
         showSectorNotice(`Falha na persistência: ${msg}`, true);
+        if (optimisticApplied && rollbackSnapshot) {
+          setContagens((prev) => normalizeContagens(prev.map((c) => {
+            if (c.id !== inventoryId) return c;
+            return {
+              ...c,
+              categorias: (c.categorias ?? []).map((cat) => ({
+                ...cat,
+                itens: (cat.itens ?? []).map((it) => (it.id === itemId ? rollbackSnapshot!.origRow : it)),
+              })),
+            };
+          })));
+        }
         return false;
       }
     }
+
     const lockKey = `${inventoryId}|${itemId}|${sectorId}`;
     if (!opts?.skipLockCheck && sectorSavingLockRef.current.has(lockKey)) return false;
     sectorSavingLockRef.current.add(lockKey);
+    setKeySaving(inventoryId, itemId, sectorId, "saving");
+
     try {
-      await saveInventorySectorCountToSupabase({
-        inventoryId,
-        itemId,
-        sectorId,
-        quantityRaw: desiredValueRaw,
-      });
-      const cleanedValue = String(desiredValueRaw ?? "").trim();
-      const numericValue = parsePtNumber(cleanedValue);
       setContagens((prev) => {
         const next = prev.map((c) => {
           if (c.id !== inventoryId) return c;
           const categorias = (c.categorias ?? []).map((cat) => {
             const itens = (cat.itens ?? []).map((origIt) => {
               if (origIt.id !== itemId) return origIt;
-              const sc: Record<string, string> = { ...(origIt.sectorCounts ?? {}) };
-              if (cleanedValue && numericValue > 0) {
-                sc[sectorId] = formatDecimal3Places(numericValue);
-              } else {
-                delete sc[sectorId];
-              }
-              const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
-              const estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
-              return { ...origIt, sectorCounts: sc, estoqueFinal };
+              if (!rollbackSnapshot) rollbackSnapshot = { inventoryId, itemId, sectorId, origRow: { ...origIt, sectorCounts: origIt.sectorCounts ? { ...origIt.sectorCounts } : undefined } };
+              return buildOptimisticRow(origIt, sectorId, cleanedValue, numericValue);
             });
             return { ...cat, itens };
           });
           return { ...c, categorias };
         });
-        const normalized = normalizeContagens(next);
-        const updated = normalized.find((x) => x.id === inventoryId);
-        if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-        return normalized;
+        return normalizeContagens(next);
       });
+      optimisticApplied = true;
+
+      await saveInventorySectorCountToSupabase({
+        inventoryId,
+        itemId,
+        sectorId,
+        quantityRaw: desiredValueRaw,
+      });
+      setKeySaving(inventoryId, itemId, sectorId, "saved");
+      clearKeySaving(inventoryId, itemId, sectorId, 700);
       return true;
     } catch (err: any) {
       const msg = String(err?.message ?? err ?? "Erro ao salvar contagem").slice(0, 160);
       showSectorNotice(`Falha na persistência: ${msg}`, true);
+      setKeySaving(inventoryId, itemId, sectorId, "error");
+      if (optimisticApplied && rollbackSnapshot) {
+        setContagens((prev) => normalizeContagens(prev.map((c) => {
+          if (c.id !== inventoryId) return c;
+          return {
+            ...c,
+            categorias: (c.categorias ?? []).map((cat) => ({
+              ...cat,
+              itens: (cat.itens ?? []).map((it) => (it.id === itemId ? rollbackSnapshot!.origRow : it)),
+            })),
+          };
+        })));
+      }
+      window.setTimeout(() => clearKeySaving(inventoryId, itemId, sectorId, 0), 2200);
       return false;
     } finally {
       sectorSavingLockRef.current.delete(lockKey);
@@ -1087,15 +1185,13 @@ export default function InventarioClient() {
     const value = String(pendingDraftsRef.current[itemId] ?? "").trim();
     const cId = selectedContagem?.id;
     if (!cId) return;
-    const ok = await persistItemQtySectorThenState(cId, itemId, value);
-    if (ok) {
-      setPendingDrafts((prev) => {
-        if (!(itemId in prev)) return prev;
-        const next = { ...prev };
-        delete next[itemId];
-        return next;
-      });
-    }
+    setPendingDrafts((prev) => {
+      if (!(itemId in prev)) return prev;
+      const next = { ...prev };
+      delete next[itemId];
+      return next;
+    });
+    void persistItemQtySectorThenState(cId, itemId, value);
   }
 
   function removeItem(itemId: string) {
@@ -1116,7 +1212,7 @@ export default function InventarioClient() {
     });
   }
 
-  async function uncountItem(itemId: string) {
+  function uncountItem(itemId: string) {
     setEditingItemId(null);
     setEditingValue("");
     setPendingDrafts((prev) => {
@@ -1127,7 +1223,7 @@ export default function InventarioClient() {
     });
     const cId = selectedContagem?.id;
     if (!cId) return;
-    await persistItemQtySectorThenState(cId, itemId, "");
+    void persistItemQtySectorThenState(cId, itemId, "");
   }
 
   function deleteContagem(id: string) {
@@ -1585,6 +1681,11 @@ export default function InventarioClient() {
                       if (isReadOnly) return "Somente leitura.";
                       return "";
                     })();
+                    const cId = selectedContagem?.id ?? "";
+                    const sId = resolveActiveSectorId();
+                    const rowStatus = getKeySaving(cId, String(r.id ?? ""), sId);
+                    const statusStyle: React.CSSProperties | undefined = rowStatus === "saving" ? { color: "#6b7280" } : rowStatus === "saved" ? { color: "#047857" } : rowStatus === "error" ? { color: "#b91c1c" } : undefined;
+                    const statusLabel = rowStatus === "saving" ? "Salvando…" : rowStatus === "saved" ? "Salvo" : rowStatus === "error" ? "Erro ao salvar" : "";
                     return (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
@@ -1673,7 +1774,12 @@ export default function InventarioClient() {
                           title={disabledReason}
                           style={editDisabled ? { background: "#f9fafb", color: "#6b7280", cursor: rowHasSectors && selectedSectorId === "Todos" ? "not-allowed" : "text" } : undefined}
                         />
-                        <div className={styles.unitPill}>{r.unidade}</div>
+                        <div className={styles.unitPill} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, minWidth: 44 }}>
+                          <div>{r.unidade}</div>
+                          {statusLabel ? (
+                            <div style={{ fontSize: 10, fontWeight: 700, ...statusStyle, whiteSpace: "nowrap" }}>{statusLabel}</div>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                     );
@@ -1713,6 +1819,11 @@ export default function InventarioClient() {
                         : String(r.estoqueFinal ?? "");
                     const activeEditOriginal =
                       selectedSectorId !== "Todos" ? String(sc[selectedSectorId] ?? "") : String(r.estoqueFinal ?? "");
+                    const cId = selectedContagem?.id ?? "";
+                    const sId = resolveActiveSectorId();
+                    const rowStatus = getKeySaving(cId, String(r.id ?? ""), sId);
+                    const statusStyle: React.CSSProperties | undefined = rowStatus === "saving" ? { color: "#6b7280" } : rowStatus === "saved" ? { color: "#047857" } : rowStatus === "error" ? { color: "#b91c1c" } : undefined;
+                    const statusLabel = rowStatus === "saving" ? "Salvando…" : rowStatus === "saved" ? "Salvo" : rowStatus === "error" ? "Erro ao salvar" : "";
                     return (
                     <div key={r.id} className={styles.itemRow}>
                       <div className={styles.itemLeft}>
@@ -1812,44 +1923,57 @@ export default function InventarioClient() {
                                 setEditingItemId(null);
                               }}
                             />
-                            <div className={styles.unitPill}>{r.unidade}</div>
+                            <div className={styles.unitPill} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, minWidth: 44 }}>
+                              <div>{r.unidade}</div>
+                              {statusLabel ? (
+                                <div style={{ fontSize: 10, fontWeight: 700, ...statusStyle, whiteSpace: "nowrap" }}>{statusLabel}</div>
+                              ) : null}
+                            </div>
                           </>
                         ) : (
-                          <div
-                            className={styles.qtyLabel}
-                            onClick={() => {
-                              if (editDisabled) return;
-                              editCancelledRef.current = false;
-                              editOriginalValueRef.current = activeEditOriginal;
-                              setEditingItemId(r.id);
-                              setEditingValue(activeEditOriginal);
-                              setTimeout(() => editInputRef.current?.focus(), 0);
-                            }}
-                            role="button"
-                            tabIndex={editDisabled ? -1 : 0}
-                            onKeyDown={(e) => {
-                              if (editDisabled) return;
-                              if (e.key === "Enter") {
-                                e.preventDefault();
+                          <>
+                            <div
+                              className={styles.qtyLabel}
+                              onClick={() => {
+                                if (editDisabled) return;
                                 editCancelledRef.current = false;
                                 editOriginalValueRef.current = activeEditOriginal;
                                 setEditingItemId(r.id);
                                 setEditingValue(activeEditOriginal);
                                 setTimeout(() => editInputRef.current?.focus(), 0);
-                              }
-                            }}
-                            style={editDisabled ? { cursor: "default", opacity: 0.85 } : undefined}
-                            title={editDisabled ? disabledReason || "Selecione um setor específico para editar" : "Clique para editar"}
-                          >
-                            <div>
-                              {editingItemId !== r.id && selectedSectorId !== "Todos" && sectorEntries.length > 1 ? (
-                                <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 2 }}>
-                                  Setor atual · Total geral: {formatDecimal3Places(totalNum)} {r.unidade}
-                                </div>
-                              ) : null}
-                              <div>{`${activeSectorDisplay || "0"} ${r.unidade}`}</div>
+                              }}
+                              role="button"
+                              tabIndex={editDisabled ? -1 : 0}
+                              onKeyDown={(e) => {
+                                if (editDisabled) return;
+                                if (e.key === "Enter") {
+                                  e.preventDefault();
+                                  editCancelledRef.current = false;
+                                  editOriginalValueRef.current = activeEditOriginal;
+                                  setEditingItemId(r.id);
+                                  setEditingValue(activeEditOriginal);
+                                  setTimeout(() => editInputRef.current?.focus(), 0);
+                                }
+                              }}
+                              style={editDisabled ? { cursor: "default", opacity: 0.85 } : undefined}
+                              title={editDisabled ? disabledReason || "Selecione um setor específico para editar" : "Clique para editar"}
+                            >
+                              <div>
+                                {editingItemId !== r.id && selectedSectorId !== "Todos" && sectorEntries.length > 1 ? (
+                                  <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 600, marginBottom: 2 }}>
+                                    Setor atual · Total geral: {formatDecimal3Places(totalNum)} {r.unidade}
+                                  </div>
+                                ) : null}
+                                <div>{`${activeSectorDisplay || "0"} ${r.unidade}`}</div>
+                              </div>
                             </div>
-                          </div>
+                            <div className={styles.unitPill} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, minWidth: 44 }}>
+                              <div>{r.unidade}</div>
+                              {statusLabel ? (
+                                <div style={{ fontSize: 10, fontWeight: 700, ...statusStyle, whiteSpace: "nowrap" }}>{statusLabel}</div>
+                              ) : null}
+                            </div>
+                          </>
                         )}
                         <div className={styles.actions}>
                           <button
