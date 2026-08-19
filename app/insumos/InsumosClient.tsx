@@ -24,6 +24,7 @@ import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readSectorsFromStore, subscribeSectors, writeSectorsToStore, type SectorRow } from "../lib/sectorsStore";
 import {
   deleteSectorFromSupabase,
+  inspectSectorUsage,
   loadSectorsFromSupabase,
   saveItemSectorsToSupabase,
   saveSectorToSupabase,
@@ -482,6 +483,7 @@ export default function InsumosClient() {
   const [deletingSectorName, setDeletingSectorName] = useState("");
   const [deletingSectorLinks, setDeletingSectorLinks] = useState<{ itemLinks: number; counts: number }>({ itemLinks: 0, counts: 0 });
   const [sectorSearch, setSectorSearch] = useState("");
+  const [sectorAction, setSectorAction] = useState<string | null>(null);
   const itemSectorSyncRef = useRef<number | null>(null);
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
@@ -1457,6 +1459,8 @@ export default function InsumosClient() {
   async function addSector() {
     const name = normalizeSectorName(sectorNewDraft);
     if (!name) return;
+    if (sectorAction) return;
+    setSectorAction("create");
     try {
       const created = await saveSectorToSupabase({ name });
       setSectors((prev) => {
@@ -1469,6 +1473,8 @@ export default function InsumosClient() {
       const msg = describeSectorError(raw) || `Não foi possível criar o setor (${raw}).`;
       showToast(msg, "error");
       return;
+    } finally {
+      setSectorAction(null);
     }
     setSectorNewDraft("");
   }
@@ -1488,6 +1494,8 @@ export default function InsumosClient() {
     if (!id) return;
     const name = normalizeSectorName(editingSectorDraft);
     if (!name) return;
+    if (sectorAction) return;
+    setSectorAction(`edit:${id}`);
     try {
       const updated = await saveSectorToSupabase({ id, name });
       setSectors((prev) => {
@@ -1500,6 +1508,8 @@ export default function InsumosClient() {
       const msg = describeSectorError(raw) || `Não foi possível renomear o setor (${raw}).`;
       showToast(msg, "error");
       return;
+    } finally {
+      setSectorAction(null);
     }
     cancelEditSector();
   }
@@ -1516,19 +1526,23 @@ export default function InsumosClient() {
     const localLinks = sectorCounts.get(row.id) ?? 0;
     let apiLinks = localLinks;
     let apiCounts = 0;
+    if (sectorAction) return;
+    setSectorAction(`check:${row.id}`);
     try {
-      await deleteSectorFromSupabase(row.id);
+      const usage = await inspectSectorUsage(row.id);
+      apiLinks = usage.itemLinks;
+      apiCounts = usage.counts;
     } catch (err) {
       const payload = (err as any)?.payload;
       if (payload?.links && typeof payload.links === "object") {
         apiLinks = typeof payload.links.itemLinks === "number" ? payload.links.itemLinks : localLinks;
         apiCounts = typeof payload.links.counts === "number" ? payload.links.counts : 0;
       }
-      if ((err as any)?.error === "sector_in_use" || (err as any)?.message === "sector_in_use" || (err as any)?.message?.includes("sector_in_use")) {
-        const total = apiLinks + apiCounts;
-        showToast(`Setor em uso: ${total} vínculo(s). Não é possível excluir.`, "error");
-        return;
-      }
+      const raw = String((err as any)?.message ?? String(err) ?? "");
+      showToast(describeSectorError(raw) || `Não foi possível verificar o setor (${raw}).`, "error");
+      return;
+    } finally {
+      setSectorAction(null);
     }
     if (apiLinks || apiCounts) {
       showToast(`Setor em uso: ${apiLinks + apiCounts} vínculo(s). Não é possível excluir.`, "error");
@@ -1550,8 +1564,12 @@ export default function InsumosClient() {
   async function confirmDeleteSector() {
     const id = deletingSectorId;
     if (!id) return;
+    if (sectorAction) return;
+    setSectorAction(`delete:${id}`);
+    let deleted = false;
     try {
       await deleteSectorFromSupabase(id);
+      deleted = true;
       setSectors((prev) => {
         const next = prev.filter((s) => s.id !== id);
         writeSectorsToStore(next);
@@ -1568,8 +1586,10 @@ export default function InsumosClient() {
       );
     } catch (err) {
       showToast(`Não foi possível excluir o setor (${(err as any)?.message ?? String(err)}).`, "error");
+    } finally {
+      setSectorAction(null);
     }
-    cancelDeleteSector();
+    if (deleted) cancelDeleteSector();
   }
 
   function toggleDraftSectorId(target: "new" | "edit", id: string) {
@@ -3013,7 +3033,7 @@ export default function InsumosClient() {
                     type="button"
                     className={styles.categoriesAddBtn}
                     onClick={addSector}
-                    disabled={!normalizeSectorName(sectorNewDraft) || isReadOnly}
+                    disabled={!normalizeSectorName(sectorNewDraft) || isReadOnly || sectorAction !== null}
                   >
                     <IconPlus /> ADD
                   </button>
@@ -3045,7 +3065,7 @@ export default function InsumosClient() {
                                 className={`${styles.categoryIconBtn} ${styles.categoryIconBtnConfirm}`}
                                 aria-label="Confirmar edição"
                                 onClick={confirmEditSector}
-                                disabled={!normalizeSectorName(editingSectorDraft)}
+                                disabled={!normalizeSectorName(editingSectorDraft) || sectorAction !== null}
                               >
                                 <IconCheck />
                               </button>
@@ -3087,7 +3107,7 @@ export default function InsumosClient() {
                                 type="button"
                                 className={styles.categoryIconBtn}
                                 aria-label="Excluir setor"
-                                disabled={isReadOnly || isGeral}
+                                disabled={isReadOnly || isGeral || sectorAction !== null}
                                 onClick={() => openDeleteSector(s)}
                                 title={isGeral ? "O setor Geral não pode ser excluído." : count > 0 ? `Existem ${count} vínculo(s) neste setor.` : ""}
                               >
@@ -3138,8 +3158,8 @@ export default function InsumosClient() {
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteSector}>
-                  Excluir
+                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteSector} disabled={sectorAction !== null}>
+                  {sectorAction === `delete:${deletingSectorId}` ? "Excluindo..." : "Excluir"}
                 </button>
                 <button type="button" className={styles.confirmCancel} onClick={cancelDeleteSector}>
                   Cancelar

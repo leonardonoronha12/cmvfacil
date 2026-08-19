@@ -349,6 +349,7 @@ export async function DELETE(req: NextRequest) {
 
     const url = new URL(req.url);
     const id = String(url.searchParams.get("id") ?? "").trim();
+    const checkOnly = url.searchParams.get("checkOnly") === "1";
     if (!id || !isUuid(id)) return json({ ok: false, error: "missing_id" }, { status: 400 });
 
     const baseQ = db.from("sectors").select("id,name").eq("id", id);
@@ -364,6 +365,7 @@ export async function DELETE(req: NextRequest) {
       return json({ ok: false, error: "cannot_delete_geral" }, { status: 400 });
     }
 
+    let usage = { itemLinks: 0, counts: 0 };
     try {
       const linksQ = db.from("item_sectors").select("id", { count: "exact", head: true }).eq("sector_id", id);
       const countsQ = db.from("inventory_item_sector_counts").select("id", { count: "exact", head: true }).eq("sector_id", id);
@@ -371,8 +373,12 @@ export async function DELETE(req: NextRequest) {
       const [r1, r2] = await Promise.all([scoped.q1, scoped.q2]);
       const links = typeof r1.count === "number" ? r1.count : 0;
       const counts = typeof r2.count === "number" ? r2.count : 0;
-      if (links || counts) return json({ ok: false, error: "sector_in_use", links: { itemLinks: links, counts } }, { status: 409 });
+      usage = { itemLinks: links, counts };
+      if (checkOnly) return json({ ok: true, links: usage });
+      if (links || counts) return json({ ok: false, error: "sector_in_use", links: usage }, { status: 409 });
     } catch {}
+
+    if (checkOnly) return json({ ok: true, links: usage });
 
     const delQ = db.from("sectors").delete().eq("id", id);
     const delRes = scope.companyId

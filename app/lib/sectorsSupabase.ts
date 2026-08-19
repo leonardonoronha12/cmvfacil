@@ -98,6 +98,24 @@ export async function deleteSectorFromSupabase(id: string): Promise<{ deleted: b
   return { deleted: true };
 }
 
+export async function inspectSectorUsage(id: string): Promise<{ itemLinks: number; counts: number }> {
+  const qp = buildQuery({});
+  const url = `/api/sectors?ts=${Date.now()}${qp}&id=${encodeURIComponent(id)}&checkOnly=1`;
+  const res = await fetch(url, { method: "DELETE" });
+  const json = (await res.json().catch(() => null)) as
+    | { ok?: boolean; error?: string; links?: { itemLinks?: unknown; counts?: unknown } }
+    | null;
+  if (!res.ok || !json?.ok) {
+    const err: any = new Error(json?.error || `failed_to_check_sector_${res.status}`);
+    err.payload = json;
+    throw err;
+  }
+  return {
+    itemLinks: typeof json.links?.itemLinks === "number" ? json.links.itemLinks : 0,
+    counts: typeof json.links?.counts === "number" ? json.links.counts : 0,
+  };
+}
+
 export async function saveItemSectorsToSupabase(itemSectors: Array<{ itemId: string; sectorIds: string[] }>): Promise<{ ok: boolean }> {
   const qp = buildQuery({});
   const res = await fetch(`/api/item-sectors?ts=${Date.now()}${qp}`, {
