@@ -342,7 +342,14 @@ export async function GET(req: NextRequest) {
     const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
     const shouldUseCompat = await shouldUseCompatSource({ req, supabase });
     if (shouldUseCompat) {
-      const { data: memberRows, error: memberErr } = await supabase
+      const db = (() => {
+        try {
+          return getSupabaseAdmin();
+        } catch {
+          return supabase;
+        }
+      })();
+      const { data: memberRows, error: memberErr } = await db
         .from("company_members")
         .select("company_id,role,permission_level")
         .eq("user_id", userId)
@@ -351,7 +358,7 @@ export async function GET(req: NextRequest) {
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
       if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
 
-      const { data: suppliersDb, error: suppliersErr } = await supabase
+      const { data: suppliersDb, error: suppliersErr } = await db
         .from("suppliers")
         .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
         .eq("company_id", companyId)
@@ -398,7 +405,7 @@ export async function GET(req: NextRequest) {
       }
 
       const produtos: Record<string, string[]> = {};
-      const { data: linksDb, error: linksErr } = await supabase
+      const { data: linksDb, error: linksErr } = await db
         .from("supplier_items")
         .select("supplier_id,item:items(name)")
         .eq("company_id", companyId)
@@ -618,14 +625,6 @@ export async function POST(req: NextRequest) {
       return json({ ok: true, traceId }, { status: 200 });
     }
 
-    const { data: memberRows, error: memberErr } = await supabase
-      .from("company_members")
-      .select("company_id,role,permission_level")
-      .eq("user_id", userId)
-      .limit(50);
-    if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
-    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-    if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
     const db = (() => {
       try {
         return getSupabaseAdmin();
@@ -633,7 +632,14 @@ export async function POST(req: NextRequest) {
         return supabase;
       }
     })();
-
+    const { data: memberRows, error: memberErr } = await db
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("user_id", userId)
+      .limit(50);
+    if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
+    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
     const infoMap = safeObj(data.info);
     const produtosMap = safeObj(data.produtos);
     const equivMap = safeObj(data.equivalencias);
