@@ -899,12 +899,6 @@ export default function InsumosClient() {
         }
         return next;
       })();
-      setDataRows(imported);
-      setCategories(mergedCategories);
-      setIsImportOpen(false);
-      setSelectedFile(null);
-      setSelectedFileName(null);
-      if (fileInputRef.current) fileInputRef.current.value = "";
       if (!isReadOnly && !isBootstrapRunning()) {
         try {
           await saveInsumosStateToSupabase({
@@ -923,8 +917,15 @@ export default function InsumosClient() {
           showToast(`Importação concluída: ${imported.length} item(ns).`, "success");
         } catch (err) {
           showToast(saveErrorMessage(err), "error");
+          return;
         }
       }
+      setDataRows(imported);
+      setCategories(mergedCategories);
+      setIsImportOpen(false);
+      setSelectedFile(null);
+      setSelectedFileName(null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       showToast(err instanceof Error ? err.message : String(err), "error", 8000);
     } finally {
