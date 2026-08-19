@@ -664,6 +664,26 @@ export default function EntradasClient() {
   const [mapUnidadeNota, setMapUnidadeNota] = useState("Und");
   const [mapInsumoEq, setMapInsumoEq] = useState("");
   const [mapEqQtd, setMapEqQtd] = useState("");
+  const lastConfigVinculacaoTriggerRef = useRef<HTMLElement | null>(null);
+  const configVinculacaoFirstInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (!isAddFornecedorItemOpen) return;
+    const t = window.setTimeout(() => {
+      configVinculacaoFirstInputRef.current?.focus();
+      try {
+        configVinculacaoFirstInputRef.current?.select();
+      } catch {}
+    }, 0);
+    return () => {
+      window.clearTimeout(t);
+      const trigger = lastConfigVinculacaoTriggerRef.current;
+      if (trigger && typeof (trigger as any).focus === "function") {
+        try {
+          (trigger as any).focus();
+        } catch {}
+      }
+    };
+  }, [isAddFornecedorItemOpen]);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
@@ -1684,11 +1704,12 @@ export default function EntradasClient() {
     setIsDetailsOpen(false);
   }
 
-  function openConfigurarVinculacao(nomeNaNota: string) {
+  function openConfigurarVinculacao(nomeNaNota: string, trigger?: HTMLElement | null) {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
     }
+    if (trigger) lastConfigVinculacaoTriggerRef.current = trigger;
     const fornecedorKeyRaw = (fornecedorModalKey || (detailsRow?.fornecedor ?? "")).trim();
     const fornecedorKey = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const name = nomeNaNota.trim();
@@ -1697,7 +1718,7 @@ export default function EntradasClient() {
     setMapNomeNota(name);
     setMapUnidadeNota(existing?.unidadeNaNota || "Und");
     setMapInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? "").trim());
-    setMapEqQtd(existing?.equivalenteQuantidade || "");
+    setMapEqQtd(existing?.equivalenteQuantidade ?? "");
     setIsAddFornecedorItemOpen(true);
   }
 
@@ -1744,11 +1765,12 @@ export default function EntradasClient() {
     });
   }
 
-  function openAddItemFornecedor() {
+  function openAddItemFornecedor(trigger?: HTMLElement | null) {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
     }
+    if (trigger) lastConfigVinculacaoTriggerRef.current = trigger;
     setMapNomeNota("");
     setMapUnidadeNota("Und");
     setMapInsumoEq((insumosStore[0]?.item ?? "").trim());
@@ -2820,9 +2842,9 @@ export default function EntradasClient() {
                                 type="button"
                                 className={styles.itemAddBtn}
                                 disabled={isReadOnly}
-                                onClick={() => {
+                                onClick={(e) => {
                                   setIsItemMenuOpen(false);
-                                  openAddItemFornecedor();
+                                  openAddItemFornecedor(e.currentTarget);
                                 }}
                               >
                                 + Adicionar novo item do fornecedor
@@ -3292,9 +3314,10 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isAddFornecedorItemOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
-            <div className={`${styles.modal} ${styles.mapItemModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+        {isMounted && isAddFornecedorItemOpen
+          ? createPortal(
+              <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
+                <div className={`${styles.modal} ${styles.mapItemModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Configurar Vinculação</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsAddFornecedorItemOpen(false)}>
@@ -3305,7 +3328,7 @@ export default function EntradasClient() {
               <div className={styles.modalBody}>
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Nome na nota</div>
-                  <input className={styles.formInput} value={mapNomeNota} onChange={(e) => setMapNomeNota(e.target.value)} />
+                  <input ref={configVinculacaoFirstInputRef} className={styles.formInput} value={mapNomeNota} onChange={(e) => setMapNomeNota(e.target.value)} />
                 </div>
 
                 <div className={styles.formField}>
@@ -3353,8 +3376,10 @@ export default function EntradasClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          </div>,
+              document.body,
+            )
+          : null}
 
         {isMounted && isFornecedorProdutosOpen && fornecedorModalKey
           ? createPortal(
@@ -3434,12 +3459,12 @@ export default function EntradasClient() {
                   <button
                     type="button"
                     className={styles.fornecedorAddBtn}
-                    onClick={() => {
+                    onClick={(e) => {
                       const q = fornecedorProdutosSearch.trim();
                       const pick = fornecedorProdutosPick.trim();
                       const name = q || pick;
                       addProdutoToFornecedor(name);
-                      if (name) openConfigurarVinculacao(name);
+                      if (name) openConfigurarVinculacao(name, e.currentTarget);
                       setFornecedorProdutosSearch("");
                     }}
                   >
@@ -3456,8 +3481,8 @@ export default function EntradasClient() {
                           type="button"
                           className={styles.fornecedorItemOpenBtn}
                           aria-label="Configurar vinculação"
-                          onClick={() => {
-                            openConfigurarVinculacao(name);
+                          onClick={(e) => {
+                            openConfigurarVinculacao(name, e.currentTarget);
                           }}
                         >
                           <div className={styles.fornecedorItemNameWrap}>
