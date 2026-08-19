@@ -3217,7 +3217,7 @@ export default function InsumosClient() {
                                 className={`${styles.categoryIconBtn} ${styles.categoryIconBtnConfirm}`}
                                 aria-label="Confirmar edição"
                                 onClick={confirmEditSector}
-                                disabled={!normalizeSectorName(editingSectorDraft) || sectorAction !== null}
+                                disabled={!normalizeSectorName(editingSectorDraft) || sectorAction === "create" || sectorAction === `check:${editingSectorId ?? ""}` || sectorAction === `delete:${editingSectorId ?? ""}`}
                               >
                                 <IconCheck />
                               </button>
@@ -3242,6 +3242,51 @@ export default function InsumosClient() {
                                   PADRÃO
                                 </span>
                               ) : null}
+                              {sectorAction === `check:${s.id}` ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontSize: 10,
+                                    background: "#f3f4f6",
+                                    color: "#6b7280",
+                                    padding: "2px 6px",
+                                    borderRadius: 999,
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  Verificando…
+                                </span>
+                              ) : null}
+                              {sectorAction === `delete:${s.id}` ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontSize: 10,
+                                    background: "#fef2f2",
+                                    color: "#b91c1c",
+                                    padding: "2px 6px",
+                                    borderRadius: 999,
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  Excluindo…
+                                </span>
+                              ) : null}
+                              {sectorAction === `edit:${s.id}` ? (
+                                <span
+                                  style={{
+                                    marginLeft: 8,
+                                    fontSize: 10,
+                                    background: "#eff6ff",
+                                    color: "#1d4ed8",
+                                    padding: "2px 6px",
+                                    borderRadius: 999,
+                                    fontWeight: 500,
+                                  }}
+                                >
+                                  Salvando…
+                                </span>
+                              ) : null}
                             </div>
                             <div className={styles.categoryCount}>{count}</div>
                             <div className={styles.categoryActions}>
@@ -3250,7 +3295,7 @@ export default function InsumosClient() {
                                 className={styles.categoryIconBtn}
                                 aria-label="Editar setor"
                                 onClick={() => editSector(s)}
-                                disabled={isReadOnly || isGeral}
+                                disabled={isReadOnly || isGeral || sectorAction === "create" || sectorAction === `check:${s.id}` || sectorAction === `delete:${s.id}`}
                                 title={isGeral ? "O setor Geral não pode ser renomeado." : ""}
                               >
                                 <IconEdit />
@@ -3259,7 +3304,7 @@ export default function InsumosClient() {
                                 type="button"
                                 className={styles.categoryIconBtn}
                                 aria-label="Excluir setor"
-                                disabled={isReadOnly || isGeral || sectorAction !== null}
+                                disabled={isReadOnly || isGeral || sectorAction === "create" || sectorAction === `edit:${s.id}` || sectorAction === `check:${s.id}` || sectorAction === `delete:${s.id}`}
                                 onClick={() => openDeleteSector(s)}
                                 title={isGeral ? "O setor Geral não pode ser excluído." : count > 0 ? `Existem ${count} vínculo(s) neste setor.` : ""}
                               >
