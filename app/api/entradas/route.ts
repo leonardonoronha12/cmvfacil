@@ -258,6 +258,50 @@ async function loadCompanyLegacyEntradas(args: {
   });
 }
 
+async function loadUserDisplayNames(db: ReturnType<typeof getSupabaseServerClient>, userIds: string[]) {
+  const ids = Array.from(new Set(userIds.map((value) => String(value ?? "").trim().toLowerCase()).filter(isUuid)));
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+
+  const { data: profiles } = await db
+    .from("user_profiles")
+    .select("user_id,email,nome,sobrenome,nome_completo")
+    .in("user_id", ids);
+  for (const profile of profiles ?? []) {
+    const userId = String((profile as any)?.user_id ?? "").trim().toLowerCase();
+    if (!userId) continue;
+    const first = normalizeText((profile as any)?.nome);
+    const last = normalizeText((profile as any)?.sobrenome);
+    const displayName =
+      normalizeText((profile as any)?.nome_completo) ||
+      normalizeText([first, last].filter(Boolean).join(" ")) ||
+      normalizeText((profile as any)?.email);
+    if (displayName) names.set(userId, displayName);
+  }
+
+  const missing = ids.filter((id) => !names.has(id));
+  if (missing.length) {
+    try {
+      const admin = getSupabaseAdmin();
+      await Promise.all(
+        missing.map(async (userId) => {
+          const { data } = await admin.auth.admin.getUserById(userId);
+          const user = data?.user;
+          const meta = (user?.user_metadata ?? {}) as Record<string, unknown>;
+          const displayName = normalizeText(meta.full_name ?? meta.nome_completo ?? meta.name) || normalizeText(user?.email);
+          if (displayName) names.set(userId, displayName);
+        }),
+      );
+    } catch {}
+  }
+  return names;
+}
+
+function userIdFromLegacyEntryId(value: unknown) {
+  const match = /^user:([0-9a-f-]{36}):/i.exec(String(value ?? "").trim());
+  return match && isUuid(match[1] ?? "") ? String(match[1]).toLowerCase() : "";
+}
+
 function isAdminUserId(userId: string) {
   const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
   const emails = new Set(
@@ -316,7 +360,7 @@ export async function GET(req: NextRequest) {
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
     if (!id) return json({ source: "legacy", readOnly: false, rows: [] }, { status: 200 });
     const supabase = getSupabaseServerClient(accessToken);
-    const userId = id.slice("user:".length);
+    const userId = String(id).slice("user:".length);
 
     const isAdmin = Boolean(rawUserId && isAdminUserId(rawUserId));
     const shouldUseCompat = await shouldUseCompatSource({ req, supabase, userId, isAdmin });
@@ -433,6 +477,19 @@ export async function GET(req: NextRequest) {
         byInvoiceId.set(invId, arr);
       }
 
+      const responsibleIds = visibleInvoicesDb
+        .map((inv: any) =>
+          String(
+            inv?.responsavel_user_id ??
+              (inv?.raw as any)?.responsavel_user_id ??
+              (inv?.raw as any)?.responsavel_id ??
+              (inv?.raw as any)?.created_by_user_id ??
+              "",
+          ).trim(),
+        )
+        .filter(isUuid);
+      const responsibleNames = await loadUserDisplayNames(supabase, responsibleIds);
+
       const rows = visibleInvoicesDb
         .map((inv: any) => {
           const invDbId = String(inv?.id ?? "").trim();
@@ -444,7 +501,7 @@ export async function GET(req: NextRequest) {
           const codigo = String(inv?.codigo ?? "").trim() || "-";
           const dataLancamento = formatDateLabelPTFromValue(inv?.data_recebimento);
           const dataCriacao = formatDateLabelPTFromValue(inv?.data_criacao);
-          const responsavel = String(
+          const responsavelRaw = String(
             inv?.responsavel_user_id ??
               (inv?.raw as any)?.responsavel_id ??
               (inv?.raw as any)?.bubble?.responsavel_id ??
@@ -452,6 +509,7 @@ export async function GET(req: NextRequest) {
               (inv?.raw as any)?.bubble?.creator ??
               "",
           ).trim();
+          const responsavel = (isUuid(responsavelRaw) ? responsibleNames.get(responsavelRaw.toLowerCase()) : "") || responsavelRaw || "-";
 
           const itensNota = (byInvoiceId.get(invDbId) ?? []).map((it: any) => {
             const itDbId = String(it?.id ?? "").trim();
@@ -730,6 +788,14 @@ export async function GET(req: NextRequest) {
 
     const missingSupplierIds: string[] = [];
     const invalidSupplierNames: Array<{ id: string; nome: string }> = [];
+    const responsibleNames = await loadUserDisplayNames(
+      companyScope.db,
+      rowsDb.flatMap((r) => {
+        const raw = String((r as any)?.responsavel ?? "").trim();
+        const owner = userIdFromLegacyEntryId((r as any)?.id);
+        return [raw, owner].filter(isUuid);
+      }),
+    );
     const rows = rowsDb.map((r) => {
       const fornecedorRaw = String(r?.fornecedor ?? "").trim();
       const dbId = isDbPrefixed(fornecedorRaw) ? canonicalUuid(dbIdFromKey(fornecedorRaw)) : isUuid(fornecedorRaw) ? canonicalUuid(fornecedorRaw) : "";
@@ -742,7 +808,14 @@ export async function GET(req: NextRequest) {
       const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback || inferred;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
-      return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
+      const responsavelRaw = String((r as any)?.responsavel ?? "").trim();
+      const ownerUserId = userIdFromLegacyEntryId((r as any)?.id);
+      const responsavel =
+        (isUuid(responsavelRaw) ? responsibleNames.get(responsavelRaw.toLowerCase()) : "") ||
+        responsibleNames.get(ownerUserId) ||
+        responsavelRaw ||
+        "-";
+      return { ...r, responsavel, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
     });
 
     return json(
@@ -795,8 +868,14 @@ export async function POST(req: NextRequest) {
     const entradaId = String((body as any).id ?? "").trim();
     if (!entradaId || !entradaId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
+    const userId = String(id).slice("user:".length);
+    const responsibleNames = await loadUserDisplayNames(supabase, [userId]);
+    const payload = {
+      ...(body as Record<string, unknown>),
+      responsavel: responsibleNames.get(userId.toLowerCase()) || String((body as any)?.responsavel ?? "").trim() || userId,
+    };
     const tBeforeUpsert = performance.now();
-    const { error } = await supabase.from("entradas").upsert(body as any, { onConflict: "id" });
+    const { error } = await supabase.from("entradas").upsert(payload as any, { onConflict: "id" });
     const tAfterUpsert = performance.now();
     if (error) return json({ error: error.message }, { status: 500 });
     const total = tAfterUpsert - t0;
