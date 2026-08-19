@@ -1371,7 +1371,7 @@ export default function EntradasClient() {
           fornecedor: fornecedorKey || fornecedor.toUpperCase(),
           valorNota: "R$0,00",
           itens: "0 Itens",
-          responsavel: "",
+          responsavel: currentUserFullName || currentUserEmail || "-",
           dataCriacao: formatDateLabelPT(now),
           itensNota: [],
         };
@@ -1520,7 +1520,7 @@ export default function EntradasClient() {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+        showToast("Não foi possível salvar os fornecedores. Verifique sua conexão e tente novamente.", "error", 9000);
       });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
