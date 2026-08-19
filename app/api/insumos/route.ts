@@ -399,7 +399,7 @@ async function seedCompanyItemsFromLegacy(args: { supabase: ReturnType<typeof ge
   }
 
   if (upsertByBubble.length) {
-    const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+    const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "id" });
     if (error) return { ok: false, diag: diagOut };
   }
   if (upsertById.length) {
@@ -646,7 +646,7 @@ export async function POST(req: NextRequest) {
       }
       const db = supabaseAdmin ?? supabase;
 
-      const { data: memberRows, error: memberErr } = await supabase
+      const { data: memberRows, error: memberErr } = await db
         .from("company_members")
         .select("company_id,role,permission_level")
         .eq("user_id", userId)
@@ -765,7 +765,7 @@ export async function POST(req: NextRequest) {
       }
 
       if (upsertByBubble.length) {
-        const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "company_id,bubble_id" });
+        const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "id" });
         if (error) return json({ error: error.message }, { status: 500 });
       }
       if (upsertById.length) {
