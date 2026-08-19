@@ -9,8 +9,77 @@ export type InsumosStatePayload = {
 };
 
 export type DeleteInsumosResponse =
-  | { ok: true; source: "compat"; deletedCount: number; deletedIds: string[]; results?: any[] }
-  | { ok: false; source?: "compat" | "legacy"; deletedCount?: number; deletedIds?: string[]; error?: string; links?: any };
+  | {
+      ok: true;
+      source: "compat";
+      deletedCount: number;
+      deletedIds: string[];
+      archived?: boolean;
+      archivedCount?: number;
+      archivedIds?: string[];
+      results?: any[];
+      archivedBecauseLinks?: any;
+      checkOnly?: true;
+      links?: any;
+      recipeNames?: string[];
+      hasAnyLinks?: boolean;
+      hasRecipeLinks?: boolean;
+      suggestedAction?: "delete" | "archive" | "block";
+    }
+  | {
+      ok: false;
+      source?: "compat" | "legacy";
+      deletedCount?: number;
+      deletedIds?: string[];
+      archivedCount?: number;
+      archivedIds?: string[];
+      error?: string;
+      links?: any;
+      humanMessage?: string;
+      recipeNames?: string[];
+      status?: number;
+    };
+
+export async function checkInsumoUsage(args: { id?: string; bubbleId?: string; source?: "compat" | "legacy"; userId?: string }) {
+  const source = args.source ?? "compat";
+  const qp = buildQaQuery({ userId: args.userId, source });
+  const url = new URL(`/api/insumos?ts=${Date.now()}&checkOnly=1${qp}`, window.location.origin);
+  if (args.id) url.searchParams.set("id", String(args.id));
+  if (args.bubbleId) url.searchParams.set("bubbleId", String(args.bubbleId));
+  const res = await fetch(url.toString(), { method: "DELETE", cache: "no-store" });
+  const text = await res.text().catch(() => "");
+  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosResponse | null;
+  if (!res.ok || !json) {
+    const msg = String((json as any)?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_check_${res.status}`;
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.payload = json;
+    throw err;
+  }
+  return json as any;
+}
+
+export async function checkInsumosUsageBatch(args: { ids?: string[]; bubbleIds?: string[]; source?: "compat" | "legacy"; userId?: string }) {
+  const source = args.source ?? "compat";
+  const qp = buildQaQuery({ userId: args.userId, source });
+  const url = `/api/insumos?ts=${Date.now()}&checkOnly=1${qp}`;
+  const res = await fetch(url, {
+    method: "DELETE",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ ids: args.ids ?? [], bubbleIds: args.bubbleIds ?? [] }),
+    cache: "no-store",
+  });
+  const text = await res.text().catch(() => "");
+  const json = (text ? (JSON.parse(text) as any) : null) as DeleteInsumosResponse | null;
+  if (!res.ok || !json) {
+    const msg = String((json as any)?.error ?? "").trim() || (text ? text.slice(0, 400) : "") || `failed_to_check_batch_${res.status}`;
+    const err: any = new Error(msg);
+    err.status = res.status;
+    err.payload = json;
+    throw err;
+  }
+  return json as any;
+}
 
 function getQaOverridesFromLocation() {
   if (typeof window === "undefined") return { userId: "", source: "" };

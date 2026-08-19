@@ -483,6 +483,7 @@ export async function GET(req: NextRequest) {
         .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
         .eq("company_id", companyId)
         .or("item_receita.is.null,item_receita.eq.false")
+        .or("ocultar_cmv.is.null,ocultar_cmv.eq.false")
         .order("name", { ascending: true });
       if (itemsErr) return json({ error: itemsErr.message }, { status: 500 });
       let itemsDb = (itemsDbRaw ?? []) as any[];
@@ -501,6 +502,7 @@ export async function GET(req: NextRequest) {
             .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
             .eq("company_id", companyId)
             .or("item_receita.is.null,item_receita.eq.false")
+            .or("ocultar_cmv.is.null,ocultar_cmv.eq.false")
             .order("name", { ascending: true });
           if (!itemsErr2) itemsDb = (itemsDb2 ?? []) as any[];
         }
@@ -914,25 +916,155 @@ async function getLinksBlockingDelete(args: { supabase: ReturnType<typeof getSup
   return out;
 }
 
+async function getRecipeUsageNames(args: { supabase: ReturnType<typeof getSupabaseServerClient>; companyId: string; itemId: string }): Promise<string[]> {
+  const names: string[] = [];
+  const seen = new Set<string>();
+  try {
+    const res1 = await args.supabase
+      .from("recipe_ingredients")
+      .select("recipe_item:items!recipe_ingredients_recipe_item_id_fkey(name)")
+      .eq("company_id", args.companyId)
+      .eq("ingredient_item_id", args.itemId)
+      .limit(50);
+    if (!res1.error) {
+      for (const r of res1.data ?? []) {
+        const n = String((r as any)?.recipe_item?.name ?? "").trim();
+        if (n && !seen.has(n.toLowerCase())) {
+          seen.add(n.toLowerCase());
+          names.push(n);
+        }
+      }
+    }
+  } catch {}
+  try {
+    const res2 = await args.supabase
+      .from("recipe_ingredients")
+      .select("ingredient_item:items!recipe_ingredients_ingredient_item_id_fkey(name)")
+      .eq("company_id", args.companyId)
+      .eq("recipe_item_id", args.itemId)
+      .limit(50);
+    if (!res2.error) {
+      for (const r of res2.data ?? []) {
+        const n = String((r as any)?.ingredient_item?.name ?? "").trim();
+        if (n && !seen.has(n.toLowerCase())) {
+          seen.add(n.toLowerCase());
+          names.push(n);
+        }
+      }
+    }
+  } catch {}
+  try {
+    const res3 = await args.supabase
+      .from("items")
+      .select("name")
+      .eq("company_id", args.companyId)
+      .eq("id", args.itemId)
+      .eq("item_receita", true)
+      .maybeSingle();
+    if (!res3.error && res3.data) {
+      const n = String((res3.data as any)?.name ?? "").trim();
+      if (n && !seen.has(n.toLowerCase())) {
+        seen.add(n.toLowerCase());
+        names.push(n);
+      }
+    }
+  } catch {}
+  return names;
+}
+
 async function deleteOneCompatItem(args: {
   supabase: ReturnType<typeof getSupabaseServerClient>;
   companyId: string;
   target: DeleteTarget;
+  checkOnly?: boolean;
 }) {
-  const base = { source: "compat" as const, deletedCount: 0, deletedIds: [] as string[] };
+  const base = {
+    source: "compat" as const,
+    deletedCount: 0,
+    deletedIds: [] as string[],
+    archivedCount: 0,
+    archivedIds: [] as string[],
+    recipeNames: [] as string[],
+  };
 
-  const findQ = args.supabase.from("items").select("id,bubble_id").eq("company_id", args.companyId);
+  const findQ = args.supabase.from("items").select("id,bubble_id,name").eq("company_id", args.companyId);
   const findRes = args.target.id ? await findQ.eq("id", args.target.id).maybeSingle() : await findQ.eq("bubble_id", args.target.bubbleId as string).maybeSingle();
   if (findRes.error) return { status: 500, body: { ...base, ok: false, error: findRes.error.message } };
   const itemId = String((findRes.data as any)?.id ?? "").trim();
   if (!itemId) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
 
+  let links: Array<{ table: string; columns: string[]; fk: string; count: number }> = [];
+  let recipeNames: string[] = [];
   try {
-    const links = await getLinksBlockingDelete({ supabase: args.supabase, companyId: args.companyId, itemId });
-    if (links.length) return { status: 409, body: { ...base, ok: false, error: "conflict_links", links } };
+    const [linkRes, rn] = await Promise.all([
+      getLinksBlockingDelete({ supabase: args.supabase, companyId: args.companyId, itemId }),
+      getRecipeUsageNames({ supabase: args.supabase, companyId: args.companyId, itemId }),
+    ]);
+    links = linkRes;
+    recipeNames = rn;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return { status: 500, body: { ...base, ok: false, error: msg } };
+  }
+
+  const hasRecipeLinks = links.some((l) => l.table === "recipe_ingredients") || recipeNames.length > 0;
+  const hasAnyLinks = links.length > 0;
+
+  if (args.checkOnly) {
+    return {
+      status: 200,
+      body: {
+        ...base,
+        ok: true,
+        checkOnly: true,
+        links,
+        recipeNames,
+        hasRecipeLinks,
+        hasAnyLinks,
+        suggestedAction: !hasAnyLinks ? "delete" : hasRecipeLinks ? "block" : "archive",
+      },
+    };
+  }
+
+  if (hasRecipeLinks) {
+    const list = recipeNames.slice(0, 10).join(", ") + (recipeNames.length > 10 ? "…" : "");
+    const humanMsg = list
+      ? `Usado em receitas${recipeNames.length > 1 ? ` (${recipeNames.length})` : ""}: ${list}. Não é possível excluir.`
+      : `Usado em fichas técnicas ou pré-preparos. Não é possível excluir.`;
+    return {
+      status: 409,
+      body: {
+        ...base,
+        ok: false,
+        error: "used_in_recipe",
+        humanMessage: humanMsg,
+        links,
+        recipeNames,
+      },
+    };
+  }
+
+  if (hasAnyLinks) {
+    const patchRes = await args.supabase
+      .from("items")
+      .update({ ocultar_cmv: true })
+      .eq("company_id", args.companyId)
+      .eq("id", itemId)
+      .select("id");
+    if (patchRes.error) return { status: 500, body: { ...base, ok: false, error: patchRes.error.message } };
+    const archivedIds = (patchRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
+    if (!archivedIds.length) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
+    return {
+      status: 200,
+      body: {
+        ...base,
+        ok: true,
+        archived: true,
+        archivedCount: archivedIds.length,
+        archivedIds,
+        archivedBecauseLinks: links,
+      },
+    };
   }
 
   const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
@@ -969,6 +1101,7 @@ export async function DELETE(req: NextRequest) {
     if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
 
     const url = new URL(req.url);
+    const checkOnly = String(url.searchParams.get("checkOnly") ?? url.searchParams.get("check_only") ?? "").trim() === "1";
     const qId = String(url.searchParams.get("id") ?? "").trim();
     const qBubbleId = String(url.searchParams.get("bubbleId") ?? url.searchParams.get("bubble_id") ?? "").trim();
     const body = (await req.json().catch(() => null)) as any;
@@ -993,20 +1126,41 @@ export async function DELETE(req: NextRequest) {
 
     if (batchTargets.length) {
       const results: any[] = [];
+      let totalDeleted = 0;
+      let totalArchived = 0;
+      const allDeletedIds: string[] = [];
+      const allArchivedIds: string[] = [];
       for (const t of batchTargets) {
-        const r = await deleteOneCompatItem({ supabase, companyId, target: t });
-        results.push({ key: t.key, ...r.body, status: r.status });
+        const r = await deleteOneCompatItem({ supabase, companyId, target: t, checkOnly });
+        const b: any = { key: t.key, ...r.body, status: r.status };
+        results.push(b);
+        if (!checkOnly) {
+          if (typeof b.deletedCount === "number" && b.deletedCount > 0) totalDeleted += b.deletedCount;
+          if (typeof b.archivedCount === "number" && b.archivedCount > 0) totalArchived += b.archivedCount;
+          if (Array.isArray(b.deletedIds)) for (const x of b.deletedIds) if (x) allDeletedIds.push(x);
+          if (Array.isArray(b.archivedIds)) for (const x of b.archivedIds) if (x) allArchivedIds.push(x);
+        }
       }
-      const deletedCount = results.reduce((acc, r) => acc + (typeof r.deletedCount === "number" ? r.deletedCount : 0), 0);
-      const deletedIds = results.flatMap((r) => (Array.isArray(r.deletedIds) ? r.deletedIds : [])).filter(Boolean);
-      return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
+      return json(
+        {
+          ok: true,
+          source: "compat",
+          checkOnly: checkOnly ? true : undefined,
+          deletedCount: totalDeleted,
+          deletedIds: allDeletedIds,
+          archivedCount: totalArchived,
+          archivedIds: allArchivedIds,
+          results,
+        },
+        { status: 200 },
+      );
     }
 
     if (!singleTarget) {
       return json({ ok: false, source: "compat", deletedCount: 0, deletedIds: [], error: "missing_id" }, { status: 400 });
     }
 
-    const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget });
+    const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget, checkOnly });
     return json(res.body, { status: res.status });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

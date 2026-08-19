@@ -11,6 +11,8 @@ import usePagination from "../components/usePagination";
 import { readInsumosFromStore, writeInsumosToStore, type InsumoStoreItem } from "../lib/insumosStore";
 import { readInsumoCategoriasFromStore, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import {
+  checkInsumoUsage,
+  checkInsumosUsageBatch,
   deleteInsumoFromSupabase,
   deleteInsumosBatchFromSupabase,
   loadInsumosStateFromSupabase,
@@ -438,6 +440,7 @@ export default function InsumosClient() {
   const [isDeleteItemOpen, setIsDeleteItemOpen] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [deletingItemName, setDeletingItemName] = useState<string>("");
+  const [deletingItemUsage, setDeletingItemUsage] = useState<any>(null);
   const [bulkDeleteMode, setBulkDeleteMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
@@ -501,10 +504,19 @@ export default function InsumosClient() {
   }
 
   function deleteErrorMessage(err: unknown) {
+    const payload = (err as any)?.payload;
+    if (payload?.humanMessage && typeof payload.humanMessage === "string") return payload.humanMessage;
     const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
     if (!msg) return "Não foi possível excluir o insumo.";
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg === "compat_required") return "Sua sessão ainda não está no modo compat. Atualize a página e tente novamente.";
+    if (msg.includes("conflict_links") || msg.includes("used_in_recipe")) {
+      if (payload?.recipeNames && Array.isArray(payload.recipeNames) && payload.recipeNames.length > 0) {
+        const list = payload.recipeNames.slice(0, 8).join(", ");
+        return `Usado em receitas: ${list}. Não é possível excluir.`;
+      }
+      return "Esse insumo tem vínculos e não pode ser excluído diretamente.";
+    }
     return `Não foi possível excluir o insumo (${msg}).`;
   }
 
@@ -1157,59 +1169,123 @@ export default function InsumosClient() {
     setSelectedIds(new Set());
     setDeletingItemId(row.id);
     setDeletingItemName(row.item);
+    setDeletingItemUsage(null);
     setIsDeleteItemOpen(true);
+    if (isCompatSource) {
+      const raw = String(row.id ?? "").trim();
+      const isDb = raw.startsWith("db:");
+      const uuid = isDb ? raw.slice("db:".length) : raw;
+      const bubbleId = !isDb && /^\d{6,}x\d{6,}$/.test(raw) ? raw : "";
+      void (async () => {
+        try {
+          const usage = await checkInsumoUsage({
+            id: isDb ? uuid : isUuidValue(uuid) ? uuid : undefined,
+            bubbleId: bubbleId || undefined,
+            source: "compat",
+          });
+          setDeletingItemUsage(usage);
+        } catch (err) {
+          try {
+            const payload = (err as any)?.payload;
+            if (payload && ((payload as any).error === "used_in_recipe" || (payload as any).humanMessage)) {
+              setDeletingItemUsage({ ...(payload ?? {}), ok: false, hasRecipeLinks: true, suggestedAction: "block" });
+            }
+          } catch {}
+        }
+      })();
+    }
   }
 
   async function confirmDeleteItem() {
     const id = deletingItemId;
     if (!id) return;
+    if (isDeletingItem) return;
+
+    const rowSnapshot = dataRows.find((r) => r.id === id) ?? null;
+    const rowIndex = rowSnapshot ? dataRows.findIndex((r) => r.id === id) : -1;
+
+    setIsDeletingItem(true);
+
+    const rollbackVisual = () => {
+      if (rowSnapshot) {
+        setDataRows((prev) => {
+          if (prev.some((r) => r.id === id)) return prev;
+          const insertAt = rowIndex >= 0 ? Math.min(rowIndex, prev.length) : prev.length;
+          const clone = prev.slice();
+          clone.splice(insertAt, 0, rowSnapshot);
+          return clone;
+        });
+      }
+    };
+
+    const buildDeleteErrorMessage = (err: unknown) => {
+      const payload = (err as any)?.payload;
+      if (payload?.humanMessage && typeof payload.humanMessage === "string") return payload.humanMessage;
+      const rawErr = String((err as any)?.error ?? (err as any)?.message ?? "");
+      if (rawErr.includes("conflict_links") || rawErr.includes("used_in_recipe")) {
+        if (payload?.recipeNames && Array.isArray(payload.recipeNames) && payload.recipeNames.length > 0) {
+          const list = payload.recipeNames.slice(0, 8).join(", ");
+          return `Usado em receitas: ${list}. Não é possível excluir.`;
+        }
+        return "Esse insumo tem vínculos e não pode ser excluído diretamente.";
+      }
+      return saveErrorMessage(err);
+    };
+
+    const closeCleanup = () => {
+      setIsDeleteItemOpen(false);
+      setDeletingItemId(null);
+      setDeletingItemName("");
+      setDeletingItemUsage(null);
+      setIsDeletingItem(false);
+    };
+
     if (isCompatSource) {
+      setDataRows((prev) => prev.filter((r) => r.id !== id));
       void (async () => {
         try {
           const raw = String(id ?? "").trim();
           const isDb = raw.startsWith("db:");
           const uuid = isDb ? raw.slice("db:".length) : raw;
           const bubbleId = !isDb && /^\d{6,}x\d{6,}$/.test(raw) ? raw : "";
-          const res = await deleteInsumoFromSupabase({ id: isDb ? uuid : isUuidValue(uuid) ? uuid : undefined, bubbleId: bubbleId || undefined, source: "compat" });
-          if (!res?.deletedCount) throw new Error("deletedCount=0");
-          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
-          const meta = state.meta ?? { source: "legacy" as const, readOnly: false };
-          setSourceMeta(meta);
-          const mapped = (state.rows ?? []).map((s, idx) => ({
-            id: String(s.id || idx + 1),
-            ocultar: Boolean(s.ocultar),
-            item: String(s.item ?? "").trim(),
-            medida: String(s.medida ?? "").trim() || "Und",
-            custoMedio: String(s.custoMedio ?? "").trim() || "-",
-            categoria: String(s.categoria ?? "").trim() || "-",
-            especificacao: String(s.especificacao ?? "").trim() || "-",
-          }));
-          setDataRows(mapped);
-          const fromRows = getUniqueCategoriesFromRows(mapped);
-          const merged: string[] = [];
-          const seen = new Set<string>();
-          for (const c of [...(state.categories ?? []), ...fromRows]) {
-            const name = normalizeCategoryName(c);
-            if (!name || name === "-") continue;
-            const key = name.toLowerCase();
-            if (seen.has(key)) continue;
-            seen.add(key);
-            merged.push(name);
-          }
-          setCategories(merged);
-          writeInsumosToStore(state.rows ?? []);
-          writeInsumoCategoriasToStore(merged);
-          showToast("Item excluído.", "success");
+          const res = await deleteInsumoFromSupabase({
+            id: isDb ? uuid : isUuidValue(uuid) ? uuid : undefined,
+            bubbleId: bubbleId || undefined,
+            source: "compat",
+          });
+          const wasArchived = Boolean((res as any)?.archived) || (typeof (res as any)?.archivedCount === "number" && (res as any).archivedCount > 0);
+          const countOk = (typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0) + (wasArchived ? 1 : 0);
+          if (!countOk) throw new Error("deletedCount=0");
+          const nextRows = dataRows.filter((r) => r.id !== id);
+          writeInsumosToStore(
+            nextRows.map((r) => ({
+              id: r.id,
+              item: r.item,
+              medida: r.medida,
+              custoMedio: r.custoMedio,
+              categoria: r.categoria,
+              especificacao: r.especificacao,
+              ocultar: r.ocultar,
+            })),
+          );
+          const mergedCats = Array.from(
+            new Set(
+              [...categories, ...getUniqueCategoriesFromRows(nextRows)].map((x) => normalizeCategoryName(x)).filter(Boolean) as string[],
+            ),
+          ).sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
+          setCategories(mergedCats);
+          writeInsumoCategoriasToStore(mergedCats);
+          showToast(wasArchived ? "Item arquivado do catálogo." : "Item excluído.", "success");
+          closeCleanup();
         } catch (err) {
-          showToast(saveErrorMessage(err), "error");
-        } finally {
-          setIsDeleteItemOpen(false);
-          setDeletingItemId(null);
-          setDeletingItemName("");
+          rollbackVisual();
+          showToast(buildDeleteErrorMessage(err), "error");
+          setIsDeletingItem(false);
         }
       })();
       return;
     }
+
     setDataRows((prev) => {
       const nextRows = prev.filter((r) => r.id !== id);
       writeInsumosToStore(
@@ -1223,30 +1299,33 @@ export default function InsumosClient() {
           ocultar: r.ocultar,
         })),
       );
-      if (isBootstrapRunning()) return nextRows;
-      void saveInsumosStateToSupabase({
-        rows: nextRows.map((r) => ({
-          id: r.id,
-          item: r.item,
-          medida: r.medida,
-          custoMedio: r.custoMedio,
-          categoria: r.categoria,
-          especificacao: r.especificacao,
-          ocultar: r.ocultar,
-        })) as any,
-        categories,
-      })
-        .then(() => {
-          saveErrorShownRef.current = false;
+      if (!isBootstrapRunning()) {
+        void saveInsumosStateToSupabase({
+          rows: nextRows.map((r) => ({
+            id: r.id,
+            item: r.item,
+            medida: r.medida,
+            custoMedio: r.custoMedio,
+            categoria: r.categoria,
+            especificacao: r.especificacao,
+            ocultar: r.ocultar,
+          })) as any,
+          categories,
         })
-        .catch((err) => {
-          showToast(saveErrorMessage(err), "error");
-        });
+          .then(() => {
+            saveErrorShownRef.current = false;
+            closeCleanup();
+          })
+          .catch((err) => {
+            rollbackVisual();
+            showToast(saveErrorMessage(err), "error");
+            setIsDeletingItem(false);
+          });
+      } else {
+        closeCleanup();
+      }
       return nextRows;
     });
-    setIsDeleteItemOpen(false);
-    setDeletingItemId(null);
-    setDeletingItemName("");
     showToast("Item excluído.", "success");
   }
 
@@ -1756,9 +1835,16 @@ export default function InsumosClient() {
     if (!selectedIds.size) return;
     if (isBulkDeleting) return;
     setIsBulkDeleting(true);
+    const rawIds = Array.from(selectedIds);
+    const idsSet = new Set(rawIds);
+    const rowsSnapshot = dataRows.filter((r) => idsSet.has(r.id));
+    const prevRows = dataRows.slice();
+
+    const rollbackLocal = () => {
+      setDataRows(() => prevRows);
+    };
+
     try {
-      const rawIds = Array.from(selectedIds);
-      const idsSet = new Set(rawIds);
       flushSync(() => {
         showToast(rawIds.length === 1 ? "Excluindo 1 item…" : `Excluindo ${rawIds.length} itens…`, "success", 12000, "Excluindo…", "loading");
         setIsBulkDeleteOpen(false);
@@ -1781,24 +1867,35 @@ export default function InsumosClient() {
       }
 
       const res = await deleteInsumosBatchFromSupabase({ ids, bubbleIds, source: "compat" });
-      const okCount = typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0;
-      const failures = Array.isArray((res as any)?.results) ? (res as any).results.filter((r: any) => !r?.ok) : [];
-      if (failures.length) showToast("Alguns itens não puderam ser excluídos. A lista foi atualizada.", "error");
-      else showToast(rawIds.length === 1 ? "Insumo deletado com sucesso." : `${okCount} insumos deletados com sucesso.`, "success");
-      void (async () => {
-        try {
-          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
-          applyLoadedState(state);
-        } catch {}
-      })();
+      const deletedOk = typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0;
+      const archivedOk = typeof (res as any)?.archivedCount === "number" ? (res as any).archivedCount : 0;
+      const failures: any[] = Array.isArray((res as any)?.results) ? (res as any).results.filter((r: any) => !r?.ok) : [];
+      if (failures.length) {
+        showToast(
+          deletedOk > 0 || archivedOk > 0
+            ? `${deletedOk} excluído(s), ${archivedOk} arquivado(s). ${failures.length} não pode(m) ser processado(s).`
+            : failures.length === 1
+              ? "1 item não pode ser excluído ou arquivado."
+              : `${failures.length} itens não podem ser excluídos ou arquivados.`,
+          deletedOk || archivedOk ? "success" : "error",
+        );
+      } else {
+        showToast(
+          rawIds.length === 1
+            ? archivedOk > 0
+              ? "Insumo arquivado com sucesso."
+              : "Insumo deletado com sucesso."
+            : `${deletedOk} excluído(s) e ${archivedOk} arquivado(s) com sucesso.`,
+          "success",
+        );
+      }
+      const remainingRows = dataRows.filter((r) => !idsSet.has(r.id));
+      writeInsumosToStore(
+        remainingRows.map((r) => ({ id: r.id, item: r.item, medida: r.medida, custoMedio: r.custoMedio, categoria: r.categoria, especificacao: r.especificacao, ocultar: r.ocultar }))
+      );
     } catch (err) {
+      rollbackLocal();
       showToast(deleteErrorMessage(err), "error");
-      void (async () => {
-        try {
-          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
-          applyLoadedState(state);
-        } catch {}
-      })();
     } finally {
       setIsBulkDeleting(false);
     }
@@ -2428,11 +2525,13 @@ export default function InsumosClient() {
 
         {mounted && isDeleteItemOpen ? (
           createPortal(
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDeleteItemOpen(false)}>
+          <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!isDeletingItem) setIsDeleteItemOpen(false); }}>
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>Excluir Item?</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDeleteItemOpen(false)}>
+                <div className={styles.modalTitle}>
+                  {deletingItemUsage?.suggestedAction === "block" ? "Não é possível excluir" : deletingItemUsage?.suggestedAction === "archive" ? "Arquivar item?" : "Excluir Item?"}
+                </div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => { if (!isDeletingItem) setIsDeleteItemOpen(false); }} disabled={isDeletingItem}>
                   ×
                 </button>
               </div>
@@ -2442,15 +2541,68 @@ export default function InsumosClient() {
                   <IconTrash />
                 </div>
                 <div className={styles.confirmText}>
-                  Caso exclua o item <strong>“{deletingItemName}”</strong> não poderá recuperá-lo.
+                  {deletingItemUsage?.suggestedAction === "block" ? (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        O item <strong>“{deletingItemName}”</strong> está sendo usado em receitas ou fichas técnicas e não pode ser removido do catálogo.
+                      </div>
+                      {deletingItemUsage?.recipeNames?.length > 0 ? (
+                        <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", padding: "10px 12px", borderRadius: 8, lineHeight: 1.45 }}>
+                          <strong>Receitas que usam esse insumo:</strong>
+                          <div style={{ marginTop: 4 }}>{deletingItemUsage.recipeNames.slice(0, 10).join(", ")}{deletingItemUsage.recipeNames.length > 10 ? ` (+${deletingItemUsage.recipeNames.length - 10})` : ""}</div>
+                        </div>
+                      ) : deletingItemUsage?.humanMessage ? (
+                        <div style={{ fontSize: 13, color: "#92400e", background: "#fffbeb", padding: "10px 12px", borderRadius: 8, lineHeight: 1.45 }}>
+                          {deletingItemUsage.humanMessage}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : deletingItemUsage?.suggestedAction === "archive" ? (
+                    <>
+                      <div style={{ marginBottom: 8 }}>
+                        O item <strong>“{deletingItemName}”</strong> tem histórico de uso (entradas, inventários, desperdícios, fornecedores, custos). Ele será <strong>arquivado/ocultado</strong> do catálogo ativo, mas todos os históricos permanecem íntegros e legíveis.
+                      </div>
+                      {Array.isArray(deletingItemUsage?.links) && deletingItemUsage.links.length > 0 ? (
+                        <div style={{ fontSize: 13, color: "#1f2937", background: "#f3f4f6", padding: "10px 12px", borderRadius: 8, lineHeight: 1.45 }}>
+                          <strong>Vínculos detectados:</strong>
+                          <ul style={{ margin: "6px 0 0 20px", padding: 0 }}>
+                            {deletingItemUsage.links.slice(0, 8).map((l: any, i: number) => (
+                              <li key={i}>
+                                {l.table === "invoice_items" ? `Entradas (${l.count} registro${l.count > 1 ? "s" : ""})` :
+                                 l.table === "inventory_items" ? `Inventários (${l.count})` :
+                                 l.table === "wastes" ? `Desperdícios (${l.count})` :
+                                 l.table === "supplier_items" ? `Cadastros de fornecedor (${l.count})` :
+                                 l.table === "shopping_list_items" ? `Listas de compras (${l.count})` :
+                                 l.table === "avg_cost_events" ? `Histórico de custos (${l.count})` :
+                                 `${l.table} (${l.count})`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <>Caso exclua o item <strong>“{deletingItemName}”</strong> não poderá recuperá-lo.</>
+                  )}
                 </div>
               </div>
 
               <div className={styles.confirmActions}>
-                <button type="button" className={styles.confirmDelete} onClick={confirmDeleteItem} disabled={isDeletingItem}>
-                  Excluir
+                <button
+                  type="button"
+                  className={styles.confirmDelete}
+                  onClick={confirmDeleteItem}
+                  disabled={isDeletingItem || deletingItemUsage?.suggestedAction === "block"}
+                >
+                  {isDeletingItem
+                    ? deletingItemUsage?.suggestedAction === "archive"
+                      ? "Arquivando…"
+                      : "Excluindo…"
+                    : deletingItemUsage?.suggestedAction === "archive"
+                      ? "Arquivar item"
+                      : "Excluir"}
                 </button>
-                <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteItemOpen(false)}>
+                <button type="button" className={styles.confirmCancel} onClick={() => setIsDeleteItemOpen(false)} disabled={isDeletingItem}>
                   Cancelar
                 </button>
               </div>
