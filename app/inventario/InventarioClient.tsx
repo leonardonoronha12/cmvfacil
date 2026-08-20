@@ -267,13 +267,13 @@ export default function InventarioClient() {
   }
   function buildOptimisticRow(origIt: InventarioItemRow, sectorId: string, cleanedValue: string, numericValue: number): InventarioItemRow {
     const sc: Record<string, string> = { ...(origIt.sectorCounts ?? {}) };
-    if (cleanedValue && numericValue > 0) {
+    if (cleanedValue !== "") {
       sc[sectorId] = formatDecimal3Places(numericValue);
     } else {
       delete sc[sectorId];
     }
     const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
-    const estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
+    const estoqueFinal = Object.keys(sc).length > 0 ? formatDecimal3Places(totalNum) : "";
     return { ...origIt, sectorCounts: sc, estoqueFinal };
   }
 
@@ -668,7 +668,7 @@ export default function InventarioClient() {
                 }
                 it.sectorCounts = sc;
                 const totalNum = Object.values(sc).reduce((acc, v) => acc + parsePtNumber(String(v ?? "")), 0);
-                it.estoqueFinal = totalNum > 0 ? formatDecimal3Places(totalNum) : Object.values(sc).find((v) => String(v ?? "").trim()) ?? "";
+                it.estoqueFinal = Object.keys(sc).length > 0 ? formatDecimal3Places(totalNum) : "";
                 return it;
               });
               return { ...cat, itens };
