@@ -969,15 +969,10 @@ export async function POST(req: NextRequest) {
       });
       // #endregion
 
-      if (missing.length) {
-        return errJson({
-          status: 400,
-          traceId,
-          stage: "compat.items_not_found",
-          error: `items_not_found: ${missing.join(" | ")}`,
-          source: "compat",
-        });
-      }
+      // Produtos legados podem continuar no cadastro do fornecedor mesmo quando
+      // o insumo correspondente já foi removido. Eles não devem invalidar todo o
+      // salvamento: persistimos os vínculos resolvidos e ignoramos apenas os
+      // nomes sem correspondência na tabela items.
 
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
       if (supplierIdsToClear.length) {

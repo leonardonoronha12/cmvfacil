@@ -351,6 +351,7 @@ export default function FornecedoresClient() {
   const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
+  const fornecedoresPersistedSnapshotRef = useRef("");
   const fornecedoresLoadErrorShownRef = useRef(false);
   const fornecedoresSaveErrorShownRef = useRef(false);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -485,6 +486,7 @@ export default function FornecedoresClient() {
       setInfoMap(nextInfo);
       setProdutosMap(nextProdutos);
       setEquivalenciasMap(nextEq);
+      fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq });
       fornecedoresReadyRef.current = true;
       setIsLoadingTable(false);
     })();
@@ -502,9 +504,14 @@ export default function FornecedoresClient() {
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
     if (isReadOnly) return;
+    const snapshot = JSON.stringify({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap });
+    if (snapshot === fornecedoresPersistedSnapshotRef.current) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).catch((err) => {
+      void saveFornecedoresStateToSupabase({ info: infoMap, produtos: produtosMap, equivalencias: equivalenciasMap }).then(() => {
+        fornecedoresPersistedSnapshotRef.current = snapshot;
+        fornecedoresSaveErrorShownRef.current = false;
+      }).catch((err) => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
         const msg = err instanceof Error ? err.message : String(err ?? "");
