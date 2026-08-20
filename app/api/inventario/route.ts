@@ -186,7 +186,12 @@ function parseMaybeNumber(v: unknown) {
   if (!s) return 0;
   const neg = s.includes("-");
   const cleaned = s.replace(/-/g, "");
-  const normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  const decimalIndex = Math.max(lastComma, lastDot);
+  const integerDigits = (decimalIndex >= 0 ? cleaned.slice(0, decimalIndex) : cleaned).replace(/[^\d]/g, "") || "0";
+  const decimalDigits = decimalIndex >= 0 ? cleaned.slice(decimalIndex + 1).replace(/[^\d]/g, "") : "";
+  const normalized = `${integerDigits}${decimalIndex >= 0 ? `.${decimalDigits}` : ""}`;
   const n = Number.parseFloat(normalized);
   if (!Number.isFinite(n)) return 0;
   return neg ? -n : n;

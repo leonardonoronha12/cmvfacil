@@ -106,9 +106,16 @@ function normalizeSectorName(value: string) {
 }
 
 function parsePtNumber(value: string): number {
-  const raw = typeof value === "string" ? value.trim() : String(value ?? "").trim();
+  const raw = (typeof value === "string" ? value : String(value ?? "")).replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
-  const normalized = raw.replace(/\./g, "").replace(",", ".");
+  const neg = raw.includes("-");
+  const cleaned = raw.replace(/-/g, "");
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  const decimalIndex = Math.max(lastComma, lastDot);
+  const integerDigits = (decimalIndex >= 0 ? cleaned.slice(0, decimalIndex) : cleaned).replace(/[^\d]/g, "") || "0";
+  const decimalDigits = decimalIndex >= 0 ? cleaned.slice(decimalIndex + 1).replace(/[^\d]/g, "") : "";
+  const normalized = `${neg ? "-" : ""}${integerDigits}${decimalIndex >= 0 ? `.${decimalDigits}` : ""}`;
   const n = Number(normalized);
   return Number.isFinite(n) ? n : 0;
 }

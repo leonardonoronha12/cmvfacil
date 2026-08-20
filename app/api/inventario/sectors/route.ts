@@ -87,10 +87,12 @@ function parsePtNumber(input: unknown): number {
   if (!raw) return 0;
   const neg = raw.includes("-");
   const cleaned = raw.replace(/-/g, "");
-  const parts = cleaned.split(",");
-  const intPart = (parts[0] ?? "").replace(/\./g, "").replace(/[^\d]/g, "") || "0";
-  const decPart = (parts[1] ?? "").replace(/[^\d]/g, "");
-  const num = Number.parseFloat(`${intPart}.${decPart}`);
+  const lastComma = cleaned.lastIndexOf(",");
+  const lastDot = cleaned.lastIndexOf(".");
+  const decimalIndex = Math.max(lastComma, lastDot);
+  const intPart = (decimalIndex >= 0 ? cleaned.slice(0, decimalIndex) : cleaned).replace(/[^\d]/g, "") || "0";
+  const decPart = decimalIndex >= 0 ? cleaned.slice(decimalIndex + 1).replace(/[^\d]/g, "") : "";
+  const num = Number.parseFloat(`${intPart}${decimalIndex >= 0 ? `.${decPart}` : ""}`);
   return neg ? -num : num;
 }
 

@@ -351,6 +351,14 @@ function IconPencil() {
   );
 }
 
+function IconCheck() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="m5 12 4 4L19 6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function IconTrash() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
@@ -3005,7 +3013,7 @@ export default function EntradasClient() {
                         disabled={isReadOnly || !canAddNotaItem}
                         onClick={confirmAddNotaItem}
                       >
-                          {editingNotaItemId ? <IconPencil /> : <IconPlusCircle />}
+                          {editingNotaItemId ? <IconCheck /> : <IconPlusCircle />}
                       </button>
                     </div>
                   </div>
