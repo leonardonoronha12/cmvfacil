@@ -899,6 +899,45 @@
   color: #01040e;
 }
 
+.detailsHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.detailsEditBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 0 12px;
+  border: 1px solid #dce3e1;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #20312f;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.detailsEditBtn:hover:not(:disabled) {
+  border-color: #0ab86d;
+  color: #087747;
+  background: #f3fbf7;
+}
+
+.detailsEditBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.detailsEditBtn svg {
+  width: 15px;
+  height: 15px;
+}
+
 .detailsBody {
   display: flex;
   align-items: stretch;
