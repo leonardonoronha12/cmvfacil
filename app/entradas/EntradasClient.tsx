@@ -656,6 +656,7 @@ export default function EntradasClient() {
   const [detailUnit, setDetailUnit] = useState("Und");
   const [detailSubtotal, setDetailSubtotal] = useState("0,00");
   const [detailUnitCost, setDetailUnitCost] = useState("0,000");
+  const [editingNotaItemId, setEditingNotaItemId] = useState<string | null>(null);
   const [isItemMenuOpen, setIsItemMenuOpen] = useState(false);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const [fornecedorItemMap, setFornecedorItemMap] = useState<FornecedorEquivalenciasMap>({});
@@ -1685,6 +1686,7 @@ export default function EntradasClient() {
     setDetailUnit("Und");
     setDetailSubtotal("0,00");
     setDetailUnitCost("0,000");
+    setEditingNotaItemId(null);
     setIsItemMenuOpen(false);
     setIsDetailsOpen(true);
   }
@@ -1822,7 +1824,30 @@ export default function EntradasClient() {
     showToast("Vínculo salvo!", "success");
   }
 
-  function confirmAddNotaItem() {
+  function startEditNotaItem(item: NotaItem) {
+    if (isReadOnly) {
+      showToast("Modo somente leitura.", "error");
+      return;
+    }
+    const { qty, unit } = parseQtyLabel(item.quantidadeLabel);
+    setEditingNotaItemId(item.id);
+    setDetailItemName(resolveNotaItemDisplayName(item, insumosById));
+    setDetailQty(formatPtNumber(qty, 3));
+    setDetailUnit(unit || "Und");
+    setDetailSubtotal(formatPtNumber(parseBrlToCents(item.subtotalLabel) / 100, 2));
+    setIsItemMenuOpen(false);
+  }
+
+  function resetNotaItemForm() {
+    setEditingNotaItemId(null);
+    setDetailItemName("");
+    setDetailQty("0,000");
+    setDetailUnit("Und");
+    setDetailSubtotal("0,00");
+    setDetailUnitCost("0,000");
+  }
+
+  async function confirmAddNotaItem() {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -1847,6 +1872,35 @@ export default function EntradasClient() {
     };
     if (!qty || !Number.isFinite(qty) || qty <= 0 || !subtotalCents || !Number.isFinite(subtotalCents) || subtotalCents <= 0) {
       showToast("Preencha quantidade e subtotal.", "error");
+      return;
+    }
+
+    if (editingNotaItemId) {
+      if (!detailsRow) return;
+      const currentItem = (detailsRow.itensNota ?? []).find((item) => item.id === editingNotaItemId);
+      if (!currentItem) {
+        showToast("O item selecionado não foi encontrado.", "error");
+        resetNotaItemForm();
+        return;
+      }
+      const updatedItem: NotaItem = { ...currentItem, ...newItem, id: currentItem.id };
+      const items = (detailsRow.itensNota ?? []).map((item) => (item.id === editingNotaItemId ? updatedItem : item));
+      const total = items.reduce((acc, item) => acc + parseBrlToCents(item.subtotalLabel), 0);
+      const nextRow: EntradaRow = {
+        ...detailsRow,
+        itensNota: items,
+        itens: `${items.length} ${items.length === 1 ? "Item" : "Itens"}`,
+        valorNota: formatBrlFromCents(total),
+      };
+      try {
+        await upsertEntradaToSupabase(nextRow as unknown as any);
+      } catch {
+        showToast("Não foi possível salvar as alterações do item.", "error");
+        return;
+      }
+      setRows((prev) => prev.map((row) => (row.id === nextRow.id ? nextRow : row)));
+      resetNotaItemForm();
+      showToast("Item atualizado!", "success");
       return;
     }
 
@@ -1876,11 +1930,7 @@ export default function EntradasClient() {
         return next;
       });
     }
-    setDetailItemName("");
-    setDetailQty("0,000");
-    setDetailUnit("Und");
-    setDetailSubtotal("0,00");
-    setDetailUnitCost("0,000");
+    resetNotaItemForm();
     showToast("Item adicionado!", "success");
   }
 
@@ -2716,24 +2766,9 @@ export default function EntradasClient() {
                 <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.detailsHeader}>
                 <div className={styles.detailsTitle}>{`Detalhes da Nota${detailsNoteNumber ? ` ${detailsNoteNumber}` : ""}`}</div>
-                <div className={styles.detailsHeaderActions}>
-                  <button
-                    type="button"
-                    className={styles.detailsEditBtn}
-                    disabled={isReadOnly}
-                    onClick={() => {
-                      const row = detailsRow;
-                      setIsDetailsOpen(false);
-                      openEditModal(row);
-                    }}
-                  >
-                    <IconPencil />
-                    Editar nota
-                  </button>
-                  <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
-                    ×
-                  </button>
-                </div>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
+                  ×
+                </button>
               </div>
 
               <div className={styles.detailsBody}>
@@ -2966,11 +3001,11 @@ export default function EntradasClient() {
                       <button
                         type="button"
                         className={canAddNotaItem ? `${styles.plusBtn} ${styles.plusBtnOn}` : styles.plusBtn}
-                        aria-label="Adicionar item"
+                        aria-label={editingNotaItemId ? "Salvar alterações do item" : "Adicionar item"}
                         disabled={isReadOnly || !canAddNotaItem}
                         onClick={confirmAddNotaItem}
                       >
-                        <IconPlusCircle />
+                          {editingNotaItemId ? <IconPencil /> : <IconPlusCircle />}
                       </button>
                     </div>
                   </div>
@@ -3037,9 +3072,14 @@ export default function EntradasClient() {
                             })()}
                           </div>
                         </div>
-                        <button type="button" className={styles.itemsTrash} aria-label="Remover item" onClick={() => deleteNotaItem(it.id)} disabled={isReadOnly}>
-                          <IconTrash />
-                        </button>
+                        <div className={styles.itemsActions}>
+                          <button type="button" className={styles.itemsEdit} aria-label={`Editar ${resolveNotaItemDisplayName(it, insumosById)}`} onClick={() => startEditNotaItem(it)} disabled={isReadOnly}>
+                            <IconPencil />
+                          </button>
+                          <button type="button" className={styles.itemsTrash} aria-label={`Remover ${resolveNotaItemDisplayName(it, insumosById)}`} onClick={() => deleteNotaItem(it.id)} disabled={isReadOnly}>
+                            <IconTrash />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
