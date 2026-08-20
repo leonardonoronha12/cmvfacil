@@ -233,6 +233,13 @@ async function resolveCompanyEntryScope(args: {
   return { companyId, userIds, db };
 }
 
+function entryIdAllowedForCompanyScope(entryId: string, scope: { companyId: string; userIds: string[] }) {
+  const id = String(entryId ?? "").trim().toLowerCase();
+  if (!id) return false;
+  if (scope.companyId && id.startsWith(`company:${scope.companyId.toLowerCase()}:`)) return true;
+  return scope.userIds.some((userId) => id.startsWith(`user:${userId.toLowerCase()}:`));
+}
+
 async function loadCompanyLegacyEntradas(args: {
   supabase: ReturnType<typeof getSupabaseServerClient>;
   userIds: string[];
@@ -863,19 +870,22 @@ export async function POST(req: NextRequest) {
     const tJson = performance.now();
     if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
     const { accessToken, id } = resolveUserScopedId(req);
-    const prefix = id ? `${id}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    if (!id) return json({ error: "unauthorized" }, { status: 401 });
     const entradaId = String((body as any).id ?? "").trim();
-    if (!entradaId || !entradaId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
     const supabase = getSupabaseServerClient(accessToken);
     const userId = String(id).slice("user:".length);
-    const responsibleNames = await loadUserDisplayNames(supabase, [userId]);
+    const companyScope = await resolveCompanyEntryScope({ supabase, userId });
+    if (!entryIdAllowedForCompanyScope(entradaId, companyScope)) {
+      return json({ error: "invalid_id_scope" }, { status: 400 });
+    }
+    const responsibleNames = await loadUserDisplayNames(companyScope.db, [userId]);
+    const existingResponsible = String((body as any)?.responsavel ?? "").trim();
     const payload = {
       ...(body as Record<string, unknown>),
-      responsavel: responsibleNames.get(userId.toLowerCase()) || String((body as any)?.responsavel ?? "").trim() || userId,
+      responsavel: existingResponsible || responsibleNames.get(userId.toLowerCase()) || userId,
     };
     const tBeforeUpsert = performance.now();
-    const { error } = await supabase.from("entradas").upsert(payload as any, { onConflict: "id" });
+    const { error } = await companyScope.db.from("entradas").upsert(payload as any, { onConflict: "id" });
     const tAfterUpsert = performance.now();
     if (error) return json({ error: error.message }, { status: 500 });
     const total = tAfterUpsert - t0;
@@ -892,9 +902,10 @@ export async function DELETE(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const { accessToken, id: userScopedId } = resolveUserScopedId(req);
-    const prefix = userScopedId ? `${userScopedId}:` : "";
-    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    if (!userScopedId) return json({ error: "unauthorized" }, { status: 401 });
     const supabase = getSupabaseServerClient(accessToken);
+    const userId = String(userScopedId).slice("user:".length);
+    const companyScope = await resolveCompanyEntryScope({ supabase, userId });
 
     const qId = String(url.searchParams.get("id") ?? "").trim();
     const body = (await req.json().catch(() => null)) as any;
@@ -902,14 +913,14 @@ export async function DELETE(req: NextRequest) {
     const ids = idsRaw.map((x) => String(x ?? "").trim()).filter(Boolean);
     if (!ids.length) return json({ error: "missing_id" }, { status: 400 });
 
-    const invalidIds = ids.filter((id) => !id.startsWith(prefix));
+    const invalidIds = ids.filter((id) => !entryIdAllowedForCompanyScope(id, companyScope));
     if (invalidIds.length) return json({ error: "invalid_id_scope", invalidIds }, { status: 400 });
 
     const deletedIds: string[] = [];
     const chunkSize = 200;
     for (let i = 0; i < ids.length; i += chunkSize) {
       const chunk = ids.slice(i, i + chunkSize);
-      const { data, error } = await supabase.from("entradas").delete().in("id", chunk).select("id");
+      const { data, error } = await companyScope.db.from("entradas").delete().in("id", chunk).select("id");
       if (error) return json({ error: error.message }, { status: 500 });
       for (const r of data ?? []) {
         const did = String((r as any)?.id ?? "").trim();
