@@ -932,7 +932,11 @@ export async function POST(req: NextRequest) {
       // salvamento: persistimos os vínculos resolvidos e ignoramos apenas os
       // nomes sem correspondência na tabela items.
 
-      const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
+      // A lista recebida é o snapshot completo dos produtos de cada fornecedor.
+      // Limpar todos os vínculos desses fornecedores antes de recriar o estado
+      // desejado impede que um item removido permaneça no banco e reapareça ou
+      // seja duplicado no próximo GET.
+      const supplierIdsToClear = supplierIdsForSync;
       if (supplierIdsToClear.length) {
         // #region debug-point B:post-compat-clear
         await __dbgSend({

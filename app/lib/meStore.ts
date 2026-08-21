@@ -117,51 +117,15 @@ export async function loadMeFromApi() {
   if (loading) return loading;
   loading = (async () => {
     try {
-      const authRes = await fetch(`/api/auth/me?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
-      const authJson = (await authRes.json().catch(() => null)) as any;
-      const sessionUserId = String(authJson?.userId ?? "").trim();
-      const sessionEmail = String(authJson?.email ?? "").trim().toLowerCase();
-      if (!sessionUserId) {
-        clearMeStore();
-        return null;
-      }
       const prev = readMeFromStore();
-      if (prev?.userId && prev.userId !== sessionUserId) clearMeStore();
-
       const res = await fetch(`/api/me?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
       const j = (await res.json().catch(() => null)) as any;
       if (!res.ok || !j?.ok) {
-        const keep = prev && prev.userId === sessionUserId ? prev : null;
-        if (keep) return keep;
-        if (!sessionEmail) {
-          clearMeStore();
-          return null;
-        }
-
-        const fallback: MeProfile = {
-          userId: sessionUserId,
-          email: sessionEmail,
-          nome: "",
-          sobrenome: "",
-          nomeCompleto: "",
-          whatsapp: "",
-          avatarUrl: "",
-          companyId: "",
-          companyName: "",
-          companyLogoUrl: "",
-          companyCnpj: "",
-          companyEmail: "",
-          companyWhatsapp: "",
-          companyIndustry: "",
-          role: "Colaborador",
-          planType: "",
-          planStatus: "",
-          cardLast4: "",
-          members: [],
-        };
-        writeMeToStore(fallback);
-        return fallback;
+        if (prev) return prev;
+        clearMeStore();
+        return null;
       }
+      const sessionUserId = String(j.userId ?? "").trim();
       const next: MeProfile = {
         userId: String(j.userId ?? "").trim(),
         email: String(j.email ?? "").trim(),
@@ -191,10 +155,7 @@ export async function loadMeFromApi() {
             }))
           : [],
       };
-      if (next.userId && next.userId !== sessionUserId) {
-        clearMeStore();
-        return null;
-      }
+      if (prev?.userId && sessionUserId && prev.userId !== sessionUserId) clearClientData();
       if (next.userId && next.email) writeMeToStore(next);
       return next;
     } catch {

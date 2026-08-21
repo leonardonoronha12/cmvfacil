@@ -699,8 +699,8 @@ export default function EntradasClient() {
     };
   }, [isAddFornecedorItemOpen]);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
-  const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
-  const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
+  const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>(() => readFornecedorInfoMap());
+  const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>(() => readFornecedorProdutosMap());
   const [fornecedorDbLabelCache, setFornecedorDbLabelCache] = useState<Record<string, string>>({});
   const fornecedorDbLabelInFlightRef = useRef<Set<string>>(new Set());
   const [isFornecedorProdutosOpen, setIsFornecedorProdutosOpen] = useState(false);
@@ -712,6 +712,7 @@ export default function EntradasClient() {
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const fornecedoresLoadErrorShownRef = useRef(false);
   const fornecedoresSaveErrorShownRef = useRef(false);
+  const fornecedoresPersistedSnapshotRef = useRef("");
   const [isMounted, setIsMounted] = useState(false);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [currentUserFullName, setCurrentUserFullName] = useState("");
@@ -826,7 +827,10 @@ export default function EntradasClient() {
     });
     return decorated.map(({ row }) => row);
   }, [currentUserEmail, currentUserFullName, dateEnd, dateStart, fornecedorDbLabelCache, fornecedorInfoMap, query, rows, sortDir, sortKey]);
-  const canRender = Boolean(isMounted && authReady);
+  // O middleware já protege a rota. Renderizamos imediatamente com o snapshot
+  // local enquanto a sessão é revalidada em segundo plano, evitando bloquear a
+  // tela inteira em "Carregando autenticação".
+  const canRender = isMounted;
   if (!canRender && isMounted && !dbgGateOnceRef.current) {
     dbgGateOnceRef.current = true;
     __dbgSend("h1", "app/entradas/EntradasClient.tsx:gate", "auth_gate_blocked", {
@@ -1493,9 +1497,9 @@ export default function EntradasClient() {
   useEffect(() => {
     if (!authReady) return;
     (async () => {
-      let nextInfo: FornecedorInfoMap = {};
-      let nextProdutos: FornecedorProdutos = {};
-      let nextEq: FornecedorEquivalenciasMap = {};
+      let nextInfo: FornecedorInfoMap = readFornecedorInfoMap();
+      let nextProdutos: FornecedorProdutos = readFornecedorProdutosMap();
+      let nextEq: FornecedorEquivalenciasMap = readFornecedorEquivalenciasMap();
       try {
         const db = await loadFornecedoresStateFromSupabase();
         const hasDb = Object.keys(db.info).length || Object.keys(db.produtos).length || Object.keys(db.equivalencias).length;
@@ -1505,7 +1509,8 @@ export default function EntradasClient() {
           nextEq = db.equivalencias;
         }
       } catch {
-        if (!fornecedoresLoadErrorShownRef.current) {
+        const hasCached = Object.keys(nextInfo).length || Object.keys(nextProdutos).length || Object.keys(nextEq).length;
+        if (!hasCached && !fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
           showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
         }
@@ -1517,6 +1522,7 @@ export default function EntradasClient() {
       setFornecedorInfoMap(nextInfo);
       setFornecedorProdutosMap(nextProdutos);
       setFornecedorItemMap(nextEq);
+      fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq });
       fornecedoresReadyRef.current = true;
     })();
 
@@ -1533,13 +1539,20 @@ export default function EntradasClient() {
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
     if (isReadOnly) return;
+    const snapshot = JSON.stringify({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap });
+    if (snapshot === fornecedoresPersistedSnapshotRef.current) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
-        if (fornecedoresSaveErrorShownRef.current) return;
-        fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar os fornecedores. Verifique sua conexão e tente novamente.", "error", 9000);
-      });
+      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap })
+        .then(() => {
+          fornecedoresPersistedSnapshotRef.current = snapshot;
+          fornecedoresSaveErrorShownRef.current = false;
+        })
+        .catch(() => {
+          if (fornecedoresSaveErrorShownRef.current) return;
+          fornecedoresSaveErrorShownRef.current = true;
+          showToast("Não foi possível salvar os fornecedores. Verifique sua conexão e tente novamente.", "error", 9000);
+        });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
 

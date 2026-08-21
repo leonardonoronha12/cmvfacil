@@ -649,6 +649,13 @@
   flex-shrink: 0;
 }
 
+.produtosActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .vincModal {
   max-width: 640px;
 }

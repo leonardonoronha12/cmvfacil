@@ -659,7 +659,7 @@ export default function FornecedoresClient() {
     setIsVincOpen(true);
   }
 
-  function saveVinculacao() {
+  async function saveVinculacao() {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -692,8 +692,6 @@ export default function FornecedoresClient() {
     if (!oldName && !hasNomeNaNota) {
       const nextList = [...curProdutos, nomeNaNota];
       nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, nextList);
-      writeFornecedorProdutosMap(nextProdutos);
-      setProdutosMap(nextProdutos);
     } else if (oldName && oldName.toLowerCase() !== nomeNaNota.toLowerCase()) {
       const replaced = curProdutos.map((x) => (x.toLowerCase() === oldName.toLowerCase() ? nomeNaNota : x));
       const dedup: string[] = [];
@@ -701,8 +699,6 @@ export default function FornecedoresClient() {
         if (!dedup.some((d) => d.toLowerCase() === n.toLowerCase())) dedup.push(n);
       }
       nextProdutos = setProdutosForKey(produtosMap, fornecedorKeyRaw, dedup);
-      writeFornecedorProdutosMap(nextProdutos);
-      setProdutosMap(nextProdutos);
     }
 
     const curEq = existingList;
@@ -710,14 +706,20 @@ export default function FornecedoresClient() {
       (x) => x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
     );
     const nextEq = setEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw, [...filtered, nextItem] as any[]);
+    try {
+      await saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+    } catch {
+      showToast("Não foi possível editar o produto. Tente novamente.", "error");
+      return;
+    }
+    writeFornecedorProdutosMap(nextProdutos);
+    setProdutosMap(nextProdutos);
     writeFornecedorEquivalenciasMap(nextEq);
     setEquivalenciasMap(nextEq);
-
-    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq }).catch(() =>
-      showToast("Erro ao salvar no banco de dados.", "error"),
-    );
+    fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
     setVincNomeOriginal(nomeNaNota);
     setIsVincOpen(false);
+    showToast("Produto atualizado com sucesso.", "success");
   }
 
   function openProdutos(row: FornecedorRow) {
@@ -770,7 +772,7 @@ export default function FornecedoresClient() {
     openVinculacao(item);
   }
 
-  function removeProduto(item: string) {
+  async function removeProduto(item: string) {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -781,11 +783,23 @@ export default function FornecedoresClient() {
     const cur = getProdutosForKey(produtosMap, keyRaw);
     const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
     const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, nextList);
+    const nextEq = setEquivalenciasForKey(
+      equivalenciasMap,
+      keyRaw,
+      getEquivalenciasForKey(equivalenciasMap, keyRaw).filter((x) => x.nomeNaNota.toLowerCase() !== item.toLowerCase()),
+    );
+    try {
+      await saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+    } catch {
+      showToast("Não foi possível excluir o produto. Tente novamente.", "error");
+      return;
+    }
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
-    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
-      showToast("Erro ao salvar no banco de dados.", "error"),
-    );
+    writeFornecedorEquivalenciasMap(nextEq);
+    setEquivalenciasMap(nextEq);
+    fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+    showToast("Produto excluído com sucesso.", "success");
   }
 
   const visibleRows = useMemo(() => {
@@ -1641,6 +1655,19 @@ export default function FornecedoresClient() {
                           return eqLabel ? <div className={styles.produtosEq}>{eqLabel}</div> : null;
                         })()}
                       </div>
+                      <div className={styles.produtosActions}>
+                      <button
+                        type="button"
+                        className={styles.produtosTrash}
+                        aria-label={`Editar ${name}`}
+                        disabled={isReadOnly}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openVinculacao(name);
+                        }}
+                      >
+                        <IconEdit />
+                      </button>
                       <button
                         type="button"
                         className={styles.produtosTrash}
@@ -1657,6 +1684,7 @@ export default function FornecedoresClient() {
                       >
                         <IconTrash />
                       </button>
+                      </div>
                     </div>
                   ))}
                 </div>
