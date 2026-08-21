@@ -18,6 +18,8 @@ export type FornecedoresStatePayload = {
   meta?: { source: "legacy" | "compat"; readOnly: boolean };
 };
 
+let fornecedoresLoadInFlight: Promise<FornecedoresStatePayload> | null = null;
+
 function getQaOverridesFromLocation() {
   if (typeof window === "undefined") return { userId: "", source: "" };
   const params = new URLSearchParams(window.location.search);
@@ -129,7 +131,7 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
   return out;
 }
 
-export async function loadFornecedoresStateFromSupabase(userId?: string) {
+async function fetchFornecedoresStateFromSupabase(userId?: string): Promise<FornecedoresStatePayload> {
   const override = getQaOverridesFromLocation();
   const u = String(userId ?? "").trim() || override.userId;
   const source = override.source;
@@ -161,6 +163,20 @@ export async function loadFornecedoresStateFromSupabase(userId?: string) {
     equivalencias: normalizeEquivalenciasMap(row.equivalencias),
     meta: { source: sourceLabel, readOnly: Boolean(json.readOnly) },
   };
+}
+
+export function loadFornecedoresStateFromSupabase(userId?: string): Promise<FornecedoresStatePayload> {
+  const override = getQaOverridesFromLocation();
+  const canShareRequest = !String(userId ?? "").trim() && !override.userId && !override.source;
+  if (canShareRequest && fornecedoresLoadInFlight) return fornecedoresLoadInFlight;
+
+  const request = fetchFornecedoresStateFromSupabase(userId);
+  if (!canShareRequest) return request;
+
+  fornecedoresLoadInFlight = request.finally(() => {
+    fornecedoresLoadInFlight = null;
+  });
+  return fornecedoresLoadInFlight;
 }
 
 export async function saveFornecedoresStateToSupabase(payload: { info: FornecedorInfoMap; produtos: FornecedorProdutos; equivalencias: FornecedorEquivalenciasMap }) {

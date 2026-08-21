@@ -358,12 +358,22 @@ export async function GET(req: NextRequest) {
       const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
       if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
 
-      const { data: suppliersDb, error: suppliersErr } = await db
-        .from("suppliers")
-        .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
-        .eq("company_id", companyId)
-        .order("nome", { ascending: true });
+      const [suppliersResult, linksResult] = await Promise.all([
+        db
+          .from("suppliers")
+          .select("id,bubble_id,external_key,nome,endereco,vendedor,whatsapp,raw")
+          .eq("company_id", companyId)
+          .order("nome", { ascending: true }),
+        db
+          .from("supplier_items")
+          .select("supplier_id,item:items(name)")
+          .eq("company_id", companyId)
+          .limit(5000),
+      ]);
+      const { data: suppliersDb, error: suppliersErr } = suppliersResult;
+      const { data: linksDb, error: linksErr } = linksResult;
       if (suppliersErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_select", error: suppliersErr.message, source: "compat" });
+      if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
 
       const info: Record<string, any> = {};
       const supplierKeyById = new Map<string, string>();
@@ -405,12 +415,6 @@ export async function GET(req: NextRequest) {
       }
 
       const produtos: Record<string, string[]> = {};
-      const { data: linksDb, error: linksErr } = await db
-        .from("supplier_items")
-        .select("supplier_id,item:items(name)")
-        .eq("company_id", companyId)
-        .limit(5000);
-      if (linksErr) return errJson({ status: 500, traceId, stage: "compat.supplier_items_select", error: linksErr.message, source: "compat" });
       let linksSupplierIdMissing = 0;
       let linksSupplierKeyMissing = 0;
       let linksSupplierNotInInfo = 0;
@@ -450,52 +454,6 @@ export async function GET(req: NextRequest) {
         const cur = Array.isArray(produtos[k]) ? produtos[k] : [];
         if (!cur.length && rawProdutos.length) produtos[k] = rawProdutos;
       }
-
-      // #region debug-point D:get-compat-shape
-      await __dbgSend({
-        hypothesisId: "D",
-        traceId,
-        location: "app/api/fornecedores/route.ts:GET:compat",
-        msg: "[DEBUG] fornecedores GET compat: shape",
-        data: {
-          companyId,
-          suppliersDb: (suppliersDb ?? []).length,
-          infoKeys: Object.keys(info).length,
-          linksDb: (linksDb ?? []).length,
-          produtosKeys: Object.keys(produtos).length,
-        },
-        accessToken,
-        companyId,
-        supabase,
-      });
-      // #endregion
-
-      // #region debug-point D2:get-compat-links-skip
-      await __dbgSend({
-        hypothesisId: "D2",
-        traceId,
-        location: "app/api/fornecedores/route.ts:GET:compat",
-        msg: "[DEBUG] fornecedores GET compat: links skip reasons",
-        data: {
-          companyId,
-          shouldUseCompat,
-          isAdmin,
-          suppliersDb: (suppliersDb ?? []).length,
-          infoKeys: Object.keys(info).length,
-          linksDb: (linksDb ?? []).length,
-          distinctSupplierIds: distinctSupplierIds.size,
-          linksSupplierIdMissing,
-          linksSupplierKeyMissing,
-          linksSupplierNotInInfo,
-          linksItemNameMissing,
-          linksSupplierIdSamples,
-          linksNotInInfoSamples,
-        },
-        accessToken,
-        companyId,
-        supabase,
-      });
-      // #endregion
 
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
       if (normalizedTombstones.length) produtos[TOMBSTONE_KEY] = normalizedTombstones;

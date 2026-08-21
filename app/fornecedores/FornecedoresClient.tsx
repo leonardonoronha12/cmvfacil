@@ -326,14 +326,13 @@ function parseSupplierRowsFromTable(table: unknown[][]) {
 export default function FornecedoresClient() {
   const TOMBSTONE_KEY = "__CMVFACIL_DELETED_SUPPLIERS__";
   const [isMounted, setIsMounted] = useState(false);
-  const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isLoadingTable, setIsLoadingTable] = useState(() => Object.keys(readFornecedorInfoMap()).length === 0);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const toastTimerRef = useRef<number | null>(null);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
   const [rows, setRows] = useState<FornecedorRow[]>([]);
   const [query, setQuery] = useState("");
   const isReadOnly = Boolean(sourceMeta.readOnly);
-  const isCompatSource = sourceMeta.source === "compat";
 
   const [sortKey, setSortKey] = useState<null | ColumnKey>(null);
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -346,9 +345,9 @@ export default function FornecedoresClient() {
   const [prodFornecedorLabel, setProdFornecedorLabel] = useState<string>("");
   const [prodVendedor, setProdVendedor] = useState<string>("");
   const [prodEndereco, setProdEndereco] = useState<string>("");
-  const [produtosMap, setProdutosMap] = useState<FornecedorProdutos>({});
-  const [infoMap, setInfoMap] = useState<FornecedorInfoMap>({});
-  const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
+  const [produtosMap, setProdutosMap] = useState<FornecedorProdutos>(() => readFornecedorProdutosMap());
+  const [infoMap, setInfoMap] = useState<FornecedorInfoMap>(() => readFornecedorInfoMap());
+  const [equivalenciasMap, setEquivalenciasMap] = useState<FornecedorEquivalenciasMap>(() => readFornecedorEquivalenciasMap());
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const fornecedoresPersistedSnapshotRef = useRef("");
@@ -1099,28 +1098,6 @@ export default function FornecedoresClient() {
           </div>
         </section>
 
-        {isCompatSource ? (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "#eef6ff",
-              border: "1px solid #cfe6ff",
-              color: "#1b3a57",
-              fontSize: 13,
-              fontWeight: 700,
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-          </div>
-        ) : null}
-
         <section className={styles.toolbar}>
           <div className={styles.search}>
             <span className={styles.searchIcon}>
@@ -1191,7 +1168,7 @@ export default function FornecedoresClient() {
               <div className={styles.thActions}>Ações</div>
             </div>
 
-            {!pagination.pageItems.length ? (
+            {!tableLoading.show && !pagination.pageItems.length ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhum fornecedor cadastrado</div>
                 <div className={styles.emptyText}>Clique em “Novo Fornecedor” ou importe uma planilha para começar.</div>
