@@ -22,6 +22,8 @@ export type EntradasStatePayload = {
   meta?: { source: "legacy" | "compat"; readOnly: boolean };
 };
 
+let entradasLoadInFlight: Promise<EntradasStatePayload> | null = null;
+
 function toStoreRow(r: EntradaDbRow): EntradaStoreRow {
   const fallbackValor = String((r as any)?.valorNota ?? (r as any)?.valor ?? "").trim();
   const fornecedorNome = String((r as any)?.fornecedor_nome ?? (r as any)?.fornecedorNome ?? "").trim();
@@ -71,7 +73,7 @@ function persistPageSource(source: "legacy" | "compat") {
   } catch {}
 }
 
-export async function loadEntradasStateFromSupabase(userId?: string): Promise<EntradasStatePayload> {
+async function fetchEntradasStateFromSupabase(userId?: string): Promise<EntradasStatePayload> {
   const override = getQaOverridesFromLocation();
   const u = String(userId ?? "").trim() || override.userId;
   const source = override.source;
@@ -82,6 +84,20 @@ export async function loadEntradasStateFromSupabase(userId?: string): Promise<En
   const sourceLabel = String(json?.source ?? "legacy") === "compat" ? "compat" : "legacy";
   persistPageSource(sourceLabel);
   return { rows: (json.rows ?? []).map(toStoreRow), meta: { source: sourceLabel, readOnly: Boolean(json?.readOnly) } };
+}
+
+export function loadEntradasStateFromSupabase(userId?: string): Promise<EntradasStatePayload> {
+  const override = getQaOverridesFromLocation();
+  const canShareRequest = !String(userId ?? "").trim() && !override.userId && !override.source;
+  if (canShareRequest && entradasLoadInFlight) return entradasLoadInFlight;
+
+  const request = fetchEntradasStateFromSupabase(userId);
+  if (!canShareRequest) return request;
+
+  entradasLoadInFlight = request.finally(() => {
+    entradasLoadInFlight = null;
+  });
+  return entradasLoadInFlight;
 }
 
 export async function loadEntradasFromSupabase(userId?: string) {

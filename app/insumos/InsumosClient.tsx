@@ -26,7 +26,6 @@ import { loadFornecedoresStateFromSupabase } from "../lib/fornecedoresSupabase";
 import { readSectorsFromStore, subscribeSectors, writeSectorsToStore, type SectorRow } from "../lib/sectorsStore";
 import {
   deleteSectorFromSupabase,
-  inspectSectorUsage,
   loadSectorsFromSupabase,
   saveItemSectorsToSupabase,
   saveSectorToSupabase,
@@ -1540,15 +1539,29 @@ export default function InsumosClient() {
     const name = normalizeSectorName(sectorNewDraft);
     if (!name) return;
     if (sectorAction) return;
+    const optimisticId = `optimistic:${Date.now()}`;
+    const optimisticSector: SectorRow = { id: optimisticId, name };
+    setSectorNewDraft("");
+    setSectors((prev) => {
+      const next = [...prev, optimisticSector];
+      writeSectorsToStore(next);
+      return next;
+    });
     setSectorAction("create");
     try {
       const created = await saveSectorToSupabase({ name });
       setSectors((prev) => {
-        const next = [...prev, created];
+        const next = prev.map((sector) => (sector.id === optimisticId ? created : sector));
         writeSectorsToStore(next);
         return next;
       });
     } catch (err) {
+      setSectors((prev) => {
+        const next = prev.filter((sector) => sector.id !== optimisticId);
+        writeSectorsToStore(next);
+        return next;
+      });
+      setSectorNewDraft(name);
       const raw = String((err as any)?.message ?? String(err) ?? "");
       const msg = describeSectorError(raw) || `Não foi possível criar o setor (${raw}).`;
       showToast(msg, "error");
@@ -1556,7 +1569,6 @@ export default function InsumosClient() {
     } finally {
       setSectorAction(null);
     }
-    setSectorNewDraft("");
   }
 
   function editSector(row: SectorRow) {
@@ -1575,6 +1587,14 @@ export default function InsumosClient() {
     const name = normalizeSectorName(editingSectorDraft);
     if (!name) return;
     if (sectorAction) return;
+    const previousSector = sectors.find((sector) => sector.id === id);
+    if (!previousSector) return;
+    setSectors((prev) => {
+      const next = prev.map((sector) => (sector.id === id ? { ...sector, name } : sector));
+      writeSectorsToStore(next);
+      return next;
+    });
+    cancelEditSector();
     setSectorAction(`edit:${id}`);
     try {
       const updated = await saveSectorToSupabase({ id, name });
@@ -1584,6 +1604,11 @@ export default function InsumosClient() {
         return next;
       });
     } catch (err) {
+      setSectors((prev) => {
+        const next = prev.map((sector) => (sector.id === id ? previousSector : sector));
+        writeSectorsToStore(next);
+        return next;
+      });
       const raw = String((err as any)?.message ?? String(err) ?? "");
       const msg = describeSectorError(raw) || `Não foi possível renomear o setor (${raw}).`;
       showToast(msg, "error");
@@ -1591,10 +1616,9 @@ export default function InsumosClient() {
     } finally {
       setSectorAction(null);
     }
-    cancelEditSector();
   }
 
-  async function openDeleteSector(row: SectorRow) {
+  function openDeleteSector(row: SectorRow) {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -1603,34 +1627,10 @@ export default function InsumosClient() {
       showToast("Não é possível excluir o setor Geral.", "error");
       return;
     }
-    const localLinks = sectorCounts.get(row.id) ?? 0;
-    let apiLinks = localLinks;
-    let apiCounts = 0;
     if (sectorAction) return;
-    setSectorAction(`check:${row.id}`);
-    try {
-      const usage = await inspectSectorUsage(row.id);
-      apiLinks = usage.itemLinks;
-      apiCounts = usage.counts;
-    } catch (err) {
-      const payload = (err as any)?.payload;
-      if (payload?.links && typeof payload.links === "object") {
-        apiLinks = typeof payload.links.itemLinks === "number" ? payload.links.itemLinks : localLinks;
-        apiCounts = typeof payload.links.counts === "number" ? payload.links.counts : 0;
-      }
-      const raw = String((err as any)?.message ?? String(err) ?? "");
-      showToast(describeSectorError(raw) || `Não foi possível verificar o setor (${raw}).`, "error");
-      return;
-    } finally {
-      setSectorAction(null);
-    }
-    if (apiLinks || apiCounts) {
-      showToast(`Setor em uso: ${apiLinks + apiCounts} vínculo(s). Não é possível excluir.`, "error");
-      return;
-    }
     setDeletingSectorId(row.id);
     setDeletingSectorName(row.name);
-    setDeletingSectorLinks({ itemLinks: apiLinks, counts: apiCounts });
+    setDeletingSectorLinks({ itemLinks: sectorCounts.get(row.id) ?? 0, counts: 0 });
     setIsDeleteSectorOpen(true);
   }
 
@@ -1645,31 +1645,30 @@ export default function InsumosClient() {
     const id = deletingSectorId;
     if (!id) return;
     if (sectorAction) return;
+    const previousSectors = sectors;
+    const previousLinks = itemSectorLinks;
+    const previousRows = dataRows;
+    setSectors((prev) => {
+      const next = prev.filter((sector) => sector.id !== id);
+      writeSectorsToStore(next);
+      return next;
+    });
+    setItemSectorLinks((prev) => prev.filter((link) => link.sectorId !== id));
+    setDataRows((prev) => prev.map((row) => ({ ...row, sectorIds: row.sectorIds?.filter((sectorId) => sectorId !== id) })));
+    cancelDeleteSector();
     setSectorAction(`delete:${id}`);
-    let deleted = false;
     try {
       await deleteSectorFromSupabase(id);
-      deleted = true;
-      setSectors((prev) => {
-        const next = prev.filter((s) => s.id !== id);
-        writeSectorsToStore(next);
-        return next;
-      });
-      setItemSectorLinks((prev) => prev.filter((l) => l.sectorId !== id));
-      setDataRows((prev) =>
-        prev.map((r) => {
-          if (!r.sectorIds?.length) return r;
-          const next = r.sectorIds.filter((sid) => sid !== id);
-          if (next.length === r.sectorIds.length) return r;
-          return { ...r, sectorIds: next };
-        }),
-      );
     } catch (err) {
-      showToast(`Não foi possível excluir o setor (${(err as any)?.message ?? String(err)}).`, "error");
+      setSectors(previousSectors);
+      writeSectorsToStore(previousSectors);
+      setItemSectorLinks(previousLinks);
+      setDataRows(previousRows);
+      const raw = String((err as any)?.message ?? String(err) ?? "");
+      showToast(describeSectorError(raw) || `Não foi possível excluir o setor (${raw}).`, "error");
     } finally {
       setSectorAction(null);
     }
-    if (deleted) cancelDeleteSector();
   }
 
   function toggleDraftSectorId(target: "new" | "edit", id: string) {

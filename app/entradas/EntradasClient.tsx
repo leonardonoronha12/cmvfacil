@@ -614,7 +614,7 @@ function IconPlusCircle() {
 }
 
 export default function EntradasClient() {
-  const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isLoadingTable, setIsLoadingTable] = useState(() => readEntradasFromStore([]).length === 0);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [query, setQuery] = useState("");
   const [dateStart, setDateStart] = useState("");
@@ -627,7 +627,12 @@ export default function EntradasClient() {
   const [periodPicking, setPeriodPicking] = useState<"start" | "end">("start");
   const [periodMonth, setPeriodMonth] = useState(() => startOfMonth(new Date()));
   const periodWrapRef = useRef<HTMLDivElement | null>(null);
-  const [rows, setRows] = useState<EntradaRow[]>([]);
+  const [rows, setRows] = useState<EntradaRow[]>(() =>
+    (readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[]).map((r) => ({
+      ...r,
+      dataLancamento: normalizeDateLabelPT(r.dataLancamento),
+    })),
+  );
   const rowsReadyRef = useRef(false);
   const [customFornecedores, setCustomFornecedores] = useState<string[]>([]);
   const [toast, setToast] = useState<{ title: string; message: string; tone: "success" | "error" } | null>(null);
@@ -1457,20 +1462,24 @@ export default function EntradasClient() {
   useEffect(() => {
     if (!authReady) return;
     rowsReadyRef.current = false;
-    setIsLoadingTable(true);
+    const stored = readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[];
+    if (stored.length) {
+      setRows(stored.map((r) => ({ ...r, dataLancamento: normalizeDateLabelPT(r.dataLancamento) })));
+      setIsLoadingTable(false);
+    } else {
+      setIsLoadingTable(true);
+    }
     (async () => {
       try {
         const db = await loadEntradasStateFromSupabase();
         if ((db as any)?.meta) setSourceMeta((db as any).meta);
-        if (db.rows[0]) {
-          setRows(db.rows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
-          rowsReadyRef.current = true;
-          setIsLoadingTable(false);
-          return;
-        }
+        setRows(db.rows.map((r) => ({ ...(r as unknown as EntradaRow), dataLancamento: normalizeDateLabelPT(r.dataLancamento) })) as unknown as EntradaRow[]);
+        rowsReadyRef.current = true;
+        setIsLoadingTable(false);
+        return;
       } catch {}
-      const stored = readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[];
-      setRows(stored.map((r) => ({ ...r, dataLancamento: normalizeDateLabelPT(r.dataLancamento) })));
+      const fallbackRows = readEntradasFromStore([] as unknown as any) as unknown as EntradaRow[];
+      setRows(fallbackRows.map((r) => ({ ...r, dataLancamento: normalizeDateLabelPT(r.dataLancamento) })));
       rowsReadyRef.current = true;
       setIsLoadingTable(false);
     })();
@@ -2367,7 +2376,7 @@ export default function EntradasClient() {
           </div>
 
           <div className={styles.tableBody} data-qa-grid="entradas:rows">
-            {!pagination.totalItems ? (
+            {!tableLoading.show && !pagination.totalItems ? (
               <div className={styles.emptyState}>
                 <div className={styles.emptyTitle}>Nenhuma nota cadastrada</div>
                 <div className={styles.emptyText}>Clique em “Nova Nota” para começar.</div>
