@@ -468,12 +468,18 @@ export default function InventarioClient() {
     return afterQuery;
   }, [allItems, categoriaFilter, isCompatSource, itemCategoryMap, query, selectedSectorId]);
 
-  const pendentes = useMemo(() => filteredItems.filter((r) => !String(r.estoqueFinal ?? "").trim()), [filteredItems]);
+  const hasCountInSelectedView = (r: InventarioItemRow) => {
+    if (selectedSectorId === "Todos") return Boolean(String(r.estoqueFinal ?? "").trim());
+    const sectorCounts = r.sectorCounts ?? {};
+    return Boolean(String(sectorCounts[selectedSectorId] ?? "").trim());
+  };
+
+  const pendentes = useMemo(() => filteredItems.filter((r) => !hasCountInSelectedView(r)), [filteredItems, selectedSectorId]);
   const contabilizados = useMemo(() => {
-    const list = filteredItems.filter((r) => String(r.estoqueFinal ?? "").trim());
+    const list = filteredItems.filter((r) => hasCountInSelectedView(r));
     const collator = new Intl.Collator("pt-BR", { sensitivity: "base" });
     return [...list].sort((a, b) => collator.compare(a.item, b.item));
-  }, [filteredItems]);
+  }, [filteredItems, selectedSectorId]);
 
   const qaUi = useMemo(() => {
     if (isCompatSource) {
