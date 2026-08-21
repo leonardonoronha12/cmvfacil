@@ -2024,7 +2024,7 @@ export default function EntradasClient() {
                     color: "#1b3a57",
                     fontSize: 13,
                     fontWeight: 700,
-                    display: "flex",
+                    display: "none",
                     justifyContent: "flex-end",
                     gap: 12,
                     flexWrap: "wrap",

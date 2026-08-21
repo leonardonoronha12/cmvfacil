@@ -427,7 +427,7 @@ function IconCheck() {
 
 export default function InsumosClient() {
   const [mounted, setMounted] = useState(false);
-  const [isLoadingTable, setIsLoadingTable] = useState(true);
+  const [isLoadingTable, setIsLoadingTable] = useState(() => readInsumosFromStore().length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDeletingItem, setIsDeletingItem] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
@@ -446,7 +446,18 @@ export default function InsumosClient() {
   const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [importing, setImporting] = useState(false);
-  const [dataRows, setDataRows] = useState<InsumoRow[]>([]);
+  const [dataRows, setDataRows] = useState<InsumoRow[]>(() =>
+    readInsumosFromStore().map((row) => ({
+      id: row.id,
+      ocultar: Boolean(row.ocultar),
+      item: row.item,
+      medida: row.medida || "Und",
+      custoMedio: row.custoMedio || "-",
+      categoria: row.categoria || "-",
+      especificacao: row.especificacao || "-",
+      sectorIds: row.sectorIds,
+    })),
+  );
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -591,6 +602,10 @@ export default function InsumosClient() {
     (async () => {
       try {
         setLoadError(null);
+        if (readInsumosFromStore().length) {
+          rowsReadyRef.current = true;
+          setIsLoadingTable(false);
+        }
         const state = await loadInsumosStateFromSupabase();
         applyLoadedState(state);
       } catch (err) {
@@ -2139,7 +2154,7 @@ export default function InsumosClient() {
               color: "#1b3a57",
               fontSize: 13,
               fontWeight: 700,
-              display: "flex",
+              display: "none",
               justifyContent: "flex-end",
               gap: 12,
               flexWrap: "wrap",

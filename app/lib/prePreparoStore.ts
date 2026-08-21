@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type PrePreparoStoreRow = {
   id: string;
   categoria: string;
@@ -57,6 +59,7 @@ function normalizeRows(input: unknown): PrePreparoStoreRow[] {
 }
 
 export function readPrePreparoFromStore(fallback: PrePreparoStoreRow[] = []): PrePreparoStoreRow[] {
+  if (!cache.length) cache = normalizeRows(readTableCache<unknown>("pre-preparo", []));
   return cache.length ? cache : fallback;
 }
 
@@ -64,6 +67,7 @@ export function writePrePreparoToStore(rows: PrePreparoStoreRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  writeTableCache("pre-preparo", normalized);
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

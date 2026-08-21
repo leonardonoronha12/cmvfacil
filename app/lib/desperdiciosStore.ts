@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type DesperdicioRow = {
   id: string;
   data: string;
@@ -36,6 +38,7 @@ function normalizeRows(input: unknown): DesperdicioRow[] {
 }
 
 export function readDesperdiciosFromStore(fallback: DesperdicioRow[] = []): DesperdicioRow[] {
+  if (!cache.length) cache = normalizeRows(readTableCache<unknown>("desperdicios", []));
   return cache.length ? cache : fallback;
 }
 
@@ -43,6 +46,7 @@ export function writeDesperdiciosToStore(rows: DesperdicioRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  writeTableCache("desperdicios", normalized);
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

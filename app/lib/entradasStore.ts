@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type NotaItem = {
   id: string;
   itemId?: string;
@@ -71,6 +73,7 @@ function normalizeRows(input: unknown): EntradaStoreRow[] {
 }
 
 export function readEntradasFromStore(fallback: EntradaStoreRow[] = []): EntradaStoreRow[] {
+  if (!cache.length) cache = normalizeRows(readTableCache<unknown>("entradas", []));
   return cache.length ? cache : fallback;
 }
 
@@ -78,6 +81,7 @@ export function writeEntradasToStore(rows: EntradaStoreRow[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  writeTableCache("entradas", normalized);
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

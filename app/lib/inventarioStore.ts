@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type InventarioItemRow = {
   id: string;
   item: string;
@@ -87,6 +89,7 @@ function normalizeContagens(input: unknown): InventarioContagem[] {
 }
 
 export function readInventarioFromStore(fallback: InventarioContagem[] = []): InventarioContagem[] {
+  if (!cache.length) cache = normalizeContagens(readTableCache<unknown>("inventario", []));
   return cache.length ? cache : fallback;
 }
 
@@ -94,6 +97,7 @@ export function writeInventarioToStore(rows: InventarioContagem[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeContagens(rows);
   cache = normalized;
+  writeTableCache("inventario", normalized);
   window.dispatchEvent(new CustomEvent(EVENT, { detail: normalized }));
 }
 

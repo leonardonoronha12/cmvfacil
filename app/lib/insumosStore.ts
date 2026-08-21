@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type InsumoStoreItem = {
   id: string;
   item: string;
@@ -46,6 +48,7 @@ function normalizeRows(input: unknown): InsumoStoreItem[] {
 }
 
 export function readInsumosFromStore(): InsumoStoreItem[] {
+  if (!cache.length) cache = normalizeRows(readTableCache<unknown>("insumos", []));
   return cache;
 }
 
@@ -53,6 +56,7 @@ export function writeInsumosToStore(rows: InsumoStoreItem[]) {
   if (typeof window === "undefined") return;
   const normalized = normalizeRows(rows);
   cache = normalized;
+  writeTableCache("insumos", normalized);
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail: normalized }));
 }
 

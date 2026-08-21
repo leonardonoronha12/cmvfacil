@@ -12,9 +12,11 @@ import { writeInsumoCategoriasToStore } from "./insumoCategoriasStore";
 import { writeInsumosToStore } from "./insumosStore";
 import { writePrePreparoEtiquetasToStore } from "./prePreparoEtiquetasStore";
 import { writePrePreparoToStore } from "./prePreparoStore";
+import { clearTableCaches } from "./tableCache";
 
 export function clearClientData() {
   if (typeof window === "undefined") return;
+  clearTableCaches();
   try {
     writeInsumosToStore([]);
     writeInsumoCategoriasToStore([]);
@@ -44,4 +46,3 @@ export function clearClientData() {
     writeFichasTecnicasEtiquetasToStore([]);
   } catch {}
 }
-

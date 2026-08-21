@@ -533,7 +533,7 @@ export default function DesperdiciosClient({
   const saveErrorShownRef = useRef(false);
   const deleteErrorShownRef = useRef(false);
   const [isLoadingTable, setIsLoadingTable] = useState(false);
-  const [rows, setRows] = useState<DesperdicioRow[]>([]);
+  const [rows, setRows] = useState<DesperdicioRow[]>(() => readDesperdiciosFromStore([]));
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
     return initialSourceMeta ?? { source: "legacy", readOnly: false };
   });
@@ -1824,8 +1824,8 @@ export default function DesperdiciosClient({
                 color: "#1b3a57",
                 fontSize: 13,
                 fontWeight: 700,
-                display: "flex",
-                justifyContent: "flex-end",
+              display: "none",
+              justifyContent: "flex-end",
                 gap: 12,
                 flexWrap: "wrap",
               }}

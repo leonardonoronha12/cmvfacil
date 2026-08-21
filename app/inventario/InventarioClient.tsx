@@ -204,12 +204,12 @@ const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
   const [mounted, setMounted] = useState(false);
-  const [isLoadingInventario, setIsLoadingInventario] = useState(true);
-  const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
+  const [isLoadingInventario, setIsLoadingInventario] = useState(() => readInventarioFromStore([]).length === 0);
+  const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>(() => readInsumosFromStore());
   const [insumoCategorias, setInsumoCategorias] = useState<string[]>(() => readInsumoCategoriasFromStore());
   const [prePreparoStore, setPrePreparoStore] = useState<PrePreparoStoreRow[]>(() => readPrePreparoFromStore([]));
   const [fichasTecnicasRows, setFichasTecnicasRows] = useState<FichaTecnicaRow[]>(() => readFichasTecnicasFromStore([]));
-  const [contagens, setContagens] = useState<InventarioContagem[]>(initialContagens);
+  const [contagens, setContagens] = useState<InventarioContagem[]>(() => sortContagensDesc(normalizeContagens(readInventarioFromStore(initialContagens))));
   const contagensReadyRef = useRef(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>({ source: "legacy", readOnly: false });
   const [compatInventories, setCompatInventories] = useState<InventarioCompatInventory[]>([]);
@@ -217,7 +217,7 @@ export default function InventarioClient() {
   const isReadOnly = Boolean(sourceMeta.readOnly);
   const isCompatSource = sourceMeta.source === "compat";
 
-  const [selectedContagemId, setSelectedContagemId] = useState<string | null>(initialContagens[0]?.id ?? null);
+  const [selectedContagemId, setSelectedContagemId] = useState<string | null>(() => sortContagensDesc(normalizeContagens(readInventarioFromStore(initialContagens)))[0]?.id ?? null);
   const [query, setQuery] = useState("");
   const [categoriaFilter, setCategoriaFilter] = useState("Categorias pendentes");
   const [sectors, setSectors] = useState<SectorRow[]>(() => readSectorsFromStore());
@@ -704,7 +704,7 @@ export default function InventarioClient() {
     let cancelled = false;
     const startedAt = Date.now();
     void (async () => {
-      setIsLoadingInventario(true);
+      if (!readInventarioFromStore([]).length) setIsLoadingInventario(true);
       try {
         const db = await loadInventarioStateFromSupabase();
         if (db.meta) setSourceMeta(db.meta);
@@ -1391,7 +1391,7 @@ export default function InventarioClient() {
               color: "#1b3a57",
               fontSize: 13,
               fontWeight: 700,
-              display: "flex",
+              display: "none",
               justifyContent: "flex-end",
               gap: 12,
               flexWrap: "wrap",

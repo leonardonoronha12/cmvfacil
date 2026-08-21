@@ -1,5 +1,7 @@
 "use client";
 
+import { readTableCache, writeTableCache } from "./tableCache";
+
 export type FornecedorInfo = {
   fornecedor: string;
   vendedor: string;
@@ -116,6 +118,7 @@ function normalizeEquivalenciasMap(input: unknown): FornecedorEquivalenciasMap {
 }
 
 export function readFornecedorInfoMap(): FornecedorInfoMap {
+  if (!Object.keys(infoCache).length) infoCache = normalizeInfoMap(readTableCache<unknown>("fornecedores-info", {}));
   return infoCache;
 }
 
@@ -123,6 +126,7 @@ export function writeFornecedorInfoMap(map: FornecedorInfoMap) {
   if (typeof window === "undefined") return;
   const normalized = normalizeInfoMap(map);
   infoCache = normalized;
+  writeTableCache("fornecedores-info", normalized);
   window.dispatchEvent(new CustomEvent(INFO_EVENT, { detail: normalized }));
 }
 
@@ -137,6 +141,7 @@ export function subscribeFornecedorInfo(listener: (map: FornecedorInfoMap) => vo
 }
 
 export function readFornecedorProdutosMap(): FornecedorProdutos {
+  if (!Object.keys(prodCache).length) prodCache = normalizeProdutosMap(readTableCache<unknown>("fornecedores-produtos", {}));
   return prodCache;
 }
 
@@ -144,6 +149,7 @@ export function writeFornecedorProdutosMap(map: FornecedorProdutos) {
   if (typeof window === "undefined") return;
   const normalized = normalizeProdutosMap(map);
   prodCache = normalized;
+  writeTableCache("fornecedores-produtos", normalized);
   window.dispatchEvent(new CustomEvent(PROD_EVENT, { detail: normalized }));
 }
 
@@ -158,6 +164,7 @@ export function subscribeFornecedorProdutos(listener: (map: FornecedorProdutos) 
 }
 
 export function readFornecedorEquivalenciasMap(): FornecedorEquivalenciasMap {
+  if (!Object.keys(mapCache).length) mapCache = normalizeEquivalenciasMap(readTableCache<unknown>("fornecedores-equivalencias", {}));
   return mapCache;
 }
 
@@ -165,6 +172,7 @@ export function writeFornecedorEquivalenciasMap(map: FornecedorEquivalenciasMap)
   if (typeof window === "undefined") return;
   const normalized = normalizeEquivalenciasMap(map);
   mapCache = normalized;
+  writeTableCache("fornecedores-equivalencias", normalized);
   window.dispatchEvent(new CustomEvent(MAP_EVENT, { detail: normalized }));
 }
 
