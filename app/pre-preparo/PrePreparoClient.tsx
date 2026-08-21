@@ -18,6 +18,8 @@ import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase 
 import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readFichasTecnicasFromStore, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
+import { loadSectorsFromSupabase, saveItemSectorsToSupabase } from "../lib/sectorsSupabase";
+import { readSectorsFromStore, writeSectorsToStore, type SectorRow } from "../lib/sectorsStore";
 import ft from "../fichas-tecnicas/fichas-tecnicas.module.css";
 import insumosStyles from "../insumos/insumos.module.css";
 import styles from "./pre-preparo.module.css";
@@ -33,6 +35,7 @@ type PrePreparoRow = {
   validadeDias?: number;
   ingredientes?: IngredienteRow[];
   modoPreparo?: string;
+  sectorIds?: string[];
 };
 
 type IngredienteRow = {
@@ -641,6 +644,8 @@ export default function PrePreparoClient() {
   const toastTimerRef = useRef<number | null>(null);
   const savePrePreparoTimeoutRef = useRef<number | null>(null);
   const saveEtiquetasTimeoutRef = useRef<number | null>(null);
+  const saveSectorLinksTimeoutRef = useRef<number | null>(null);
+  const sectorsReadyRef = useRef(false);
   const prePreparoLoadedRef = useRef(false);
   const etiquetasLoadedRef = useRef(false);
   const autoSyncDetailsRef = useRef<Set<string>>(new Set());
@@ -654,6 +659,8 @@ export default function PrePreparoClient() {
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("Categorias");
   const [rows, setRows] = useState<PrePreparoRow[]>([]);
+  const [sectors, setSectors] = useState<SectorRow[]>(() => readSectorsFromStore());
+  const [itemSectorLinks, setItemSectorLinks] = useState<Array<{ itemId: string; sectorId: string }>>([]);
   const [isSavingNewRecipe, setIsSavingNewRecipe] = useState(false);
   const [sourceMeta, setSourceMeta] = useState<{ source: "legacy" | "compat"; readOnly: boolean }>(() => {
     if (typeof window === "undefined") return { source: "legacy", readOnly: false };
@@ -772,6 +779,7 @@ export default function PrePreparoClient() {
   const [ingredientCost, setIngredientCost] = useState("0,00");
   const [newRecipeYield, setNewRecipeYield] = useState("0,000");
   const [newRecipeYieldUnit, setNewRecipeYieldUnit] = useState("Kg");
+  const [newRecipeSectorIds, setNewRecipeSectorIds] = useState<string[]>([]);
 
   const [isCategoriasOpen, setIsCategoriasOpen] = useState(false);
   const [categoryModalTarget, setCategoryModalTarget] = useState<"new" | "edit">("new");
@@ -791,6 +799,7 @@ export default function PrePreparoClient() {
   const [draftValidity, setDraftValidity] = useState("7");
   const [draftValidityUnit, setDraftValidityUnit] = useState("Dia(s)");
   const [draftImageUrl, setDraftImageUrl] = useState("");
+  const [draftSectorIds, setDraftSectorIds] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
@@ -1037,6 +1046,57 @@ export default function PrePreparoClient() {
       unsubCats();
     };
   }, []);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const loaded = await loadSectorsFromSupabase();
+        setSectors(loaded.sectors);
+        setItemSectorLinks(loaded.itemLinks ?? []);
+        if (loaded.sectors.length) writeSectorsToStore(loaded.sectors);
+        sectorsReadyRef.current = true;
+      } catch {
+        sectorsReadyRef.current = false;
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!sectorsReadyRef.current || isLoadingPrePreparo) return;
+    const geralId = sectors.find((sector) => sector.name.trim().toLowerCase() === "geral")?.id ?? null;
+    const linksByItem = new Map<string, string[]>();
+    for (const link of itemSectorLinks) {
+      const list = linksByItem.get(link.itemId) ?? [];
+      if (!list.includes(link.sectorId)) list.push(link.sectorId);
+      linksByItem.set(link.itemId, list);
+    }
+    setRows((previous) => {
+      let changed = false;
+      const next = previous.map((row) => {
+        const sectorIds = linksByItem.get(String(row.id)) ?? (geralId ? [geralId] : []);
+        if (JSON.stringify(row.sectorIds ?? []) === JSON.stringify(sectorIds)) return row;
+        changed = true;
+        return { ...row, sectorIds };
+      });
+      return changed ? next : previous;
+    });
+  }, [isLoadingPrePreparo, itemSectorLinks, sectors]);
+
+  useEffect(() => {
+    if (isReadOnly || !prePreparoLoadedRef.current || !sectorsReadyRef.current) return;
+    if (saveSectorLinksTimeoutRef.current) window.clearTimeout(saveSectorLinksTimeoutRef.current);
+    saveSectorLinksTimeoutRef.current = window.setTimeout(() => {
+      const geralId = sectors.find((sector) => sector.name.trim().toLowerCase() === "geral")?.id ?? null;
+      const payload = rows.map((row) => ({
+        itemId: String(row.id),
+        sectorIds: row.sectorIds?.length ? row.sectorIds : geralId ? [geralId] : [],
+      }));
+      if (!payload.length) return;
+      void saveItemSectorsToSupabase(payload)
+        .then(() => setItemSectorLinks(payload.flatMap((entry) => entry.sectorIds.map((sectorId) => ({ itemId: entry.itemId, sectorId })))))
+        .catch((error) => showToast(`Não foi possível salvar os setores dos pré-preparos (${error instanceof Error ? error.message : String(error)}).`, "error"));
+    }, 800);
+  }, [isReadOnly, rows, sectors]);
 
   useEffect(() => {
     void (async () => {
@@ -1478,6 +1538,7 @@ export default function PrePreparoClient() {
     const match = recipeCategories.find((c) => c.toLowerCase() === from.toLowerCase()) ?? "";
     setDraftCategory(match);
     setDraftImageUrl(String(row.recipeImage ?? "").trim());
+    setDraftSectorIds(row.sectorIds ?? []);
     setDraftSpec("");
     const parsedYield = parseQtyLabel(String(row.rendimento ?? ""));
     setDraftUnit((parsedYield.unit || "Und").trim() || "Und");
@@ -1502,6 +1563,8 @@ export default function PrePreparoClient() {
     setIngredientCost("0,00");
     setNewRecipeYield("0,000");
     setNewRecipeYieldUnit("Kg");
+    const geralId = sectors.find((sector) => sector.name.trim().toLowerCase() === "geral")?.id ?? "";
+    setNewRecipeSectorIds(geralId ? [geralId] : []);
     setIsNewRecipeOpen(true);
     if (newRecipeFileRef.current) newRecipeFileRef.current.value = "";
   }
@@ -3512,6 +3575,23 @@ export default function PrePreparoClient() {
                 </div>
 
                 <div className={styles.formField}>
+                  <div className={styles.formLabel}>Setores</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                    {sectors.map((sector) => (
+                      <label key={sector.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", border: "1px solid #d9e1df", borderRadius: 10, cursor: "pointer" }}>
+                        <input
+                          type="checkbox"
+                          checked={draftSectorIds.includes(sector.id)}
+                          onChange={(event) => setDraftSectorIds((previous) => event.target.checked ? [...new Set([...previous, sector.id])] : previous.filter((id) => id !== sector.id))}
+                        />
+                        {sector.name}
+                      </label>
+                    ))}
+                  </div>
+                  <div className={styles.helper}>O pré-preparo aparecerá no inventário de cada setor selecionado.</div>
+                </div>
+
+                <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida</div>
                   <select className={styles.formSelect} value={draftUnit} onChange={(e) => setDraftUnit(e.target.value)}>
                     <option value="Und">Und</option>
@@ -3556,6 +3636,7 @@ export default function PrePreparoClient() {
                                 receita: name,
                                 categoria: draftCategory,
                                 recipeImage: draftImageUrl ? draftImageUrl : undefined,
+                                sectorIds: draftSectorIds,
                                 rendimento,
                               });
                             })()
@@ -3920,6 +4001,23 @@ export default function PrePreparoClient() {
                       </div>
                       <div className={styles.helper}>Este prazo será considerado para todas as etiquetas desse item.</div>
                     </div>
+
+                    <div className={styles.formField}>
+                      <div className={styles.formLabel}>Setores</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                        {sectors.map((sector) => (
+                          <label key={sector.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", border: "1px solid #d9e1df", borderRadius: 10, cursor: "pointer" }}>
+                            <input
+                              type="checkbox"
+                              checked={newRecipeSectorIds.includes(sector.id)}
+                              onChange={(event) => setNewRecipeSectorIds((previous) => event.target.checked ? [...new Set([...previous, sector.id])] : previous.filter((id) => id !== sector.id))}
+                            />
+                            {sector.name}
+                          </label>
+                        ))}
+                      </div>
+                      <div className={styles.helper}>Selecione todos os setores que produzem ou armazenam este pré-preparo.</div>
+                    </div>
                   </>
                 ) : newRecipeStep === 2 ? (
                   <>
@@ -4164,6 +4262,7 @@ export default function PrePreparoClient() {
                         validadeDias: clampNonNegativeInt(Number.parseInt(newRecipeValidity.replace(/[^\d]/g, "") || "0", 10)) || 7,
                         modoPreparo: "",
                         ingredientes: newRecipeIngredients,
+                        sectorIds: newRecipeSectorIds,
                       };
                       const nextRows = [newRow, ...rows];
                       setIsSavingNewRecipe(true);

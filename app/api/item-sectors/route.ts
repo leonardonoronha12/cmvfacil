@@ -201,8 +201,12 @@ export async function POST(req: NextRequest) {
       if (!deduped.size) deduped.add(geralId);
       requestedByItem.set(itemId, deduped);
     }
-    const allItems = new Set<string>([...existingByItem.keys(), ...requestedByItem.keys()]);
-    for (const itemId of allItems) {
+    // This endpoint receives partial snapshots (for example, only the supplies
+    // visible on /insumos or only the recipes visible on /pre-preparo). Never
+    // rewrite links for an item that was not explicitly included in the body.
+    // Doing so used to move every omitted item back to "Geral" and silently
+    // erased sector work made on another screen.
+    for (const itemId of requestedByItem.keys()) {
       const existing = existingByItem.get(itemId) ?? new Set<string>();
       const requested = requestedByItem.get(itemId) ?? new Set<string>([geralId]);
       for (const sid of requested) {

@@ -486,6 +486,7 @@ export default function InsumosClient() {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("Todas");
   const [sectors, setSectors] = useState<SectorRow[]>([]);
+  const sectorsReadyRef = useRef(false);
   const [itemSectorLinks, setItemSectorLinks] = useState<Array<{ itemId: string; sectorId: string }>>([]);
   const [isSectorsOpen, setIsSectorsOpen] = useState(false);
   const [sectorNewDraft, setSectorNewDraft] = useState("");
@@ -658,6 +659,7 @@ export default function InsumosClient() {
         if (loaded.sectors.length) writeSectorsToStore(loaded.sectors);
         setSectors(loaded.sectors);
         setItemSectorLinks(loaded.itemLinks ?? []);
+        sectorsReadyRef.current = true;
         if (rowsReadyRef.current) {
           setDataRows((prev) => {
             const geralId = loaded.sectors.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
@@ -723,6 +725,7 @@ export default function InsumosClient() {
           showToast(saveErrorMessage(err), "error");
         });
     }, 650);
+    if (!sectorsReadyRef.current) return;
     itemSectorSyncRef.current = window.setTimeout(() => {
       const geralId = sectors.find((s) => normalizeSectorName(s.name).toLowerCase() === "geral")?.id ?? null;
       const payload: Array<{ itemId: string; sectorIds: string[] }> = [];

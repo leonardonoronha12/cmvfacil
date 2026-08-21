@@ -669,6 +669,8 @@ export default function EntradasClient() {
   const [detailUnit, setDetailUnit] = useState("Und");
   const [detailSubtotal, setDetailSubtotal] = useState("0,00");
   const [detailUnitCost, setDetailUnitCost] = useState("0,000");
+  const detailQtyInputRef = useRef<HTMLInputElement | null>(null);
+  const detailSubtotalInputRef = useRef<HTMLInputElement | null>(null);
   const [editingNotaItemId, setEditingNotaItemId] = useState<string | null>(null);
   const [isItemMenuOpen, setIsItemMenuOpen] = useState(false);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
@@ -2793,7 +2795,22 @@ export default function EntradasClient() {
         {isMounted && isDetailsOpen && detailsRow
           ? createPortal(
               <div className={styles.modalOverlay} role="presentation" onClick={() => setIsDetailsOpen(false)}>
-                <div className={`${styles.modal} ${styles.detailsModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                <div
+                  className={`${styles.modal} ${styles.detailsModal}`}
+                  role="dialog"
+                  aria-modal="true"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key !== "Escape") return;
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (isItemMenuOpen) {
+                      setIsItemMenuOpen(false);
+                      return;
+                    }
+                    setIsDetailsOpen(false);
+                  }}
+                >
               <div className={styles.detailsHeader}>
                 <div className={styles.detailsTitle}>{`Detalhes da Nota${detailsNoteNumber ? ` ${detailsNoteNumber}` : ""}`}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
@@ -2947,11 +2964,18 @@ export default function EntradasClient() {
 
                       <div className={styles.qtyWrap}>
                         <input
+                          ref={detailQtyInputRef}
                           className={styles.qtyInput}
                           inputMode="decimal"
                           pattern="[0-9.,]*"
                           value={detailQty}
                           onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              detailSubtotalInputRef.current?.focus();
+                              detailSubtotalInputRef.current?.select();
+                              return;
+                            }
                             if (e.ctrlKey || e.metaKey || e.altKey) return;
                             const k = e.key;
                             if (k.length !== 1) return;
@@ -2987,11 +3011,17 @@ export default function EntradasClient() {
                       <div className={styles.moneyWrap}>
                         <div className={styles.moneyPrefix}>R$</div>
                         <input
+                          ref={detailSubtotalInputRef}
                           className={styles.moneyInput}
                           inputMode="decimal"
                           pattern="[0-9.,]*"
                           value={detailSubtotal}
                           onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              if (canAddNotaItem) void confirmAddNotaItem();
+                              return;
+                            }
                             if (e.ctrlKey || e.metaKey || e.altKey) return;
                             const k = e.key;
                             if (k.length !== 1) return;

@@ -232,6 +232,31 @@ export async function GET(req: NextRequest) {
       }
     } catch {}
 
+    // Recover sector links that can still be proven by historical inventory
+    // counts. This is intentionally additive: an existing explicit link is
+    // never removed, and only a valid item/sector pair from the same company
+    // scope is restored. It repairs catalogs affected by the old partial-save
+    // behavior without guessing sector names.
+    try {
+      const countQ = db.from("inventory_item_sector_counts").select("item_id,sector_id");
+      const countRes = scope.companyId
+        ? await countQ.eq("company_id", scope.companyId).limit(20000)
+        : scope.userScopeId
+          ? await countQ.eq("user_scope_id", scope.userScopeId).limit(20000)
+          : { data: [], error: null };
+      if (!countRes.error) {
+        const known = new Set(itemLinks.map((link: any) => `${String(link?.item_id ?? "")}::${String(link?.sector_id ?? "")}`));
+        for (const count of (countRes.data ?? []) as any[]) {
+          const itemId = String(count?.item_id ?? "").trim();
+          const sectorId = String(count?.sector_id ?? "").trim();
+          const key = `${itemId}::${sectorId}`;
+          if (!itemId || !sectorId || known.has(key)) continue;
+          known.add(key);
+          itemLinks.push({ item_id: itemId, sector_id: sectorId });
+        }
+      }
+    } catch {}
+
     const sectors = (sectorsDb as any[]).map((s: any) => ({
       id: String(s?.id ?? ""),
       name: String(s?.name ?? ""),
