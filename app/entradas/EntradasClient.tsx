@@ -3081,8 +3081,14 @@ export default function EntradasClient() {
                           </div>
                         </div>
                         <div className={styles.itemsActions}>
-                          <button type="button" className={styles.itemsEdit} aria-label={`Editar ${resolveNotaItemDisplayName(it, insumosById)}`} onClick={() => startEditNotaItem(it)} disabled={isReadOnly}>
-                            <IconPencil />
+                          <button
+                            type="button"
+                            className={styles.itemsEdit}
+                            aria-label={editingNotaItemId === it.id ? `Salvar ${resolveNotaItemDisplayName(it, insumosById)}` : `Editar ${resolveNotaItemDisplayName(it, insumosById)}`}
+                            onClick={() => editingNotaItemId === it.id ? void confirmAddNotaItem() : startEditNotaItem(it)}
+                            disabled={isReadOnly}
+                          >
+                            {editingNotaItemId === it.id ? <IconCheck /> : <IconPencil />}
                           </button>
                           <button type="button" className={styles.itemsTrash} aria-label={`Remover ${resolveNotaItemDisplayName(it, insumosById)}`} onClick={() => deleteNotaItem(it.id)} disabled={isReadOnly}>
                             <IconTrash />
