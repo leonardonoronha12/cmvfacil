@@ -344,6 +344,8 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const bootstrapStopRef = useRef(false);
   const tabHiddenAtRef = useRef(0);
   const tabResumedAtRef = useRef(0);
+  const navigationRequestRef = useRef(0);
+  const navigationFallbackRef = useRef<number | null>(null);
   const bubbleObjOverlayKey = "cmvfacil:bubbleObjMigrationOverlayHidden:v1";
   const bubbleObjEnsureKey = "cmvfacil:bubbleObjEnsureStarted:v1";
   const [bubbleObjOverlayVisible, setBubbleObjOverlayVisible] = useState(true);
@@ -1095,6 +1097,11 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
     }
 
     e.preventDefault();
+    const requestId = ++navigationRequestRef.current;
+    if (navigationFallbackRef.current) {
+      window.clearTimeout(navigationFallbackRef.current);
+      navigationFallbackRef.current = null;
+    }
     const target = new URL(href, window.location.origin);
     const resumedRecently = Date.now() - tabResumedAtRef.current < 15_000;
     if (document.visibilityState !== "visible" || resumedRecently) {
@@ -1108,12 +1115,20 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
 
     // If a stalled client transition does not update the URL, fall back to a
     // regular navigation so the sidebar never becomes unresponsive.
-    window.setTimeout(() => {
+    navigationFallbackRef.current = window.setTimeout(() => {
+      if (requestId !== navigationRequestRef.current) return;
       const current = `${window.location.pathname}${window.location.search}`;
       const expected = `${target.pathname}${target.search}`;
       if (current !== expected) window.location.assign(target.href);
+      navigationFallbackRef.current = null;
     }, 1200);
   };
+
+  useEffect(() => {
+    return () => {
+      if (navigationFallbackRef.current) window.clearTimeout(navigationFallbackRef.current);
+    };
+  }, []);
 
   const companyName = String(me?.companyName ?? "").trim() || "—";
   const userLabel =
