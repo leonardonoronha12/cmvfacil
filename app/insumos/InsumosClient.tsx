@@ -464,6 +464,7 @@ export default function InsumosClient() {
   const rowsReadyRef = useRef(false);
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
+  const persistedSnapshotRef = useRef("");
   const categoriesReadyRef = useRef(false);
   const [toast, setToast] = useState<{
     title: string;
@@ -588,6 +589,19 @@ export default function InsumosClient() {
     }
     setCategories(merged);
     categoriesReadyRef.current = true;
+
+    persistedSnapshotRef.current = JSON.stringify({
+      rows: mapped.map((r) => ({
+        id: r.id,
+        item: r.item,
+        medida: r.medida,
+        custoMedio: r.custoMedio,
+        categoria: r.categoria,
+        especificacao: r.especificacao,
+        ocultar: r.ocultar,
+      })),
+      categories: merged,
+    });
 
     writeInsumosToStore(state.rows ?? []);
     writeInsumoCategoriasToStore(merged);
@@ -715,8 +729,22 @@ export default function InsumosClient() {
         ocultar: r.ocultar,
         sectorIds: r.sectorIds,
       }));
+      const snapshot = JSON.stringify({
+        rows: storeRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+        categories,
+      });
+      if (snapshot === persistedSnapshotRef.current) return;
       void saveInsumosStateToSupabase({ rows: storeRows as any, categories })
         .then(() => {
+          persistedSnapshotRef.current = snapshot;
           saveErrorShownRef.current = false;
         })
         .catch((err) => {
@@ -928,6 +956,18 @@ export default function InsumosClient() {
               especificacao: r.especificacao,
               ocultar: r.ocultar,
             })) as any,
+            categories: mergedCategories,
+          });
+          persistedSnapshotRef.current = JSON.stringify({
+            rows: imported.map((r) => ({
+              id: r.id,
+              item: r.item,
+              medida: r.medida,
+              custoMedio: r.custoMedio,
+              categoria: r.categoria,
+              especificacao: r.especificacao,
+              ocultar: r.ocultar,
+            })),
             categories: mergedCategories,
           });
           saveErrorShownRef.current = false;

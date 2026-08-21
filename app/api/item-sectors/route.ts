@@ -225,11 +225,23 @@ export async function POST(req: NextRequest) {
     }
 
     if (toUpsert.length) {
-      const { error } = await db.from("item_sectors").upsert(toUpsert, {
-        onConflict: scope.companyId ? "company_id,item_id,sector_id" : "user_scope_id,item_id,sector_id",
-        ignoreDuplicates: true,
-      });
-      if (error) return json({ error: error.message }, { status: 500 });
+      // item_sectors uses partial unique indexes for company and legacy user
+      // scopes. PostgREST cannot infer those indexes through onConflict, so an
+      // upsert fails with "no unique or exclusion constraint". We already
+      // loaded the current links above; insert only the missing pairs.
+      const missing = toUpsert.filter((row) => !existingByItem.get(String(row.item_id))?.has(String(row.sector_id)));
+      for (let start = 0; start < missing.length; start += 200) {
+        const batch = missing.slice(start, start + 200);
+        const { error } = await db.from("item_sectors").insert(batch);
+        if (error && String((error as any)?.code ?? "") === "23505") {
+          for (const row of batch) {
+            const retry = await db.from("item_sectors").insert(row);
+            if (retry.error && String((retry.error as any)?.code ?? "") !== "23505") return json({ error: retry.error.message }, { status: 500 });
+          }
+        } else if (error) {
+          return json({ error: error.message }, { status: 500 });
+        }
+      }
     }
     if (toDelete.length) {
       for (const d of toDelete) {

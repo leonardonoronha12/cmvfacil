@@ -678,9 +678,11 @@ export async function POST(req: NextRequest) {
       }
 
       const toCreate: { company_id: string; name: string }[] = [];
+      const plannedCategoryKeys = new Set<string>();
       for (const name0 of categoryNames) {
         const key = normalizeNameKey(name0);
-        if (!key || categoryIdByKey.has(key)) continue;
+        if (!key || categoryIdByKey.has(key) || plannedCategoryKeys.has(key)) continue;
+        plannedCategoryKeys.add(key);
         toCreate.push({ company_id: companyId, name: name0 });
       }
       if (toCreate.length) {
@@ -765,16 +767,20 @@ export async function POST(req: NextRequest) {
       }
 
       if (upsertByBubble.length) {
-        const { error } = await db.from("items").upsert(upsertByBubble as any, { onConflict: "id" });
-        if (error) return json({ error: error.message }, { status: 500 });
+        for (let start = 0; start < upsertByBubble.length; start += 100) {
+          const { error } = await db.from("items").upsert(upsertByBubble.slice(start, start + 100) as any, { onConflict: "id" });
+          if (error) return json({ error: error.message, stage: "compat.items_upsert_bubble", batchStart: start }, { status: 500 });
+        }
       }
       if (upsertById.length) {
-        const { error } = await db.from("items").upsert(upsertById as any, { onConflict: "id" });
-        if (error) return json({ error: error.message }, { status: 500 });
+        for (let start = 0; start < upsertById.length; start += 100) {
+          const { error } = await db.from("items").upsert(upsertById.slice(start, start + 100) as any, { onConflict: "id" });
+          if (error) return json({ error: error.message, stage: "compat.items_upsert_id", batchStart: start }, { status: 500 });
+        }
       }
 
       return json(
-        { ok: true },
+        { ok: true, savedCount: upsertByBubble.length + upsertById.length },
         {
           status: 200,
           headers: {
