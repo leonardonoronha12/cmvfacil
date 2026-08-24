@@ -874,11 +874,25 @@ function readInventoryItemQuantity(item: any): number | null {
     const values = Object.values(sectorCounts as Record<string, unknown>)
       .map((value) => String(value ?? "").trim())
       .filter((value) => value !== "");
-    if (values.length) return values.reduce((total, value) => total + parsePtNumber(value), 0);
+    if (values.length) return values.reduce((total, value) => total + parseInventoryCountValue(value), 0);
   }
 
   const raw = String(item?.estoqueFinal ?? "").trim();
   return raw === "" ? null : parsePtNumber(raw);
+}
+
+function parseInventoryCountValue(input: unknown) {
+  if (typeof input === "number") return Number.isFinite(input) ? input : 0;
+
+  const raw = String(input ?? "").trim();
+  if (!raw) return 0;
+
+  if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  return parsePtNumber(raw);
 }
 
 async function hydrateInventorySectorCounts(contagens: InventarioContagem[], userIdOverride?: string) {
@@ -916,7 +930,7 @@ async function hydrateInventorySectorCounts(contagens: InventarioContagem[], use
           const loadedCounts = countsByInventoryItem.get(key);
           if (!loadedCounts) return item;
           const sectorCounts = { ...(item?.sectorCounts ?? {}), ...loadedCounts };
-          const total = Object.values(sectorCounts).reduce<number>((sum, value) => sum + parsePtNumber(String(value ?? "")), 0);
+          const total = Object.values(sectorCounts).reduce<number>((sum, value) => sum + parseInventoryCountValue(value), 0);
           return { ...item, sectorCounts, estoqueFinal: String(total) };
         }),
       })),
