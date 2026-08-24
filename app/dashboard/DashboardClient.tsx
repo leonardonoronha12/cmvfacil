@@ -868,6 +868,19 @@ function startOfDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
 
+function readInventoryItemQuantity(item: any): number | null {
+  const sectorCounts = item?.sectorCounts;
+  if (sectorCounts && typeof sectorCounts === "object" && !Array.isArray(sectorCounts)) {
+    const values = Object.values(sectorCounts as Record<string, unknown>)
+      .map((value) => String(value ?? "").trim())
+      .filter((value) => value !== "");
+    if (values.length) return values.reduce((total, value) => total + parsePtNumber(value), 0);
+  }
+
+  const raw = String(item?.estoqueFinal ?? "").trim();
+  return raw === "" ? null : parsePtNumber(raw);
+}
+
 function buildPriorInventoryBalances(contagens: InventarioContagem[], beforeTime: number) {
   const byId = new Map<string, number>();
   const byName = new Map<string, number>();
@@ -883,9 +896,8 @@ function buildPriorInventoryBalances(contagens: InventarioContagem[], beforeTime
     for (const cat of safeArray<any>((contagem as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
-        const rawQty = String((it as any).estoqueFinal ?? "").trim();
-        if (!rawQty) continue;
-        const qty = parsePtNumber(rawQty);
+        const qty = readInventoryItemQuantity(it);
+        if (qty == null) continue;
         const id = String((it as any).id ?? "").trim();
         const nameKey = normalizeKey(String((it as any).item ?? ""));
         if (id && !byId.has(id)) byId.set(id, qty);
@@ -1613,7 +1625,7 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
-        const qty = parsePtNumber((it as any).estoqueFinal || "0");
+        const qty = readInventoryItemQuantity(it) ?? 0;
         initialById.set(it.id, qty);
         const nameKey = normalizeKey(String((it as any).item ?? ""));
         if (nameKey) initialByName.set(nameKey, qty);
@@ -1624,7 +1636,7 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
         if (Boolean((it as any).removido)) continue;
-        const qty = parsePtNumber((it as any).estoqueFinal || "0");
+        const qty = readInventoryItemQuantity(it) ?? 0;
         finalById.set(it.id, qty);
         const nameKey = normalizeKey(String((it as any).item ?? ""));
         if (nameKey) finalByName.set(nameKey, qty);
@@ -1920,7 +1932,7 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemStart as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
-          const qty = parsePtNumber((it as any).estoqueFinal || "0");
+          const qty = readInventoryItemQuantity(it) ?? 0;
           initialById.set(it.id, qty);
           const nameKey = normalizeKey(String((it as any).item ?? ""));
           if (nameKey) initialByName.set(nameKey, qty);
@@ -1931,7 +1943,7 @@ export default function DashboardClient() {
     for (const cat of safeArray<any>((contagemEnd as any).categorias)) {
       for (const it of safeArray<any>((cat as any).itens)) {
           if (Boolean((it as any).removido)) continue;
-          const qty = parsePtNumber((it as any).estoqueFinal || "0");
+          const qty = readInventoryItemQuantity(it) ?? 0;
           finalById.set(it.id, qty);
           const nameKey = normalizeKey(String((it as any).item ?? ""));
           if (nameKey) finalByName.set(nameKey, qty);
