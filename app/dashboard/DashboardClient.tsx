@@ -881,6 +881,51 @@ function readInventoryItemQuantity(item: any): number | null {
   return raw === "" ? null : parsePtNumber(raw);
 }
 
+async function hydrateInventorySectorCounts(contagens: InventarioContagem[], userIdOverride?: string) {
+  if (!contagens.length) return contagens;
+
+  try {
+    const params = new URLSearchParams();
+    if (userIdOverride) params.set("userId", userIdOverride);
+    const query = params.size ? `?${params.toString()}` : "";
+    const response = await fetch(`/api/inventario/sectors${query}`, { cache: "no-store" });
+    if (!response.ok) return contagens;
+
+    const payload = (await response.json().catch(() => null)) as any;
+    const rows = safeArray<any>(payload?.counts ?? payload?.rows);
+    if (!rows.length) return contagens;
+
+    const countsByInventoryItem = new Map<string, Record<string, string>>();
+    for (const row of rows) {
+      const inventoryId = String(row?.inventory_id ?? "").trim();
+      const itemId = String(row?.item_id ?? "").trim();
+      const sectorId = String(row?.sector_id ?? "").trim();
+      if (!inventoryId || !itemId || !sectorId) continue;
+      const key = `${inventoryId}\u0000${itemId}`;
+      const sectorCounts = countsByInventoryItem.get(key) ?? {};
+      sectorCounts[sectorId] = String(row?.quantity ?? "0");
+      countsByInventoryItem.set(key, sectorCounts);
+    }
+
+    return contagens.map((contagem) => ({
+      ...contagem,
+      categorias: safeArray<any>(contagem.categorias).map((categoria) => ({
+        ...categoria,
+        itens: safeArray<any>(categoria.itens).map((item) => {
+          const key = `${String(contagem.id ?? "").trim()}\u0000${String(item?.id ?? "").trim()}`;
+          const loadedCounts = countsByInventoryItem.get(key);
+          if (!loadedCounts) return item;
+          const sectorCounts = { ...(item?.sectorCounts ?? {}), ...loadedCounts };
+          const total = Object.values(sectorCounts).reduce<number>((sum, value) => sum + parsePtNumber(String(value ?? "")), 0);
+          return { ...item, sectorCounts, estoqueFinal: String(total) };
+        }),
+      })),
+    }));
+  } catch {
+    return contagens;
+  }
+}
+
 function buildPriorInventoryBalances(contagens: InventarioContagem[], beforeTime: number) {
   const byId = new Map<string, number>();
   const byName = new Map<string, number>();
@@ -1183,7 +1228,9 @@ export default function DashboardClient() {
         loadInsumosFromSupabase(userIdOverride || undefined).catch(() => [] as InsumoStoreItem[]),
         loadEntradasFromSupabase(userIdOverride || undefined).catch(() => [] as EntradaStoreRow[]),
         loadFornecedoresStateFromSupabase(userIdOverride || undefined).catch(() => ({ info: {} as FornecedorInfoMap, produtos: {} as FornecedorProdutos, equivalencias: {} as FornecedorEquivalenciasMap })),
-        loadInventarioFromSupabase(userIdOverride || undefined).catch(() => [] as InventarioContagem[]),
+        loadInventarioFromSupabase(userIdOverride || undefined)
+          .then((rows) => hydrateInventorySectorCounts(rows, userIdOverride || undefined))
+          .catch(() => [] as InventarioContagem[]),
         loadDesperdiciosFromSupabase(userIdOverride || undefined).catch(() => [] as DesperdicioRow[]),
         loadPrePreparoFromSupabase(userIdOverride || undefined).catch(() => [] as PrePreparoStoreRow[]),
         loadPrePreparoEtiquetasFromSupabase().catch(() => [] as PrePreparoEtiquetaRow[]),
@@ -1307,7 +1354,8 @@ export default function DashboardClient() {
 
       let contagensRows: InventarioContagem[] = [];
       try {
-      contagensRows = await loadInventarioFromSupabase(userIdOverride || undefined);
+        contagensRows = await loadInventarioFromSupabase(userIdOverride || undefined);
+        contagensRows = await hydrateInventorySectorCounts(contagensRows, userIdOverride || undefined);
       } catch {}
       writeInventarioToStore(contagensRows);
       let entradasRows: EntradaStoreRow[] = [];
