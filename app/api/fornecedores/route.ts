@@ -445,14 +445,31 @@ export async function GET(req: NextRequest) {
           linksItemNameMissing++;
           continue;
         }
+        const rawProdutos = rawProdutosByKey.get(supplierKey) ?? [];
+        const rawEquiv = safeObj(rawEquivByKey.get(supplierKey));
+        const aliases = rawProdutos.filter((alias) => {
+          const eq = safeObj(rawEquiv[String(alias ?? "").trim().toLowerCase()]);
+          return normalizeLookupKey(String(eq.insumoEquivalente ?? "")) === normalizeLookupKey(itemName);
+        });
+        const displayNames = aliases.length ? aliases : [itemName];
         const prev = Array.isArray(produtos[supplierKey]) ? produtos[supplierKey] : [];
-        if (!prev.includes(itemName)) produtos[supplierKey] = [...prev, itemName];
+        const next = [...prev];
+        for (const displayName of displayNames) {
+          if (!next.some((name) => name.toLowerCase() === displayName.toLowerCase())) next.push(displayName);
+        }
+        produtos[supplierKey] = next;
       }
 
       for (const k of Object.keys(info)) {
         const rawProdutos = rawProdutosByKey.get(k) ?? [];
         const cur = Array.isArray(produtos[k]) ? produtos[k] : [];
-        if (!cur.length && rawProdutos.length) produtos[k] = rawProdutos;
+        if (rawProdutos.length) {
+          const next = [...cur];
+          for (const productName of rawProdutos) {
+            if (!next.some((name) => name.toLowerCase() === productName.toLowerCase())) next.push(productName);
+          }
+          produtos[k] = next;
+        }
       }
 
       const normalizedTombstones = Array.from(new Set(tombstones.map(normalizeTombstoneKey).filter(Boolean)));
@@ -805,10 +822,20 @@ export async function POST(req: NextRequest) {
         const productName = String((data as any).product_name ?? (data as any).productName ?? "").trim();
         if (!productName) return errJson({ status: 400, traceId, stage: "incremental.delete.missing_name", error: "missing_name", source: "compat" });
         const lowerNeedle = productName.toLowerCase();
-        const nextProdutos = curProdutos.filter((p) => p.toLowerCase() !== lowerNeedle);
+        const matchingEquivKeys = new Set<string>([equivKey(productName)]);
+        const matchingProductNames = new Set<string>([lowerNeedle]);
+        for (const [key, value] of Object.entries(curEquiv)) {
+          const eq = safeObj(value);
+          const alias = String(eq.nomeNaNota ?? "").trim();
+          const linkedItem = String(eq.insumoEquivalente ?? "").trim();
+          if (normalizeLookupKey(linkedItem) !== normalizeLookupKey(productName)) continue;
+          matchingEquivKeys.add(key);
+          if (alias) matchingProductNames.add(alias.toLowerCase());
+        }
+        const nextProdutos = curProdutos.filter((p) => !matchingProductNames.has(p.toLowerCase()));
         const nextEquiv: Record<string, any> = {};
         for (const [k, v] of Object.entries(curEquiv)) {
-          if (k === equivKey(productName)) continue;
+          if (matchingEquivKeys.has(k)) continue;
           nextEquiv[k] = v;
         }
         const newRaw = normalizeFornecedoresRaw(curRaw, { produtos: nextProdutos, equivalencias: nextEquiv });
@@ -819,20 +846,21 @@ export async function POST(req: NextRequest) {
           .eq("id", supplierId);
         if (upErr) return errJson({ status: 500, traceId, stage: "incremental.delete.raw_update", error: upErr.message, source: "compat" });
 
-        const prevEquiv = curEquiv[equivKey(productName)];
-        const itemName = prevEquiv ? String(prevEquiv.insumoEquivalente ?? "").trim() : "";
+        const prevEquiv =
+          curEquiv[equivKey(productName)] ??
+          Object.entries(curEquiv).find(([key]) => matchingEquivKeys.has(key))?.[1];
+        const itemName = prevEquiv ? String((prevEquiv as any).insumoEquivalente ?? "").trim() : productName;
         if (itemName) {
           const itemId = canonicalUuid(await findItemIdByName(itemName));
           if (itemId) {
-            try {
-              await db
-                .from("supplier_items")
-                .delete()
-                .eq("company_id", companyId)
-                .eq("supplier_id", supplierId)
-                .eq("item_id", itemId);
-            } catch {
-              /* noop: best-effort cleanup of supplier_item link */
+            const { error: unlinkErr } = await db
+              .from("supplier_items")
+              .delete()
+              .eq("company_id", companyId)
+              .eq("supplier_id", supplierId)
+              .eq("item_id", itemId);
+            if (unlinkErr) {
+              return errJson({ status: 500, traceId, stage: "incremental.delete.supplier_items", error: unlinkErr.message, source: "compat" });
             }
           }
         }
