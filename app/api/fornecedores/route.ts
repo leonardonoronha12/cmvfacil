@@ -598,6 +598,250 @@ export async function POST(req: NextRequest) {
     if (memberErr) return errJson({ status: 500, traceId, stage: "compat.company_members_select", error: memberErr.message, source: "compat" });
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     if (!companyId) return errJson({ status: 500, traceId, stage: "compat.missing_company", error: "missing_company", source: "compat" });
+
+    async function resolveIncrementalSupplierId(keyRaw: string): Promise<string> {
+      const key = String(keyRaw ?? "").trim();
+      if (!key) return "";
+      if (isDbPrefixed(key)) {
+        const id = canonicalUuid(dbIdFromKey(key));
+        if (!id) return "";
+        const { data, error } = await db
+          .from("suppliers")
+          .select("id")
+          .eq("company_id", companyId)
+          .eq("id", id)
+          .limit(1);
+        if (error) return "";
+        return canonicalUuid(String((data?.[0] as any)?.id ?? ""));
+      }
+      const byBubble = await db
+        .from("suppliers")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("bubble_id", key)
+        .limit(1);
+      if (!byBubble.error && (byBubble.data?.length ?? 0) > 0) {
+        return canonicalUuid(String((byBubble.data![0] as any).id ?? ""));
+      }
+      const byExt = await db
+        .from("suppliers")
+        .select("id")
+        .eq("company_id", companyId)
+        .eq("external_key", key)
+        .limit(1);
+      if (!byExt.error && (byExt.data?.length ?? 0) > 0) {
+        return canonicalUuid(String((byExt.data![0] as any).id ?? ""));
+      }
+      const nameKey = normalizeLookupKey(key);
+      if (!nameKey) return "";
+      const rows = await db.from("suppliers").select("id,nome").eq("company_id", companyId).limit(2000);
+      if (rows.error) return "";
+      for (const s of rows.data ?? []) {
+        if (normalizeLookupKey(String((s as any).nome ?? "")) === nameKey) {
+          return canonicalUuid(String((s as any).id ?? ""));
+        }
+      }
+      return "";
+    }
+    async function findItemIdByName(nameRaw: string): Promise<string> {
+      const name = String(nameRaw ?? "").trim();
+      if (!name) return "";
+      const { data, error } = await db
+        .from("items")
+        .select("id,name")
+        .eq("company_id", companyId)
+        .limit(12000);
+      if (error) return "";
+      const needle = name.toLowerCase();
+      for (const row of data ?? []) {
+        if (String((row as any).name ?? "").toLowerCase() === needle) {
+          return canonicalUuid(String((row as any).id ?? ""));
+        }
+      }
+      return "";
+    }
+    function extractRawProdutosEquiv(raw: unknown): { produtos: string[]; equivalencias: Record<string, any> } {
+      const obj = safeObj(raw);
+      const fornecedores = safeObj(obj.fornecedores);
+      const produtos = safeArr((fornecedores as any).produtos).map((x) => String(x ?? ""));
+      const equivalencias = safeObj((fornecedores as any).equivalencias) as Record<string, any>;
+      return { produtos, equivalencias };
+    }
+    function equivKey(name: string): string {
+      return String(name ?? "").trim().toLowerCase();
+    }
+
+    // #region incremental: dispatch actions (upsert_product / delete_product)
+    const action = typeof data.action === "string" ? data.action.trim().toLowerCase() : "";
+    if (action === "upsert_product" || action === "delete_product") {
+      const supplierKeyRaw = String((data as any).supplier_key ?? (data as any).supplierKey ?? "").trim();
+      const supplierId = canonicalUuid(await resolveIncrementalSupplierId(supplierKeyRaw));
+      if (!supplierId) {
+        return errJson({ status: 404, traceId, stage: "incremental.supplier_not_found", error: "supplier_not_found", source: "compat" });
+      }
+      const curRow = await db
+        .from("suppliers")
+        .select("id,raw")
+        .eq("company_id", companyId)
+        .eq("id", supplierId)
+        .limit(1);
+      if (curRow.error) return errJson({ status: 500, traceId, stage: "incremental.supplier_select", error: curRow.error.message, source: "compat" });
+      if (!curRow.data?.length) {
+        return errJson({ status: 404, traceId, stage: "incremental.supplier_gone", error: "supplier_gone", source: "compat" });
+      }
+      const curRaw = (curRow.data[0] as any)?.raw ?? {};
+      const { produtos: curProdutos, equivalencias: curEquiv } = extractRawProdutosEquiv(curRaw);
+
+      if (action === "upsert_product") {
+        const product = safeObj((data as any).product) as Record<string, unknown>;
+        const oldName = typeof product.oldName === "string" ? product.oldName.trim() : "";
+        const newName = typeof product.name === "string" ? product.name.trim() : "";
+        if (!newName) return errJson({ status: 400, traceId, stage: "incremental.upsert.missing_name", error: "missing_name", source: "compat" });
+        const unit = (typeof product.unit === "string" && product.unit.trim()) ? product.unit.trim() : "Und";
+        const equivItemName = typeof product.equivalentItemName === "string" ? product.equivalentItemName.trim() : "";
+        const factor = (typeof product.factor === "string" && product.factor.trim()) ? product.factor.trim() : "1";
+        const equivUnitDefault = equivItemName ? (unit || "Und") : "";
+        const equivUnit = (typeof product.equivalentUnit === "string" && product.equivalentUnit.trim()) ? product.equivalentUnit.trim() : equivUnitDefault;
+
+        const nextProdutos: string[] = [];
+        const lowerDedup = new Set<string>();
+        for (const p of curProdutos) {
+          const pl = p.toLowerCase();
+          const isOldMatch = oldName && pl === oldName.toLowerCase();
+          if (isOldMatch) continue;
+          if (lowerDedup.has(pl)) continue;
+          lowerDedup.add(pl);
+          nextProdutos.push(p);
+        }
+        const newLower = newName.toLowerCase();
+        if (!lowerDedup.has(newLower)) {
+          lowerDedup.add(newLower);
+          nextProdutos.push(newName);
+        }
+
+        const nextEquiv: Record<string, any> = {};
+        for (const [k, v] of Object.entries(curEquiv)) {
+          const matchOld = oldName && k === equivKey(oldName);
+          const matchNew = k === equivKey(newName);
+          if (matchOld || matchNew) continue;
+          nextEquiv[k] = v;
+        }
+        if (equivItemName) {
+          nextEquiv[equivKey(newName)] = {
+            id:
+              (oldName ? (curEquiv[equivKey(oldName)]?.id ?? null) : null) ??
+              (curEquiv[equivKey(newName)]?.id ?? null) ??
+              String(Date.now()),
+            nomeNaNota: newName,
+            unidadeNaNota: unit,
+            insumoEquivalente: equivItemName,
+            equivalenteQuantidade: factor,
+            equivalenteUnidade: equivUnit,
+          };
+        } else {
+          const existing =
+            (oldName ? curEquiv[equivKey(oldName)] : null) ?? curEquiv[equivKey(newName)] ?? null;
+          if (existing) nextEquiv[equivKey(newName)] = { ...existing, nomeNaNota: newName };
+        }
+
+        const newRaw = normalizeFornecedoresRaw(curRaw, { produtos: nextProdutos, equivalencias: nextEquiv });
+        const { error: upErr } = await db
+          .from("suppliers")
+          .update({ raw: newRaw } as any)
+          .eq("company_id", companyId)
+          .eq("id", supplierId);
+        if (upErr) return errJson({ status: 500, traceId, stage: "incremental.upsert.raw_update", error: upErr.message, source: "compat" });
+
+        if (equivItemName) {
+          const itemId = canonicalUuid(await findItemIdByName(equivItemName));
+          if (itemId) {
+            const { error: linkErr } = await db
+              .from("supplier_items")
+              .upsert(
+                [{ company_id: companyId, supplier_id: supplierId, item_id: itemId }],
+                { onConflict: "company_id,supplier_id,item_id", ignoreDuplicates: true },
+              );
+            if (linkErr) return errJson({ status: 500, traceId, stage: "incremental.upsert.supplier_items", error: linkErr.message, source: "compat" });
+            if (oldName && oldName !== equivItemName) {
+              const oldItemId = canonicalUuid(await findItemIdByName(oldName));
+              if (oldItemId && oldItemId !== itemId) {
+                try {
+                  await db
+                    .from("supplier_items")
+                    .delete()
+                    .eq("company_id", companyId)
+                    .eq("supplier_id", supplierId)
+                    .eq("item_id", oldItemId);
+                } catch {
+                  /* noop: best-effort cleanup of old supplier_item link */
+                }
+              }
+            }
+          }
+        } else if (oldName && oldName !== newName) {
+          const prevEquiv = curEquiv[equivKey(oldName)];
+          const prevItemName = prevEquiv ? String(prevEquiv.insumoEquivalente ?? "").trim() : "";
+          if (prevItemName) {
+            const oldItemId = canonicalUuid(await findItemIdByName(prevItemName));
+            if (oldItemId) {
+              try {
+                await db
+                  .from("supplier_items")
+                  .delete()
+                  .eq("company_id", companyId)
+                  .eq("supplier_id", supplierId)
+                  .eq("item_id", oldItemId);
+              } catch {
+                /* noop: best-effort cleanup of previous supplier_item link */
+              }
+            }
+          }
+        }
+
+        return json({ ok: true, traceId, source: "compat", mode: "incremental", action: "upsert_product", supplierId }, { status: 200 });
+      }
+
+      if (action === "delete_product") {
+        const productName = String((data as any).product_name ?? (data as any).productName ?? "").trim();
+        if (!productName) return errJson({ status: 400, traceId, stage: "incremental.delete.missing_name", error: "missing_name", source: "compat" });
+        const lowerNeedle = productName.toLowerCase();
+        const nextProdutos = curProdutos.filter((p) => p.toLowerCase() !== lowerNeedle);
+        const nextEquiv: Record<string, any> = {};
+        for (const [k, v] of Object.entries(curEquiv)) {
+          if (k === equivKey(productName)) continue;
+          nextEquiv[k] = v;
+        }
+        const newRaw = normalizeFornecedoresRaw(curRaw, { produtos: nextProdutos, equivalencias: nextEquiv });
+        const { error: upErr } = await db
+          .from("suppliers")
+          .update({ raw: newRaw } as any)
+          .eq("company_id", companyId)
+          .eq("id", supplierId);
+        if (upErr) return errJson({ status: 500, traceId, stage: "incremental.delete.raw_update", error: upErr.message, source: "compat" });
+
+        const prevEquiv = curEquiv[equivKey(productName)];
+        const itemName = prevEquiv ? String(prevEquiv.insumoEquivalente ?? "").trim() : "";
+        if (itemName) {
+          const itemId = canonicalUuid(await findItemIdByName(itemName));
+          if (itemId) {
+            try {
+              await db
+                .from("supplier_items")
+                .delete()
+                .eq("company_id", companyId)
+                .eq("supplier_id", supplierId)
+                .eq("item_id", itemId);
+            } catch {
+              /* noop: best-effort cleanup of supplier_item link */
+            }
+          }
+        }
+
+        return json({ ok: true, traceId, source: "compat", mode: "incremental", action: "delete_product", supplierId }, { status: 200 });
+      }
+    }
+    // #endregion
+
     const infoMap = safeObj(data.info);
     const produtosMap = safeObj(data.produtos);
     const equivMap = safeObj(data.equivalencias);

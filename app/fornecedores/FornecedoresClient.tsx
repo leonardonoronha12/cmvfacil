@@ -353,6 +353,8 @@ export default function FornecedoresClient() {
   const fornecedoresPersistedSnapshotRef = useRef("");
   const fornecedoresLoadErrorShownRef = useRef(false);
   const fornecedoresSaveErrorShownRef = useRef(false);
+  const fornecedoresIncrementalMutexRef = useRef<Map<string, Promise<void>>>(new Map());
+  const fornecedoresIncrementalNonceRef = useRef(0);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
   const [produtoDraft, setProdutoDraft] = useState("");
   const [produtoQuery, setProdutoQuery] = useState("");
@@ -706,20 +708,70 @@ export default function FornecedoresClient() {
       (x) => x.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase() && x.nomeNaNota.toLowerCase() !== oldName.toLowerCase(),
     );
     const nextEq = setEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw, [...filtered, nextItem] as any[]);
-    try {
-      await saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
-    } catch {
-      showToast("Não foi possível editar o produto. Tente novamente.", "error");
-      return;
-    }
+
+    const mutexKey = `upsert:${fornecedorKey.toLowerCase()}:${nomeNaNota.toLowerCase()}`;
+    const mutex = fornecedoresIncrementalMutexRef.current;
+    if (mutex.has(mutexKey)) return;
+
+    const prevProdutos = produtosMap;
+    const prevEq = equivalenciasMap;
+    const prevSnapshot = fornecedoresPersistedSnapshotRef.current;
+    const nextSnapshot = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     writeFornecedorEquivalenciasMap(nextEq);
     setEquivalenciasMap(nextEq);
-    fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+    if (fornecedoresSyncTimeoutRef.current) {
+      window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+      fornecedoresSyncTimeoutRef.current = null;
+    }
+    fornecedoresPersistedSnapshotRef.current = nextSnapshot;
     setVincNomeOriginal(nomeNaNota);
     setIsVincOpen(false);
-    showToast("Produto atualizado com sucesso.", "success");
+    const nonce = ++fornecedoresIncrementalNonceRef.current;
+
+    let task: Promise<void> | undefined;
+    task = (async () => {
+      try {
+        const res = await fetch("/api/fornecedores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upsert_product",
+            supplier_key: fornecedorKey,
+            product: {
+              oldName,
+              name: nomeNaNota,
+              unit: unidadeNaNota,
+              equivalentItemName: insumoEquivalente,
+              factor: vincEqQtd.trim() || "1",
+              equivalentUnit: equivalenteUnidade,
+            },
+          }),
+        });
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = (await res.json().catch(() => ({ ok: true }))) as any;
+        if (!payload?.ok) throw new Error("rejected");
+        fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+        showToast("Produto atualizado com sucesso.", "success");
+      } catch (err) {
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        writeFornecedorProdutosMap(prevProdutos);
+        setProdutosMap(prevProdutos);
+        writeFornecedorEquivalenciasMap(prevEq);
+        setEquivalenciasMap(prevEq);
+        fornecedoresPersistedSnapshotRef.current = prevSnapshot;
+        setVincNomeOriginal(originalName);
+        setIsVincOpen(true);
+        const msg = err instanceof Error ? err.message : String(err ?? "");
+        showToast(`Não foi possível editar o produto. Tente novamente. ${msg}`.trim(), "error", 9000);
+      } finally {
+        if (task !== undefined && mutex.get(mutexKey) === task) mutex.delete(mutexKey);
+      }
+    })();
+    mutex.set(mutexKey, task);
   }
 
   function openProdutos(row: FornecedorRow) {
@@ -759,17 +811,61 @@ export default function FornecedoresClient() {
       openVinculacao(curList.find((x) => x.toLowerCase() === item.toLowerCase()) ?? item);
       return;
     }
+
+    const mutexKey = `add:${key.toLowerCase()}:${item.toLowerCase()}`;
+    const mutex = fornecedoresIncrementalMutexRef.current;
+    if (mutex.has(mutexKey)) return;
+
     const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, [...curList, item]);
+    const prevProdutos = produtosMap;
+    const prevSnapshot = fornecedoresPersistedSnapshotRef.current;
+    const nextSnapshot = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap });
+
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
-    void saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap }).catch(() =>
-      showToast("Erro ao salvar no banco de dados.", "error"),
-    );
+    if (fornecedoresSyncTimeoutRef.current) {
+      window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+      fornecedoresSyncTimeoutRef.current = null;
+    }
+    fornecedoresPersistedSnapshotRef.current = nextSnapshot;
     setProdutoDraft("");
     setProdutoQuery("");
     setIsProdutoMenuOpen(false);
     setProdutoDropdownRect(null);
-    openVinculacao(item);
+    const nonce = ++fornecedoresIncrementalNonceRef.current;
+
+    let task: Promise<void> | undefined;
+    task = (async () => {
+      try {
+        const res = await fetch("/api/fornecedores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "upsert_product",
+            supplier_key: key,
+            product: {
+              name: item,
+            },
+          }),
+        });
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = (await res.json().catch(() => ({ ok: true }))) as any;
+        if (!payload?.ok) throw new Error("rejected");
+        fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: equivalenciasMap });
+        openVinculacao(item);
+      } catch (err) {
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        writeFornecedorProdutosMap(prevProdutos);
+        setProdutosMap(prevProdutos);
+        fornecedoresPersistedSnapshotRef.current = prevSnapshot;
+        const msg = err instanceof Error ? err.message : String(err ?? "");
+        showToast(`Erro ao adicionar produto. Tente novamente. ${msg}`.trim(), "error", 9000);
+      } finally {
+        if (task !== undefined && mutex.get(mutexKey) === task) mutex.delete(mutexKey);
+      }
+    })();
+    mutex.set(mutexKey, task);
   }
 
   async function removeProduto(item: string) {
@@ -780,6 +876,11 @@ export default function FornecedoresClient() {
     const keyRaw = (prodFornecedorKey ?? "").trim();
     const key = normalizeFornecedorKey(keyRaw);
     if (!key) return;
+
+    const mutexKey = `del:${key.toLowerCase()}:${item.toLowerCase()}`;
+    const mutex = fornecedoresIncrementalMutexRef.current;
+    if (mutex.has(mutexKey)) return;
+
     const cur = getProdutosForKey(produtosMap, keyRaw);
     const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
     const nextProdutos: FornecedorProdutos = setProdutosForKey(produtosMap, keyRaw, nextList);
@@ -788,18 +889,54 @@ export default function FornecedoresClient() {
       keyRaw,
       getEquivalenciasForKey(equivalenciasMap, keyRaw).filter((x) => x.nomeNaNota.toLowerCase() !== item.toLowerCase()),
     );
-    try {
-      await saveFornecedoresStateToSupabase({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
-    } catch {
-      showToast("Não foi possível excluir o produto. Tente novamente.", "error");
-      return;
-    }
+    const prevProdutos = produtosMap;
+    const prevEq = equivalenciasMap;
+    const prevSnapshot = fornecedoresPersistedSnapshotRef.current;
+    const nextSnapshot = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+
     writeFornecedorProdutosMap(nextProdutos);
     setProdutosMap(nextProdutos);
     writeFornecedorEquivalenciasMap(nextEq);
     setEquivalenciasMap(nextEq);
-    fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
-    showToast("Produto excluído com sucesso.", "success");
+    if (fornecedoresSyncTimeoutRef.current) {
+      window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+      fornecedoresSyncTimeoutRef.current = null;
+    }
+    fornecedoresPersistedSnapshotRef.current = nextSnapshot;
+    const nonce = ++fornecedoresIncrementalNonceRef.current;
+
+    let task: Promise<void> | undefined;
+    task = (async () => {
+      try {
+        const res = await fetch("/api/fornecedores", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "delete_product",
+            supplier_key: key,
+            product_name: item,
+          }),
+        });
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const payload = (await res.json().catch(() => ({ ok: true }))) as any;
+        if (!payload?.ok) throw new Error("rejected");
+        fornecedoresPersistedSnapshotRef.current = JSON.stringify({ info: infoMap, produtos: nextProdutos, equivalencias: nextEq });
+        showToast("Produto excluído com sucesso.", "success");
+      } catch (err) {
+        if (nonce !== fornecedoresIncrementalNonceRef.current) return;
+        writeFornecedorProdutosMap(prevProdutos);
+        setProdutosMap(prevProdutos);
+        writeFornecedorEquivalenciasMap(prevEq);
+        setEquivalenciasMap(prevEq);
+        fornecedoresPersistedSnapshotRef.current = prevSnapshot;
+        const msg = err instanceof Error ? err.message : String(err ?? "");
+        showToast(`Não foi possível excluir o produto. Tente novamente. ${msg}`.trim(), "error", 9000);
+      } finally {
+        if (task !== undefined && mutex.get(mutexKey) === task) mutex.delete(mutexKey);
+      }
+    })();
+    mutex.set(mutexKey, task);
   }
 
   const visibleRows = useMemo(() => {
