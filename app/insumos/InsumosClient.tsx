@@ -435,6 +435,7 @@ export default function InsumosClient() {
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [isNewItemOpen, setIsNewItemOpen] = useState(false);
   const [isEditItemOpen, setIsEditItemOpen] = useState(false);
+  const [isSavingEditItem, setIsSavingEditItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [isDeleteItemOpen, setIsDeleteItemOpen] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
@@ -1387,9 +1388,9 @@ export default function InsumosClient() {
     showToast("Item excluído.", "success");
   }
 
-  function saveEditItem() {
+  async function saveEditItem() {
     const id = editingItemId;
-    if (!id) return;
+    if (!id || isSavingEditItem) return;
     const item = newItemName.trim();
     if (!item) return;
     const medida = newUnit.trim() || "-";
@@ -1398,16 +1399,9 @@ export default function InsumosClient() {
     const custoMedio = newInitialCost.trim() ? (newInitialCost.trim().startsWith("R$") ? newInitialCost.trim() : `R$${newInitialCost.trim()}`) : "-";
     const effectiveSectorIds = getEffectiveDraftIds("edit");
 
-    if (categoria !== "-") {
-      setCategories((prev) => {
-        const key = categoria.toLowerCase();
-        if (prev.some((c) => c.toLowerCase() === key)) return prev;
-        return [...prev, categoria];
-      });
-    }
-
-    setDataRows((prev) =>
-      prev.map((r) =>
+    const nextCategories =
+      categoria !== "-" && !categories.some((c) => c.toLowerCase() === categoria.toLowerCase()) ? [...categories, categoria] : categories;
+    const nextRows = dataRows.map((r) =>
         r.id === id
           ? {
               ...r,
@@ -1419,10 +1413,48 @@ export default function InsumosClient() {
               sectorIds: effectiveSectorIds.length ? effectiveSectorIds : r.sectorIds,
             }
           : r,
-      ),
     );
-    setIsEditItemOpen(false);
-    setEditingItemId(null);
+
+    setIsSavingEditItem(true);
+    try {
+      await saveInsumosStateToSupabase({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+          sectorIds: r.sectorIds,
+        })) as any,
+        categories: nextCategories,
+      });
+
+      const snapshot = JSON.stringify({
+        rows: nextRows.map((r) => ({
+          id: r.id,
+          item: r.item,
+          medida: r.medida,
+          custoMedio: r.custoMedio,
+          categoria: r.categoria,
+          especificacao: r.especificacao,
+          ocultar: r.ocultar,
+        })),
+        categories: nextCategories,
+      });
+      persistedSnapshotRef.current = snapshot;
+      saveErrorShownRef.current = false;
+      setDataRows(nextRows);
+      setCategories(nextCategories);
+      setIsEditItemOpen(false);
+      setEditingItemId(null);
+      showToast("Item atualizado com sucesso.", "success");
+    } catch (err) {
+      showToast(saveErrorMessage(err), "error");
+    } finally {
+      setIsSavingEditItem(false);
+    }
   }
 
   const categoryCounts = useMemo(() => {
@@ -2940,7 +2972,13 @@ export default function InsumosClient() {
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Editar Item</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsEditItemOpen(false)}>
+                <button
+                  type="button"
+                  className={styles.modalClose}
+                  aria-label="Fechar"
+                  onClick={() => setIsEditItemOpen(false)}
+                  disabled={isSavingEditItem}
+                >
                   ×
                 </button>
               </div>
@@ -3083,10 +3121,10 @@ export default function InsumosClient() {
                 <button
                   type="button"
                   className={styles.modalPrimaryWide}
-                  onClick={saveEditItem}
-                  disabled={!newItemName.trim() || !newCategory.trim() || !newUnit.trim() || !newInitialCost.trim()}
+                  onClick={() => void saveEditItem()}
+                  disabled={isSavingEditItem || !newItemName.trim() || !newCategory.trim() || !newUnit.trim() || !newInitialCost.trim()}
                 >
-                  Salvar
+                  {isSavingEditItem ? "Salvando..." : "Salvar"}
                 </button>
               </div>
             </div>
