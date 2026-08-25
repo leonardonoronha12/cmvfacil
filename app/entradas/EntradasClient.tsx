@@ -1236,6 +1236,24 @@ export default function EntradasClient() {
     return out;
   }, [fornecedorItensNaNota, fornecedorProdutos]);
 
+  const isFornecedorSimplifiedMode = fornecedorProdutosMerged.length === 0;
+
+  const fornecedorProdutosSelecionaveis = useMemo(() => {
+    if (!isFornecedorSimplifiedMode) return fornecedorProdutos;
+
+    const seen = new Set<string>();
+    return insumosStore
+      .map((insumo) => normalizeNotaItemName(insumo.item))
+      .filter((name) => {
+        if (!name) return false;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base" }));
+  }, [fornecedorProdutos, insumosStore, isFornecedorSimplifiedMode]);
+
   const fornecedorModalProdutosMerged = useMemo(() => {
     const keyRaw = (fornecedorModalKey ?? "").trim();
     const key = keyRaw ? resolveFornecedorKey(keyRaw, fornecedorInfoMap) : "";
@@ -1269,11 +1287,11 @@ export default function EntradasClient() {
   }, [detailItemName, fornecedorItensNaNota]);
 
   const filteredFornecedorProdutos = useMemo(() => {
-    const list = fornecedorProdutos;
+    const list = fornecedorProdutosSelecionaveis;
     const q = detailItemName.trim().toLowerCase();
     if (!q) return list;
     return list.filter((n) => n.toLowerCase().includes(q));
-  }, [detailItemName, fornecedorProdutos]);
+  }, [detailItemName, fornecedorProdutosSelecionaveis]);
 
   const canAddNotaItem = useMemo(() => {
     if (!normalizeNotaItemName(detailItemName)) return false;
@@ -1953,7 +1971,7 @@ export default function EntradasClient() {
     }
     const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
     const fornecedor = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
-    if (fornecedor) {
+    if (fornecedor && !isFornecedorSimplifiedMode) {
       setFornecedorProdutosMap((prev) => {
         const cur = prev[fornecedor] ?? [];
         const has = cur.some((x) => x.toLowerCase() === nome.toLowerCase());
@@ -2922,7 +2940,7 @@ export default function EntradasClient() {
                                       const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
                                       const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
                                       const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
-                                      setDetailUnit(existing?.unidadeNaNota || "Und");
+                                      setDetailUnit(existing?.unidadeNaNota || insumosByName.get(name.toLowerCase())?.medida || "Und");
                                       setIsItemMenuOpen(false);
                                     }}
                                   >
