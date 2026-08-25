@@ -1147,6 +1147,7 @@ export default function DashboardClient() {
   const fornecedoresReadyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const fornecedoresSaveErrorShownRef = useRef(false);
+  const calculateAfterLoadRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
   const revenueInputRef = useRef<HTMLInputElement | null>(null);
@@ -1908,6 +1909,11 @@ export default function DashboardClient() {
 
   function handleCalculate() {
     try {
+      if (isLoadingTables) {
+        calculateAfterLoadRef.current = true;
+        setCalcError("");
+        return;
+      }
       if (inventoryOptions.length <= 0 || !startDate.trim() || !endDate.trim() || parseBrlToCents(revenue) <= 0) {
         setCalcError("Preencha datas e faturamento para calcular.");
         return;
@@ -2199,6 +2205,12 @@ export default function DashboardClient() {
       showToast(`Erro ao calcular CMV (${msg}).`, "error", 20000);
     }
   }
+
+  useEffect(() => {
+    if (isLoadingTables || !calculateAfterLoadRef.current) return;
+    calculateAfterLoadRef.current = false;
+    handleCalculate();
+  }, [isLoadingTables]);
 
   const categorias = useMemo(() => {
     const out: string[] = [];
