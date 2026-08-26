@@ -195,6 +195,10 @@ export async function middleware(req: NextRequest) {
       pathname === "/cadastro-empresa" ||
       pathname.startsWith("/cadastro-empresa/") ||
       pathname === "/api/me" ||
+      pathname === "/api/telemetry/event" ||
+      pathname === "/admin/observabilidade" ||
+      pathname.startsWith("/admin/observabilidade/") ||
+      pathname === "/api/admin/observability" ||
       pathname.startsWith("/api/bubble-obj/migration/") ||
       pathname.startsWith("/api/billing/") ||
       pathname === "/api/stripe/webhook"
