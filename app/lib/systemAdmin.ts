@@ -14,8 +14,13 @@ export async function requireSystemAdmin(req: NextRequest) {
   if (envSet("ADMIN_USER_IDS").has(value) || envSet("ADMIN_USER_EMAILS").has(value)) return { ok: true as const, userId };
   if (!uuidRe.test(userId) && value.includes("@") && process.env.ADMIN_SECRET) return { ok: true as const, userId };
   if (uuidRe.test(userId)) {
-    const { data } = await getSupabaseAdmin().auth.admin.getUserById(userId);
+    const db = getSupabaseAdmin();
+    const [{ data }, { data: dynamicAdmin }] = await Promise.all([
+      db.auth.admin.getUserById(userId),
+      db.from("system_admins").select("id").eq("user_id", userId).eq("active", true).maybeSingle(),
+    ]);
     if (data.user?.email && envSet("ADMIN_USER_EMAILS").has(data.user.email.toLowerCase())) return { ok: true as const, userId };
+    if (dynamicAdmin?.id) return { ok: true as const, userId };
   }
   return { ok: false as const, status: 403, error: "forbidden" };
 }
