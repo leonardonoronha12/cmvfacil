@@ -444,7 +444,7 @@
 
 .trHead {
   display: grid;
-  grid-template-columns: 1.5fr 0.8fr 0.7fr;
+  grid-template-columns: 1.5fr 0.8fr 0.7fr 0.45fr;
   background: #0b3b3a;
   color: #ffffff;
   font-size: 11px;
@@ -454,7 +454,7 @@
 
 .tr {
   display: grid;
-  grid-template-columns: 1.5fr 0.8fr 0.7fr;
+  grid-template-columns: 1.5fr 0.8fr 0.7fr 0.45fr;
   padding: 12px;
   background: #ffffff;
   border-top: 1px solid #eef1f1;
@@ -523,6 +523,88 @@
   font-weight: 800;
   font-size: 10px;
   width: fit-content;
+}
+
+.actionsHeader,
+.memberActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.memberDeleteButton {
+  width: 32px;
+  height: 32px;
+  border: 1px solid #e4e8e7;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #ff2f54;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.memberDeleteButton:hover {
+  border-color: #ff2f54;
+  background: #fff5f7;
+}
+
+.memberRemoveOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(1, 18, 18, 0.55);
+}
+
+.memberRemoveDialog {
+  width: min(460px, 100%);
+  padding: 22px;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.2);
+}
+
+.memberRemoveTitle {
+  color: #101214;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.memberRemoveText {
+  margin: 12px 0 0;
+  color: #52605e;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.memberRemoveError {
+  margin-top: 12px;
+  color: #b42318;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.memberRemoveButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .table {
+    overflow-x: auto;
+  }
+
+  .trHead,
+  .tr {
+    min-width: 720px;
+  }
 }
 
 .blockedOverlay {

@@ -66,6 +66,17 @@ function IconUserPlaceholder() {
   );
 }
 
+function IconTrashSmall() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M4 7H20" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M9 3H15L16 7H8L9 3Z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M6.5 7L7.4 20H16.6L17.5 7" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+      <path d="M10 11V16M14 11V16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 type TabKey = "minha-conta" | "alterar-senha" | "minha-empresa" | "usuarios" | "planos";
 
 export default function AjustesClient() {
@@ -134,6 +145,9 @@ export default function AjustesClient() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [memberToRemove, setMemberToRemove] = useState<{ name: string; email: string } | null>(null);
+  const [memberRemoveLoading, setMemberRemoveLoading] = useState(false);
+  const [memberRemoveError, setMemberRemoveError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -997,6 +1011,7 @@ export default function AjustesClient() {
                       <div>Membro</div>
                       <div>Data de Admissão</div>
                       <div>Permissão</div>
+                      <div className={styles.actionsHeader}>Ações</div>
                     </div>
                     {members.map((m) => (
                       <div key={`${m.email}:${m.name}`} className={styles.tr}>
@@ -1018,9 +1033,87 @@ export default function AjustesClient() {
                         </div>
                         <div>{m.joinedAt || "—"}</div>
                         <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                        <div className={styles.memberActions}>
+                          {permissao === "Administrador" && m.role !== "Administrador" ? (
+                            <button
+                              type="button"
+                              className={styles.memberDeleteButton}
+                              aria-label={`Excluir usuário ${m.name}`}
+                              title="Excluir usuário"
+                              onClick={() => {
+                                setMemberRemoveError("");
+                                setMemberToRemove({ name: m.name, email: m.email });
+                              }}
+                            >
+                              <IconTrashSmall />
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>
+
+                  {memberToRemove ? (
+                    <div className={styles.memberRemoveOverlay} role="presentation">
+                      <div className={styles.memberRemoveDialog} role="dialog" aria-modal="true" aria-labelledby="remove-member-title">
+                        <div className={styles.memberRemoveTitle} id="remove-member-title">Excluir usuário?</div>
+                        <p className={styles.memberRemoveText}>
+                          O usuário <strong>{memberToRemove.name}</strong> ({memberToRemove.email}) perderá o acesso a esta empresa. A conta de login não será apagada.
+                        </p>
+                        {memberRemoveError ? <div className={styles.memberRemoveError}>{memberRemoveError}</div> : null}
+                        <div className={styles.memberRemoveButtons}>
+                          <button
+                            type="button"
+                            className={styles.btnDanger}
+                            disabled={memberRemoveLoading}
+                            onClick={async () => {
+                              if (memberRemoveLoading) return;
+                              setMemberRemoveLoading(true);
+                              setMemberRemoveError("");
+                              try {
+                                const res = await fetch("/api/company-members", {
+                                  method: "DELETE",
+                                  headers: { "content-type": "application/json" },
+                                  body: JSON.stringify({ email: memberToRemove.email }),
+                                });
+                                const result = (await res.json().catch(() => null)) as any;
+                                if (!res.ok || !result?.ok) throw new Error(String(result?.error ?? "remove_member_failed"));
+                                setMembers((current) => current.filter((member) => member.email.toLowerCase() !== memberToRemove.email.toLowerCase()));
+                                setMemberToRemove(null);
+                                await loadMeFromApi();
+                              } catch (error) {
+                                const code = error instanceof Error ? error.message : String(error);
+                                const message =
+                                  code === "cannot_remove_admin"
+                                    ? "O usuário administrador não pode ser excluído."
+                                    : code === "cannot_remove_self"
+                                      ? "Você não pode excluir o próprio usuário."
+                                      : code === "forbidden"
+                                        ? "Somente administradores podem excluir usuários."
+                                        : "Não foi possível excluir o usuário. Tente novamente.";
+                                setMemberRemoveError(message);
+                              } finally {
+                                setMemberRemoveLoading(false);
+                              }
+                            }}
+                          >
+                            {memberRemoveLoading ? "Excluindo…" : "Excluir"}
+                          </button>
+                          <button
+                            type="button"
+                            className={styles.btnGhost}
+                            disabled={memberRemoveLoading}
+                            onClick={() => {
+                              setMemberToRemove(null);
+                              setMemberRemoveError("");
+                            }}
+                          >
+                            Cancelar
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 
