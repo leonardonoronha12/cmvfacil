@@ -408,6 +408,7 @@
 
 .editModal {
   width: 640px;
+  overflow: visible;
 }
 
 .newModal {
