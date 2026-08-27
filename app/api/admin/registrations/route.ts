@@ -30,15 +30,17 @@ export async function GET(req: NextRequest) {
     const auth = await requireSystemAdmin(req);
     if (!auth.ok) return NextResponse.json({ ok: false, error: auth.error }, { status: auth.status });
     const db = getSupabaseAdmin();
-    const [authUsers, mapResult, migrationsResult, companiesResult, membersResult] = await Promise.all([
+    const [authUsers, mapResult, migrationsResult, registryResult, companiesResult, membersResult] = await Promise.all([
       listAuthUsers(db),
       db.from("bubble_obj_user_map").select("bubble_user_id,email,nome,supabase_user_id"),
       db.from("bubble_obj_user_migration").select("email,supabase_user_id,status,validation_status,validation_report"),
+      db.from("subscription_migration_registry").select("email,migrated_at,source"),
       db.from("companies").select("id,fantasy_name,email,stripe_subscription_id,subscription_status"),
       db.from("company_members").select("user_id,company_id"),
     ]);
     if (mapResult.error) throw mapResult.error;
     if (migrationsResult.error) throw migrationsResult.error;
+    if (registryResult.error) throw registryResult.error;
 
     const companies = companiesResult.data ?? [];
     const companyById = new Map<string, Company>(companies.map((company: any) => [String(company.id), {
@@ -60,15 +62,17 @@ export async function GET(req: NextRequest) {
       const email = String((row as any).email || "").trim().toLowerCase();
       if (email) migrationByEmail.set(email, row);
     }
+    const registeredMigrationEmails = new Set((registryResult.data ?? []).map((row: any) => String(row.email || "").trim().toLowerCase()).filter(Boolean));
+    const authByEmail = new Map(authUsers.filter(user => user.email).map(user => [String(user.email).trim().toLowerCase(), String(user.id)]));
 
     const seen = new Set<string>();
     const legacyUsers = [];
-    for (const row of [...(mapResult.data ?? []), ...(migrationsResult.data ?? [])]) {
+    for (const row of [...(mapResult.data ?? []), ...(migrationsResult.data ?? []), ...(registryResult.data ?? [])]) {
       const email = String((row as any).email || "").trim().toLowerCase();
       if (!email || seen.has(email)) continue;
       seen.add(email);
       const migration = migrationByEmail.get(email);
-      const userId = String(migration?.supabase_user_id || (row as any).supabase_user_id || "");
+      const userId = String(migration?.supabase_user_id || (row as any).supabase_user_id || authByEmail.get(email) || "");
       const userCompanies = companiesByUser.get(userId) ?? companiesByEmail.get(email) ?? [];
       const hasLinkedStripeSubscription = userCompanies.some(company => Boolean(company.stripeSubscriptionId));
       legacyUsers.push({
@@ -76,7 +80,7 @@ export async function GET(req: NextRequest) {
         authUserId: userId || null,
         companies: userCompanies.map(({ id, name }) => ({ id, name })),
         companiesCount: userCompanies.length,
-        subscriptionMigrated: billingWasMigrated(migration) || hasLinkedStripeSubscription,
+        subscriptionMigrated: registeredMigrationEmails.has(email) || billingWasMigrated(migration) || hasLinkedStripeSubscription,
         migrationStatus: String(migration?.validation_status || migration?.status || ""),
       });
     }
