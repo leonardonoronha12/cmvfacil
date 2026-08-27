@@ -1751,7 +1751,7 @@ export async function POST(req: NextRequest) {
         res = await fetch(tickUrl, {
           method: "POST",
           headers: { cookie, "content-type": "application/json" },
-          body: JSON.stringify({ runId, maxPages: tickMaxPages }),
+          body: JSON.stringify({ runId, maxPages: tickMaxPages, ...(adminTargetUserId ? { adminTargetUserId: userId } : {}) }),
           cache: "no-store",
           signal: controller.signal,
         });

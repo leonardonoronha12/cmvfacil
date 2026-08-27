@@ -4,6 +4,7 @@ import { getUserIdFromRequest } from "../../../../lib/requestUserId";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 import { fetchBubbleObjPageWithConstraints, getBubbleObjCredentials } from "../../../../lib/bubbleObjApi";
 import { isCountableFinalBaseType, isDerivedBaseType, isScopeOnlyBaseType, isStagedOnlyBaseType, parseObjectType } from "../../../../lib/bubbleObjRealMapping";
+import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -234,10 +235,18 @@ async function getRun(supabase: ReturnType<typeof getSupabaseAdmin>, runId: stri
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = getUserIdFromRequest(req);
+    const body = (await req.json().catch(() => null)) as any;
+    const session = getUserIdFromRequest(req);
+    const adminTargetUserId = String(body?.adminTargetUserId ?? "").trim();
+    let userId = String(session.userId ?? "").trim();
+    if (adminTargetUserId) {
+      if (!isUuid(adminTargetUserId)) return json({ ok: false, error: "invalid_admin_target_user" }, { status: 400 });
+      const admin = await requireSystemAdmin(req);
+      if (!admin.ok) return json({ ok: false, error: admin.error }, { status: admin.status });
+      userId = adminTargetUserId;
+    }
     if (!userId || !isUuid(userId)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
-    const body = (await req.json().catch(() => null)) as any;
     const runId = String(body?.runId ?? "").trim();
     if (!runId) return json({ ok: false, error: "missing_runId" }, { status: 400 });
     const maxPages = typeof body?.maxPages === "number" && Number.isFinite(body.maxPages) && body.maxPages > 0 ? Math.min(20, Math.floor(body.maxPages)) : 3;
