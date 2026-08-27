@@ -11,6 +11,19 @@ export const maxDuration = 60;
 const cleanEmail = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const json = (body: unknown, status = 200) => NextResponse.json(body, { status, headers: { "cache-control": "no-store" } });
 
+function emailFromBubbleRow(raw: any) {
+  const mapped = cleanEmail(mapBubbleUsuario(raw).normalized?.email);
+  if (mapped.includes("@")) return mapped;
+  for (const [key, value] of Object.entries(raw ?? {})) {
+    const normalizedKey = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!normalizedKey.includes("email") && !normalizedKey.includes("login") && !normalizedKey.includes("username")) continue;
+    const match = String(value ?? "").match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+    if (match) return cleanEmail(match[0]);
+  }
+  const fallback = JSON.stringify(raw ?? {}).match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/i);
+  return fallback ? cleanEmail(fallback[0]) : "";
+}
+
 async function authUsersByEmail() {
   const db = getSupabaseAdmin();
   const result = new Map<string, { id: string; createdAt: string }>();
@@ -47,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     const db = getSupabaseAdmin();
     const auth = await authUsersByEmail();
-    const emails = page.results.map(row => cleanEmail(mapBubbleUsuario(row).normalized?.email)).filter(Boolean);
+    const emails = page.results.map(emailFromBubbleRow).filter(Boolean);
     const ids = emails.map(email => auth.get(email)?.id).filter(Boolean) as string[];
     const { data: migrations, error } = ids.length
       ? await db.from("bubble_obj_user_migration").select("supabase_user_id,status,validation_status,last_attempt_at,last_error,total_received,total_processed").in("supabase_user_id", ids)
@@ -57,7 +70,7 @@ export async function GET(req: NextRequest) {
 
     const rows = page.results.map(raw => {
       const mapped = mapBubbleUsuario(raw).normalized as any;
-      const email = cleanEmail(mapped?.email);
+      const email = emailFromBubbleRow(raw);
       const target = auth.get(email);
       const migration: any = target ? migrationByUser.get(target.id) : null;
       const bubbleUserId = String(mapped?.bubble_user_id ?? raw?.unique_id ?? raw?._id ?? raw?.id ?? "");
@@ -76,7 +89,7 @@ export async function GET(req: NextRequest) {
       };
     }).filter(row => row.email);
     const remaining = Number(page.remaining ?? 0);
-    return json({ ok: true, rows, cursor, nextCursor: remaining > 0 ? cursor + page.results.length : null, remaining, sourceType });
+    return json({ ok: true, rows, cursor, nextCursor: remaining > 0 ? cursor + page.results.length : null, remaining, sourceType, received: page.results.length, omittedWithoutEmail: page.results.length - rows.length });
   } catch (error) {
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, 500);
   }
