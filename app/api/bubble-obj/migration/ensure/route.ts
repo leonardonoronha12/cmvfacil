@@ -24,6 +24,7 @@ import {
   userScopedId,
 } from "../../../../lib/bubbleObjRealMapping";
 import { formatMoneyBRL, parsePtNumber } from "../../../../lib/bubbleCsv";
+import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -1547,13 +1548,21 @@ async function rebuildInventariosFromControlForCompany(args: {
 export async function POST(req: NextRequest) {
   let step = "start";
   try {
-    step = "auth";
     const ensureStartedAt = nowIso();
-    const { userId } = getUserIdFromRequest(req);
-    if (!userId || !isUuid(userId)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
-
     step = "parse_body";
     const body = (await req.json().catch(() => null)) as any;
+    step = "auth";
+    const session = getUserIdFromRequest(req);
+    const adminTargetUserId = String(body?.adminTargetUserId ?? "").trim();
+    let userId = String(session.userId ?? "").trim();
+    if (adminTargetUserId) {
+      if (!isUuid(adminTargetUserId)) return json({ ok: false, error: "invalid_admin_target_user" }, { status: 400 });
+      const admin = await requireSystemAdmin(req);
+      if (!admin.ok) return json({ ok: false, error: admin.error }, { status: admin.status });
+      userId = adminTargetUserId;
+    }
+    if (!userId || !isUuid(userId)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+
     const callBudgetMs = typeof body?.callBudgetMs === "number" && Number.isFinite(body.callBudgetMs) && body.callBudgetMs > 0 ? Math.min(20_000, Math.floor(body.callBudgetMs)) : 15_000;
     const tickMaxPages = typeof body?.maxPages === "number" && Number.isFinite(body.maxPages) && body.maxPages > 0 ? Math.min(10, Math.floor(body.maxPages)) : 2;
     const maxTicks = typeof body?.maxTicks === "number" && Number.isFinite(body.maxTicks) && body.maxTicks > 0 ? Math.min(5, Math.floor(body.maxTicks)) : 2;

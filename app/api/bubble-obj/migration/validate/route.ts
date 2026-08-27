@@ -22,6 +22,7 @@ import {
   userScopedId,
 } from "../../../../lib/bubbleObjRealMapping";
 import { parsePtNumber } from "../../../../lib/bubbleCsv";
+import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -208,7 +209,16 @@ async function countBubbleUserScoped(args: { creds: Awaited<ReturnType<typeof ge
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = getUserIdFromRequest(req);
+    const body = (await req.json().catch(() => null)) as any;
+    const session = getUserIdFromRequest(req);
+    const adminTargetUserId = String(body?.adminTargetUserId ?? "").trim();
+    let userId = String(session.userId ?? "").trim();
+    if (adminTargetUserId) {
+      if (!isUuid(adminTargetUserId)) return json({ ok: false, error: "invalid_admin_target_user" }, { status: 400 });
+      const admin = await requireSystemAdmin(req);
+      if (!admin.ok) return json({ ok: false, error: admin.error }, { status: admin.status });
+      userId = adminTargetUserId;
+    }
     if (!userId || !isUuid(userId)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     let supabase: ReturnType<typeof getSupabaseAdmin>;
