@@ -496,9 +496,9 @@ export async function POST(req: NextRequest) {
       const d = mapDesperdicio(r?.raw_payload_json ?? {});
       if (!d.bubbleDesperdicioId) continue;
       const insumoId = d.bubbleItemId ? buildInsumoId(userId, d.bubbleItemId) : "";
-      const item = insumoId || d.itemNome || "";
+      const item = d.bubbleItemId ? String((insumoByBubbleId.get(d.bubbleItemId) as any)?.item ?? "").trim() : "";
       const motivo = d.motivoNome || (d.bubbleMotivoId ? String(motivoNameById[d.bubbleMotivoId] ?? "").trim() : "") || "";
-      desperdicioUpserts.push({ id: buildDesperdicioId(userId, d.bubbleDesperdicioId), data: d.data, item, quantidade: d.quantidade || "", custo: d.custo || "", motivo } as any);
+      desperdicioUpserts.push({ id: buildDesperdicioId(userId, d.bubbleDesperdicioId), data: d.data, item: item || d.itemNome || insumoId, quantidade: d.quantidade || "", custo: d.custo || "", motivo } as any);
     }
     if (desperdicioUpserts.length) await supabase.from("desperdicios").upsert(desperdicioUpserts as any, { onConflict: "id" });
 

@@ -989,6 +989,7 @@ async function processStagingBatch(args: {
     }
   } else if (baseType === "motivos_desperdicios" || baseType === "desperdicio") {
     const motivoMap: Record<string, string> = {};
+    const itemNameByBubbleId = new Map<string, string>();
     if (baseType === "desperdicio" && parsed.companyId) {
       const key = scopeObjectType(`motivos_desperdicios@${parsed.companyId}`);
       const { data, error } = await supabase
@@ -1003,6 +1004,12 @@ async function processStagingBatch(args: {
         if (!id) continue;
         const m = mapMotivoDesperdicio((r as any)?.raw_payload_json ?? {});
         if (m.nome) motivoMap[id] = m.nome;
+      }
+      const insumos = await loadInsumosState();
+      for (const row of insumos.rows) {
+        const match = String((row as any)?.id ?? "").match(/insumo:(.+)$/);
+        const name = String((row as any)?.item ?? "").trim();
+        if (match?.[1] && name) itemNameByBubbleId.set(match[1], name);
       }
     }
 
@@ -1030,7 +1037,7 @@ async function processStagingBatch(args: {
         continue;
       }
       const insumoId = d.bubbleItemId ? buildInsumoId(userId, d.bubbleItemId) : "";
-      const item = insumoId || d.itemNome || "";
+      const item = (d.bubbleItemId ? itemNameByBubbleId.get(d.bubbleItemId) : "") || d.itemNome || insumoId;
       const motivo = d.motivoNome || (d.bubbleMotivoId ? String(motivoMap[d.bubbleMotivoId] ?? "").trim() : "") || "";
       upserts.push({ id: buildDesperdicioId(userId, d.bubbleDesperdicioId), data: d.data, item, quantidade: d.quantidade || "", custo: d.custo || "", motivo } as any);
       processedIds.push(String(r.id));

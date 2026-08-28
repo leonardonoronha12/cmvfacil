@@ -298,7 +298,7 @@ export function mapMotivoDesperdicio(raw: any) {
 
 export function mapDesperdicio(raw: any) {
   const bubbleDesperdicioId = normalizeText(pickAny(raw, ["_id"]));
-  const data = normalizeText(pickAny(raw, ["lancamento"])) || new Date().toISOString().slice(0, 10);
+  const data = formatBubbleDateNumericPT(pickAny(raw, ["lancamento"]));
   const bubbleItemId = extractBubbleId(pickAny(raw, ["item_id"])) || "";
   const itemNome = "";
   const quantidadeRaw = pickRawAny(raw, ["quantidade"]);
