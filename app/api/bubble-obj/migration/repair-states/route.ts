@@ -484,6 +484,74 @@ export async function POST(req: NextRequest) {
     }
     if (entradasUpserts.length) await supabase.from("entradas").upsert(entradasUpserts as any, { onConflict: "id" });
 
+    // Keep the normalized purchase tables complete as well as the legacy
+    // entradas projection. Dashboard history currently tolerates the legacy
+    // projection, but CMV consumers must not depend on embedded JSON forever.
+    let normalizedInvoiceItems = 0;
+    let normalizedInvoiceItemsSkipped = 0;
+    const { data: targetCompanyRow } = await supabase.from("companies").select("id").eq("bubble_id", companyId).maybeSingle();
+    let targetCompanyId = String((targetCompanyRow as any)?.id ?? "").trim();
+    if (!targetCompanyId) {
+      const { data: membershipRows } = await supabase.from("company_members").select("company_id").eq("user_id", userId).limit(2);
+      if ((membershipRows ?? []).length === 1) targetCompanyId = String((membershipRows as any[])[0]?.company_id ?? "").trim();
+    }
+    if (targetCompanyId) {
+      const [targetItemsRes, targetInvoicesRes] = await Promise.all([
+        supabase.from("items").select("id,bubble_id").eq("company_id", targetCompanyId),
+        supabase.from("invoices").select("id,bubble_id,fornecedor_id").eq("company_id", targetCompanyId),
+      ]);
+      if (targetItemsRes.error) throw new Error(targetItemsRes.error.message);
+      if (targetInvoicesRes.error) throw new Error(targetInvoicesRes.error.message);
+      const targetItemIdByBubbleId = new Map<string, string>();
+      for (const row of (targetItemsRes.data ?? []) as any[]) {
+        const bubbleId = String(row?.bubble_id ?? "").trim();
+        const id = String(row?.id ?? "").trim();
+        if (bubbleId && id) targetItemIdByBubbleId.set(bubbleId, id);
+      }
+      const targetInvoiceByBubbleId = new Map<string, { id: string; fornecedorId: string }>();
+      for (const row of (targetInvoicesRes.data ?? []) as any[]) {
+        const bubbleId = String(row?.bubble_id ?? "").trim();
+        const id = String(row?.id ?? "").trim();
+        if (bubbleId && id) targetInvoiceByBubbleId.set(bubbleId, { id, fornecedorId: String(row?.fornecedor_id ?? "").trim() });
+      }
+      const relationalRows: any[] = [];
+      for (const sourceRow of itensNotasRows) {
+        const raw = sourceRow?.raw_payload_json ?? {};
+        const mapped = mapItemNota(raw);
+        const bubbleId = String(sourceRow?.bubble_unique_id ?? mapped.bubbleItemNotaId ?? "").trim();
+        const invoice = targetInvoiceByBubbleId.get(mapped.bubbleNotaId) ?? null;
+        const itemId = targetItemIdByBubbleId.get(mapped.bubbleItemId) ?? "";
+        if (!bubbleId || !invoice?.id || !itemId) {
+          normalizedInvoiceItemsSkipped += 1;
+          continue;
+        }
+        const rawDate = String((raw as any)?.data_lancamento ?? (raw as any)?.["Created Date"] ?? "").trim();
+        relationalRows.push({
+          company_id: targetCompanyId,
+          bubble_id: bubbleId,
+          external_key: null,
+          invoice_id: invoice.id,
+          item_id: itemId,
+          fornecedor_id: invoice.fornecedorId || null,
+          data_lancamento: /^\d{4}-\d{2}-\d{2}/.test(rawDate) ? rawDate.slice(0, 10) : null,
+          quantidade: parseBubbleNumber((raw as any)?.quantidade),
+          custo_unitario: parseBubbleNumber((raw as any)?.custo_unitario),
+          subtotal: parseBubbleNumber((raw as any)?.subtotal),
+          ocultar_cmv: parseBubbleBool((raw as any)?.ocultar_cmv),
+          cadastro_item: parseBubbleBool((raw as any)?.cadastro_Item ?? (raw as any)?.cadastro_item),
+          excluivel_detalhes_item: parseBubbleBool((raw as any)?.excluivel_detalhes_item ?? (raw as any)?.["excluível_detalhes_item"]),
+          created_by_user_id: userId,
+          raw: { bubble: raw, system: { source: "bubble_obj_repair_states" } },
+        });
+      }
+      for (let offset = 0; offset < relationalRows.length; offset += 500) {
+        const chunk = relationalRows.slice(offset, offset + 500);
+        const { error: invoiceItemsError } = await supabase.from("invoice_items").upsert(chunk as any, { onConflict: "company_id,bubble_id" } as any);
+        if (invoiceItemsError) throw new Error(invoiceItemsError.message);
+        normalizedInvoiceItems += chunk.length;
+      }
+    }
+
     const motivoNameById: Record<string, string> = {};
     for (const r of motivosRows) {
       const m = mapMotivoDesperdicio(r?.raw_payload_json ?? {});
@@ -513,6 +581,8 @@ export async function POST(req: NextRequest) {
           fornecedores: Object.keys(fornecedoresInfo).length,
           inventario: inventarioUpserts.length,
           entradas: entradasUpserts.length,
+          invoiceItems: normalizedInvoiceItems,
+          invoiceItemsSkipped: normalizedInvoiceItemsSkipped,
           desperdicios: desperdicioUpserts.length,
         },
       },
