@@ -320,6 +320,27 @@ export async function POST(req: NextRequest) {
       fornecedoresProdutos[key] = mergeUniqueSortedStrings([...(fornecedoresProdutos[key] ?? []), nomeItem]);
     }
 
+    // Some Bubble tenants never persisted itens_fornecedores. In that case,
+    // rebuild only relationships proven by their purchase history: the item
+    // belongs to the supplier of its parent invoice. Never guess links for
+    // orphan invoice items.
+    if (itensFornecedoresRows.length === 0) {
+      const supplierByInvoiceId = new Map<string, string>();
+      for (const r of notasRows) {
+        const nf = mapNotaFiscal(r?.raw_payload_json ?? {});
+        if (nf.bubbleNotaId && nf.fornecedorId) supplierByInvoiceId.set(nf.bubbleNotaId, nf.fornecedorId);
+      }
+      for (const r of itensNotasRows) {
+        const it = mapItemNota(r?.raw_payload_json ?? {});
+        const supplierId = supplierByInvoiceId.get(it.bubbleNotaId) ?? "";
+        const supplierName = String(fornecedorNameById[supplierId] ?? "").trim();
+        const itemName = it.bubbleItemId ? String((insumoByBubbleId.get(it.bubbleItemId) as any)?.item ?? "").trim() : "";
+        if (!supplierName || !itemName) continue;
+        const key = supplierName.toUpperCase();
+        fornecedoresProdutos[key] = mergeUniqueSortedStrings([...(fornecedoresProdutos[key] ?? []), itemName]);
+      }
+    }
+
     await supabase
       .from("fornecedores_state")
       .upsert({ id: stId, info: fornecedoresInfo, produtos: fornecedoresProdutos, equivalencias: {} } as any, { onConflict: "id" });

@@ -688,7 +688,30 @@ export async function applyBubbleCompatForEmail(email: string, options?: ApplyOp
   {
     const baseType = "itens_fornecedores";
     const table = "supplier_items";
-    const srcRows = byBaseType[baseType] ?? [];
+    const explicitRows = byBaseType[baseType] ?? [];
+    const srcRows = explicitRows.length
+      ? explicitRows
+      : (() => {
+          const supplierByInvoiceId = new Map<string, string>();
+          for (const invoice of byBaseType["notas_fiscais"] ?? []) {
+            const raw = (invoice as any)?.raw_payload_json ?? {};
+            const invoiceId = String((invoice as any)?.bubble_unique_id ?? raw?._id ?? "").trim();
+            const supplierId = extractBubbleId(raw?.fornecedor_id) || normalizeText(raw?.fornecedor_id);
+            if (invoiceId && supplierId) supplierByInvoiceId.set(invoiceId, supplierId);
+          }
+          return (byBaseType["itens_notas"] ?? []).flatMap((invoiceItem: any) => {
+            const raw = invoiceItem?.raw_payload_json ?? {};
+            const invoiceId = extractBubbleId(raw?.nota_id) || normalizeText(raw?.nota_id);
+            const supplierId = supplierByInvoiceId.get(invoiceId) ?? "";
+            const itemId = extractBubbleId(raw?.item_id) || normalizeText(raw?.item_id);
+            if (!supplierId || !itemId) return [];
+            return [{
+              ...invoiceItem,
+              bubble_unique_id: `derived:${String(invoiceItem?.bubble_unique_id ?? `${invoiceId}:${itemId}`).trim()}`,
+              raw_payload_json: { ...raw, fornecedor_id: supplierId, item_id: itemId, derived_from_invoice: invoiceId },
+            }];
+          });
+        })();
     if (!shouldApplyTable(table)) {
       countsBefore[table] = await countByCompanyId(supabase, table, firstCompanyId);
       countsAfter[table] = countsBefore[table];

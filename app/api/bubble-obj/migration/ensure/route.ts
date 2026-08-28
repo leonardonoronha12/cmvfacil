@@ -1564,6 +1564,80 @@ async function rebuildInventariosFromControlForCompany(args: {
   }
 }
 
+async function rebuildSupplierProductsFromControlForCompany(args: {
+  supabase: ReturnType<typeof getSupabaseAdmin>;
+  userId: string;
+  companyId: string;
+}) {
+  const { supabase, userId, companyId } = args;
+  const load = async (baseType: string) => {
+    const rows: any[] = [];
+    const objectType = `${baseType}@${companyId}#${userId}`;
+    for (let from = 0; from < 50_000; from += 1_000) {
+      const { data, error } = await supabase
+        .from("bubble_obj_import_control")
+        .select("bubble_unique_id,raw_payload_json,status")
+        .eq("supabase_user_id", userId)
+        .eq("bubble_object_type", objectType)
+        .in("status", ["staged", "processed", "staged_only"])
+        .range(from, from + 999);
+      if (error) throw new Error(error.message);
+      rows.push(...((data ?? []) as any[]));
+      if ((data ?? []).length < 1_000) break;
+    }
+    return rows;
+  };
+  const [supplierRows, itemRows, invoiceRows, invoiceItemRows, explicitRows] = await Promise.all([
+    load("fornecedores"), load("item"), load("notas_fiscais"), load("itens_notas"), load("itens_fornecedores"),
+  ]);
+  const supplierNameById = new Map<string, string>();
+  for (const row of supplierRows) {
+    const mapped = mapFornecedor((row as any)?.raw_payload_json ?? {});
+    if (mapped.bubbleFornecedorId && mapped.nome) supplierNameById.set(mapped.bubbleFornecedorId, mapped.nome);
+  }
+  const itemNameById = new Map<string, string>();
+  for (const row of itemRows) {
+    const id = String((row as any)?.bubble_unique_id ?? "").trim();
+    const name = String((row as any)?.raw_payload_json?.nome ?? "").trim();
+    if (id && name) itemNameById.set(id, name);
+  }
+  const products: Record<string, string[]> = {};
+  const add = (supplierId: string, itemId: string, fallbackName = "") => {
+    const supplierName = String(supplierNameById.get(supplierId) ?? "").trim();
+    const itemName = String(itemNameById.get(itemId) ?? fallbackName).trim();
+    if (!supplierName || !itemName) return;
+    const key = supplierName.toUpperCase();
+    products[key] = Array.from(new Set([...(products[key] ?? []), itemName])).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  };
+  if (explicitRows.length) {
+    for (const row of explicitRows) {
+      const mapped = mapItemFornecedor((row as any)?.raw_payload_json ?? {});
+      add(mapped.bubbleFornecedorId, mapped.bubbleItemId, mapped.nomeItem);
+    }
+  } else {
+    const supplierByInvoice = new Map<string, string>();
+    for (const row of invoiceRows) {
+      const mapped = mapNotaFiscal((row as any)?.raw_payload_json ?? {});
+      if (mapped.bubbleNotaId && mapped.fornecedorId) supplierByInvoice.set(mapped.bubbleNotaId, mapped.fornecedorId);
+    }
+    for (const row of invoiceItemRows) {
+      const mapped = mapItemNota((row as any)?.raw_payload_json ?? {});
+      add(supplierByInvoice.get(mapped.bubbleNotaId) ?? "", mapped.bubbleItemId, mapped.nomeItem);
+    }
+  }
+  const stateId = userScopedId(userId).slice(0, -1);
+  const { data: current, error: readError } = await supabase
+    .from("fornecedores_state").select("info,equivalencias").eq("id", stateId).maybeSingle();
+  if (readError) throw new Error(readError.message);
+  const { error } = await supabase.from("fornecedores_state").upsert({
+    id: stateId,
+    info: (current as any)?.info ?? {},
+    produtos: products,
+    equivalencias: (current as any)?.equivalencias ?? {},
+  } as any, { onConflict: "id" });
+  if (error) throw new Error(error.message);
+}
+
 async function rebuildRecipeStatesFromControlForCompany(args: {
   supabase: ReturnType<typeof getSupabaseAdmin>;
   userId: string;
@@ -1809,6 +1883,7 @@ export async function POST(req: NextRequest) {
           await rebuildEntradasFromControlForCompany({ supabase, userId, companyId });
         }
         await rebuildInventariosFromControlForCompany({ supabase, userId, companyId });
+        await rebuildSupplierProductsFromControlForCompany({ supabase, userId, companyId });
         await rebuildRecipeStatesFromControlForCompany({ supabase, userId, companyId });
       }
     }
@@ -2023,6 +2098,7 @@ export async function POST(req: NextRequest) {
       step = "final_rebuild";
       for (const companyId of companyIds.slice(0, 3)) {
         await rebuildInventariosFromControlForCompany({ supabase, userId, companyId });
+        await rebuildSupplierProductsFromControlForCompany({ supabase, userId, companyId });
         await rebuildRecipeStatesFromControlForCompany({ supabase, userId, companyId });
       }
     }
