@@ -496,12 +496,14 @@ export async function POST(req: NextRequest) {
       if ((membershipRows ?? []).length === 1) targetCompanyId = String((membershipRows as any[])[0]?.company_id ?? "").trim();
     }
     if (targetCompanyId) {
-      const [targetItemsRes, targetInvoicesRes] = await Promise.all([
+      const [targetItemsRes, targetInvoicesRes, targetSuppliersRes] = await Promise.all([
         supabase.from("items").select("id,bubble_id,name").eq("company_id", targetCompanyId),
         supabase.from("invoices").select("id,bubble_id,fornecedor_id").eq("company_id", targetCompanyId),
+        supabase.from("suppliers").select("id,bubble_id,nome").eq("company_id", targetCompanyId),
       ]);
       if (targetItemsRes.error) throw new Error(targetItemsRes.error.message);
       if (targetInvoicesRes.error) throw new Error(targetInvoicesRes.error.message);
+      if (targetSuppliersRes.error) throw new Error(targetSuppliersRes.error.message);
       const targetItemIdByBubbleId = new Map<string, string>();
       const targetItemIdByName = new Map<string, string>();
       for (const row of (targetItemsRes.data ?? []) as any[]) {
@@ -559,6 +561,38 @@ export async function POST(req: NextRequest) {
       for (const [itemId, bubbleId] of itemBubbleIdBackfills.entries()) {
         const { error: itemBackfillError } = await supabase.from("items").update({ bubble_id: bubbleId } as any).eq("company_id", targetCompanyId).eq("id", itemId).is("bubble_id", null);
         if (itemBackfillError) throw new Error(itemBackfillError.message);
+      }
+      const targetSupplierIdByName = new Map<string, string>();
+      const targetSupplierIdBySourceBubbleId = new Map<string, string>();
+      for (const row of (targetSuppliersRes.data ?? []) as any[]) {
+        const id = String(row?.id ?? "").trim();
+        const nameKey = String(row?.nome ?? "").replace(/\s+/g, " ").trim().toLocaleUpperCase("pt-BR");
+        if (id && nameKey && !targetSupplierIdByName.has(nameKey)) targetSupplierIdByName.set(nameKey, id);
+      }
+      for (const sourceSupplierRow of fornecedoresRows) {
+        const mapped = mapFornecedor(sourceSupplierRow?.raw_payload_json ?? {});
+        const bubbleId = String(mapped.bubbleFornecedorId ?? "").trim();
+        const nameKey = String(mapped.nome ?? "").replace(/\s+/g, " ").trim().toLocaleUpperCase("pt-BR");
+        const supplierId = targetSupplierIdByName.get(nameKey) ?? "";
+        if (!bubbleId || !supplierId) continue;
+        targetSupplierIdBySourceBubbleId.set(bubbleId, supplierId);
+        const { error: supplierBackfillError } = await supabase.from("suppliers").update({ bubble_id: bubbleId } as any).eq("company_id", targetCompanyId).eq("id", supplierId).is("bubble_id", null);
+        if (supplierBackfillError) throw new Error(supplierBackfillError.message);
+      }
+      for (const sourceInvoiceRow of notasRows) {
+        const mapped = mapNotaFiscal(sourceInvoiceRow?.raw_payload_json ?? {});
+        const invoice = targetInvoiceByBubbleId.get(mapped.bubbleNotaId) ?? null;
+        const supplierId = targetSupplierIdBySourceBubbleId.get(mapped.fornecedorId) ?? "";
+        if (!invoice?.id || !supplierId) continue;
+        if (!invoice.fornecedorId) {
+          const { error: invoiceSupplierError } = await supabase.from("invoices").update({ fornecedor_id: supplierId } as any).eq("company_id", targetCompanyId).eq("id", invoice.id).is("fornecedor_id", null);
+          if (invoiceSupplierError) throw new Error(invoiceSupplierError.message);
+          invoice.fornecedorId = supplierId;
+        }
+      }
+      for (const row of relationalRows) {
+        const invoice = Array.from(targetInvoiceByBubbleId.values()).find((x) => x.id === String(row.invoice_id ?? ""));
+        if (invoice?.fornecedorId) row.fornecedor_id = invoice.fornecedorId;
       }
       for (let offset = 0; offset < relationalRows.length; offset += 500) {
         const chunk = relationalRows.slice(offset, offset + 500);
