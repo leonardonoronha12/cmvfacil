@@ -706,8 +706,8 @@ async function processStagingBatch(args: {
           const bubbleItemId = String(it.bubbleItemId ?? "").trim();
           const insumoId = bubbleItemId ? buildInsumoId(userId, bubbleItemId) : "";
           const insumo = bubbleItemId ? byBubbleId.get(bubbleItemId) ?? null : null;
-          const itemName = String((insumo as any)?.item ?? it.nomeItem ?? "").trim() || "Item";
-          const unidade = String((insumo as any)?.medida ?? it.unidade ?? "Und").trim() || "Und";
+          const itemName = bubbleItemId ? String((insumo as any)?.item ?? it.nomeItem ?? "").trim() || "-" : "-";
+          const unidade = bubbleItemId ? String((insumo as any)?.medida ?? it.unidade ?? "Und").trim() || "Und" : "-";
           const catFromId = it.categoriaId && categoriaNameById ? String(categoriaNameById[it.categoriaId] ?? "").trim() : "";
           const catName = normTxt(it.categoriaNome || catFromId) || String((insumo as any)?.categoria ?? "").trim() || "Sem categoria";
           const catKey = catName.toLowerCase();

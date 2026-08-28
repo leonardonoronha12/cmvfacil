@@ -418,13 +418,16 @@ export async function POST(req: NextRequest) {
     const invCatsByInvId = new Map<string, Map<string, any>>();
     for (const r of itensInvRows) {
       const it = mapItemInventario(r?.raw_payload_json ?? {});
-      if (!it.bubbleInventarioId || !it.bubbleItemId) continue;
+      if (!it.bubbleInventarioId) continue;
       const invId = buildInventarioId(userId, it.bubbleInventarioId);
       if (!inventariosById.has(invId)) continue;
-      const insumoId = buildInsumoId(userId, it.bubbleItemId);
-      const insumo = insumoByBubbleId.get(it.bubbleItemId) ?? null;
-      const itemName = String((insumo as any)?.item ?? "").trim() || "Item";
-      const unidade = String((insumo as any)?.medida ?? it.unidade ?? "Und").trim() || "Und";
+      const sourceRowId = String(r?.bubble_unique_id ?? (r?.raw_payload_json as any)?._id ?? "").trim();
+      const insumoId = it.bubbleItemId
+        ? buildInsumoId(userId, it.bubbleItemId)
+        : `${userScopedId(userId)}inventario_item:${sourceRowId}`;
+      const insumo = it.bubbleItemId ? insumoByBubbleId.get(it.bubbleItemId) ?? null : null;
+      const itemName = it.bubbleItemId ? String((insumo as any)?.item ?? "").trim() || "-" : "-";
+      const unidade = it.bubbleItemId ? String((insumo as any)?.medida ?? it.unidade ?? "Und").trim() || "Und" : "-";
       const catName = String((insumo as any)?.categoria ?? "").trim() || "Sem categoria";
       const catKey = catName.toLowerCase();
       const cats = invCatsByInvId.get(invId) ?? new Map<string, any>();
