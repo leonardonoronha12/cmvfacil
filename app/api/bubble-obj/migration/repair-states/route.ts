@@ -497,17 +497,27 @@ export async function POST(req: NextRequest) {
     }
     if (targetCompanyId) {
       const [targetItemsRes, targetInvoicesRes] = await Promise.all([
-        supabase.from("items").select("id,bubble_id").eq("company_id", targetCompanyId),
+        supabase.from("items").select("id,bubble_id,name").eq("company_id", targetCompanyId),
         supabase.from("invoices").select("id,bubble_id,fornecedor_id").eq("company_id", targetCompanyId),
       ]);
       if (targetItemsRes.error) throw new Error(targetItemsRes.error.message);
       if (targetInvoicesRes.error) throw new Error(targetInvoicesRes.error.message);
       const targetItemIdByBubbleId = new Map<string, string>();
+      const targetItemIdByName = new Map<string, string>();
       for (const row of (targetItemsRes.data ?? []) as any[]) {
         const bubbleId = String(row?.bubble_id ?? "").trim();
         const id = String(row?.id ?? "").trim();
         if (bubbleId && id) targetItemIdByBubbleId.set(bubbleId, id);
+        const nameKey = String(row?.name ?? "").replace(/\s+/g, " ").trim().toLocaleUpperCase("pt-BR");
+        if (nameKey && id && !targetItemIdByName.has(nameKey)) targetItemIdByName.set(nameKey, id);
       }
+      const sourceItemNameByBubbleId = new Map<string, string>();
+      for (const sourceItemRow of itemRows) {
+        const bubbleId = String(sourceItemRow?.bubble_unique_id ?? "").trim();
+        const name = String((sourceItemRow?.raw_payload_json as any)?.nome ?? "").replace(/\s+/g, " ").trim();
+        if (bubbleId && name) sourceItemNameByBubbleId.set(bubbleId, name);
+      }
+      const itemBubbleIdBackfills = new Map<string, string>();
       const targetInvoiceByBubbleId = new Map<string, { id: string; fornecedorId: string }>();
       for (const row of (targetInvoicesRes.data ?? []) as any[]) {
         const bubbleId = String(row?.bubble_id ?? "").trim();
@@ -520,11 +530,13 @@ export async function POST(req: NextRequest) {
         const mapped = mapItemNota(raw);
         const bubbleId = String(sourceRow?.bubble_unique_id ?? mapped.bubbleItemNotaId ?? "").trim();
         const invoice = targetInvoiceByBubbleId.get(mapped.bubbleNotaId) ?? null;
-        const itemId = targetItemIdByBubbleId.get(mapped.bubbleItemId) ?? "";
+        const sourceItemNameKey = String(sourceItemNameByBubbleId.get(mapped.bubbleItemId) ?? "").toLocaleUpperCase("pt-BR");
+        const itemId = targetItemIdByBubbleId.get(mapped.bubbleItemId) ?? targetItemIdByName.get(sourceItemNameKey) ?? "";
         if (!bubbleId || !invoice?.id || !itemId) {
           normalizedInvoiceItemsSkipped += 1;
           continue;
         }
+        if (!targetItemIdByBubbleId.has(mapped.bubbleItemId)) itemBubbleIdBackfills.set(itemId, mapped.bubbleItemId);
         const rawDate = String((raw as any)?.data_lancamento ?? (raw as any)?.["Created Date"] ?? "").trim();
         relationalRows.push({
           company_id: targetCompanyId,
@@ -543,6 +555,10 @@ export async function POST(req: NextRequest) {
           created_by_user_id: userId,
           raw: { bubble: raw, system: { source: "bubble_obj_repair_states" } },
         });
+      }
+      for (const [itemId, bubbleId] of itemBubbleIdBackfills.entries()) {
+        const { error: itemBackfillError } = await supabase.from("items").update({ bubble_id: bubbleId } as any).eq("company_id", targetCompanyId).eq("id", itemId).is("bubble_id", null);
+        if (itemBackfillError) throw new Error(itemBackfillError.message);
       }
       for (let offset = 0; offset < relationalRows.length; offset += 500) {
         const chunk = relationalRows.slice(offset, offset + 500);
