@@ -485,10 +485,15 @@ export async function POST(req: NextRequest) {
       }
 
       const itemControl = await loadControl("item", 50_000).catch(() => []);
+      const sourceItemCostByBubbleId = new Map<string, number>();
+      const sourceItemNameByBubbleId = new Map<string, string>();
       for (const r of itemControl) {
         const raw = (r as any)?.raw_payload_json ?? {};
         const mapped = mapItemToInsumo(raw, { userId, categoriaNameById });
         if (!mapped.ok || !mapped.bubbleItemId) continue;
+        const sourceCost = parsePtNumber(String(mapped.insumo.custoMedio ?? ""));
+        if (sourceCost > 0) sourceItemCostByBubbleId.set(mapped.bubbleItemId, sourceCost);
+        sourceItemNameByBubbleId.set(mapped.bubbleItemId, String(mapped.insumo.item ?? "").trim());
         const dbRow = insumoById.get(mapped.insumo.id) ?? null;
         contentValidation.checked.items += 1;
         if (!dbRow) {
@@ -577,7 +582,9 @@ export async function POST(req: NextRequest) {
 
         const rawLatest = latestCostByItem.get(bubbleItemId)?.raw ?? null;
         const cm = rawLatest ? mapCustoMedioItem(rawLatest) : null;
-        const expectedCost = cm?.custoMedio ? parsePtNumber(cm.custoMedio) : 0;
+        // The Item record is Bubble's current value. custo_medio_item is a
+        // historical ledger and is only a fallback when Item has no cost.
+        const expectedCost = sourceItemCostByBubbleId.get(bubbleItemId) ?? (cm?.custoMedio ? parsePtNumber(cm.custoMedio) : 0);
 
         if (expectedCost && !dbCost) {
           contentValidation.mismatches.push({ baseType: "custo_medio_item", bubbleId: bubbleItemId, kind: "missing_cost", expected: expectedCost, actual: null });
@@ -659,9 +666,21 @@ export async function POST(req: NextRequest) {
             .filter(Boolean),
         ),
       );
-      const { data: entradasDbRows } = entIdsToLoad.length
-        ? await supabase.from("entradas").select("id,itens_nota,valor_nota").in("id", entIdsToLoad).limit(50_000)
-        : await supabase.from("entradas").select("id,itens_nota,valor_nota").like("id", `${entPrefix}%`).limit(10);
+      const entradasDbRows: any[] = [];
+      if (entIdsToLoad.length) {
+        // Supabase projects commonly cap a single response at 500/1000 rows.
+        // Chunking also keeps the generated `in` URL below proxy limits.
+        for (let offset = 0; offset < entIdsToLoad.length; offset += 200) {
+          const ids = entIdsToLoad.slice(offset, offset + 200);
+          const { data, error } = await supabase.from("entradas").select("id,itens_nota,valor_nota").in("id", ids).limit(ids.length);
+          if (error) throw new Error(error.message);
+          entradasDbRows.push(...(data ?? []));
+        }
+      } else {
+        const { data, error } = await supabase.from("entradas").select("id,itens_nota,valor_nota").like("id", `${entPrefix}%`).limit(10);
+        if (error) throw new Error(error.message);
+        entradasDbRows.push(...(data ?? []));
+      }
       const entById = new Map<string, any>((entradasDbRows ?? []).map((r: any) => [String(r?.id ?? ""), r]));
       const itensNotasControl = await loadControl("itens_notas", 50_000).catch(() => []);
       const itensNotaByNotaId = new Map<string, { count: number; subtotalSum: number }>();
@@ -684,12 +703,14 @@ export async function POST(req: NextRequest) {
         const entId = buildEntradaId(userId, nf.bubbleNotaId);
         const ent = entById.get(entId) ?? null;
         const items = Array.isArray((ent as any)?.itens_nota) ? ((ent as any).itens_nota as any[]) : [];
-        const expected = Array.isArray((nf as any).listaItens) ? ((nf as any).listaItens as any[]).length : 0;
+        // Detailed itens_notas is authoritative when present; listaItens on
+        // the note is only Bubble's denormalized summary and can be stale.
+        const bubbleItemsMeta = itensNotaByNotaId.get(nf.bubbleNotaId) ?? null;
+        const expected = bubbleItemsMeta?.count ?? (Array.isArray((nf as any).listaItens) ? ((nf as any).listaItens as any[]).length : 0);
         if (!ent || items.length !== expected) {
           contentValidation.mismatches.push({ baseType: "notas_fiscais", bubbleId: nf.bubbleNotaId, kind: "itens_nota_count_mismatch", expected, actual: ent ? items.length : null });
         }
 
-        const bubbleItemsMeta = itensNotaByNotaId.get(nf.bubbleNotaId) ?? null;
         if (bubbleItemsMeta && bubbleItemsMeta.count > 0) {
           const hasAnySubtotal = items.some((x) => parsePtNumber(String((x as any)?.subtotalLabel ?? (x as any)?.subtotal ?? "")) > 0);
           const hasAnyUnitCost = items.some((x) => parsePtNumber(String((x as any)?.custoUnitarioLabel ?? (x as any)?.custoUnitario ?? "")) > 0);
@@ -758,8 +779,9 @@ export async function POST(req: NextRequest) {
         const dbItem = String((dbRow as any)?.item ?? "").trim();
         const dbMotivo = String((dbRow as any)?.motivo ?? "").trim();
         const dbCusto = String((dbRow as any)?.custo ?? "").trim();
-        if (d.bubbleItemId && (!dbItem || !dbItem.includes(d.bubbleItemId))) {
-          contentValidation.mismatches.push({ baseType: "desperdicio", bubbleId: d.bubbleDesperdicioId, kind: "item_link_mismatch", expected: d.bubbleItemId, actual: dbItem || null });
+        const expectedItemName = sourceItemNameByBubbleId.get(d.bubbleItemId) ?? "";
+        if (d.bubbleItemId && (!dbItem || (expectedItemName && dbItem !== expectedItemName))) {
+          contentValidation.mismatches.push({ baseType: "desperdicio", bubbleId: d.bubbleDesperdicioId, kind: "item_link_mismatch", expected: expectedItemName || d.bubbleItemId, actual: dbItem || null });
         }
         if (d.custo && (!dbCusto || dbCusto === "R$0,00")) {
           contentValidation.mismatches.push({ baseType: "desperdicio", bubbleId: d.bubbleDesperdicioId, kind: "missing_custo", expected: d.custo, actual: dbCusto || null });
