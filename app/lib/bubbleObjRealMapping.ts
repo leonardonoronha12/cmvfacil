@@ -58,6 +58,20 @@ function pickAny(obj: any, keys: string[]) {
   return "";
 }
 
+function pickRawAny(obj: any, keys: string[]) {
+  for (const k of keys) {
+    const v = obj?.[k];
+    if (v != null && String(v).trim() !== "") return v;
+  }
+  const byNorm = new Map<string, any>();
+  for (const [k, v] of Object.entries(obj ?? {})) byNorm.set(normalizeLower(k).replace(/[^a-z0-9]+/g, "_"), v);
+  for (const k of keys) {
+    const v = byNorm.get(normalizeLower(k).replace(/[^a-z0-9]+/g, "_"));
+    if (v != null && String(v).trim() !== "") return v;
+  }
+  return "";
+}
+
 function safeJsonString(value: unknown) {
   try {
     const s = JSON.stringify(value);
@@ -107,6 +121,16 @@ function parseBool(v: unknown) {
   return Boolean(v);
 }
 
+export function parseBubbleNumber(v: unknown) {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  return parsePtNumber(String(v ?? ""));
+}
+
+export function formatBubbleQuantity3(v: unknown) {
+  const value = parseBubbleNumber(v);
+  return value.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 });
+}
+
 function normalizeCategoryName(v: unknown) {
   return normalizeText(v);
 }
@@ -149,8 +173,8 @@ export function mapItemToInsumo(raw: any, args: { userId: string; categoriaNameB
   })();
   const especificacao = normalizeText(pickAny(raw, ["descricao"]));
   const ocultar = parseBool(pickAny(raw, ["boolean_ocultar_cmv"]));
-  const custoRaw = pickAny(raw, ["custo_medio"]);
-  const custoNum = parsePtNumber(String(custoRaw ?? ""));
+  const custoRaw = pickRawAny(raw, ["custo_medio"]);
+  const custoNum = parseBubbleNumber(custoRaw);
   const custoMedio = custoNum ? formatMoneyBRL(custoNum) : "";
 
   return {
@@ -170,8 +194,8 @@ export function mapItemToInsumo(raw: any, args: { userId: string; categoriaNameB
 
 export function mapCustoMedioItem(raw: any) {
   const bubbleItemId = extractBubbleId(pickAny(raw, ["item"])) || "";
-  const custoRaw = pickAny(raw, ["custo_medio"]);
-  const num = parsePtNumber(String(custoRaw ?? ""));
+  const custoRaw = pickRawAny(raw, ["custo_medio"]);
+  const num = parseBubbleNumber(custoRaw);
   const custoMedio = num ? formatMoneyBRL(num) : "";
   const createdAt = normalizeText(pickAny(raw, ["data_lancamento"]));
   return { bubbleItemId, custoMedio, createdAt };
@@ -205,7 +229,8 @@ export function mapItemInventario(raw: any) {
   const categoriaId = "";
   const categoriaNome = "";
   const unidade = "";
-  const estoqueFinal = normalizeText(pickAny(raw, ["quantidade_contada"])) || "";
+  const quantidadeRaw = pickRawAny(raw, ["quantidade_contada"]);
+  const estoqueFinal = quantidadeRaw === "" ? "" : formatBubbleQuantity3(quantidadeRaw);
   return { bubbleInventarioId, bubbleItemId, categoriaId, categoriaNome, unidade, estoqueFinal };
 }
 
@@ -215,9 +240,9 @@ export function mapNotaFiscal(raw: any) {
   const dataLancamento = normalizeText(pickAny(raw, ["data_recebimento"]));
   const fornecedorId = extractBubbleId(pickAny(raw, ["fornecedor_id"])) || "";
   const fornecedorNome = "";
-  const valorNotaRaw = pickAny(raw, ["valor_nota"]);
+  const valorNotaRaw = pickRawAny(raw, ["valor_nota"]);
   const valorNota = (() => {
-    const n = parsePtNumber(String(valorNotaRaw ?? ""));
+    const n = parseBubbleNumber(valorNotaRaw);
     return n ? formatMoneyBRL(n) : normalizeText(valorNotaRaw);
   })();
   const responsavel = extractBubbleId(pickAny(raw, ["responsavel_id"])) || "";
@@ -241,15 +266,16 @@ export function mapItemNota(raw: any) {
   const bubbleNotaId = extractBubbleId(pickAny(raw, ["nota_id"])) || "";
   const bubbleItemId = extractBubbleId(pickAny(raw, ["item_id"])) || "";
   const nomeItem = "";
-  const quantidade = normalizeText(pickAny(raw, ["quantidade"])) || "";
-  const subtotalRaw = pickAny(raw, ["subtotal"]);
+  const quantidadeRaw = pickRawAny(raw, ["quantidade"]);
+  const quantidade = quantidadeRaw === "" ? "" : formatBubbleQuantity3(quantidadeRaw);
+  const subtotalRaw = pickRawAny(raw, ["subtotal"]);
   const subtotal = (() => {
-    const n = parsePtNumber(String(subtotalRaw ?? ""));
+    const n = parseBubbleNumber(subtotalRaw);
     return n ? formatMoneyBRL(n) : normalizeText(subtotalRaw);
   })();
-  const custoUnitRaw = pickAny(raw, ["custo_unitario"]);
+  const custoUnitRaw = pickRawAny(raw, ["custo_unitario"]);
   const custoUnitario = (() => {
-    const n = parsePtNumber(String(custoUnitRaw ?? ""));
+    const n = parseBubbleNumber(custoUnitRaw);
     return n ? formatMoneyBRL(n) : normalizeText(custoUnitRaw);
   })();
   return { bubbleItemNotaId, bubbleNotaId, bubbleItemId, nomeItem, quantidade, subtotal, custoUnitario };
@@ -266,10 +292,11 @@ export function mapDesperdicio(raw: any) {
   const data = normalizeText(pickAny(raw, ["lancamento"])) || new Date().toISOString().slice(0, 10);
   const bubbleItemId = extractBubbleId(pickAny(raw, ["item_id"])) || "";
   const itemNome = "";
-  const quantidade = normalizeText(pickAny(raw, ["quantidade"])) || "";
-  const custoRaw = pickAny(raw, ["custo_total"]);
+  const quantidadeRaw = pickRawAny(raw, ["quantidade"]);
+  const quantidade = quantidadeRaw === "" ? "" : formatBubbleQuantity3(quantidadeRaw);
+  const custoRaw = pickRawAny(raw, ["custo_total"]);
   const custo = (() => {
-    const n = parsePtNumber(String(custoRaw ?? ""));
+    const n = parseBubbleNumber(custoRaw);
     return n ? formatMoneyBRL(n) : normalizeText(custoRaw);
   })();
   const bubbleMotivoId = extractBubbleId(pickAny(raw, ["motivo"])) || "";

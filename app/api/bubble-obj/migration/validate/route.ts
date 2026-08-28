@@ -446,7 +446,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       companyId,
       mismatches: [] as any[],
-      checked: { items: 0, custos: 0, inventarioItems: 0, notas: 0, desperdicios: 0 },
+      checked: { items: 0, custos: 0, inventarioItems: 0, notas: 0, desperdicios: 0, fichasTecnicas: 0, prePreparos: 0 },
     };
 
     if (companyId) {
@@ -484,7 +484,7 @@ export async function POST(req: NextRequest) {
         if (nome) categoriaNameById[id] = nome;
       }
 
-      const itemControl = await loadControl("item", 15).catch(() => []);
+      const itemControl = await loadControl("item", 50_000).catch(() => []);
       for (const r of itemControl) {
         const raw = (r as any)?.raw_payload_json ?? {};
         const mapped = mapItemToInsumo(raw, { userId, categoriaNameById });
@@ -509,6 +509,38 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      const truthy = (value: unknown) => ["1", "true", "sim", "yes"].includes(String(value ?? "").trim().toLowerCase());
+      const expectedFichaIds = new Set<string>();
+      const expectedPreIds = new Set<string>();
+      for (const row of itemControl) {
+        const raw = (row as any)?.raw_payload_json ?? {};
+        if (!truthy((raw as any)?.boolean_item_receita)) continue;
+        const id = String((row as any)?.bubble_unique_id ?? (raw as any)?._id ?? "").trim();
+        if (!id) continue;
+        if (truthy((raw as any)?.boolean_item_do_cardapio)) expectedFichaIds.add(id);
+        else expectedPreIds.add(id);
+      }
+      const [fichaState, preState] = await Promise.all([
+        supabase.from("fichas_tecnicas_state").select("payload").eq("id", stateId).maybeSingle(),
+        supabase.from("pre_preparo_state").select("payload").eq("id", stateId).maybeSingle(),
+      ]);
+      const fichaRows = Array.isArray((fichaState.data as any)?.payload) ? (((fichaState.data as any).payload ?? []) as any[]) : [];
+      const preRows = Array.isArray((preState.data as any)?.payload) ? (((preState.data as any).payload ?? []) as any[]) : [];
+      const fichaIds = new Set(fichaRows.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+      const preIds = new Set(preRows.map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+      contentValidation.checked.fichasTecnicas = expectedFichaIds.size;
+      contentValidation.checked.prePreparos = expectedPreIds.size;
+      for (const id of expectedFichaIds) {
+        if (!fichaIds.has(id)) contentValidation.mismatches.push({ baseType: "item", bubbleId: id, kind: "missing_ficha_tecnica", expected: "fichas_tecnicas_state", actual: null });
+      }
+      for (const id of expectedPreIds) {
+        if (!preIds.has(id)) contentValidation.mismatches.push({ baseType: "item", bubbleId: id, kind: "missing_pre_preparo", expected: "pre_preparo_state", actual: null });
+      }
+      if (fichaRows.length !== expectedFichaIds.size)
+        contentValidation.mismatches.push({ baseType: "item", kind: "fichas_tecnicas_count_mismatch", expected: expectedFichaIds.size, actual: fichaRows.length });
+      if (preRows.length !== expectedPreIds.size)
+        contentValidation.mismatches.push({ baseType: "item", kind: "pre_preparo_count_mismatch", expected: expectedPreIds.size, actual: preRows.length });
+
       const bubbleIdFromInsumoId = (id: string) => {
         const raw = String(id ?? "").trim();
         if (!raw) return "";
@@ -517,11 +549,23 @@ export async function POST(req: NextRequest) {
         return raw.slice(idx + "insumo:".length).trim();
       };
 
-      const custoObjectType = `custo_medio_item@${companyId}#${userId}`;
       const sampleBubbleItemIds = Array.from(insumoById.keys())
-        .slice(0, 12)
         .map((id) => bubbleIdFromInsumoId(id))
         .filter(Boolean);
+      const custoControl = await loadControl("custo_medio_item", 50_000).catch(() => []);
+      const latestCostByItem = new Map<string, { raw: any; launchedAt: number; updatedAt: number }>();
+      for (const row of custoControl) {
+        const raw = (row as any)?.raw_payload_json ?? {};
+        const mapped = mapCustoMedioItem(raw);
+        const bubbleItemId = String(mapped.bubbleItemId ?? "").trim();
+        if (!bubbleItemId) continue;
+        const launchedAt = Date.parse(String((raw as any)?.data_lancamento ?? "")) || 0;
+        const updatedAt = Date.parse(String((raw as any)?.["Modified Date"] ?? (raw as any)?.["Created Date"] ?? "")) || 0;
+        const previous = latestCostByItem.get(bubbleItemId);
+        if (!previous || launchedAt > previous.launchedAt || (launchedAt === previous.launchedAt && updatedAt > previous.updatedAt)) {
+          latestCostByItem.set(bubbleItemId, { raw, launchedAt, updatedAt });
+        }
+      }
 
       for (const bubbleItemId of sampleBubbleItemIds) {
         contentValidation.checked.custos += 1;
@@ -531,15 +575,7 @@ export async function POST(req: NextRequest) {
         const dbCostRaw = String((dbRow as any)?.custoMedio ?? "").trim();
         const dbCost = parsePtNumber(dbCostRaw);
 
-        const baseQuery = supabase
-          .from("bubble_obj_import_control")
-          .select("raw_payload_json")
-          .eq("supabase_user_id", userId)
-          .eq("bubble_object_type", custoObjectType)
-          .filter("raw_payload_json->>item", "eq", bubbleItemId);
-
-        const { data: latestRows } = await baseQuery.order("raw_payload_json->>data_lancamento", { ascending: false }).limit(1);
-        const rawLatest = Array.isArray(latestRows) && latestRows.length ? (latestRows[0] as any)?.raw_payload_json ?? null : null;
+        const rawLatest = latestCostByItem.get(bubbleItemId)?.raw ?? null;
         const cm = rawLatest ? mapCustoMedioItem(rawLatest) : null;
         const expectedCost = cm?.custoMedio ? parsePtNumber(cm.custoMedio) : 0;
 
@@ -555,7 +591,23 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const invItemControl = await loadControl("itens_inventarios", 30).catch(() => []);
+      const invItemControlRaw = await loadControl("itens_inventarios", 50_000).catch(() => []);
+      const latestInvItemByKey = new Map<string, any>();
+      for (const row of invItemControlRaw) {
+        const raw = (row as any)?.raw_payload_json ?? {};
+        const mapped = mapItemInventario(raw);
+        if (!mapped.bubbleInventarioId || !mapped.bubbleItemId) continue;
+        const key = `${mapped.bubbleInventarioId}:${mapped.bubbleItemId}`;
+        const updatedAt = Date.parse(String((raw as any)?.["Modified Date"] ?? (raw as any)?.["Created Date"] ?? "")) || 0;
+        const previous = latestInvItemByKey.get(key) ?? null;
+        const previousRaw = (previous as any)?.raw_payload_json ?? {};
+        const previousUpdatedAt = Date.parse(String((previousRaw as any)?.["Modified Date"] ?? (previousRaw as any)?.["Created Date"] ?? "")) || 0;
+        const nextHasValue = Boolean(String(mapped.estoqueFinal ?? "").trim());
+        const previousMapped = previous ? mapItemInventario(previousRaw) : null;
+        const previousHasValue = Boolean(String(previousMapped?.estoqueFinal ?? "").trim());
+        if (!previous || updatedAt > previousUpdatedAt || (updatedAt === previousUpdatedAt && nextHasValue && !previousHasValue)) latestInvItemByKey.set(key, row);
+      }
+      const invItemControl = Array.from(latestInvItemByKey.values());
       const invIdsToLoad = Array.from(
         new Set(
           invItemControl
@@ -681,7 +733,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const desperdicioControl = await loadControl("desperdicio", 20).catch(() => []);
+      const desperdicioControl = await loadControl("desperdicio", 50_000).catch(() => []);
       const despIdsToLoad = Array.from(
         new Set(
           desperdicioControl

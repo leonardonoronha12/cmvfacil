@@ -16,6 +16,8 @@ import {
   mapMotivoDesperdicio,
   mapNotaFiscal,
   formatBubbleDateLabelPT,
+  formatBubbleQuantity3,
+  parseBubbleNumber,
   parseObjectType,
   userScopedId,
 } from "../../../../lib/bubbleObjRealMapping";
@@ -63,6 +65,17 @@ function mergeUniqueSortedStrings(input: string[]) {
   }
   out.sort((a, b) => a.localeCompare(b, "pt-BR", { sensitivity: "base", numeric: true }));
   return out;
+}
+
+function parseBubbleBool(value: unknown) {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (["1", "true", "sim", "yes"].includes(s)) return true;
+  if (["0", "false", "nao", "não", "no", ""].includes(s)) return false;
+  return Boolean(value);
+}
+
+function formatPercent(value: number, digits = 1) {
+  return `${value.toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: digits })}%`;
 }
 
 function scopeObjectType(userId: string, objectType: string) {
@@ -212,6 +225,66 @@ export async function POST(req: NextRequest) {
     );
     await supabase.from("insumos_state").upsert({ id: stId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
 
+    const fichasTecnicasRows: any[] = [];
+    const prePreparoRows: any[] = [];
+    for (const r of itemRows) {
+      const raw = r?.raw_payload_json ?? {};
+      if (!parseBubbleBool((raw as any)?.boolean_item_receita)) continue;
+      const bubbleItemId = String(r?.bubble_unique_id ?? (raw as any)?._id ?? "").trim();
+      if (!bubbleItemId) continue;
+      const receita = String((raw as any)?.nome ?? "").trim() || "-";
+      const unidade = String((raw as any)?.unidade_medida ?? "").trim() || "Und";
+      const categoriaId = String((raw as any)?.categoria_id ?? "").trim();
+      const categoria = String(categoriaNameById[categoriaId] ?? "").trim() || "Sem categoria";
+      const rendimentoNum = parseBubbleNumber((raw as any)?.rendimento);
+      const custoTotalNum = parseBubbleNumber((raw as any)?.custo_total_receita);
+      const custoUnitarioNum = latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio
+        ? parseBubbleNumber(latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio)
+        : parseBubbleNumber((raw as any)?.custo_medio);
+      const precoVendaNum = parseBubbleNumber((raw as any)?.preco_venda_total);
+      const cmvMetaNum = parseBubbleNumber((raw as any)?.cmv_desejado);
+      const cmvAtualNum = precoVendaNum > 0 ? (custoUnitarioNum / precoVendaNum) * 100 : 0;
+      const cmvDeltaNum = cmvAtualNum - cmvMetaNum;
+      const quadrante = String((raw as any)?.quadrante_ficha_tecnica ?? "").trim().toLowerCase();
+      const bcg = ["estrela", "cavalo", "quebra-cabeca", "abacaxi"].includes(quadrante) ? quadrante : "quebra-cabeca";
+      const modoPreparo = String((raw as any)?.modo_preparo ?? "").trim() || "-";
+
+      if (parseBubbleBool((raw as any)?.boolean_item_do_cardapio)) {
+        fichasTecnicasRows.push({
+          id: bubbleItemId,
+          origin: "bubble",
+          receita,
+          precoVenda: precoVendaNum > 0 ? formatMoneyBRL(precoVendaNum) : "-",
+          custoUnitario: `${formatMoneyBRL(custoUnitarioNum)} / ${unidade}`,
+          cmvMeta: formatPercent(cmvMetaNum, 2),
+          cmvAtual: formatPercent(cmvAtualNum, 1),
+          cmvDelta: `${cmvDeltaNum > 0 ? "+" : ""}${formatPercent(cmvDeltaNum, 1)}`,
+          bcg,
+          thumb: "burger",
+          recipeYield: rendimentoNum,
+          ingredientsTotal: custoTotalNum,
+          ingredientRows: [],
+          modoPreparo,
+        });
+      } else {
+        const validadeDias = Math.max(0, Math.trunc(parseBubbleNumber((raw as any)?.validade_dias)));
+        prePreparoRows.push({
+          id: bubbleItemId,
+          origin: "bubble",
+          categoria,
+          receita,
+          custoTotal: formatMoneyBRL(custoTotalNum),
+          rendimento: rendimentoNum > 0 ? `${formatBubbleQuantity3(rendimentoNum)} ${unidade}` : "-",
+          custoUnitario: `${formatMoneyBRL(custoUnitarioNum)} / ${unidade}`,
+          validadeDias,
+          ingredientes: [],
+          modoPreparo,
+        });
+      }
+    }
+    await supabase.from("fichas_tecnicas_state").upsert({ id: stId, payload: fichasTecnicasRows } as any, { onConflict: "id" });
+    await supabase.from("pre_preparo_state").upsert({ id: stId, payload: prePreparoRows } as any, { onConflict: "id" });
+
     const insumoByBubbleId = new Map<string, any>();
     for (const r of insumosRows as any[]) {
       const bubbleId = bubbleIdFromInsumoId(String((r as any)?.id ?? ""));
@@ -272,9 +345,21 @@ export async function POST(req: NextRequest) {
       const catName = String((insumo as any)?.categoria ?? "").trim() || "Sem categoria";
       const catKey = catName.toLowerCase();
       const cats = invCatsByInvId.get(invId) ?? new Map<string, any>();
-      const catObj = cats.get(catKey) ?? { id: `cat:${catKey}`, nome: catName, status: "pendente", itens: [] };
+      const catObj = cats.get(catKey) ?? { id: `cat:${catKey}`, nome: catName, status: "contabilizado", itens: [] };
       const itensArr = Array.isArray(catObj.itens) ? (catObj.itens as any[]) : [];
-      if (!itensArr.find((x) => String((x as any)?.id ?? "") === insumoId)) itensArr.push({ id: insumoId, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "" });
+      const raw = r?.raw_payload_json ?? {};
+      const sourceUpdatedAt = Date.parse(String((raw as any)?.["Modified Date"] ?? (raw as any)?.["Created Date"] ?? "")) || 0;
+      const candidate = { id: insumoId, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "", __bubbleUpdatedAt: sourceUpdatedAt };
+      const existingIndex = itensArr.findIndex((x) => String((x as any)?.id ?? "") === insumoId);
+      if (existingIndex < 0) {
+        itensArr.push(candidate);
+      } else {
+        const existing = itensArr[existingIndex] as any;
+        const existingUpdatedAt = Number(existing?.__bubbleUpdatedAt ?? 0) || 0;
+        const candidateHasValue = Boolean(String(candidate.estoqueFinal ?? "").trim());
+        const existingHasValue = Boolean(String(existing?.estoqueFinal ?? "").trim());
+        if (sourceUpdatedAt > existingUpdatedAt || (sourceUpdatedAt === existingUpdatedAt && candidateHasValue && !existingHasValue)) itensArr[existingIndex] = candidate;
+      }
       catObj.itens = itensArr;
       cats.set(catKey, catObj);
       invCatsByInvId.set(invId, cats);
@@ -282,7 +367,12 @@ export async function POST(req: NextRequest) {
 
     const inventarioUpserts = Array.from(inventariosById.values()).map((inv) => {
       const cats = invCatsByInvId.get(inv.id);
-      const finalCats = cats ? Array.from(cats.values()) : [];
+      const finalCats = cats
+        ? Array.from(cats.values()).map((category: any) => ({
+            ...category,
+            itens: (Array.isArray(category?.itens) ? category.itens : []).map(({ __bubbleUpdatedAt: _sourceUpdatedAt, ...item }: any) => item),
+          }))
+        : [];
       return { id: inv.id, data: inv.data, categorias: finalCats } as any;
     });
     if (inventarioUpserts.length) await supabase.from("inventario").upsert(inventarioUpserts as any, { onConflict: "id" });
@@ -298,7 +388,7 @@ export async function POST(req: NextRequest) {
       const stablePart = it.bubbleItemNotaId || it.bubbleItemId;
       const stableItemId = `${userScopedId(userId)}nota_item:${it.bubbleNotaId}:${stablePart}`;
       const unidade = equivalenteUnidade || "Und";
-      const quantidade = parsePtNumber(String(it.quantidade ?? ""));
+      const quantidade = parseBubbleNumber(it.quantidade);
       const arr = notaItemsByNotaId.get(it.bubbleNotaId) ?? [];
       arr.push({
         id: stableItemId,
