@@ -203,7 +203,8 @@ export async function POST(req: NextRequest) {
       const bubbleItemId = bubbleIdFromInsumoId(id);
       if (!bubbleItemId) continue;
       const fromCostType = latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio ?? "";
-      if (fromCostType) insumosById.set(id, { ...(row as any), custoMedio: fromCostType });
+      const current = String((row as any)?.custoMedio ?? "").trim();
+      if (fromCostType && (!current || current === "-" || current === "R$0,00")) insumosById.set(id, { ...(row as any), custoMedio: fromCostType });
     }
 
     for (const r of itensNotasRows) {
@@ -238,9 +239,7 @@ export async function POST(req: NextRequest) {
       const categoria = String(categoriaNameById[categoriaId] ?? "").trim() || "Sem categoria";
       const rendimentoNum = parseBubbleNumber((raw as any)?.rendimento);
       const custoTotalNum = parseBubbleNumber((raw as any)?.custo_total_receita);
-      const custoUnitarioNum = latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio
-        ? parseBubbleNumber(latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio)
-        : parseBubbleNumber((raw as any)?.custo_medio);
+      const custoUnitarioNum = parseBubbleNumber((raw as any)?.custo_medio) || parseBubbleNumber(latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio);
       const precoVendaNum = parseBubbleNumber((raw as any)?.preco_venda_total);
       const cmvMetaNum = parseBubbleNumber((raw as any)?.cmv_desejado);
       const cmvAtualNum = precoVendaNum > 0 ? (custoUnitarioNum / precoVendaNum) * 100 : 0;

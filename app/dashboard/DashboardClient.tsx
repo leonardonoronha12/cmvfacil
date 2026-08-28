@@ -1771,7 +1771,7 @@ export default function DashboardClient() {
         if (!itemKey) continue;
         const ins = insumoByNameKey.get(itemKey) ?? null;
         if (!ins) continue;
-        const unitCost = avgUnitCostCentsByInsumoId.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
+        const unitCost = parseBrlToCents(String(ins.custoMedio ?? "")) || avgUnitCostCentsByInsumoId.get(ins.id) || 0;
         if (!unitCost) continue;
         const qty = parsePtNumber(String(ing.quantidade ?? ""));
         if (!Number.isFinite(qty) || qty <= 0) continue;
@@ -1823,7 +1823,7 @@ export default function DashboardClient() {
       const saidasQty = initialQty + entradasQty - finalQty;
 
       const baseCostCents =
-        i.kind === "insumo" ? avgUnitCostCentsByInsumoId.get(i.id) ?? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
+        i.kind === "insumo" ? parseBrlToCents(String(i.custoInicial ?? "")) || avgUnitCostCentsByInsumoId.get(i.id) || 0 : i.custoUnitCents;
       const baseUnit = i.medida || "Und";
       const qtyInBaseForOne = unit ? convertQty(1, unit, baseUnit) : 1;
       const unitCostCents = Number.isFinite(qtyInBaseForOne) && qtyInBaseForOne > 0 ? Math.round(baseCostCents * qtyInBaseForOne) : baseCostCents;
@@ -2092,7 +2092,7 @@ export default function DashboardClient() {
           if (!itemKey) continue;
           const ins = insumos.find((x) => normalizeKey(x.item) === itemKey) ?? null;
           if (!ins) continue;
-          const unitCost = avgUnitCostCentsByInsumoId.get(ins.id) ?? parseBrlToCents(String(ins.custoMedio ?? ""));
+          const unitCost = parseBrlToCents(String(ins.custoMedio ?? "")) || avgUnitCostCentsByInsumoId.get(ins.id) || 0;
           if (!unitCost) continue;
           const qty = parsePtNumber(String(ing.quantidade ?? ""));
           if (!Number.isFinite(qty) || qty <= 0) continue;
@@ -2134,7 +2134,7 @@ export default function DashboardClient() {
         const entradasQty = i.kind === "insumo" ? entradasQtyById.get(i.id) ?? 0 : 0;
         const saidasQty = initialQty + entradasQty - finalQty;
         const baseCostCents =
-          i.kind === "insumo" ? avgUnitCostCentsByInsumoId.get(i.id) ?? parseBrlToCents(String(i.custoInicial ?? "")) : i.custoUnitCents;
+          i.kind === "insumo" ? parseBrlToCents(String(i.custoInicial ?? "")) || avgUnitCostCentsByInsumoId.get(i.id) || 0 : i.custoUnitCents;
         const baseUnit = i.medida || "Und";
         const qtyInBaseForOne = unit ? convertQty(1, unit, baseUnit) : 1;
         const unitCostCents = Number.isFinite(qtyInBaseForOne) && qtyInBaseForOne > 0 ? Math.round(baseCostCents * qtyInBaseForOne) : baseCostCents;
@@ -2864,9 +2864,11 @@ export default function DashboardClient() {
     >();
 
     const ensureFornecedor = (rawKey: string, t: number) => {
-      const key = rawKey.trim().toUpperCase();
+      const raw = rawKey.trim();
+      const stableKey = raw.toLowerCase().startsWith("db:") ? "db:${raw.slice(3).trim().toLowerCase()}" : raw;
+      const key = stableKey.toUpperCase();
       if (!key) return;
-      const info = fornecedorInfoMap[key];
+      const info = fornecedorInfoMap[stableKey] || fornecedorInfoMap[key] || fornecedorInfoMap[raw.toUpperCase()];
       const prev = byFornecedor.get(key);
       if (!prev) {
         byFornecedor.set(key, {
@@ -2874,7 +2876,7 @@ export default function DashboardClient() {
           fornecedor: info?.fornecedor?.trim() || rawKey.trim() || key,
           vendedor: info?.vendedor?.trim() || "-",
           endereco: info?.endereco?.trim() || "-",
-          totalProdutos: fornecedorProdutosMap[key]?.length ?? 0,
+          totalProdutos: (fornecedorProdutosMap[stableKey] || fornecedorProdutosMap[key])?.length ?? 0,
           t,
         });
         return;
@@ -2884,7 +2886,7 @@ export default function DashboardClient() {
         fornecedor: info?.fornecedor?.trim() || prev.fornecedor,
         vendedor: info?.vendedor?.trim() || prev.vendedor,
         endereco: info?.endereco?.trim() || prev.endereco,
-        totalProdutos: fornecedorProdutosMap[key]?.length ?? prev.totalProdutos,
+        totalProdutos: (fornecedorProdutosMap[stableKey] || fornecedorProdutosMap[key])?.length ?? prev.totalProdutos,
         t: Math.max(prev.t, t),
       });
     };
@@ -2909,9 +2911,10 @@ export default function DashboardClient() {
   }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap, historicoEntradas, historyItem]);
 
   const fornecedorModalProdutos = useMemo(() => {
-    const key = fornecedorModalKey.trim().toUpperCase();
-    if (!key) return [];
-    return fornecedorProdutosMap[key] ?? [];
+    const raw = fornecedorModalKey.trim();
+    const stableKey = raw.toLowerCase().startsWith("db:") ? `db:${raw.slice(3).trim().toLowerCase()}` : raw;
+    if (!stableKey) return [];
+    return fornecedorProdutosMap[stableKey] ?? fornecedorProdutosMap[stableKey.toUpperCase()] ?? [];
   }, [fornecedorModalKey, fornecedorProdutosMap]);
 
   const fornecedorProdutoSugestoes = useMemo(() => {
@@ -2938,7 +2941,7 @@ export default function DashboardClient() {
 
   const selectedInsumoCustoMedioLabel = useMemo(() => {
     if (!selectedInsumo) return "-";
-    const cents = avgUnitCostCentsByInsumoId.get(selectedInsumo.id) ?? parseBrlToCents(String(selectedInsumo.custoMedio ?? ""));
+    const cents = parseBrlToCents(String(selectedInsumo.custoMedio ?? "")) || avgUnitCostCentsByInsumoId.get(selectedInsumo.id) || 0;
     return cents ? formatBrlFromCents(cents) : "-";
   }, [avgUnitCostCentsByInsumoId, selectedInsumo]);
 

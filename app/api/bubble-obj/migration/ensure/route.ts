@@ -536,7 +536,7 @@ async function processStagingBatch(args: {
           continue;
         }
         const prev = rowsById.get(mapped.insumo.id) ?? null;
-        const next = { ...(prev ?? {}), ...mapped.insumo, custoMedio: String(prev?.custoMedio ?? "") || String(mapped.insumo.custoMedio ?? "") };
+        const next = { ...(prev ?? {}), ...mapped.insumo, custoMedio: String(mapped.insumo.custoMedio ?? "") || String(prev?.custoMedio ?? "") };
         rowsById.set(mapped.insumo.id, next);
         categoriesSet.add(String(mapped.insumo.categoria ?? "Sem categoria"));
       } else if (baseType === "custo_medio_item") {
@@ -544,7 +544,8 @@ async function processStagingBatch(args: {
         if (cm.bubbleItemId && cm.custoMedio) {
           const id = buildInsumoId(userId, cm.bubbleItemId);
           const prev = rowsById.get(id) ?? null;
-          if (prev) rowsById.set(id, { ...(prev as any), custoMedio: cm.custoMedio });
+          const current = String((prev as any)?.custoMedio ?? "").trim();
+          if (prev && (!current || current === "-" || current === "R$0,00")) rowsById.set(id, { ...(prev as any), custoMedio: cm.custoMedio });
         }
       }
 
