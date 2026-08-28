@@ -227,6 +227,15 @@ export function mapNotaFiscal(raw: any) {
   return { bubbleNotaId, numero, dataLancamento, fornecedorId, fornecedorNome, valorNota, responsavel, dataCriacao, listaItens };
 }
 
+export function formatBubbleDateLabelPT(value: unknown) {
+  const raw = normalizeText(value);
+  if (!raw) return "-";
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return raw;
+  const month = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][Number(match[2]) - 1];
+  return month ? `${match[3]} ${month}, ${match[1]}` : raw;
+}
+
 export function mapItemNota(raw: any) {
   const bubbleItemNotaId = normalizeText(pickAny(raw, ["_id"]));
   const bubbleNotaId = extractBubbleId(pickAny(raw, ["nota_id"])) || "";

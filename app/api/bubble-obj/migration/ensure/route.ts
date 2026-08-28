@@ -20,6 +20,7 @@ import {
   mapItemToInsumo,
   mapMotivoDesperdicio,
   mapNotaFiscal,
+  formatBubbleDateLabelPT,
   parseObjectType,
   userScopedId,
 } from "../../../../lib/bubbleObjRealMapping";
@@ -1336,9 +1337,9 @@ async function rebuildEntradasFromControlForCompany(args: {
     const fornecedorFromId = nf.fornecedorId ? String(fornecedorNameById[nf.fornecedorId] ?? "").trim() : "";
     const fornecedor = fornecedorFromId || nf.fornecedorNome || String(nf.fornecedorId || "").trim() || "Sem fornecedor";
     const numero = nf.numero || `NF-${String(nf.bubbleNotaId).slice(0, 8)}`;
-    const dataLancamento = nf.dataLancamento || nf.dataCriacao || "-";
+    const dataLancamento = formatBubbleDateLabelPT(nf.dataLancamento || nf.dataCriacao);
     const responsavel = nf.responsavel || "";
-    const dataCriacao = nf.dataCriacao || dataLancamento || "-";
+    const dataCriacao = formatBubbleDateLabelPT(nf.dataCriacao || nf.dataLancamento);
 
     const itensDetalhe = itensNotasByNotaId.get(nf.bubbleNotaId) ?? [];
     const itensNota = itensDetalhe.length
@@ -1350,15 +1351,16 @@ async function rebuildEntradasFromControlForCompany(args: {
           const nomeNaNota = String((it as any)?.nomeItem ?? "").trim() || insumoNome;
           const bubbleItemNotaId = String((it as any)?.bubbleItemNotaId ?? "").trim();
           const idPart = bubbleItemNotaId || bubbleItemId || nf.bubbleNotaId;
+          const unidade = equivalenteUnidade || "Und";
+          const quantidade = parsePtNumber(String((it as any)?.quantidade ?? ""));
           return {
             id: `${userScopedId(userId)}nota_item:${nf.bubbleNotaId}:${idPart}`,
-            nomeNaNota,
-            unidadeNaNota: "",
-            insumoEquivalente: insumoNome || "",
-            equivalenteQuantidade: String((it as any)?.quantidade ?? "").trim(),
-            equivalenteUnidade,
-            subtotal: String((it as any)?.subtotal ?? "").trim(),
-            custoUnitario: String((it as any)?.custoUnitario ?? "").trim(),
+            itemId: bubbleItemId || undefined,
+            nome: nomeNaNota || insumoNome || "-",
+            unidade,
+            quantidadeLabel: `${quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${unidade}`,
+            subtotalLabel: String((it as any)?.subtotal ?? "").trim() || "R$0,00",
+            custoUnitarioLabel: String((it as any)?.custoUnitario ?? "").trim() || "R$0,00",
           };
         })
       : (() => {
@@ -1371,15 +1373,15 @@ async function rebuildEntradasFromControlForCompany(args: {
               const nomeNaNota = String((insumo as any)?.item ?? "").trim();
               const insumoEquivalente = nomeNaNota || "";
               const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
+              const unidade = equivalenteUnidade || "Und";
               return {
                 id: `${userScopedId(userId)}nota_item:${nf.bubbleNotaId}:${id}`,
-                nomeNaNota,
-                unidadeNaNota: "",
-                insumoEquivalente,
-                equivalenteQuantidade: "",
-                equivalenteUnidade,
-                subtotal: "",
-                custoUnitario: "",
+                itemId: id,
+                nome: nomeNaNota || insumoEquivalente || "-",
+                unidade,
+                quantidadeLabel: `0,000 ${unidade}`,
+                subtotalLabel: "R$0,00",
+                custoUnitarioLabel: "R$0,00",
               };
             })
             .filter(Boolean);
@@ -1391,7 +1393,7 @@ async function rebuildEntradasFromControlForCompany(args: {
       if (v && v > 0) return formatMoneyBRL(v);
       let sum = 0;
       for (const it of itensNota) {
-        const sub = parsePtNumber(String((it as any)?.subtotal ?? ""));
+        const sub = parsePtNumber(String((it as any)?.subtotalLabel ?? ""));
         if (sub) sum += sub;
       }
       return sum > 0 ? formatMoneyBRL(sum) : nf.valorNota || "R$0,00";

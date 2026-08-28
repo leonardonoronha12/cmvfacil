@@ -24,20 +24,47 @@ export type EntradasStatePayload = {
 
 let entradasLoadInFlight: Promise<EntradasStatePayload> | null = null;
 
+function normalizeEntradaDate(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})(?:T.*)?$/);
+  if (!iso) return raw;
+  const month = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][Number(iso[2]) - 1];
+  return month ? `${iso[3]} ${month}, ${iso[1]}` : raw;
+}
+
+function normalizeNotaItem(item: any, index: number) {
+  const unidade = String(item?.unidade ?? item?.equivalenteUnidade ?? item?.unidadeNaNota ?? "Und").trim() || "Und";
+  const quantidade = String(item?.quantidadeLabel ?? item?.equivalenteQuantidade ?? item?.quantidade ?? "0").trim() || "0";
+  const quantidadeLabel = /[A-Za-zÀ-ÿ]/.test(quantidade) ? quantidade : `${quantidade} ${unidade}`;
+  const subtotalLabel = String(item?.subtotalLabel ?? item?.subtotal ?? "R$0,00").trim() || "R$0,00";
+  const custoUnitarioLabel = String(item?.custoUnitarioLabel ?? item?.custoUnitario ?? "R$0,00").trim() || "R$0,00";
+  return {
+    ...item,
+    id: String(item?.id ?? `nota-item-${index}`),
+    itemId: item?.itemId ?? item?.item_id ?? undefined,
+    nome: String(item?.nome ?? item?.nomeNaNota ?? item?.insumoEquivalente ?? "-").trim() || "-",
+    unidade,
+    quantidadeLabel,
+    subtotalLabel,
+    custoUnitarioLabel,
+  };
+}
+
 function toStoreRow(r: EntradaDbRow): EntradaStoreRow {
   const fallbackValor = String((r as any)?.valorNota ?? (r as any)?.valor ?? "").trim();
   const fornecedorNome = String((r as any)?.fornecedor_nome ?? (r as any)?.fornecedorNome ?? "").trim();
   return {
     id: r.id,
     numero: r.numero,
-    dataLancamento: r.data_lancamento,
+    dataLancamento: normalizeEntradaDate(r.data_lancamento),
     fornecedor: r.fornecedor,
     fornecedorNome: fornecedorNome || undefined,
     valorNota: r.valor_nota || fallbackValor,
     itens: r.itens,
     responsavel: r.responsavel,
-    dataCriacao: r.data_criacao,
-    itensNota: Array.isArray(r.itens_nota) ? (r.itens_nota as any) : undefined,
+    dataCriacao: normalizeEntradaDate(r.data_criacao),
+    itensNota: Array.isArray(r.itens_nota) ? (r.itens_nota as any[]).map(normalizeNotaItem) : undefined,
   };
 }
 

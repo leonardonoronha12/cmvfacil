@@ -15,6 +15,7 @@ import {
   mapItemToInsumo,
   mapMotivoDesperdicio,
   mapNotaFiscal,
+  formatBubbleDateLabelPT,
   parseObjectType,
   userScopedId,
 } from "../../../../lib/bubbleObjRealMapping";
@@ -294,17 +295,19 @@ export async function POST(req: NextRequest) {
       const nomeNaNota = String((insumo as any)?.item ?? it.nomeItem ?? "").trim();
       const insumoEquivalente = nomeNaNota || "";
       const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
-      const stableItemId = `${userScopedId(userId)}nota_item:${it.bubbleNotaId}:${it.bubbleItemId}`;
+      const stablePart = it.bubbleItemNotaId || it.bubbleItemId;
+      const stableItemId = `${userScopedId(userId)}nota_item:${it.bubbleNotaId}:${stablePart}`;
+      const unidade = equivalenteUnidade || "Und";
+      const quantidade = parsePtNumber(String(it.quantidade ?? ""));
       const arr = notaItemsByNotaId.get(it.bubbleNotaId) ?? [];
       arr.push({
         id: stableItemId,
-        nomeNaNota,
-        unidadeNaNota: "",
-        insumoEquivalente,
-        equivalenteQuantidade: String(it.quantidade ?? "").trim(),
-        equivalenteUnidade,
-        subtotal: it.subtotal || "",
-        custoUnitario: it.custoUnitario || "",
+        itemId: it.bubbleItemId,
+        nome: nomeNaNota || insumoEquivalente || "-",
+        unidade,
+        quantidadeLabel: `${quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${unidade}`,
+        subtotalLabel: it.subtotal || "R$0,00",
+        custoUnitarioLabel: it.custoUnitario || "R$0,00",
       });
       notaItemsByNotaId.set(it.bubbleNotaId, arr);
     }
@@ -316,8 +319,8 @@ export async function POST(req: NextRequest) {
       const fornecedorFromId = nf.fornecedorId ? String(fornecedorNameById[nf.fornecedorId] ?? "").trim() : "";
       const fornecedor = fornecedorFromId || nf.fornecedorNome || String(nf.fornecedorId || "").trim() || "Sem fornecedor";
       const numero = nf.numero || `NF-${String(nf.bubbleNotaId).slice(0, 8)}`;
-      const dataLancamento = nf.dataLancamento || nf.dataCriacao || "-";
-      const dataCriacao = nf.dataCriacao || dataLancamento || "-";
+      const dataLancamento = formatBubbleDateLabelPT(nf.dataLancamento || nf.dataCriacao);
+      const dataCriacao = formatBubbleDateLabelPT(nf.dataCriacao || nf.dataLancamento);
       const baseItensNota = (nf as any).listaItens
         ? (nf as any).listaItens
             .map((bubbleItemId: any) => {
@@ -327,28 +330,21 @@ export async function POST(req: NextRequest) {
               const nomeNaNota = String((insumo as any)?.item ?? "").trim();
               const insumoEquivalente = nomeNaNota || "";
               const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
+              const unidade = equivalenteUnidade || "Und";
               return {
                 id: `${userScopedId(userId)}nota_item:${nf.bubbleNotaId}:${id}`,
-                nomeNaNota,
-                unidadeNaNota: "",
-                insumoEquivalente,
-                equivalenteQuantidade: "",
-                equivalenteUnidade,
-                subtotal: "",
-                custoUnitario: "",
+                itemId: id,
+                nome: nomeNaNota || insumoEquivalente || "-",
+                unidade,
+                quantidadeLabel: `0,000 ${unidade}`,
+                subtotalLabel: "R$0,00",
+                custoUnitarioLabel: "R$0,00",
               };
             })
             .filter(Boolean)
         : [];
       const extras = notaItemsByNotaId.get(nf.bubbleNotaId) ?? [];
-      const itemsById = new Map<string, any>();
-      for (const it of baseItensNota) itemsById.set(String((it as any)?.id ?? ""), it);
-      for (const it of extras) {
-        const id = String((it as any)?.id ?? "");
-        if (!id) continue;
-        itemsById.set(id, { ...(itemsById.get(id) ?? {}), ...(it as any) });
-      }
-      const itensNota = Array.from(itemsById.values());
+      const itensNota = extras.length ? extras : baseItensNota;
       const itensLabel = `${itensNota.length} ${itensNota.length === 1 ? "Item" : "Itens"}`;
 
       const valorNota = (() => {
@@ -357,7 +353,7 @@ export async function POST(req: NextRequest) {
         if (parsed && parsed > 0) return formatMoneyBRL(parsed);
         let sum = 0;
         for (const it of itensNota) {
-          const sub = parsePtNumber(String((it as any)?.subtotal ?? ""));
+          const sub = parsePtNumber(String((it as any)?.subtotalLabel ?? ""));
           if (sub) sum += sub;
         }
         return sum > 0 ? formatMoneyBRL(sum) : "R$0,00";

@@ -452,15 +452,24 @@ export async function POST(req: NextRequest) {
     if (companyId) {
       const loadControl = async (baseType: string, limit: number) => {
         const key = scopeObjectType(userId, `${baseType}@${companyId}`);
-        const { data, error } = await supabase
-          .from("bubble_obj_import_control")
-          .select("bubble_unique_id,raw_payload_json,status")
-          .eq("supabase_user_id", userId)
-          .eq("bubble_object_type", key)
-          .in("status", ["staged", "processed", "staged_only"])
-          .limit(limit);
-        if (error) throw new Error(error.message);
-        return (data ?? []) as any[];
+        const out: any[] = [];
+        const pageSize = 1000;
+        for (let from = 0; from < limit; from += pageSize) {
+          const to = Math.min(limit - 1, from + pageSize - 1);
+          const { data, error } = await supabase
+            .from("bubble_obj_import_control")
+            .select("bubble_unique_id,raw_payload_json,status")
+            .eq("supabase_user_id", userId)
+            .eq("bubble_object_type", key)
+            .in("status", ["staged", "processed", "staged_only"])
+            .order("bubble_unique_id", { ascending: true })
+            .range(from, to);
+          if (error) throw new Error(error.message);
+          const rows = (data ?? []) as any[];
+          out.push(...rows);
+          if (rows.length < pageSize) break;
+        }
+        return out;
       };
 
       const insumoById = new Map<string, any>(insumosRows.map((r: any) => [String(r?.id ?? ""), r]));
@@ -586,7 +595,7 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      const notasControl = await loadControl("notas_fiscais", 10).catch(() => []);
+      const notasControl = await loadControl("notas_fiscais", 50_000).catch(() => []);
       const entIdsToLoad = Array.from(
         new Set(
           notasControl
@@ -599,10 +608,10 @@ export async function POST(req: NextRequest) {
         ),
       );
       const { data: entradasDbRows } = entIdsToLoad.length
-        ? await supabase.from("entradas").select("id,itens_nota,valor_nota").in("id", entIdsToLoad).limit(50)
+        ? await supabase.from("entradas").select("id,itens_nota,valor_nota").in("id", entIdsToLoad).limit(50_000)
         : await supabase.from("entradas").select("id,itens_nota,valor_nota").like("id", `${entPrefix}%`).limit(10);
       const entById = new Map<string, any>((entradasDbRows ?? []).map((r: any) => [String(r?.id ?? ""), r]));
-      const itensNotasControl = await loadControl("itens_notas", 80).catch(() => []);
+      const itensNotasControl = await loadControl("itens_notas", 50_000).catch(() => []);
       const itensNotaByNotaId = new Map<string, { count: number; subtotalSum: number }>();
       for (const r of itensNotasControl) {
         const it = mapItemNota((r as any)?.raw_payload_json ?? {});
@@ -630,8 +639,8 @@ export async function POST(req: NextRequest) {
 
         const bubbleItemsMeta = itensNotaByNotaId.get(nf.bubbleNotaId) ?? null;
         if (bubbleItemsMeta && bubbleItemsMeta.count > 0) {
-          const hasAnySubtotal = items.some((x) => parsePtNumber(String((x as any)?.subtotal ?? "")) > 0);
-          const hasAnyUnitCost = items.some((x) => parsePtNumber(String((x as any)?.custoUnitario ?? "")) > 0);
+          const hasAnySubtotal = items.some((x) => parsePtNumber(String((x as any)?.subtotalLabel ?? (x as any)?.subtotal ?? "")) > 0);
+          const hasAnyUnitCost = items.some((x) => parsePtNumber(String((x as any)?.custoUnitarioLabel ?? (x as any)?.custoUnitario ?? "")) > 0);
           if (!hasAnySubtotal || !hasAnyUnitCost) {
             contentValidation.mismatches.push({
               baseType: "notas_fiscais",
@@ -656,8 +665,8 @@ export async function POST(req: NextRequest) {
         }
 
         for (const it of items.slice(0, 5)) {
-          const nomeNaNota = String((it as any)?.nomeNaNota ?? "").trim();
-          const insumoEquivalente = String((it as any)?.insumoEquivalente ?? "").trim();
+          const nomeNaNota = String((it as any)?.nome ?? (it as any)?.nomeNaNota ?? "").trim();
+          const insumoEquivalente = String((it as any)?.nome ?? (it as any)?.insumoEquivalente ?? "").trim();
           if (nomeNaNota && looksLikeTechnicalId(nomeNaNota)) {
             contentValidation.mismatches.push({ baseType: "notas_fiscais", bubbleId: nf.bubbleNotaId, kind: "nome_na_nota_technical", expected: "texto", actual: nomeNaNota });
           }
