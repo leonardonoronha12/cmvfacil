@@ -165,6 +165,7 @@ function companyScopedBaseTypes() {
     "itens_lista_compras",
     "qtd_compra_real",
     "faturamentos",
+    "ingredientes",
   ];
 }
 
@@ -1669,6 +1670,22 @@ async function rebuildRecipeStatesFromControlForCompany(args: {
     if ((data ?? []).length < 1_000) break;
   }
 
+  const ingredientObjectType = `ingredientes@${companyId}#${userId}`;
+  const stagedIngredientRows: any[] = [];
+  for (let from = 0; from < 50_000; from += 1_000) {
+    const { data, error } = await supabase
+      .from("bubble_obj_import_control")
+      .select("bubble_unique_id,raw_payload_json,status")
+      .eq("supabase_user_id", userId)
+      .eq("bubble_object_type", ingredientObjectType)
+      .in("status", ["staged", "processed", "staged_only"])
+      .order("bubble_unique_id", { ascending: true })
+      .range(from, from + 999);
+    if (error) throw new Error(error.message);
+    stagedIngredientRows.push(...((data ?? []) as any[]));
+    if ((data ?? []).length < 1_000) break;
+  }
+
   const { data: insumosState, error: insumosErr } = await supabase.from("insumos_state").select("payload").eq("id", stateId).maybeSingle();
   if (insumosErr) throw new Error(insumosErr.message);
   const insumos = Array.isArray((insumosState as any)?.payload?.rows) ? ((insumosState as any).payload.rows as any[]) : [];
@@ -1676,6 +1693,44 @@ async function rebuildRecipeStatesFromControlForCompany(args: {
   for (const row of insumos) {
     const match = String((row as any)?.id ?? "").match(/insumo:(.+)$/);
     if (match?.[1]) costByBubbleId.set(String(match[1]).trim(), parseBubbleNumber((row as any)?.custoMedio));
+  }
+
+  const itemRawByBubbleId = new Map<string, any>();
+  for (const row of itemRows) {
+    const bubbleId = String((row as any)?.bubble_unique_id ?? "").trim();
+    if (bubbleId) itemRawByBubbleId.set(bubbleId, (row as any)?.raw_payload_json ?? {});
+  }
+  const ingredientRawByBubbleId = new Map<string, any>();
+  for (const row of stagedIngredientRows) {
+    const bubbleId = String((row as any)?.bubble_unique_id ?? "").trim();
+    if (bubbleId) ingredientRawByBubbleId.set(bubbleId, (row as any)?.raw_payload_json ?? {});
+  }
+  const recipeIngredientsByBubbleId = new Map<string, any[]>();
+  for (const row of itemRows) {
+    const recipeBubbleId = String((row as any)?.bubble_unique_id ?? "").trim();
+    const recipeRaw = (row as any)?.raw_payload_json ?? {};
+    const refs = Array.isArray((recipeRaw as any)?.lista_ingredientes) ? ((recipeRaw as any).lista_ingredientes as any[]) : [];
+    const recipeRows: any[] = [];
+    for (const rawRef of refs) {
+      const ingredientBubbleId = String(rawRef && typeof rawRef === "object" ? rawRef?.unique_id ?? rawRef?._id ?? rawRef?.id ?? "" : rawRef ?? "").trim();
+      const ingredientRaw = ingredientRawByBubbleId.get(ingredientBubbleId) ?? null;
+      const itemRef = (ingredientRaw as any)?.item_id;
+      const ingredientItemBubbleId = String(itemRef && typeof itemRef === "object" ? itemRef?.unique_id ?? itemRef?._id ?? itemRef?.id ?? "" : itemRef ?? "").trim();
+      const ingredientItemRaw = itemRawByBubbleId.get(ingredientItemBubbleId) ?? null;
+      if (!ingredientBubbleId || !ingredientRaw || !ingredientItemRaw) continue;
+      const quantidade = parseBubbleNumber((ingredientRaw as any)?.quantidade);
+      const currentUnitCost = parseBubbleNumber((ingredientItemRaw as any)?.custo_medio);
+      const custoTotal = currentUnitCost > 0 ? quantidade * currentUnitCost : parseBubbleNumber((ingredientRaw as any)?.custo);
+      recipeRows.push({
+        id: ingredientBubbleId,
+        ingredientId: ingredientItemBubbleId,
+        item: String((ingredientItemRaw as any)?.nome ?? "").trim() || "-",
+        quantidade: quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 }),
+        unidade: String((ingredientItemRaw as any)?.unidade_medida ?? "").trim() || "Und",
+        custoTotal,
+      });
+    }
+    recipeIngredientsByBubbleId.set(recipeBubbleId, recipeRows);
   }
 
   const truthy = (value: unknown) => ["1", "true", "sim", "yes"].includes(String(value ?? "").trim().toLowerCase());
@@ -1716,7 +1771,7 @@ async function rebuildRecipeStatesFromControlForCompany(args: {
         thumb: "burger",
         recipeYield: rendimento,
         ingredientsTotal: custoTotal,
-        ingredientRows: [],
+        ingredientRows: recipeIngredientsByBubbleId.get(bubbleId) ?? [],
         modoPreparo,
       });
     } else {
@@ -1732,7 +1787,13 @@ async function rebuildRecipeStatesFromControlForCompany(args: {
             : "-",
         custoUnitario: `${formatMoneyBRL(custoUnitario)} / ${unidade}`,
         validadeDias: Math.max(0, Math.trunc(parseBubbleNumber((raw as any)?.validade_dias))),
-        ingredientes: [],
+        ingredientes: (recipeIngredientsByBubbleId.get(bubbleId) ?? []).map((row: any) => ({
+          id: row.id,
+          item: row.item,
+          quantidade: row.quantidade,
+          unidade: row.unidade,
+          custoCents: Math.round(Number(row.custoTotal ?? 0) * 100),
+        })),
         modoPreparo,
       });
     }

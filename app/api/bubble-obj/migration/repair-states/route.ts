@@ -144,6 +144,7 @@ export async function POST(req: NextRequest) {
     const itensFornecedoresKey = scopeObjectType(userId, `itens_fornecedores@${companyId}`);
     const motivosKey = scopeObjectType(userId, `motivos_desperdicios@${companyId}`);
     const desperdicioKey = scopeObjectType(userId, `desperdicio@${companyId}`);
+    const ingredientesKey = scopeObjectType(userId, `ingredientes@${companyId}`);
 
     const [
       categoriasRows,
@@ -157,6 +158,7 @@ export async function POST(req: NextRequest) {
       itensNotasRows,
       motivosRows,
       desperdicioRows,
+      ingredientesRows,
     ] = await Promise.all([
       loadControlRows(supabase, userId, categoriasKey),
       loadControlRows(supabase, userId, itemKey),
@@ -169,6 +171,7 @@ export async function POST(req: NextRequest) {
       loadControlRows(supabase, userId, itensNotasKey),
       loadControlRows(supabase, userId, motivosKey),
       loadControlRows(supabase, userId, desperdicioKey),
+      loadControlRows(supabase, userId, ingredientesKey),
     ]);
 
     const categoriaNameById: Record<string, string> = {};
@@ -226,6 +229,60 @@ export async function POST(req: NextRequest) {
     );
     await supabase.from("insumos_state").upsert({ id: stId, payload: { rows: insumosRows, categories } } as any, { onConflict: "id" });
 
+    const itemRawByBubbleId = new Map<string, any>();
+    for (const r of itemRows) {
+      const bubbleItemId = String(r?.bubble_unique_id ?? (r?.raw_payload_json as any)?._id ?? "").trim();
+      if (bubbleItemId) itemRawByBubbleId.set(bubbleItemId, r?.raw_payload_json ?? {});
+    }
+    const ingredientRawByBubbleId = new Map<string, any>();
+    for (const r of ingredientesRows) {
+      const ingredientId = String(r?.bubble_unique_id ?? (r?.raw_payload_json as any)?._id ?? "").trim();
+      if (ingredientId) ingredientRawByBubbleId.set(ingredientId, r?.raw_payload_json ?? {});
+    }
+    const recipeIngredientRows = new Map<string, any[]>();
+    const normalizedRecipeIngredientSources: any[] = [];
+    for (const r of itemRows) {
+      const recipeBubbleId = String(r?.bubble_unique_id ?? (r?.raw_payload_json as any)?._id ?? "").trim();
+      const raw = r?.raw_payload_json ?? {};
+      if (!recipeBubbleId || !parseBubbleBool((raw as any)?.boolean_item_receita)) continue;
+      const refs = Array.isArray((raw as any)?.lista_ingredientes) ? ((raw as any).lista_ingredientes as any[]) : [];
+      const rows: any[] = [];
+      for (const rawRef of refs) {
+        const ingredientBubbleId = String(rawRef && typeof rawRef === "object" ? rawRef?.unique_id ?? rawRef?._id ?? rawRef?.id ?? "" : rawRef ?? "").trim();
+        const ingredientRaw = ingredientRawByBubbleId.get(ingredientBubbleId) ?? null;
+        if (!ingredientRaw) continue;
+        const ingredientItemRef = (ingredientRaw as any)?.item_id;
+        const ingredientItemBubbleId = String(
+          ingredientItemRef && typeof ingredientItemRef === "object"
+            ? ingredientItemRef?.unique_id ?? ingredientItemRef?._id ?? ingredientItemRef?.id ?? ""
+            : ingredientItemRef ?? "",
+        ).trim();
+        const ingredientItemRaw = itemRawByBubbleId.get(ingredientItemBubbleId) ?? null;
+        if (!ingredientItemBubbleId || !ingredientItemRaw) continue;
+        const quantidadeNum = parseBubbleNumber((ingredientRaw as any)?.quantidade);
+        const currentUnitCost = parseBubbleNumber((ingredientItemRaw as any)?.custo_medio);
+        const custoTotal = currentUnitCost > 0 ? quantidadeNum * currentUnitCost : parseBubbleNumber((ingredientRaw as any)?.custo);
+        rows.push({
+          id: ingredientBubbleId,
+          ingredientId: ingredientItemBubbleId,
+          item: String((ingredientItemRaw as any)?.nome ?? "").trim() || "-",
+          quantidade: formatBubbleQuantity3(quantidadeNum),
+          unidade: String((ingredientItemRaw as any)?.unidade_medida ?? "").trim() || "Und",
+          custoTotal,
+        });
+        normalizedRecipeIngredientSources.push({
+          bubbleId: ingredientBubbleId,
+          recipeBubbleId,
+          ingredientItemBubbleId,
+          quantidade: quantidadeNum,
+          custo: custoTotal,
+          temporario: parseBubbleBool((ingredientRaw as any)?.ingrediente_temporario),
+          raw: ingredientRaw,
+        });
+      }
+      recipeIngredientRows.set(recipeBubbleId, rows);
+    }
+
     const fichasTecnicasRows: any[] = [];
     const prePreparoRows: any[] = [];
     for (const r of itemRows) {
@@ -262,7 +319,7 @@ export async function POST(req: NextRequest) {
           thumb: "burger",
           recipeYield: rendimentoNum,
           ingredientsTotal: custoTotalNum,
-          ingredientRows: [],
+          ingredientRows: recipeIngredientRows.get(bubbleItemId) ?? [],
           modoPreparo,
         });
       } else {
@@ -276,7 +333,13 @@ export async function POST(req: NextRequest) {
           rendimento: rendimentoNum > 0 ? `${formatBubbleQuantity3(rendimentoNum)} ${unidade}` : "-",
           custoUnitario: `${formatMoneyBRL(custoUnitarioNum)} / ${unidade}`,
           validadeDias,
-          ingredientes: [],
+          ingredientes: (recipeIngredientRows.get(bubbleItemId) ?? []).map((row: any) => ({
+            id: row.id,
+            item: row.item,
+            quantidade: row.quantidade,
+            unidade: row.unidade,
+            custoCents: Math.round(Number(row.custoTotal ?? 0) * 100),
+          })),
           modoPreparo,
         });
       }
@@ -489,6 +552,8 @@ export async function POST(req: NextRequest) {
     // projection, but CMV consumers must not depend on embedded JSON forever.
     let normalizedInvoiceItems = 0;
     let normalizedInvoiceItemsSkipped = 0;
+    let normalizedRecipeIngredients = 0;
+    let normalizedRecipeIngredientsSkipped = 0;
     const { data: targetCompanyRow } = await supabase.from("companies").select("id").eq("bubble_id", companyId).maybeSingle();
     let targetCompanyId = String((targetCompanyRow as any)?.id ?? "").trim();
     if (!targetCompanyId) {
@@ -512,6 +577,41 @@ export async function POST(req: NextRequest) {
         if (bubbleId && id) targetItemIdByBubbleId.set(bubbleId, id);
         const nameKey = String(row?.name ?? "").replace(/\s+/g, " ").trim().toLocaleUpperCase("pt-BR");
         if (nameKey && id && !targetItemIdByName.has(nameKey)) targetItemIdByName.set(nameKey, id);
+      }
+      const normalizedRecipeRows: any[] = [];
+      for (const source of normalizedRecipeIngredientSources) {
+        const recipeItemId = targetItemIdByBubbleId.get(String(source?.recipeBubbleId ?? "")) ?? "";
+        const ingredientItemId = targetItemIdByBubbleId.get(String(source?.ingredientItemBubbleId ?? "")) ?? "";
+        if (!recipeItemId || !ingredientItemId || !String(source?.bubbleId ?? "").trim()) {
+          normalizedRecipeIngredientsSkipped += 1;
+          continue;
+        }
+        normalizedRecipeRows.push({
+          company_id: targetCompanyId,
+          bubble_id: String(source.bubbleId),
+          recipe_item_id: recipeItemId,
+          ingredient_item_id: ingredientItemId,
+          quantidade: Number(source.quantidade ?? 0),
+          custo: Number(source.custo ?? 0),
+          ingrediente_temporario: Boolean(source.temporario),
+          created_by_user_id: userId,
+          raw: { bubble: source.raw ?? {}, system: { source: "bubble_obj_repair_states" } },
+        });
+      }
+      const migratedRecipeItemIds = uniqueStrings(normalizedRecipeRows.map((row: any) => String(row.recipe_item_id ?? "")));
+      if (migratedRecipeItemIds.length) {
+        const { error: clearRecipeIngredientsError } = await supabase
+          .from("recipe_ingredients")
+          .delete()
+          .eq("company_id", targetCompanyId)
+          .in("recipe_item_id", migratedRecipeItemIds);
+        if (clearRecipeIngredientsError) throw new Error(clearRecipeIngredientsError.message);
+      }
+      for (let offset = 0; offset < normalizedRecipeRows.length; offset += 500) {
+        const chunk = normalizedRecipeRows.slice(offset, offset + 500);
+        const { error: recipeIngredientsError } = await supabase.from("recipe_ingredients").upsert(chunk as any, { onConflict: "company_id,bubble_id" } as any);
+        if (recipeIngredientsError) throw new Error(recipeIngredientsError.message);
+        normalizedRecipeIngredients += chunk.length;
       }
       const sourceItemNameByBubbleId = new Map<string, string>();
       for (const sourceItemRow of itemRows) {
@@ -633,6 +733,8 @@ export async function POST(req: NextRequest) {
           entradas: entradasUpserts.length,
           invoiceItems: normalizedInvoiceItems,
           invoiceItemsSkipped: normalizedInvoiceItemsSkipped,
+          recipeIngredients: normalizedRecipeIngredients,
+          recipeIngredientsSkipped: normalizedRecipeIngredientsSkipped,
           desperdicios: desperdicioUpserts.length,
         },
       },
