@@ -766,9 +766,19 @@ export async function POST(req: NextRequest) {
             .filter(Boolean),
         ),
       );
-      const { data: despRowsDb } = despIdsToLoad.length
-        ? await supabase.from("desperdicios").select("id,item,motivo,custo").in("id", despIdsToLoad).limit(50)
-        : await supabase.from("desperdicios").select("id,item,motivo,custo").like("id", `${despPrefix}%`).limit(20);
+      const despRowsDb: any[] = [];
+      if (despIdsToLoad.length) {
+        for (let offset = 0; offset < despIdsToLoad.length; offset += 200) {
+          const ids = despIdsToLoad.slice(offset, offset + 200);
+          const { data, error } = await supabase.from("desperdicios").select("id,item,motivo,custo").in("id", ids).limit(ids.length);
+          if (error) throw new Error(error.message);
+          despRowsDb.push(...(data ?? []));
+        }
+      } else {
+        const { data, error } = await supabase.from("desperdicios").select("id,item,motivo,custo").like("id", `${despPrefix}%`).limit(20);
+        if (error) throw new Error(error.message);
+        despRowsDb.push(...(data ?? []));
+      }
       const despById = new Map<string, any>((despRowsDb ?? []).map((r: any) => [String(r?.id ?? ""), r]));
       for (const r of desperdicioControl) {
         const d = mapDesperdicio((r as any)?.raw_payload_json ?? {});
