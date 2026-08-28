@@ -354,14 +354,15 @@ export async function POST(req: NextRequest) {
     }
 
     const fornecedorNameById: Record<string, string> = {};
+    const fornecedorStateKeyById: Record<string, string> = {};
     const fornecedoresInfo: Record<string, any> = {};
     for (const r of fornecedoresRows) {
       const f = mapFornecedor(r?.raw_payload_json ?? {});
       if (!f.bubbleFornecedorId) continue;
-      if (f.nome) fornecedorNameById[f.bubbleFornecedorId] = f.nome;
-      const nome = String(f.nome ?? "").trim();
-      if (!nome) continue;
-      const k = nome.toUpperCase();
+      const nome = String(f.nome ?? "").trim() || "-";
+      fornecedorNameById[f.bubbleFornecedorId] = nome;
+      const k = nome === "-" ? `__SEM_NOME__:${f.bubbleFornecedorId}` : nome.toUpperCase();
+      fornecedorStateKeyById[f.bubbleFornecedorId] = k;
       fornecedoresInfo[k] = {
         fornecedor: nome,
         vendedor: String((f as any)?.vendedor ?? "").trim(),
@@ -373,8 +374,7 @@ export async function POST(req: NextRequest) {
     const fornecedoresProdutos: Record<string, string[]> = {};
     for (const r of itensFornecedoresRows) {
       const it = mapItemFornecedor(r?.raw_payload_json ?? {});
-      const fornNome = String(fornecedorNameById[it.bubbleFornecedorId] ?? "").trim();
-      const key = fornNome ? fornNome.toUpperCase() : "";
+      const key = String(fornecedorStateKeyById[it.bubbleFornecedorId] ?? "").trim();
       if (!key) continue;
       const insumoNome = it.bubbleItemId ? String((insumoByBubbleId.get(it.bubbleItemId) as any)?.item ?? "").trim() : "";
       const nomeItem = String(it.nomeItem || insumoNome || "").trim();

@@ -605,9 +605,9 @@ async function processStagingBatch(args: {
 
       if (baseType === "fornecedores") {
         const f = mapFornecedor(raw);
-        const nome = String(f.nome ?? "").trim();
-        if (nome) {
-          const k1 = nome.toUpperCase();
+        const nome = String(f.nome ?? "").trim() || "-";
+        {
+          const k1 = nome === "-" ? `__SEM_NOME__:${bubbleUniqueId}` : nome.toUpperCase();
           info[k1] = {
             fornecedor: nome,
             vendedor: String((f as any)?.vendedor ?? "").trim(),
