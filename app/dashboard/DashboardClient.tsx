@@ -79,12 +79,12 @@ const legendItems = [
   { label: "Revenda", tone: "green" },
   { label: "Limpeza", tone: "greenDark" },
   { label: "Hortifruti", tone: "red" },
-  { label: "Matéria Prima", tone: "yellow" },
+  { label: "Mat?ria Prima", tone: "yellow" },
   { label: "Embalagens", tone: "blue" },
-  { label: "Laticínios", tone: "purple" },
+  { label: "Latic?nios", tone: "purple" },
   { label: "Uso interno", tone: "mint" },
   { label: "Pizza", tone: "pink" },
-  { label: "Pré-Preparo", tone: "lime" },
+  { label: "Pr?-Preparo", tone: "lime" },
   { label: "Temperos", tone: "orange" },
 ] as const;
 
@@ -130,7 +130,7 @@ function PieChart({ slices, size = 220 }: { slices: PieSlice[]; size?: number })
   let start = 0;
   return (
     <div ref={wrapRef} className={styles.pieWrap} style={{ width: size, height: size }}>
-      <svg width={size} height={size} viewBox={`0 0 ${view} ${view}`} role="img" aria-label="Distribuição por categoria">
+      <svg width={size} height={size} viewBox={`0 0 ${view} ${view}`} role="img" aria-label="Distribui??o por categoria">
         <g>
           {list.map((s) => {
             const weight = totalValue > 0 ? Math.max(0, s.value) : 1;
@@ -169,7 +169,7 @@ function PieChart({ slices, size = 220 }: { slices: PieSlice[]; size?: number })
         <div className={styles.pieTooltip} style={{ left: hover.x + 10, top: hover.y + 10 }}>
           <div className={styles.pieTooltipTitle}>{hover.label}</div>
           <div className={styles.pieTooltipValue}>
-            {formatBrlFromCents(hover.value)} •{" "}
+            {formatBrlFromCents(hover.value)} ?{" "}
             {hover.pct.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
           </div>
         </div>
@@ -709,7 +709,7 @@ function parseBrlToCents(input: string) {
 function parseUnitFromQtyLabel(input: string) {
   const raw = String(input ?? "").trim();
   if (!raw) return "Und";
-  const matches = raw.match(/[A-Za-zÀ-ÿ]+/g);
+  const matches = raw.match(/[A-Za-z?-?]+/g);
   if (!matches || !matches[0]) return "Und";
   return matches[matches.length - 1] ?? "Und";
 }
@@ -797,7 +797,7 @@ function formatDateLabelDDMMYYYY(d: Date) {
 function parseDateLabelLoose(value: string) {
   const raw = value.trim();
   if (!raw) return null;
-  const m = raw.match(/^(\d{1,2})\s*([A-Za-zÀ-ÿ]{3,})[,\s]+(\d{4})$/);
+  const m = raw.match(/^(\d{1,2})\s*([A-Za-z?-?]{3,})[,\s]+(\d{4})$/);
   if (!m) return null;
   const day = Number.parseInt(m[1], 10);
   const monRaw = m[2].toLowerCase().replace(".", "");
@@ -809,7 +809,7 @@ function parseDateLabelLoose(value: string) {
     fev: 1,
     fevereiro: 1,
     mar: 2,
-    março: 2,
+    mar?o: 2,
     marco: 2,
     apr: 3,
     abr: 3,
@@ -971,7 +971,7 @@ function buildPriorInventoryBalances(contagens: InventarioContagem[], beforeTime
 function parseQtyLabel(input: string) {
   const raw = input.trim();
   if (!raw) return { qty: 0, unit: "" };
-  const m = raw.match(/^([0-9.,-]+)\s*([A-Za-zÀ-ÿ]+)?$/);
+  const m = raw.match(/^([0-9.,-]+)\s*([A-Za-z?-?]+)?$/);
   if (!m) return { qty: parsePtNumber(raw), unit: "" };
   const qty = parsePtNumber(m[1] ?? "");
   const unit = String(m[2] ?? "").trim();
@@ -1019,7 +1019,7 @@ function sanitizeFornecedorLabelForUI(input: unknown) {
   const raw = String(input ?? "");
   const cleaned = raw.replace(/[\u200B-\u200D\uFEFF\u00A0]/g, " ").trim();
   if (!cleaned) return "-";
-  if (cleaned === "□" || cleaned === "�") return "-";
+  if (cleaned === "?" || cleaned === "?") return "-";
   return cleaned;
 }
 
@@ -1189,9 +1189,9 @@ export default function DashboardClient() {
     const checkout = String(searchParams.get("checkout") ?? "").trim().toLowerCase();
     if (!checkout) return;
     if (checkout === "success") showToast("Plano PRO ativado com sucesso.", "success", 8000);
-    else if (checkout === "cancel") showToast("Pagamento cancelado. Seu período de avaliação continua ativo.", "error", 9000);
-    else if (checkout === "processing") showToast("Pagamento recebido. Aguardando confirmação.", "success", 9000);
-    else if (checkout === "error") showToast("Não foi possível iniciar a assinatura. Você pode tentar novamente em Ajustes.", "error", 10000);
+    else if (checkout === "cancel") showToast("Pagamento cancelado. Seu per?odo de avalia??o continua ativo.", "error", 9000);
+    else if (checkout === "processing") showToast("Pagamento recebido. Aguardando confirma??o.", "success", 9000);
+    else if (checkout === "error") showToast("N?o foi poss?vel iniciar a assinatura. Voc? pode tentar novamente em Ajustes.", "error", 10000);
     try {
       const url = new URL(window.location.href);
       url.searchParams.delete("checkout");
@@ -1283,7 +1283,7 @@ export default function DashboardClient() {
   }
 
   async function hardRestartSyncAndReload() {
-    showToast("Reinício Bubble desativado (modo CSV-only).", "error", 7000);
+    showToast("Rein?cio Bubble desativado (modo CSV-only).", "error", 7000);
   }
 
   useEffect(() => {
@@ -1494,7 +1494,7 @@ export default function DashboardClient() {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorEquivalenciasMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar fornecedores no banco de dados.", "error", 9000);
+        showToast("N?o foi poss?vel salvar fornecedores no banco de dados.", "error", 9000);
       });
     }, 450);
   }, [fornecedorEquivalenciasMap, fornecedorInfoMap, fornecedorProdutosMap]);
@@ -1650,7 +1650,7 @@ export default function DashboardClient() {
   }, [periodOptions]);
 
   useEffect(() => {
-    if (inventoryOptions.length >= 2 && calcError.includes("Cadastre pelo menos 2 inventários")) setCalcError("");
+    if (inventoryOptions.length >= 2 && calcError.includes("Cadastre pelo menos 2 invent?rios")) setCalcError("");
   }, [calcError, inventoryOptions.length]);
 
   useEffect(() => {
@@ -1926,14 +1926,14 @@ export default function DashboardClient() {
       const startOpt = inventoryOptions.find((o) => o.iso === startDate) ?? inventoryOptions.find((o) => o.label === startDate) ?? null;
       const endOpt = inventoryOptions.find((o) => o.iso === endDate) ?? inventoryOptions.find((o) => o.label === endDate) ?? null;
       if (!startOpt || !endOpt) {
-        setCalcError("Cadastre pelo menos 2 inventários para calcular o CMV.");
+        setCalcError("Cadastre pelo menos 2 invent?rios para calcular o CMV.");
         return;
       }
 
       const startD = parseDateDDMMYYYY(startOpt.label);
       const endD = parseDateDDMMYYYY(endOpt.label);
       if (!startD || !endD) {
-        setCalcError("As datas de inventário precisam estar no formato DD/MM/AAAA.");
+        setCalcError("As datas de invent?rio precisam estar no formato DD/MM/AAAA.");
         return;
       }
 
@@ -1945,13 +1945,13 @@ export default function DashboardClient() {
       const contagemStart = contagens.find((c) => c.data === startOpt.label) ?? null;
       const contagemEnd = contagens.find((c) => c.data === endOpt.label) ?? null;
       if (!contagemStart || !contagemEnd) {
-        setCalcError("Não foi possível localizar os inventários selecionados.");
+        setCalcError("N?o foi poss?vel localizar os invent?rios selecionados.");
         return;
       }
 
-      // O fluxo do período já foi calculado quando as datas foram selecionadas.
-      // Reaproveitá-lo evita repetir toda a varredura de inventários, entradas,
-      // insumos e pré-preparos no clique, que bloqueava contas com muitos dados.
+      // O fluxo do per?odo j? foi calculado quando as datas foram selecionadas.
+      // Reaproveit?-lo evita repetir toda a varredura de invent?rios, entradas,
+      // insumos e pr?-preparos no clique, que bloqueava contas com muitos dados.
       if (periodFlow?.startIso === startOpt.iso && periodFlow?.endIso === endOpt.iso) {
         const revenueCents = parseBrlToCents(revenue);
         const targetCmvPercent = targetCmvProvided && targetCmvValue >= 1 && targetCmvValue <= 99 ? targetCmvValue : null;
@@ -1982,7 +1982,7 @@ export default function DashboardClient() {
         const computedAt = Date.now();
         setCalcComputedAt(computedAt);
         writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
-        showToast("Cálculo feito.", "success");
+        showToast("C?lculo feito.", "success");
         if (!searchParams.get("itemId") && !searchParams.get("item")) {
           setHistoryItem(null);
           setDetailsTab("entradas");
@@ -2194,7 +2194,7 @@ export default function DashboardClient() {
       const computedAt = Date.now();
       setCalcComputedAt(computedAt);
       writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
-      showToast("Cálculo feito.", "success");
+      showToast("C?lculo feito.", "success");
       if (!searchParams.get("itemId") && !searchParams.get("item")) {
         setHistoryItem(null);
         setDetailsTab("entradas");
@@ -2262,7 +2262,7 @@ export default function DashboardClient() {
         medida: unit || "Und",
         custoMedio: r.custoUnitario,
         categoria: r.categoria ?? "-",
-        especificacao: "Pré-Preparo",
+        especificacao: "Pr?-Preparo",
         ocultar: false,
       } as InsumoStoreItem;
     });
@@ -2503,9 +2503,9 @@ export default function DashboardClient() {
   }, [calc?.cmvPercent]);
 
   const deltaLabel = useMemo(() => {
-    if (!calc) return "—";
+    if (!calc) return "?";
     const target = typeof calc.targetCmvPercent === "number" && Number.isFinite(calc.targetCmvPercent) ? calc.targetCmvPercent : null;
-    if (target == null) return "Meta não definida";
+    if (target == null) return "Meta n?o definida";
     const d = calc.deltaPp;
     const abs = Math.abs(d);
     const label = `${abs.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% p.p.`;
@@ -2517,13 +2517,13 @@ export default function DashboardClient() {
     const delta = calc.cmvPercent - lastCalc.cmvPercent;
     const abs = Math.abs(delta);
     const label = `${abs.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}% p.p.`;
-    if (delta < 0) return `${label} melhor que o cálculo anterior`;
-    if (delta > 0) return `${label} pior que o cálculo anterior`;
-    return `${label} igual ao cálculo anterior`;
+    if (delta < 0) return `${label} melhor que o c?lculo anterior`;
+    if (delta > 0) return `${label} pior que o c?lculo anterior`;
+    return `${label} igual ao c?lculo anterior`;
   }, [calc, lastCalc]);
 
   const desperdiciosLinha = useMemo(() => {
-    return `${formatBrlFromCents(calc?.desperdiciosCents ?? 0)} em desperdícios no período`;
+    return `${formatBrlFromCents(calc?.desperdiciosCents ?? 0)} em desperd?cios no per?odo`;
   }, [calc?.desperdiciosCents]);
 
   const categoriaChart = useMemo(() => {
@@ -2688,7 +2688,7 @@ export default function DashboardClient() {
         out.push({
           t,
           data: normalizeHistoryDateLabel(dateLabel || "-"),
-          fornecedor: String(e.responsavel ?? "").trim() || "Pré-preparo",
+          fornecedor: String(e.responsavel ?? "").trim() || "Pr?-preparo",
           qtd: `${String(e.quantidade ?? "").trim() || "0,000"} ${unit}`.trim(),
           preco: `${formatBrlFromCents(unitCostCents)} / ${unit}`,
           subtotal: formatBrlFromCents(subtotalCents),
@@ -2869,6 +2869,9 @@ export default function DashboardClient() {
       const key = stableKey.toUpperCase();
       if (!key) return;
       const info = fornecedorInfoMap[stableKey] || fornecedorInfoMap[key] || fornecedorInfoMap[raw.toUpperCase()];
+      // A migrated db:* key without supplier metadata is a dangling internal
+      // relationship, not a supplier name that should be shown to users.
+      if (stableKey.toLowerCase().startsWith("db:") && !info?.fornecedor?.trim()) return;
       const prev = byFornecedor.get(key);
       if (!prev) {
         byFornecedor.set(key, {
@@ -3057,7 +3060,7 @@ export default function DashboardClient() {
   function openDeleteCategory(name: string) {
     const count = categoryCounts.get(name) ?? 0;
     if (count > 0) {
-      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
+      showToast("N?o ? poss?vel excluir uma categoria que possui itens vinculados.", "error");
       return;
     }
     setDeletingCategoryName(name);
@@ -3075,7 +3078,7 @@ export default function DashboardClient() {
     const name = deletingCategoryName;
     if (!name) return;
     if (deletingCategoryCount > 0) {
-      showToast("Não é possível excluir uma categoria que possui itens vinculados.", "error");
+      showToast("N?o ? poss?vel excluir uma categoria que possui itens vinculados.", "error");
       cancelDeleteCategory();
       return;
     }
@@ -3271,42 +3274,42 @@ export default function DashboardClient() {
         >
           <div style={{ fontWeight: 900, marginBottom: 6 }}>Debug</div>
           <div>
-            <span style={{ fontWeight: 800 }}>Versão:</span> {debugVersion || "—"}
+            <span style={{ fontWeight: 800 }}>Vers?o:</span> {debugVersion || "?"}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Host:</span> {debugHost || "—"}
+            <span style={{ fontWeight: 800 }}>Host:</span> {debugHost || "?"}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Deploy:</span> {debugDeployUrl || "—"}
+            <span style={{ fontWeight: 800 }}>Deploy:</span> {debugDeployUrl || "?"}
           </div>
           <div>
             <span style={{ fontWeight: 800 }}>Conta:</span>{" "}
-            {String(debugContext?.user?.email ?? "").trim() || String(debugContext?.user?.userId ?? "").trim() || "—"}
+            {String(debugContext?.user?.email ?? "").trim() || String(debugContext?.user?.userId ?? "").trim() || "?"}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Bubble URL:</span> {debugBubbleBaseUrl || "—"} •{" "}
+            <span style={{ fontWeight: 800 }}>Bubble URL:</span> {debugBubbleBaseUrl || "?"} ?{" "}
             {debugHasBubbleToken ? "token ok" : "token vazio"}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Sync:</span> {String(debugContext?.bubbleSync?.phase ?? "") || "—"} •{" "}
-            {String(debugContext?.bubbleSync?.import?.domain ?? "") || "—"} • {String(debugContext?.bubbleSync?.import?.status ?? "") || "—"}
+            <span style={{ fontWeight: 800 }}>Sync:</span> {String(debugContext?.bubbleSync?.phase ?? "") || "?"} ?{" "}
+            {String(debugContext?.bubbleSync?.import?.domain ?? "") || "?"} ? {String(debugContext?.bubbleSync?.import?.status ?? "") || "?"}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Filtro:</span> {String(debugContext?.bubbleSync?.filter?.mode ?? "") || "—"}{" "}
-            {String(debugContext?.bubbleSync?.filter?.email ?? "") ? `• ${String(debugContext?.bubbleSync?.filter?.email ?? "")}` : ""}
+            <span style={{ fontWeight: 800 }}>Filtro:</span> {String(debugContext?.bubbleSync?.filter?.mode ?? "") || "?"}{" "}
+            {String(debugContext?.bubbleSync?.filter?.email ?? "") ? `? ${String(debugContext?.bubbleSync?.filter?.email ?? "")}` : ""}
           </div>
           <div>
-            <span style={{ fontWeight: 800 }}>Item:</span> {historyItem?.item ?? "—"} • {historicoEntradas.length} entradas
+            <span style={{ fontWeight: 800 }}>Item:</span> {historyItem?.item ?? "?"} ? {historicoEntradas.length} entradas
           </div>
           <div>
             <span style={{ fontWeight: 800 }}>DB:</span>{" "}
             {debugStats?.counts
-              ? `insumos=${String(debugStats.counts.insumos ?? "—")} • entradas=${String(debugStats.counts.entradas ?? "—")} • fornecedores=${String(debugStats.counts.fornecedores ?? "—")}`
-              : "—"}
+              ? `insumos=${String(debugStats.counts.insumos ?? "?")} ? entradas=${String(debugStats.counts.entradas ?? "?")} ? fornecedores=${String(debugStats.counts.fornecedores ?? "?")}`
+              : "?"}
           </div>
           <div style={{ marginTop: 6, color: "#6b7280" }}>
             <span style={{ fontWeight: 800, color: "#374151" }}>Amostra:</span>{" "}
-            {historicoEntradas.slice(0, 2).map((h, i) => `${i + 1}) ${h.data} | ${h.fornecedor} | ${h.qtd} | ${h.preco} | ${h.subtotal}`).join(" • ") || "—"}
+            {historicoEntradas.slice(0, 2).map((h, i) => `${i + 1}) ${h.data} | ${h.fornecedor} | ${h.qtd} | ${h.preco} | ${h.subtotal}`).join(" ? ") || "?"}
           </div>
           <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button
@@ -3322,7 +3325,7 @@ export default function DashboardClient() {
                 cursor: isLoadingTables ? "default" : "pointer",
               }}
             >
-              Forçar reinício (hard)
+              For?ar rein?cio (hard)
             </button>
           </div>
         </div>
@@ -3342,11 +3345,11 @@ export default function DashboardClient() {
                 <span className={styles.hideAlertTitle}>{hideAlert.item}</span>
               </div>
               <div className={styles.hideAlertText}>
-                {hideAlert.tone === "show" ? "Item incluído no cálculo de CMV." : "Item ocultado do cálculo de CMV."}
+                {hideAlert.tone === "show" ? "Item inclu?do no c?lculo de CMV." : "Item ocultado do c?lculo de CMV."}
               </div>
             </div>
             <button type="button" className={styles.hideAlertClose} aria-label="Fechar alerta" onClick={() => setHideAlert(null)}>
-              ×
+              ?
             </button>
           </div>
         ) : null}
@@ -3440,29 +3443,29 @@ export default function DashboardClient() {
             <span className={styles.topHintIcon}>
               <IconInfoSmall />
             </span>
-            Selecione o período, insira o faturamento referente a essas datas e defina a meta de CMV (opcional). Em seguida, clique
+            Selecione o per?odo, insira o faturamento referente a essas datas e defina a meta de CMV (opcional). Em seguida, clique
             em Calcular CMV.
           </div>
 
           <details className={styles.concepts}>
-            <summary className={styles.conceptsSummary}>Conceitos iniciais e pré-requisitos</summary>
+            <summary className={styles.conceptsSummary}>Conceitos iniciais e pr?-requisitos</summary>
             <div className={styles.conceptsBody}>
-              <div className={styles.conceptsTitle}>O que é</div>
+              <div className={styles.conceptsTitle}>O que ?</div>
               <div className={styles.conceptsText}>
-                CMV é Custo de Mercadoria Vendida, um número que mostra quantos % do faturamento foi gasto com mercadorias.
+                CMV ? Custo de Mercadoria Vendida, um n?mero que mostra quantos % do faturamento foi gasto com mercadorias.
               </div>
 
-              <div className={styles.conceptsTitle}>Por que é importante</div>
+              <div className={styles.conceptsTitle}>Por que ? importante</div>
               <div className={styles.conceptsText}>
-                Pois é o maior gasto do seu restaurante e tudo o que você reduzir do CMV vira lucro. É o caminho mais rápido para lucrar mais.
+                Pois ? o maior gasto do seu restaurante e tudo o que voc? reduzir do CMV vira lucro. ? o caminho mais r?pido para lucrar mais.
               </div>
 
-              <div className={styles.conceptsTitle}>Como é calculado</div>
-              <div className={styles.conceptsText}>CMV = Estoque Inicial + Entradas − Estoque Final</div>
+              <div className={styles.conceptsTitle}>Como ? calculado</div>
+              <div className={styles.conceptsText}>CMV = Estoque Inicial + Entradas ? Estoque Final</div>
 
-              <div className={styles.conceptsTitle}>Pré-requisitos</div>
+              <div className={styles.conceptsTitle}>Pr?-requisitos</div>
               <div className={styles.conceptsText}>
-                Para calcular o CMV, é necessário ter 2 inventários cadastrados (estoque inicial e final) e lançar todas as compras (entradas de nota) entre as 2 datas.
+                Para calcular o CMV, ? necess?rio ter 2 invent?rios cadastrados (estoque inicial e final) e lan?ar todas as compras (entradas de nota) entre as 2 datas.
               </div>
             </div>
           </details>
@@ -3487,11 +3490,11 @@ export default function DashboardClient() {
             <div className={styles.deltaCard}>
               <div className={styles.deltaList}>
                 <div className={styles.deltaRow}>{deltaLabel}</div>
-                <div className={styles.deltaRow}>{comparativoAnteriorLabel || "—"}</div>
+                <div className={styles.deltaRow}>{comparativoAnteriorLabel || "?"}</div>
                 <div className={styles.deltaRow}>{desperdiciosLinha}</div>
               </div>
               <button type="button" className={styles.deltaLink} onClick={() => setIsVariacaoOpen(true)} disabled={!calc}>
-                Ver variação de custo dos insumos
+                Ver varia??o de custo dos insumos
               </button>
             </div>
 
@@ -3546,7 +3549,7 @@ export default function DashboardClient() {
                   </div>
                   <div className={styles.statText}>
                     <p className={styles.statValue}>{formatBrlFromCents(periodFlow?.comprasCents ?? calc?.comprasCents ?? 0)}</p>
-                    <p className={styles.statLabel}>ENTRADAS PERÍODO</p>
+                    <p className={styles.statLabel}>ENTRADAS PER?ODO</p>
                   </div>
                 </div>
 
@@ -3566,7 +3569,7 @@ export default function DashboardClient() {
                   </div>
                   <div className={styles.statText}>
                     <p className={styles.statValue}>{formatBrlFromCents(periodFlow?.saidasCents ?? calc?.saidasCents ?? 0)}</p>
-                    <p className={styles.statLabel}>SAÍDAS PERÍODO</p>
+                    <p className={styles.statLabel}>SA?DAS PER?ODO</p>
                   </div>
                 </div>
               </div>
@@ -3599,13 +3602,13 @@ export default function DashboardClient() {
                   onClick={closeHistoryPanel}
                 >
                   <span className={styles.itemBackIcon} aria-hidden>
-                    ←
+                    ?
                   </span>
                   <span className={styles.itemBackText}>Detalhes do Item / {historyItem.item}</span>
                 </button>
                 <div className={styles.itemMoreWrap} ref={itemMenuRef}>
-                  <button type="button" className={styles.itemMore} aria-label="Mais opções" onClick={() => setIsItemMenuOpen((v) => !v)}>
-                    ⋮
+                  <button type="button" className={styles.itemMore} aria-label="Mais op??es" onClick={() => setIsItemMenuOpen((v) => !v)}>
+                    ?
                   </button>
                   {isItemMenuOpen ? (
                     <div className={styles.itemMenu}>
@@ -3642,7 +3645,7 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div className={styles.historyTitle}>Histórico de Entradas</div>
+                        <div className={styles.historyTitle}>Hist?rico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>
@@ -3653,7 +3656,7 @@ export default function DashboardClient() {
                             <div className={styles.historyTh}>Data</div>
                             <div className={styles.historyThItem}>Fornecedor</div>
                             <div className={styles.historyThRight}>Qtd</div>
-                            <div className={styles.historyThRight}>Preço</div>
+                            <div className={styles.historyThRight}>Pre?o</div>
                             <div className={styles.historyThRight}>Subtotal</div>
                           </div>
 
@@ -3681,7 +3684,7 @@ export default function DashboardClient() {
                           <div className={styles.fornecedorHead}>
                             <div className={styles.historyThItem}>Fornecedor</div>
                             <div className={styles.historyTh}>Vendedor</div>
-                            <div className={styles.historyTh}>Endereço</div>
+                            <div className={styles.historyTh}>Endere?o</div>
                           </div>
 
                           {historicoFornecedores.length ? (
@@ -3729,7 +3732,7 @@ export default function DashboardClient() {
                           <IconMoneySmall />
                         </div>
                         <div className={styles.itemAsideKpiText}>
-                          <div className={styles.itemAsideKpiLabel}>Custo Médio</div>
+                          <div className={styles.itemAsideKpiLabel}>Custo M?dio</div>
                           <div className={styles.itemAsideKpiValue}>{selectedInsumoCustoMedioLabel}</div>
                         </div>
                       </div>
@@ -3738,7 +3741,7 @@ export default function DashboardClient() {
                           <IconCalendarSmall />
                         </div>
                         <div className={styles.itemAsideKpiText}>
-                          <div className={styles.itemAsideKpiLabel}>Última Entrada</div>
+                          <div className={styles.itemAsideKpiLabel}>?ltima Entrada</div>
                             <div className={styles.itemAsideKpiValue}>{normalizeHistoryDateLabel(historicoEntradas[0]?.data ?? "")}</div>
                         </div>
                       </div>
@@ -3766,9 +3769,9 @@ export default function DashboardClient() {
                           : column === "final"
                             ? "Estoque Final"
                             : column === "saidas"
-                              ? "Saídas"
+                              ? "Sa?das"
                               : column === "custo"
-                                ? "Custo Médio"
+                                ? "Custo M?dio"
                                 : "CMV";
                   return (
                     <div
@@ -3847,7 +3850,7 @@ export default function DashboardClient() {
               <div className={styles.modalHeader}>
                 <div className={styles.itemEditModalTitle}>Editar Item</div>
                 <button type="button" className={styles.itemEditModalClose} aria-label="Fechar" onClick={() => setIsEditItemOpen(false)}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -3875,7 +3878,7 @@ export default function DashboardClient() {
                 </div>
 
                 <div className={styles.itemEditField}>
-                  <div className={styles.itemEditLabel}>Especificação</div>
+                  <div className={styles.itemEditLabel}>Especifica??o</div>
                   <input className={styles.itemEditInput} value={editSpec} onChange={(e) => setEditSpec(e.target.value)} />
                 </div>
 
@@ -3921,7 +3924,7 @@ export default function DashboardClient() {
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Categorias de Itens</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsCategoriesOpen(false)}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -3986,7 +3989,7 @@ export default function DashboardClient() {
                                 className={styles.itemCategoryIconBtn}
                                 aria-label="Excluir categoria"
                                 onClick={() => openDeleteCategory(c)}
-                                title={(categoryCounts.get(c) ?? 0) > 0 ? "Não é possível excluir: existem itens vinculados" : ""}
+                                title={(categoryCounts.get(c) ?? 0) > 0 ? "N?o ? poss?vel excluir: existem itens vinculados" : ""}
                               >
                                 <IconTrash />
                               </button>
@@ -4011,7 +4014,7 @@ export default function DashboardClient() {
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{fornecedorModalLabel || fornecedorModalKey}</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={closeFornecedorModal}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -4031,7 +4034,7 @@ export default function DashboardClient() {
                     <IconPin />
                   </div>
                   <div className={styles.fornecedorProdutosTopText}>
-                    <div className={styles.fornecedorProdutosTopLabel}>Endereço</div>
+                    <div className={styles.fornecedorProdutosTopLabel}>Endere?o</div>
                     <div className={styles.fornecedorProdutosTopValue}>{fornecedorModalEndereco || "-"}</div>
                   </div>
                 </div>
@@ -4040,7 +4043,7 @@ export default function DashboardClient() {
               <div className={styles.fornecedorProdutosBody}>
                 <div className={styles.fornecedorProdutosTitle}>{`Produtos do Fornecedor (${fornecedorModalProdutos.length})`}</div>
                 <div className={styles.fornecedorProdutosSub}>
-                  Vincule os produtos a este fornecedor para facilitar o registro de compras e a seleção de itens nas notas.
+                  Vincule os produtos a este fornecedor para facilitar o registro de compras e a sele??o de itens nas notas.
                 </div>
 
                 <div className={styles.fornecedorProdutosAddRow}>
@@ -4065,12 +4068,12 @@ export default function DashboardClient() {
                         aria-label="Abrir lista"
                         onClick={() => setIsFornecedorProdutoMenuOpen((v) => !v)}
                       >
-                        ▾
+                        ?
                       </button>
                     </div>
 
                     {isFornecedorProdutoMenuOpen ? (
-                      <div className={styles.fornecedorProdutoDropdown} role="listbox" aria-label="Produtos disponíveis">
+                      <div className={styles.fornecedorProdutoDropdown} role="listbox" aria-label="Produtos dispon?veis">
                         {fornecedorProdutoSugestoes.length ? (
                           fornecedorProdutoSugestoes.map((name) => (
                             <button
@@ -4139,7 +4142,7 @@ export default function DashboardClient() {
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Excluir Item?</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDeleteItemOpen(false)}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -4148,7 +4151,7 @@ export default function DashboardClient() {
                   <IconTrash />
                 </div>
                 <div className={styles.itemDeleteText}>
-                  Caso exclua o item <strong>“{selectedInsumo?.item ?? historyItem?.item ?? ""}”</strong> não poderá recuperá-lo.
+                  Caso exclua o item <strong>?{selectedInsumo?.item ?? historyItem?.item ?? ""}?</strong> n?o poder? recuper?-lo.
                 </div>
               </div>
 
@@ -4170,7 +4173,7 @@ export default function DashboardClient() {
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Excluir Categoria?</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={cancelDeleteCategory}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -4179,7 +4182,7 @@ export default function DashboardClient() {
                   <IconTrash />
                 </div>
                 <div className={styles.itemDeleteText}>
-                  Caso exclua a categoria <strong>“{deletingCategoryName}”</strong> nao podera recupera-la.
+                  Caso exclua a categoria <strong>?{deletingCategoryName}?</strong> nao podera recupera-la.
                   {deletingCategoryCount ? (
                     <>
                       <br />
@@ -4206,9 +4209,9 @@ export default function DashboardClient() {
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsVariacaoOpen(false)}>
             <div className={`${styles.modal} ${styles.variacaoModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
-                <div className={styles.modalTitle}>Variação de Preço dos Insumos</div>
+                <div className={styles.modalTitle}>Varia??o de Pre?o dos Insumos</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsVariacaoOpen(false)}>
-                  ×
+                  ?
                 </button>
               </div>
 
@@ -4218,7 +4221,7 @@ export default function DashboardClient() {
                     <div className={styles.variacaoThItem}>Item</div>
                     <div className={styles.variacaoTh}>Custo inicial</div>
                     <div className={styles.variacaoTh}>Custo final</div>
-                    <div className={styles.variacaoTh}>Variação</div>
+                    <div className={styles.variacaoTh}>Varia??o</div>
                   </div>
 
                   {variacaoRows.map((r) => {
