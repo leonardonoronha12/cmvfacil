@@ -619,7 +619,6 @@ export default function InsumosClient() {
       try {
         setLoadError(null);
         if (readInsumosFromStore().length) {
-          rowsReadyRef.current = true;
           setIsLoadingTable(false);
         }
         const state = await loadInsumosStateFromSupabase();
