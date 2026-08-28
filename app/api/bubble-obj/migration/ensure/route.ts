@@ -1099,6 +1099,7 @@ async function updateMigrationTotals(supabase: ReturnType<typeof getSupabaseAdmi
   const { data: stagedAny, error: pendingStagedErr } = await supabase
     .from("bubble_obj_import_staging")
     .select("id")
+    .eq("run_id", runId)
     .eq("supabase_user_id", userId)
     .eq("status", "staged")
     .limit(1);
@@ -2128,6 +2129,7 @@ export async function POST(req: NextRequest) {
       const { data: stagedRows, error: stagedErr } = await supabase
         .from("bubble_obj_import_staging")
         .select("bubble_object_type")
+        .eq("run_id", runId)
         .eq("supabase_user_id", userId)
         .eq("status", "staged")
         .order("created_at", { ascending: true })
