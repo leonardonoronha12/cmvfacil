@@ -219,7 +219,7 @@ export function mapItemFornecedor(raw: any) {
 
 export function mapInventario(raw: any) {
   const bubbleInventarioId = normalizeText(pickAny(raw, ["_id"]));
-  const data = normalizeText(pickAny(raw, ["data_contagem"])) || new Date().toISOString().slice(0, 10);
+  const data = formatBubbleDateNumericPT(pickAny(raw, ["data_contagem"]));
   return { bubbleInventarioId, data };
 }
 
@@ -259,6 +259,15 @@ export function formatBubbleDateLabelPT(value: unknown) {
   if (!match) return raw;
   const month = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"][Number(match[2]) - 1];
   return month ? `${match[3]} ${month}, ${match[1]}` : raw;
+}
+
+export function formatBubbleDateNumericPT(value: unknown) {
+  const raw = normalizeText(value);
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+  if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(raw)) return raw;
+  const today = new Date();
+  return `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
 }
 
 export function mapItemNota(raw: any) {
