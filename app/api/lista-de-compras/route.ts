@@ -677,7 +677,10 @@ export async function GET(req: NextRequest) {
         legacyEndItems: legacyEndQtyByNameKey.size,
       });
 
-      const invIdsToLoad = Array.from(new Set([startInvId, endInvId].filter(Boolean)));
+      // Canonical inventory_items uses UUID foreign keys. Legacy inventory
+      // ids are resolved from `categorias` below and must never be sent to a
+      // UUID filter.
+      const invIdsToLoad = Array.from(new Set([startInvId, endInvId].filter((value) => isUuid(value))));
       const { data: invItemRows, error: invItemErr } = invIdsToLoad.length
         ? await supabaseServer
             .from("inventory_items")
