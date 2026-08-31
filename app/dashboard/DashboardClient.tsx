@@ -878,7 +878,12 @@ function readInventoryItemQuantity(item: any): number | null {
   }
 
   const raw = String(item?.estoqueFinal ?? "").trim();
-  return raw === "" ? null : parsePtNumber(raw);
+  // Inventory quantities arrive both as pt-BR decimals ("0,700") and as
+  // Bubble/JSON decimals ("0.700"). The generic currency parser treats a
+  // dot followed by three digits as a thousands separator, turning 0.700
+  // into 700. Inventory values are measurements, so use the domain parser
+  // that preserves dot-decimal quantities.
+  return raw === "" ? null : parseInventoryCountValue(raw);
 }
 
 function parseInventoryCountValue(input: unknown) {
