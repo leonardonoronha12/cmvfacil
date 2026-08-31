@@ -400,6 +400,32 @@ export async function POST(req: NextRequest) {
         } else if (baseType === "fornecedores") {
           dbTotal = fornecedoresDbError ? null : fornecedoresUnique;
           dbError = fornecedoresDbError;
+          // fornecedores_state is keyed by the display name because the UI
+          // intentionally consolidates duplicate supplier records from
+          // Bubble. Count that same semantic identity on the source side,
+          // while keeping unnamed records unique through their Bubble id.
+          const sourceSupplierKeys = new Set<string>();
+          for (const ot of objectTypes) {
+            const { data, error } = await supabase
+              .from("bubble_obj_import_control")
+              .select("bubble_unique_id,raw_payload_json")
+              .eq("supabase_user_id", userId)
+              .eq("bubble_object_type", ot)
+              .in("status", ["staged", "processed", "staged_only"])
+              .limit(50_000);
+            if (error) {
+              dbError = error.message;
+              break;
+            }
+            for (const row of data ?? []) {
+              const raw = (row as any)?.raw_payload_json ?? {};
+              const name = String(raw?.nome ?? "").replace(/\s+/g, " ").trim().toLocaleUpperCase("pt-BR");
+              const sourceId = String((row as any)?.bubble_unique_id ?? "").trim();
+              if (name) sourceSupplierKeys.add(name);
+              else if (sourceId) sourceSupplierKeys.add(`__SEM_NOME__:${sourceId}`);
+            }
+          }
+          if (!dbError) bubbleTotal = sourceSupplierKeys.size;
         }
         else if (baseType === "inventarios") {
           dbTotal = invCount.total;
