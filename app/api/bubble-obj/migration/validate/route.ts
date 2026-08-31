@@ -638,10 +638,20 @@ export async function POST(req: NextRequest) {
         const previous = latestInvItemByKey.get(key) ?? null;
         const previousRaw = (previous as any)?.raw_payload_json ?? {};
         const previousUpdatedAt = Date.parse(String((previousRaw as any)?.["Modified Date"] ?? (previousRaw as any)?.["Created Date"] ?? "")) || 0;
+        const createdAt = Date.parse(String((raw as any)?.["Created Date"] ?? "")) || 0;
+        const previousCreatedAt = Date.parse(String((previousRaw as any)?.["Created Date"] ?? "")) || 0;
+        const sourceId = String((row as any)?.bubble_unique_id ?? (raw as any)?._id ?? "");
+        const previousSourceId = String((previous as any)?.bubble_unique_id ?? (previousRaw as any)?._id ?? "");
         const nextHasValue = Boolean(String(mapped.estoqueFinal ?? "").trim());
         const previousMapped = previous ? mapItemInventario(previousRaw) : null;
         const previousHasValue = Boolean(String(previousMapped?.estoqueFinal ?? "").trim());
-        if (!previous || updatedAt > previousUpdatedAt || (updatedAt === previousUpdatedAt && nextHasValue && !previousHasValue)) latestInvItemByKey.set(key, row);
+        if (
+          !previous ||
+          updatedAt > previousUpdatedAt ||
+          (updatedAt === previousUpdatedAt && createdAt > previousCreatedAt) ||
+          (updatedAt === previousUpdatedAt && createdAt === previousCreatedAt && sourceId > previousSourceId) ||
+          (updatedAt === previousUpdatedAt && createdAt === previousCreatedAt && sourceId === previousSourceId && nextHasValue && !previousHasValue)
+        ) latestInvItemByKey.set(key, row);
       }
       const invItemControl = Array.from(latestInvItemByKey.values());
       const invIdsToLoad = Array.from(

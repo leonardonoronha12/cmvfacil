@@ -445,16 +445,32 @@ export async function POST(req: NextRequest) {
       const itensArr = Array.isArray(catObj.itens) ? (catObj.itens as any[]) : [];
       const raw = r?.raw_payload_json ?? {};
       const sourceUpdatedAt = Date.parse(String((raw as any)?.["Modified Date"] ?? (raw as any)?.["Created Date"] ?? "")) || 0;
-      const candidate = { id: insumoId, item: itemName, unidade, estoqueFinal: String(it.estoqueFinal ?? "") || "", __bubbleUpdatedAt: sourceUpdatedAt };
+      const sourceCreatedAt = Date.parse(String((raw as any)?.["Created Date"] ?? "")) || 0;
+      const candidate = {
+        id: insumoId,
+        item: itemName,
+        unidade,
+        estoqueFinal: String(it.estoqueFinal ?? "") || "",
+        __bubbleUpdatedAt: sourceUpdatedAt,
+        __bubbleCreatedAt: sourceCreatedAt,
+        __bubbleSourceId: sourceRowId,
+      };
       const existingIndex = itensArr.findIndex((x) => String((x as any)?.id ?? "") === insumoId);
       if (existingIndex < 0) {
         itensArr.push(candidate);
       } else {
         const existing = itensArr[existingIndex] as any;
         const existingUpdatedAt = Number(existing?.__bubbleUpdatedAt ?? 0) || 0;
+        const existingCreatedAt = Number(existing?.__bubbleCreatedAt ?? 0) || 0;
+        const existingSourceId = String(existing?.__bubbleSourceId ?? "");
         const candidateHasValue = Boolean(String(candidate.estoqueFinal ?? "").trim());
         const existingHasValue = Boolean(String(existing?.estoqueFinal ?? "").trim());
-        if (sourceUpdatedAt > existingUpdatedAt || (sourceUpdatedAt === existingUpdatedAt && candidateHasValue && !existingHasValue)) itensArr[existingIndex] = candidate;
+        if (
+          sourceUpdatedAt > existingUpdatedAt ||
+          (sourceUpdatedAt === existingUpdatedAt && sourceCreatedAt > existingCreatedAt) ||
+          (sourceUpdatedAt === existingUpdatedAt && sourceCreatedAt === existingCreatedAt && sourceRowId > existingSourceId) ||
+          (sourceUpdatedAt === existingUpdatedAt && sourceCreatedAt === existingCreatedAt && sourceRowId === existingSourceId && candidateHasValue && !existingHasValue)
+        ) itensArr[existingIndex] = candidate;
       }
       catObj.itens = itensArr;
       cats.set(catKey, catObj);
@@ -466,7 +482,9 @@ export async function POST(req: NextRequest) {
       const finalCats = cats
         ? Array.from(cats.values()).map((category: any) => ({
             ...category,
-            itens: (Array.isArray(category?.itens) ? category.itens : []).map(({ __bubbleUpdatedAt: _sourceUpdatedAt, ...item }: any) => item),
+            itens: (Array.isArray(category?.itens) ? category.itens : []).map(
+              ({ __bubbleUpdatedAt: _sourceUpdatedAt, __bubbleCreatedAt: _sourceCreatedAt, __bubbleSourceId: _sourceId, ...item }: any) => item,
+            ),
           }))
         : [];
       return { id: inv.id, data: inv.data, categorias: finalCats } as any;
