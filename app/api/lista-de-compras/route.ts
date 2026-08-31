@@ -549,18 +549,57 @@ export async function GET(req: NextRequest) {
         .order("data_contagem", { ascending: false })
         .limit(200);
       if (invErr) return json({ ok: false, error: invErr.message, source: "compat", readOnly: true }, { status: 500 });
+
+      // Inventories created by the current application are still persisted in
+      // the legacy-shaped `inventario` table. Load them for every member of
+      // the company so the shopping list uses the same dates and counts shown
+      // on the Inventory page, even before canonical `inventories` rows exist.
+      const { data: companyMemberRows, error: companyMembersErr } = await supabaseServer
+        .from("company_members")
+        .select("user_id")
+        .eq("company_id", companyId)
+        .limit(500);
+      if (companyMembersErr) return json({ ok: false, error: companyMembersErr.message, source: "compat", readOnly: false }, { status: 500 });
+      const companyUserIds = Array.from(
+        new Set((companyMemberRows ?? []).map((row: any) => String(row?.user_id ?? "").trim()).filter(Boolean)),
+      );
+      if (!companyUserIds.includes(userId)) companyUserIds.push(userId);
+      const legacyInventoryResults = await Promise.all(
+        companyUserIds.map((memberUserId) =>
+          supabaseServer
+            .from("inventario")
+            .select("id,data,categorias,created_at")
+            .like("id", `user:${memberUserId}:%`)
+            .order("created_at", { ascending: false })
+            .limit(400),
+        ),
+      );
+      const legacyInventoryError = legacyInventoryResults.find((result) => result.error)?.error;
+      if (legacyInventoryError) return json({ ok: false, error: legacyInventoryError.message, source: "compat", readOnly: false }, { status: 500 });
+      const legacyRows = legacyInventoryResults.flatMap((result) => (result.data ?? []) as any[]);
       await dbg("E", "api/lista-de-compras", "compat_inventories_loaded", {
         companyId,
         inventories: (invRows ?? []).length,
         sample: (invRows ?? []).slice(0, 5).map((r: any) => ({ id: String(r?.id ?? ""), data_contagem: r?.data_contagem ?? null })),
       });
 
-      const inventories = (invRows ?? []).map((r: any) => ({
+      const canonicalInventories = (invRows ?? []).map((r: any) => ({
         id: String(r?.id ?? "").trim(),
         bubble_id: r?.bubble_id ? String(r.bubble_id) : null,
         nome: String(r?.nome ?? "").trim(),
         data_contagem: r?.data_contagem ? String(r.data_contagem) : null,
       }));
+      const inventories = canonicalInventories.length
+        ? canonicalInventories
+        : legacyRows
+            .map((row: any) => ({
+              id: String(row?.id ?? "").trim(),
+              bubble_id: null,
+              nome: "Inventário",
+              data_contagem: parseDateOnlyLoose(row?.data),
+            }))
+            .filter((row: any) => row.id && row.data_contagem)
+            .sort((a: any, b: any) => String(b.data_contagem).localeCompare(String(a.data_contagem)));
 
       const endInvId =
         (endInventoryId && inventories.some((x) => x.id === endInventoryId) ? endInventoryId : "") || (inventories[0]?.id ? inventories[0].id : "");
@@ -592,19 +631,6 @@ export async function GET(req: NextRequest) {
         return Math.round((tb - ta) / 86_400_000);
       };
 
-      const legacyPrefix = `${id}:`;
-      const legacyInventarios = endDate || startDate
-        ? await supabaseServer
-            .from("inventario")
-            .select("id,data,categorias,created_at")
-            .like("id", `${legacyPrefix}%`)
-            .order("created_at", { ascending: false })
-            .limit(400)
-        : { data: [], error: null as any };
-      if ((legacyInventarios as any)?.error) {
-        await dbg("E", "api/lista-de-compras", "legacy_inventario_load_failed", { error: String((legacyInventarios as any)?.error?.message ?? "") });
-      }
-      const legacyRows = ((legacyInventarios as any)?.data ?? []) as any[];
       const findLegacyInventoryRow = (targetDate: string | null) => {
         if (!targetDate) return null;
         const targetT = Date.parse(targetDate);
@@ -1035,8 +1061,7 @@ export async function GET(req: NextRequest) {
         {
           ok: true,
           source: "compat",
-          readOnly: true,
-          banner: "Modo somente leitura.",
+          readOnly: false,
           rows: rowsCompat,
           totals,
           filters: { startInventoryId: startInvId || null, endInventoryId: endInvId || null, diasEstoque, prazoFornecedor },
