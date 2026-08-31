@@ -683,13 +683,19 @@ export async function POST(req: NextRequest) {
       }
       const entById = new Map<string, any>((entradasDbRows ?? []).map((r: any) => [String(r?.id ?? ""), r]));
       const itensNotasControl = await loadControl("itens_notas", 50_000).catch(() => []);
-      const itensNotaByNotaId = new Map<string, { count: number; subtotalSum: number }>();
+      const itensNotaByNotaId = new Map<string, { count: number; subtotalSum: number; hasPositiveSubtotal: boolean; hasPositiveUnitCost: boolean }>();
       for (const r of itensNotasControl) {
         const it = mapItemNota((r as any)?.raw_payload_json ?? {});
         if (!it.bubbleNotaId) continue;
-        const cur = itensNotaByNotaId.get(it.bubbleNotaId) ?? { count: 0, subtotalSum: 0 };
+        const cur = itensNotaByNotaId.get(it.bubbleNotaId) ?? { count: 0, subtotalSum: 0, hasPositiveSubtotal: false, hasPositiveUnitCost: false };
         const subtotal = parsePtNumber(String(it.subtotal ?? ""));
-        itensNotaByNotaId.set(it.bubbleNotaId, { count: cur.count + 1, subtotalSum: cur.subtotalSum + (subtotal || 0) });
+        const unitCost = parsePtNumber(String(it.custoUnitario ?? ""));
+        itensNotaByNotaId.set(it.bubbleNotaId, {
+          count: cur.count + 1,
+          subtotalSum: cur.subtotalSum + (subtotal || 0),
+          hasPositiveSubtotal: cur.hasPositiveSubtotal || subtotal > 0,
+          hasPositiveUnitCost: cur.hasPositiveUnitCost || unitCost > 0,
+        });
       }
       const insumoNames = new Set<string>(
         insumosRows
@@ -714,7 +720,7 @@ export async function POST(req: NextRequest) {
         if (bubbleItemsMeta && bubbleItemsMeta.count > 0) {
           const hasAnySubtotal = items.some((x) => parsePtNumber(String((x as any)?.subtotalLabel ?? (x as any)?.subtotal ?? "")) > 0);
           const hasAnyUnitCost = items.some((x) => parsePtNumber(String((x as any)?.custoUnitarioLabel ?? (x as any)?.custoUnitario ?? "")) > 0);
-          if (!hasAnySubtotal || !hasAnyUnitCost) {
+          if ((bubbleItemsMeta.hasPositiveSubtotal && !hasAnySubtotal) || (bubbleItemsMeta.hasPositiveUnitCost && !hasAnyUnitCost)) {
             contentValidation.mismatches.push({
               baseType: "notas_fiscais",
               bubbleId: nf.bubbleNotaId,

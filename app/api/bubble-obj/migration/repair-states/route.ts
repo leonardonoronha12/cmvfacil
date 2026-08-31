@@ -358,11 +358,12 @@ export async function POST(req: NextRequest) {
     const fornecedoresInfo: Record<string, any> = {};
     for (const r of fornecedoresRows) {
       const f = mapFornecedor(r?.raw_payload_json ?? {});
-      if (!f.bubbleFornecedorId) continue;
+      const bubbleFornecedorId = String(f.bubbleFornecedorId || r?.bubble_unique_id || "").trim();
+      if (!bubbleFornecedorId) continue;
       const nome = String(f.nome ?? "").trim() || "-";
-      fornecedorNameById[f.bubbleFornecedorId] = nome;
-      const k = nome === "-" ? `__SEM_NOME__:${f.bubbleFornecedorId}` : nome.toUpperCase();
-      fornecedorStateKeyById[f.bubbleFornecedorId] = k;
+      fornecedorNameById[bubbleFornecedorId] = nome;
+      const k = nome === "-" ? `__SEM_NOME__:${bubbleFornecedorId}` : nome.toUpperCase();
+      fornecedorStateKeyById[bubbleFornecedorId] = k;
       fornecedoresInfo[k] = {
         fornecedor: nome,
         vendedor: String((f as any)?.vendedor ?? "").trim(),
