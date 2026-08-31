@@ -1914,7 +1914,7 @@ export async function POST(req: NextRequest) {
       step = "reopen_grown_source_types";
       const { error: reopenErr } = await supabase
         .from("bubble_obj_import_checkpoint")
-        .update({ last_cursor: 0, total_imported: 0, status: "pending", last_error: null, updated_at: nowIso() } as any)
+        .update({ last_cursor: 0, total_imported: 0, status: "pending" } as any)
         .eq("supabase_user_id", userId)
         .in("object_type", staleCompletedTypes);
       if (reopenErr) return json({ ok: false, error: reopenErr.message }, { status: 500 });
