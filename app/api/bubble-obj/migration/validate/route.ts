@@ -688,7 +688,8 @@ export async function POST(req: NextRequest) {
         new Set(
           notasControl
             .map((r: any) => {
-              const nf = mapNotaFiscal((r as any)?.raw_payload_json ?? {});
+              const rawNota = (r as any)?.raw_payload_json ?? {};
+              const nf = mapNotaFiscal({ ...rawNota, _id: (rawNota as any)?._id || String((r as any)?.bubble_unique_id ?? "").trim() });
               if (!nf.bubbleNotaId) return "";
               return buildEntradaId(userId, nf.bubbleNotaId);
             })
@@ -732,7 +733,8 @@ export async function POST(req: NextRequest) {
           .filter(Boolean),
       );
       for (const r of notasControl) {
-        const nf = mapNotaFiscal((r as any)?.raw_payload_json ?? {});
+        const rawNota = (r as any)?.raw_payload_json ?? {};
+        const nf = mapNotaFiscal({ ...rawNota, _id: (rawNota as any)?._id || String((r as any)?.bubble_unique_id ?? "").trim() });
         if (!nf.bubbleNotaId) continue;
         contentValidation.checked.notas += 1;
         const entId = buildEntradaId(userId, nf.bubbleNotaId);

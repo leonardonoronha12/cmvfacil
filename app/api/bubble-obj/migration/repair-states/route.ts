@@ -491,7 +491,9 @@ export async function POST(req: NextRequest) {
 
     const entradasUpserts: any[] = [];
     for (const r of notasRows) {
-      const nf = mapNotaFiscal(r?.raw_payload_json ?? {});
+      const rawNota = r?.raw_payload_json ?? {};
+      const sourceNotaId = String(r?.bubble_unique_id ?? "").trim();
+      const nf = mapNotaFiscal({ ...rawNota, _id: (rawNota as any)?._id || sourceNotaId });
       if (!nf.bubbleNotaId) continue;
       const fornecedorFromId = nf.fornecedorId ? String(fornecedorNameById[nf.fornecedorId] ?? "").trim() : "";
       const fornecedor = fornecedorFromId || nf.fornecedorNome || String(nf.fornecedorId || "").trim() || "Sem fornecedor";

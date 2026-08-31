@@ -793,7 +793,7 @@ async function processStagingBatch(args: {
       for (const r of list) {
         const bubbleUniqueId = String(r.bubble_unique_id ?? "").trim();
         const raw = r.raw_payload_json ?? {};
-        const nf = mapNotaFiscal(raw);
+        const nf = mapNotaFiscal({ ...raw, _id: (raw as any)?._id || bubbleUniqueId });
         if (!nf.bubbleNotaId) {
           pendingReview += 1;
           pendingIds.push(String(r.id));
@@ -1343,7 +1343,8 @@ async function rebuildEntradasFromControlForCompany(args: {
   const upserts: any[] = [];
   for (const r of (notasRows ?? []) as any[]) {
     const raw = (r as any)?.raw_payload_json ?? {};
-    const nf = mapNotaFiscal(raw);
+    const sourceNotaId = String((r as any)?.bubble_unique_id ?? "").trim();
+    const nf = mapNotaFiscal({ ...raw, _id: (raw as any)?._id || sourceNotaId });
     if (!nf.bubbleNotaId) continue;
     const fornecedorFromId = nf.fornecedorId ? String(fornecedorNameById[nf.fornecedorId] ?? "").trim() : "";
     const fornecedor = fornecedorFromId || nf.fornecedorNome || String(nf.fornecedorId || "").trim() || "Sem fornecedor";
