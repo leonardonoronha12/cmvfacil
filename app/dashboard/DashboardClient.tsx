@@ -1023,6 +1023,13 @@ function sanitizeFornecedorLabelForUI(input: unknown) {
   return cleaned;
 }
 
+function canonicalFornecedorDbKey(input: unknown) {
+  const raw = sanitizeFornecedorLabelForUI(input);
+  if (!raw.toLowerCase().startsWith("db:")) return raw;
+  const id = raw.slice(3).trim().toLowerCase();
+  return id ? `db:${id}` : "";
+}
+
 function formatPercent1(value: number) {
   const v = Number.isFinite(value) ? value : 0;
   return `${v.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%`;
@@ -1132,6 +1139,8 @@ export default function DashboardClient() {
   const [deletingCategoryName, setDeletingCategoryName] = useState("");
   const [deletingCategoryCount, setDeletingCategoryCount] = useState(0);
   const [fornecedorInfoMap, setFornecedorInfoMap] = useState<FornecedorInfoMap>({});
+  const [fornecedorDbLabelCache, setFornecedorDbLabelCache] = useState<Record<string, string>>({});
+  const fornecedorDbLabelInFlightRef = useRef<Set<string>>(new Set());
   const [fornecedorProdutosMap, setFornecedorProdutosMap] = useState<FornecedorProdutos>({});
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const [isFornecedorModalOpen, setIsFornecedorModalOpen] = useState(false);
@@ -2793,10 +2802,30 @@ export default function DashboardClient() {
       const cleanUpper = clean.toUpperCase();
       const info = fornecedorInfoMap[rawUpper] || fornecedorInfoMap[cleanUpper] || null;
       const labelFromState = info && typeof info === "object" ? String((info as any).fornecedor ?? "").trim() : "";
+      const dbKey = canonicalFornecedorDbKey(raw);
+      const labelFromDb = dbKey.toLowerCase().startsWith("db:") ? String(fornecedorDbLabelCache[dbKey] ?? "").trim() : "";
+      if (labelFromDb) return { ...x, fornecedor: labelFromDb };
       if (labelFromState) return { ...x, fornecedor: labelFromState };
       return { ...x, fornecedor: raw };
     });
-  }, [entradas, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
+  }, [entradas, fornecedorDbLabelCache, fornecedorInfoMap, getEquivalenciasForFornecedor, historyItem, insumos, prePreparoEtiquetas]);
+
+  useEffect(() => {
+    const missing = historicoEntradas
+      .map((row) => canonicalFornecedorDbKey(row.fornecedor))
+      .filter((key) => key.toLowerCase().startsWith("db:") && !fornecedorDbLabelCache[key] && !fornecedorDbLabelInFlightRef.current.has(key));
+    for (const key of Array.from(new Set(missing)).slice(0, 5)) {
+      fornecedorDbLabelInFlightRef.current.add(key);
+      void fetch(`/api/fornecedores?diag=1&fornecedorLabel=${encodeURIComponent(key)}`)
+        .then((response) => response.json().catch(() => null))
+        .then((payload) => {
+          const label = sanitizeFornecedorLabelForUI(payload?.diag?.fornecedorResolvedLabel ?? "");
+          if (!label || label.toLowerCase().startsWith("db:")) return;
+          setFornecedorDbLabelCache((previous) => ({ ...previous, [key]: label }));
+        })
+        .finally(() => fornecedorDbLabelInFlightRef.current.delete(key));
+    }
+  }, [fornecedorDbLabelCache, historicoEntradas]);
 
   const historicoHasFornecedorIds = useMemo(() => {
     return historicoEntradas.some((h) => {
