@@ -26,7 +26,10 @@ import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+// Large legacy tenants can have thousands of invoices and inventory rows.
+// Validation is an admin-only background operation, so allow it to finish
+// instead of returning a false failure at the default 30-second boundary.
+export const maxDuration = 120;
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
