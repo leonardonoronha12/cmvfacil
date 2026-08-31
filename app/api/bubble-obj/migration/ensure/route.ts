@@ -1890,6 +1890,35 @@ export async function POST(req: NextRequest) {
     step = "bubble_creds";
     const creds = await getBubbleObjCredentials();
     const batchLimit = 100;
+
+    // A Bubble account can receive new records after a previous checkpoint
+    // was marked as completed. When validation already proved that the live
+    // source contains more final records than the imported destination,
+    // reopen only those object types. Existing control rows are idempotent,
+    // so replaying the type safely discovers the newly appended records.
+    const validationPerType = Array.isArray((existingMigration as any)?.validation_report?.perType)
+      ? ((existingMigration as any).validation_report.perType as any[])
+      : [];
+    const staleCompletedTypes = Array.from(
+      new Set(
+        validationPerType
+          .filter((item: any) => item?.mappingStatus === "final" && item?.ok === false && Number(item?.diff) > 0)
+          .flatMap((item: any) => (Array.isArray(item?.objectTypes) ? item.objectTypes : []))
+          .map((value: any) => String(value ?? "").trim())
+          .filter(Boolean),
+      ),
+    );
+    if (staleCompletedTypes.length) {
+      step = "reopen_grown_source_types";
+      const { error: reopenErr } = await supabase
+        .from("bubble_obj_import_checkpoint")
+        .update({ last_cursor: 0, total_imported: 0, status: "pending", last_error: null, updated_at: nowIso() } as any)
+        .eq("supabase_user_id", userId)
+        .in("object_type", staleCompletedTypes);
+      if (reopenErr) return json({ ok: false, error: reopenErr.message }, { status: 500 });
+      shouldRebuildFromControl = false;
+    }
+
     step = "run_create";
     const migrationCanResume = ["running", "pending", "retrying"].includes(String((row as any)?.status ?? "").trim().toLowerCase());
     let previousRunId = migrationCanResume && row.last_run_id ? String(row.last_run_id) : null;
