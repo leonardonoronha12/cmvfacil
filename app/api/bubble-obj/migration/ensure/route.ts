@@ -608,12 +608,14 @@ async function processStagingBatch(args: {
         const nome = String(f.nome ?? "").trim() || "-";
         {
           const k1 = nome === "-" ? `__SEM_NOME__:${bubbleUniqueId}` : nome.toUpperCase();
-          info[k1] = {
+          const supplierInfo = {
             fornecedor: nome,
             vendedor: String((f as any)?.vendedor ?? "").trim(),
             whatsapp: String((f as any)?.whatsapp ?? "").trim(),
             endereco: String((f as any)?.endereco ?? "").trim(),
           };
+          info[k1] = supplierInfo;
+          info[bubbleUniqueId.toUpperCase()] = supplierInfo;
         }
       } else {
         const it = mapItemFornecedor(raw);

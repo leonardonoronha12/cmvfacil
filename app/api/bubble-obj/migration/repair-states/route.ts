@@ -364,12 +364,17 @@ export async function POST(req: NextRequest) {
       fornecedorNameById[bubbleFornecedorId] = nome;
       const k = nome === "-" ? `__SEM_NOME__:${bubbleFornecedorId}` : nome.toUpperCase();
       fornecedorStateKeyById[bubbleFornecedorId] = k;
-      fornecedoresInfo[k] = {
+      const supplierInfo = {
         fornecedor: nome,
         vendedor: String((f as any)?.vendedor ?? "").trim(),
         whatsapp: String((f as any)?.whatsapp ?? "").trim(),
         endereco: String((f as any)?.endereco ?? "").trim(),
       };
+      fornecedoresInfo[k] = supplierInfo;
+      // Purchase history in Bubble stores the supplier relationship by its
+      // Bubble id. Keep that id as a lookup alias so the UI always renders
+      // the human-readable supplier name instead of an internal identifier.
+      fornecedoresInfo[bubbleFornecedorId.toUpperCase()] = supplierInfo;
     }
 
     const fornecedoresProdutos: Record<string, string[]> = {};
