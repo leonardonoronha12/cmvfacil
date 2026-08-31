@@ -207,7 +207,9 @@ export async function POST(req: NextRequest) {
       if (!bubbleItemId) continue;
       const fromCostType = latestCostByBubbleItemId.get(bubbleItemId)?.custoMedio ?? "";
       const current = String((row as any)?.custoMedio ?? "").trim();
-      if (fromCostType && (!current || current === "-" || current === "R$0,00")) insumosById.set(id, { ...(row as any), custoMedio: fromCostType });
+      if (fromCostType && (!current || current === "-" || parsePtNumber(current) === 0)) {
+        insumosById.set(id, { ...(row as any), custoMedio: fromCostType });
+      }
     }
 
     for (const r of itensNotasRows) {
@@ -217,7 +219,9 @@ export async function POST(req: NextRequest) {
       const prev = insumosById.get(insumoId) ?? null;
       if (!prev) continue;
       const prevCost = String((prev as any)?.custoMedio ?? "").trim();
-      if (!prevCost || prevCost === "-" || prevCost === "R$0,00") insumosById.set(insumoId, { ...(prev as any), custoMedio: it.custoUnitario });
+      if (!prevCost || prevCost === "-" || parsePtNumber(prevCost) === 0) {
+        insumosById.set(insumoId, { ...(prev as any), custoMedio: it.custoUnitario });
+      }
     }
 
     const insumosRows = Array.from(insumosById.values()).filter((x) => x && typeof x === "object" && String((x as any)?.id ?? ""));

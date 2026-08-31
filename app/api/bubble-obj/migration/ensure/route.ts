@@ -546,7 +546,9 @@ async function processStagingBatch(args: {
           const id = buildInsumoId(userId, cm.bubbleItemId);
           const prev = rowsById.get(id) ?? null;
           const current = String((prev as any)?.custoMedio ?? "").trim();
-          if (prev && (!current || current === "-" || current === "R$0,00")) rowsById.set(id, { ...(prev as any), custoMedio: cm.custoMedio });
+          if (prev && (!current || current === "-" || parsePtNumber(current) === 0)) {
+            rowsById.set(id, { ...(prev as any), custoMedio: cm.custoMedio });
+          }
         }
       }
 
