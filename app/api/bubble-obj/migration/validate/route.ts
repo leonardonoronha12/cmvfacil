@@ -404,22 +404,26 @@ export async function POST(req: NextRequest) {
           // rules. A completed pagination checkpoint contains the exact set
           // the account can actually read, so compare the destination with
           // those uniquely enumerated source records.
-          let enumeratedSourceTotal = 0;
+          const enumeratedSourceIds = new Set<string>();
           for (const ot of objectTypes) {
-            const { count, error } = await supabase
+            const { data, error } = await supabase
               .from("bubble_obj_import_control")
-              .select("bubble_unique_id", { count: "exact", head: true })
+              .select("bubble_unique_id,raw_payload_json")
               .eq("supabase_user_id", userId)
               .eq("bubble_object_type", ot)
-              .in("status", ["staged", "processed", "staged_only"]);
+              .in("status", ["staged", "processed", "staged_only"])
+              .limit(50_000);
             if (error) {
               dbError = error.message;
               break;
             }
-            enumeratedSourceTotal += Number(count ?? 0);
+            for (const row of data ?? []) {
+              const mapped = mapItemToInsumo((row as any)?.raw_payload_json ?? {}, { userId });
+              if (mapped.ok && mapped.bubbleItemId) enumeratedSourceIds.add(mapped.bubbleItemId);
+            }
           }
           if (!dbError) {
-            bubbleTotal = enumeratedSourceTotal;
+            bubbleTotal = enumeratedSourceIds.size;
             bubbleScopedBy = "completed_checkpoint";
           }
         } else if (baseType === "fornecedores") {

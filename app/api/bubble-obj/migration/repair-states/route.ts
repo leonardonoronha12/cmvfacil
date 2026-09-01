@@ -593,6 +593,12 @@ export async function POST(req: NextRequest) {
         itens_nota: itensNota,
       } as any);
     }
+    // This projection is fully derived from Bubble. Remove stale migrated
+    // notes that no longer exist in the source before recreating the exact
+    // current set. The prefix only targets Bubble-derived rows for this user.
+    const entradaPrefix = `${userScopedId(userId)}entrada:`;
+    const { error: clearEntradasError } = await supabase.from("entradas").delete().like("id", `${entradaPrefix}%`);
+    if (clearEntradasError) throw new Error(clearEntradasError.message);
     if (entradasUpserts.length) await supabase.from("entradas").upsert(entradasUpserts as any, { onConflict: "id" });
 
     // Keep the normalized purchase tables complete as well as the legacy
