@@ -25,6 +25,7 @@ import { formatMoneyBRL, parsePtNumber } from "../../../../lib/bubbleCsv";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
 import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+import { fetchBubbleObjPageWithConstraints, getBubbleObjCredentials } from "../../../../lib/bubbleObjApi";
 
 const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -185,6 +186,53 @@ export async function POST(req: NextRequest) {
       loadControlRows(supabase, userId, desperdicioKey),
       loadControlRows(supabase, userId, ingredientesKey),
     ]);
+
+    // A completed checkpoint is append-safe, but Bubble records can later be
+    // deleted. Reconcile invoices against the live source so a removed note
+    // does not survive forever in the migrated projection or validation.
+    try {
+      const creds = await getBubbleObjCredentials();
+      const liveNotaIds = new Set<string>();
+      let cursor = 0;
+      for (let pageIndex = 0; pageIndex < 500; pageIndex += 1) {
+        const page = await fetchBubbleObjPageWithConstraints<any>({
+          creds,
+          type: "notas_fiscais",
+          cursor,
+          limit: 100,
+          constraints: [{ key: "empresa_id", constraint_type: "equals", value: companyId }],
+          timeoutMs: 15_000,
+        });
+        const results = Array.isArray(page.results) ? page.results : [];
+        for (const raw of results) {
+          const id = String(raw?._id ?? raw?.unique_id ?? "").trim();
+          if (id) liveNotaIds.add(id);
+        }
+        cursor += results.length;
+        const remaining = typeof page.remaining === "number" ? page.remaining : 0;
+        if (!results.length || remaining <= 0) break;
+      }
+      const staleRows = notasRows.filter((row: any) => {
+        const id = String(row?.bubble_unique_id ?? row?.raw_payload_json?._id ?? "").trim();
+        return id && !liveNotaIds.has(id);
+      });
+      for (let offset = 0; offset < staleRows.length; offset += 200) {
+        const ids = staleRows.slice(offset, offset + 200).map((row: any) => String(row?.id ?? "")).filter(Boolean);
+        if (!ids.length) continue;
+        const { error } = await supabase.from("bubble_obj_import_control").delete().in("id", ids);
+        if (error) throw new Error(error.message);
+      }
+      if (staleRows.length) {
+        const staleIds = new Set(staleRows.map((row: any) => String(row?.bubble_unique_id ?? row?.raw_payload_json?._id ?? "").trim()));
+        for (let index = notasRows.length - 1; index >= 0; index -= 1) {
+          const id = String((notasRows[index] as any)?.bubble_unique_id ?? (notasRows[index] as any)?.raw_payload_json?._id ?? "").trim();
+          if (staleIds.has(id)) notasRows.splice(index, 1);
+        }
+      }
+    } catch {
+      // Keep the existing checkpoint usable during a transient Bubble outage;
+      // validation will leave the account divergent and retryable.
+    }
 
     const categoriaNameById: Record<string, string> = {};
     for (const r of categoriasRows) {
