@@ -10,7 +10,13 @@ export async function requireSystemAdmin(req: NextRequest) {
   if (isLocalDevRequest(req)) return { ok: true as const, userId: "local-admin" };
   const authorization = String(req.headers.get("authorization") ?? "").trim();
   const bearer = authorization.toLowerCase().startsWith("bearer ") ? authorization.slice(7).trim() : "";
-  const serviceRoleKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SERVICE_KEY ?? "").trim();
+  const serviceRoleKey = String(
+    process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SERVICE_ROLE ??
+      process.env.SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_SERVICE_KEY ??
+      "",
+  ).trim();
   if (serviceRoleKey && bearer && bearer === serviceRoleKey) {
     return { ok: true as const, userId: "service-role" };
   }
