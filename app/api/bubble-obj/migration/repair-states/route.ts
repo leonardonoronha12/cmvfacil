@@ -23,7 +23,10 @@ import {
 } from "../../../../lib/bubbleObjRealMapping";
 import { formatMoneyBRL, parsePtNumber } from "../../../../lib/bubbleCsv";
 import { getUserIdFromRequest } from "../../../../lib/requestUserId";
+import { requireSystemAdmin } from "../../../../lib/systemAdmin";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
+
+const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function json(data: unknown, init: ResponseInit = {}) {
   const headers = new Headers(init.headers);
@@ -106,8 +109,17 @@ async function loadControlRows(supabase: ReturnType<typeof getSupabaseAdmin>, us
 
 export async function POST(req: NextRequest) {
   try {
-    const { userId } = getUserIdFromRequest(req);
-    if (!userId) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    const body = (await req.json().catch(() => null)) as any;
+    const session = getUserIdFromRequest(req);
+    const adminTargetUserId = String(body?.adminTargetUserId ?? "").trim();
+    let userId = String(session.userId ?? "").trim();
+    if (adminTargetUserId) {
+      if (!uuidRe.test(adminTargetUserId)) return json({ ok: false, error: "invalid_admin_target_user" }, { status: 400 });
+      const admin = await requireSystemAdmin(req);
+      if (!admin.ok) return json({ ok: false, error: admin.error }, { status: admin.status });
+      userId = adminTargetUserId;
+    }
+    if (!userId || !uuidRe.test(userId)) return json({ ok: false, error: "unauthorized" }, { status: 401 });
 
     const supabase = getSupabaseAdmin();
     const { data: mig, error: migErr } = await supabase
