@@ -504,21 +504,24 @@ export async function POST(req: NextRequest) {
     if (inventarioUpserts.length) await supabase.from("inventario").upsert(inventarioUpserts as any, { onConflict: "id" });
 
     const notaItemsByNotaId = new Map<string, any[]>();
-    for (const r of itensNotasRows) {
+    for (const [itemNotaIndex, r] of itensNotasRows.entries()) {
       const it = mapItemNota(r?.raw_payload_json ?? {});
-      if (!it.bubbleNotaId || !it.bubbleItemId) continue;
-      const insumo = insumoByBubbleId.get(it.bubbleItemId) ?? null;
+      if (!it.bubbleNotaId) continue;
+      const insumo = it.bubbleItemId ? (insumoByBubbleId.get(it.bubbleItemId) ?? null) : null;
       const nomeNaNota = String((insumo as any)?.item ?? it.nomeItem ?? "").trim();
       const insumoEquivalente = nomeNaNota || "";
       const equivalenteUnidade = String((insumo as any)?.medida ?? "").trim();
-      const stablePart = it.bubbleItemNotaId || it.bubbleItemId;
+      // Legacy notes can contain an orphan line whose item was deleted in
+      // Bubble. Keep that line (shown as "-") so item count and invoice total
+      // remain faithful instead of silently dropping money from the note.
+      const stablePart = it.bubbleItemNotaId || it.bubbleItemId || `orphan:${itemNotaIndex}`;
       const stableItemId = `${userScopedId(userId)}nota_item:${it.bubbleNotaId}:${stablePart}`;
       const unidade = equivalenteUnidade || "Und";
       const quantidade = parseBubbleNumber(it.quantidade);
       const arr = notaItemsByNotaId.get(it.bubbleNotaId) ?? [];
       arr.push({
         id: stableItemId,
-        itemId: it.bubbleItemId,
+        itemId: it.bubbleItemId || "",
         nome: nomeNaNota || insumoEquivalente || "-",
         unidade,
         quantidadeLabel: `${quantidade.toLocaleString("pt-BR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} ${unidade}`,

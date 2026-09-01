@@ -400,6 +400,28 @@ export async function POST(req: NextRequest) {
         if (baseType === "item") {
           dbTotal = insumosDbError ? null : insumosRows.length;
           dbError = insumosDbError;
+          // Bubble's `remaining` estimate can include rows hidden by privacy
+          // rules. A completed pagination checkpoint contains the exact set
+          // the account can actually read, so compare the destination with
+          // those uniquely enumerated source records.
+          let enumeratedSourceTotal = 0;
+          for (const ot of objectTypes) {
+            const { count, error } = await supabase
+              .from("bubble_obj_import_control")
+              .select("bubble_unique_id", { count: "exact", head: true })
+              .eq("supabase_user_id", userId)
+              .eq("bubble_object_type", ot)
+              .in("status", ["staged", "processed", "staged_only"]);
+            if (error) {
+              dbError = error.message;
+              break;
+            }
+            enumeratedSourceTotal += Number(count ?? 0);
+          }
+          if (!dbError) {
+            bubbleTotal = enumeratedSourceTotal;
+            bubbleScopedBy = "completed_checkpoint";
+          }
         } else if (baseType === "fornecedores") {
           dbTotal = fornecedoresDbError ? null : fornecedoresUnique;
           dbError = fornecedoresDbError;
@@ -795,7 +817,8 @@ export async function POST(req: NextRequest) {
             continue;
           }
           const key = insumoEquivalente.toLowerCase();
-          if (!insumoNames.has(key)) {
+          // "-" is the intentional placeholder for an orphan Bubble line.
+          if (key !== "-" && !insumoNames.has(key)) {
             contentValidation.mismatches.push({ baseType: "notas_fiscais", bubbleId: nf.bubbleNotaId, kind: "insumo_equivalente_not_found", expected: "nome existente em insumos_state", actual: insumoEquivalente });
           }
         }
