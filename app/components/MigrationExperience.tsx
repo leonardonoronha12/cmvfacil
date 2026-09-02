@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v5";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v6";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -110,6 +110,21 @@ export default function MigrationExperience() {
   };
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
+  const coachStyle = useMemo(() => {
+    if (!targetRect || typeof window === "undefined") return undefined;
+    const cardWidth = Math.min(430, window.innerWidth - 32);
+    const cardHeight = Math.min(440, window.innerHeight - 32);
+    if (window.innerWidth < 700) {
+      const targetIsLow = targetRect.top + targetRect.height / 2 > window.innerHeight / 2;
+      return { left: 10, top: targetIsLow ? 10 : Math.max(10, window.innerHeight - cardHeight - 10), right: "auto", bottom: "auto" };
+    }
+    const targetIsRight = targetRect.left + targetRect.width / 2 > window.innerWidth / 2;
+    const left = targetIsRight
+      ? Math.max(16, targetRect.left - cardWidth - 24)
+      : Math.min(window.innerWidth - cardWidth - 16, targetRect.right + 24);
+    const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, targetRect.top + targetRect.height / 2 - cardHeight / 2));
+    return { left, top, right: "auto", bottom: "auto" };
+  }, [targetRect]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
@@ -168,7 +183,7 @@ export default function MigrationExperience() {
         </div>
       </section>
     </div> : null}
-    {tourOpen && step > 0 ? <aside className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
+    {tourOpen && step > 0 ? <aside key={step} style={coachStyle} className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
