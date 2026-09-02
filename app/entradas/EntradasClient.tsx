@@ -1530,9 +1530,10 @@ export default function EntradasClient() {
         }
       } catch {
         const hasCached = Object.keys(nextInfo).length || Object.keys(nextProdutos).length || Object.keys(nextEq).length;
-        if (!hasCached && !fornecedoresLoadErrorShownRef.current) {
+        const onboardingTourActive = document.documentElement.dataset.cmvOnboardingTour === "active";
+        if (!hasCached && !onboardingTourActive && !fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+          showToast("Não foi possível carregar os fornecedores agora. Atualize a página; se continuar, entre novamente na sua conta.", "error", 9000);
         }
       }
 

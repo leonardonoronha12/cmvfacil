@@ -63,6 +63,12 @@ export default function MigrationExperience() {
   }, []);
 
   useEffect(() => {
+    if (tourOpen) document.documentElement.dataset.cmvOnboardingTour = "active";
+    else delete document.documentElement.dataset.cmvOnboardingTour;
+    return () => { delete document.documentElement.dataset.cmvOnboardingTour; };
+  }, [tourOpen]);
+
+  useEffect(() => {
     if (!tourOpen || step === 0) return;
     const fullText = `${steps[step].text} ${steps[step].improvement}`;
     setTypedText("");
