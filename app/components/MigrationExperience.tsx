@@ -1,10 +1,10 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v6";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v7";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -25,6 +25,7 @@ type ChatLine = { from: "bot" | "user"; text: string };
 
 export default function MigrationExperience() {
   const pathname = usePathname();
+  const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -40,13 +41,16 @@ export default function MigrationExperience() {
 
   useEffect(() => {
     let active = true;
+    router.prefetch("/dashboard");
+    router.prefetch("/inventario");
+    router.prefetch("/entradas");
     if (localStorage.getItem(DONE_TOUR_KEY) !== "done") {
       const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
       const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
       setStep(initialStep);
       setTourOpen(true);
-      if (pathname !== steps[initialStep].path) window.location.assign(steps[initialStep].path);
+      if (pathname !== steps[initialStep].path) router.replace(steps[initialStep].path);
     }
     fetch(`/api/me?tour=1&ts=${Date.now()}`, { cache: "no-store" })
       .then(r => r.json())
@@ -64,26 +68,33 @@ export default function MigrationExperience() {
     setTypedText("");
     let cursor = 0;
     const timer = window.setInterval(() => {
-      cursor = Math.min(fullText.length, cursor + 3);
+      cursor = Math.min(fullText.length, cursor + 9);
       setTypedText(fullText.slice(0, cursor));
       if (cursor >= fullText.length) window.clearInterval(timer);
-    }, 18);
+    }, 28);
     return () => window.clearInterval(timer);
   }, [step, tourOpen]);
 
   useEffect(() => {
     if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); return; }
+    let didScroll = false;
+    let timer = 0;
     const locate = () => {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
       let element = target.selector ? document.querySelector(target.selector) : null;
       if (!element && target.text) element = Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text!)) ?? null;
       if (element instanceof HTMLElement) {
-        const rect = element.getBoundingClientRect(); setTargetRect(rect);
-        element.scrollIntoView({ block: "center", behavior: "smooth" });
-      } else setTargetRect(null);
+        const rect = element.getBoundingClientRect();
+        setTargetRect(previous => previous && Math.abs(previous.left - rect.left) < 1 && Math.abs(previous.top - rect.top) < 1 && Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1 ? previous : rect);
+        if (!didScroll && (rect.top < 8 || rect.bottom > window.innerHeight - 8)) { didScroll = true; element.scrollIntoView({ block: "center", behavior: "smooth" }); }
+        if (timer) window.clearInterval(timer);
+        return true;
+      }
+      return false;
     };
-    locate(); const timer = window.setInterval(locate, 350); window.addEventListener("resize", locate);
-    return () => { window.clearInterval(timer); window.removeEventListener("resize", locate); };
+    if (!locate()) timer = window.setInterval(locate, 160);
+    window.addEventListener("resize", locate); window.addEventListener("scroll", locate, true);
+    return () => { if (timer) window.clearInterval(timer); window.removeEventListener("resize", locate); window.removeEventListener("scroll", locate, true); };
   }, [step, tourOpen, pathname]);
 
   useEffect(() => {
@@ -93,9 +104,9 @@ export default function MigrationExperience() {
       const element = target.selector ? document.querySelector(target.selector) : Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text || ""));
       if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
       const next = step + 1;
-      if (next >= steps.length) { window.setTimeout(finishTour, 80); return; }
+      if (next >= steps.length) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
-      window.setTimeout(() => setStep(next), 80);
+      setStep(next);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
@@ -106,7 +117,7 @@ export default function MigrationExperience() {
     sessionStorage.setItem(ACTIVE_TOUR_KEY, String(bounded));
     setStep(bounded);
     const destination = steps[bounded].path;
-    if (pathname !== destination) window.location.assign(destination);
+    if (pathname !== destination) router.push(destination);
   };
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
