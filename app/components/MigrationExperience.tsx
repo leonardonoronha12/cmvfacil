@@ -4,18 +4,20 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v4";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v5";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
-  { path: "/dashboard", icon: "✨", kicker: "Uma experiência renovada", title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados continuam aqui, agora em uma experiência mais rápida, organizada e simples de usar.", improvement: "Eu vou caminhar com você pelas telas e mostrar como cada melhoria economiza tempo na sua rotina.", bullets: ["Dados preservados", "Mais agilidade", "Ajuda sempre disponível"] },
-  { path: "/dashboard", icon: "🧭", kicker: "Tudo no lugar certo", title: "Navegue sem se perder", text: "As rotinas que você já conhece estão reunidas no menu lateral e a troca entre telas ficou mais direta.", improvement: "Assim você encontra qualquer tarefa em poucos cliques: relatórios acima, cadastros no centro e a operação diária logo abaixo.", bullets: ["Relatórios", "Cadastros", "Rotina diária"] },
-  { path: "/inventario", icon: "📦", kicker: "Você está no Inventário", title: "Contagens por setor", text: "Organize Bar, Cozinha, Estoque Seco e outras áreas. Fica mais fácil saber o que falta e o que já foi contado.", improvement: "Sua equipe pode dividir a contagem por área, enxergar os pendentes e retomar o trabalho com segurança, reduzindo esquecimentos.", bullets: ["Separação por setores", "Pendentes visíveis", "Histórico organizado"] },
-  { path: "/entradas", icon: "⚖️", kicker: "Novidade nas Entradas", title: "Conversor de unidades", text: "Converta caixas, pacotes, unidades, gramas, quilos, mililitros e litros enquanto lança a nota.", improvement: "Você informa como comprou e como controla o estoque; o sistema cuida da conta, evitando calculadora, retrabalho e diferenças por unidade incorreta.", bullets: ["Conversão automática", "Menos contas manuais", "Menos erros de lançamento"] },
-  { path: "/entradas", icon: "🔎", kicker: "Catálogo completo", title: "Encontre qualquer insumo", text: "O dropdown da nota mostra todo o catálogo e mantém automaticamente o vínculo correto com o fornecedor.", improvement: "Mesmo na primeira compra daquele fornecedor, o item aparece. Você lança mais rápido e constrói um histórico de preços mais confiável.", bullets: ["Todos os insumos", "Busca mais rápida", "Fornecedor vinculado"] },
-  { path: "/dashboard", icon: "💬", kicker: "Estamos com você", title: "Suporte dentro do sistema", text: "Conte o que aconteceu e envie imagem ou vídeo. O chamado chega ao time do CMV Fácil com os dados da sua conta.", improvement: "Você não precisa sair do sistema nem explicar tudo de novo: eu preparo o contexto, a página, sua empresa e os anexos para o atendimento começar mais rápido.", bullets: ["Protocolo automático", "Imagens e vídeos", "Envio direto ao suporte"] },
+  { path: "/dashboard", icon: "✨", kicker: "Uma experiência renovada", title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados continuam aqui, agora em uma experiência mais rápida, organizada e simples de usar.", improvement: "Eu vou caminhar com você pelas telas. A partir do próximo passo, clique apenas no que estiver iluminado.", bullets: ["Dados preservados", "Tour interativo", "Ajuda sempre disponível"] },
+  { path: "/dashboard", target: { selector: 'a[href="/inventario"]' }, icon: "🧭", kicker: "Sua vez", title: "Abra o Inventário", text: "A tela ficou escura para destacar exatamente onde você deve clicar.", improvement: "Clique em Inventário no menu lateral. Eu vou junto e continuo a explicação na próxima tela.", bullets: ["Clique no item iluminado"] },
+  { path: "/inventario", target: { text: "Nova Contagem", tag: "button" }, icon: "📦", kicker: "Inventário por setores", title: "Crie uma nova contagem", text: "Agora você pode separar Bar, Cozinha, Estoque Seco e outras áreas.", improvement: "Clique em Nova Contagem para conhecer a janela. Nada será salvo sem sua confirmação.", bullets: ["Setores organizados", "Pendentes visíveis"] },
+  { path: "/inventario", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Simples e seguro", title: "Você conheceu a nova contagem", text: "É aqui que uma data de inventário é iniciada para depois receber as quantidades de cada setor.", improvement: "Feche a janela no X iluminado para seguirmos. Nenhum registro será criado durante este tour.", bullets: ["Clique no X para continuar"] },
+  { path: "/inventario", target: { selector: 'a[href="/entradas"]' }, icon: "⚖️", kicker: "Próxima novidade", title: "Vamos para Entradas", text: "O lançamento de notas ganhou recursos que reduzem contas manuais e itens não encontrados.", improvement: "Clique em Entradas no menu lateral para eu mostrar onde tudo começa.", bullets: ["Clique em Entradas"] },
+  { path: "/entradas", target: { text: "Nova Nota", tag: "button" }, icon: "🧾", kicker: "Lançamento mais fácil", title: "Abra uma nova nota", text: "O novo fluxo prepara fornecedor e data antes da inclusão dos produtos.", improvement: "Clique em Nova Nota. Você poderá conhecer a tela sem salvar nenhuma informação.", bullets: ["Fluxo guiado", "Sem salvar agora"] },
+  { path: "/entradas", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "🔎", kicker: "Catálogo e conversão", title: "Mais recursos ao lançar", text: "Depois de criar uma nota, o dropdown apresenta todos os insumos e o conversor ajusta caixas, unidades, quilos e litros.", improvement: "Isso reduz retrabalho e mantém fornecedor, quantidade e custo coerentes. Feche esta janela no X iluminado.", bullets: ["Todos os insumos", "Conversão automática"] },
+  { path: "/entradas", target: { selector: 'button[data-tour="support"]' }, icon: "💬", kicker: "Suporte inteligente", title: "Fale comigo quando precisar", text: "O botão Ajuda acompanha você em todas as telas.", improvement: "Clique no botão iluminado. Você pode escrever, anexar imagem ou vídeo e enviar o chamado automaticamente ao WhatsApp do suporte.", bullets: ["Clique em Ajuda", "Atendimento com contexto"] },
 ];
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
@@ -32,6 +34,7 @@ export default function MigrationExperience() {
   const [sending, setSending] = useState(false);
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean } | null>(null);
   const [typedText, setTypedText] = useState("");
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -66,6 +69,36 @@ export default function MigrationExperience() {
       if (cursor >= fullText.length) window.clearInterval(timer);
     }, 18);
     return () => window.clearInterval(timer);
+  }, [step, tourOpen]);
+
+  useEffect(() => {
+    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); return; }
+    const locate = () => {
+      const target = steps[step].target as { selector?: string; text?: string; tag?: string };
+      let element = target.selector ? document.querySelector(target.selector) : null;
+      if (!element && target.text) element = Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text!)) ?? null;
+      if (element instanceof HTMLElement) {
+        const rect = element.getBoundingClientRect(); setTargetRect(rect);
+        element.scrollIntoView({ block: "center", behavior: "smooth" });
+      } else setTargetRect(null);
+    };
+    locate(); const timer = window.setInterval(locate, 350); window.addEventListener("resize", locate);
+    return () => { window.clearInterval(timer); window.removeEventListener("resize", locate); };
+  }, [step, tourOpen, pathname]);
+
+  useEffect(() => {
+    if (!tourOpen || step === 0 || !steps[step].target) return;
+    const onClick = (event: MouseEvent) => {
+      const target = steps[step].target as { selector?: string; text?: string; tag?: string };
+      const element = target.selector ? document.querySelector(target.selector) : Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text || ""));
+      if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
+      const next = step + 1;
+      if (next >= steps.length) { window.setTimeout(finishTour, 80); return; }
+      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
+      window.setTimeout(() => setStep(next), 80);
+    };
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, [step, tourOpen]);
 
   const goToStep = (nextStep: number) => {
@@ -151,14 +184,20 @@ export default function MigrationExperience() {
       <div className={styles.coachProgress}>{steps.map((item, index) => <button aria-label={`Etapa ${index + 1}`} key={item.title} onClick={() => goToStep(index)} className={index === step ? styles.coachProgressOn : index < step ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
-        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>
-        {step < steps.length - 1 ? <button className={styles.coachNext} onClick={() => goToStep(step + 1)}>Me mostre a próxima <span>→</span></button> : <button className={styles.coachNext} onClick={finishTour}>Tudo pronto! <span>✓</span></button>}</div>
+        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button><strong className={styles.clickHint}>Clique no destaque para continuar</strong></div>
       </div>
     </aside> : null}
+    {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
+      <i style={{ left: 0, top: 0, width: "100%", height: Math.max(0, targetRect.top - 9) }} />
+      <i style={{ left: 0, top: targetRect.bottom + 9, width: "100%", bottom: 0 }} />
+      <i style={{ left: 0, top: Math.max(0, targetRect.top - 9), width: Math.max(0, targetRect.left - 9), height: targetRect.height + 18 }} />
+      <i style={{ left: targetRect.right + 9, top: Math.max(0, targetRect.top - 9), right: 0, height: targetRect.height + 18 }} />
+      <b style={{ left: targetRect.left - 7, top: targetRect.top - 7, width: targetRect.width + 14, height: targetRect.height + 14 }} />
+    </div> : null}
 
     <div className={styles.helpActions}>
       <button className={styles.tourButton} onClick={() => { goToStep(0); setTourOpen(true); }}>Ver novidades</button>
-      <button className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
+      <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
     </div>
     {chatOpen ? <aside className={styles.chat} aria-label="Assistente de suporte">
       <header><div><strong>Assistente CMV Fácil</strong><small>Suporte e dúvidas</small></div><button onClick={() => setChatOpen(false)} aria-label="Fechar">×</button></header>
