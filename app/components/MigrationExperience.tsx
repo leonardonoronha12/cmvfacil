@@ -10,12 +10,12 @@ const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
-  { path: "/dashboard", icon: "✨", kicker: "Uma experiência renovada", title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados continuam aqui, agora em uma experiência mais rápida, organizada e simples de usar.", bullets: ["Dados preservados", "Mais agilidade", "Ajuda sempre disponível"] },
-  { path: "/dashboard", icon: "🧭", kicker: "Tudo no lugar certo", title: "Navegue sem se perder", text: "As rotinas que você já conhece estão reunidas no menu lateral e a troca entre telas ficou mais direta.", bullets: ["Relatórios", "Cadastros", "Rotina diária"] },
-  { path: "/inventario", icon: "📦", kicker: "Você está no Inventário", title: "Contagens por setor", text: "Organize Bar, Cozinha, Estoque Seco e outras áreas. Fica mais fácil saber o que falta e o que já foi contado.", bullets: ["Separação por setores", "Pendentes visíveis", "Histórico organizado"] },
-  { path: "/entradas", icon: "⚖️", kicker: "Novidade nas Entradas", title: "Conversor de unidades", text: "Converta caixas, pacotes, unidades, gramas, quilos, mililitros e litros enquanto lança a nota.", bullets: ["Conversão automática", "Menos contas manuais", "Menos erros de lançamento"] },
-  { path: "/entradas", icon: "🔎", kicker: "Catálogo completo", title: "Encontre qualquer insumo", text: "O dropdown da nota mostra todo o catálogo e mantém automaticamente o vínculo correto com o fornecedor.", bullets: ["Todos os insumos", "Busca mais rápida", "Fornecedor vinculado"] },
-  { path: "/dashboard", icon: "💬", kicker: "Estamos com você", title: "Suporte dentro do sistema", text: "Conte o que aconteceu e envie imagem ou vídeo. O chamado chega ao time do CMV Fácil com os dados da sua conta.", bullets: ["Protocolo automático", "Imagens e vídeos", "Envio direto ao suporte"] },
+  { path: "/dashboard", icon: "✨", kicker: "Uma experiência renovada", title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados continuam aqui, agora em uma experiência mais rápida, organizada e simples de usar.", improvement: "Eu vou caminhar com você pelas telas e mostrar como cada melhoria economiza tempo na sua rotina.", bullets: ["Dados preservados", "Mais agilidade", "Ajuda sempre disponível"] },
+  { path: "/dashboard", icon: "🧭", kicker: "Tudo no lugar certo", title: "Navegue sem se perder", text: "As rotinas que você já conhece estão reunidas no menu lateral e a troca entre telas ficou mais direta.", improvement: "Assim você encontra qualquer tarefa em poucos cliques: relatórios acima, cadastros no centro e a operação diária logo abaixo.", bullets: ["Relatórios", "Cadastros", "Rotina diária"] },
+  { path: "/inventario", icon: "📦", kicker: "Você está no Inventário", title: "Contagens por setor", text: "Organize Bar, Cozinha, Estoque Seco e outras áreas. Fica mais fácil saber o que falta e o que já foi contado.", improvement: "Sua equipe pode dividir a contagem por área, enxergar os pendentes e retomar o trabalho com segurança, reduzindo esquecimentos.", bullets: ["Separação por setores", "Pendentes visíveis", "Histórico organizado"] },
+  { path: "/entradas", icon: "⚖️", kicker: "Novidade nas Entradas", title: "Conversor de unidades", text: "Converta caixas, pacotes, unidades, gramas, quilos, mililitros e litros enquanto lança a nota.", improvement: "Você informa como comprou e como controla o estoque; o sistema cuida da conta, evitando calculadora, retrabalho e diferenças por unidade incorreta.", bullets: ["Conversão automática", "Menos contas manuais", "Menos erros de lançamento"] },
+  { path: "/entradas", icon: "🔎", kicker: "Catálogo completo", title: "Encontre qualquer insumo", text: "O dropdown da nota mostra todo o catálogo e mantém automaticamente o vínculo correto com o fornecedor.", improvement: "Mesmo na primeira compra daquele fornecedor, o item aparece. Você lança mais rápido e constrói um histórico de preços mais confiável.", bullets: ["Todos os insumos", "Busca mais rápida", "Fornecedor vinculado"] },
+  { path: "/dashboard", icon: "💬", kicker: "Estamos com você", title: "Suporte dentro do sistema", text: "Conte o que aconteceu e envie imagem ou vídeo. O chamado chega ao time do CMV Fácil com os dados da sua conta.", improvement: "Você não precisa sair do sistema nem explicar tudo de novo: eu preparo o contexto, a página, sua empresa e os anexos para o atendimento começar mais rápido.", bullets: ["Protocolo automático", "Imagens e vídeos", "Envio direto ao suporte"] },
 ];
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
@@ -31,6 +31,7 @@ export default function MigrationExperience() {
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean } | null>(null);
+  const [typedText, setTypedText] = useState("");
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -53,6 +54,19 @@ export default function MigrationExperience() {
       .catch(() => {});
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (!tourOpen || step === 0) return;
+    const fullText = `${steps[step].text} ${steps[step].improvement}`;
+    setTypedText("");
+    let cursor = 0;
+    const timer = window.setInterval(() => {
+      cursor = Math.min(fullText.length, cursor + 3);
+      setTypedText(fullText.slice(0, cursor));
+      if (cursor >= fullText.length) window.clearInterval(timer);
+    }, 18);
+    return () => window.clearInterval(timer);
+  }, [step, tourOpen]);
 
   const goToStep = (nextStep: number) => {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
@@ -97,7 +111,7 @@ export default function MigrationExperience() {
   };
 
   return <>
-    {tourOpen ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
+    {tourOpen && step === 0 ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
       <section className={styles.tourCard}>
         <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b></div></header>
         <div className={styles.progress}>{steps.map((item, index) => <button key={item.title} aria-label={`Ir para etapa ${index + 1}`} onClick={() => goToStep(index)} className={index <= step ? styles.progressOn : ""}><span /></button>)}</div>
@@ -121,6 +135,26 @@ export default function MigrationExperience() {
         </div>
       </section>
     </div> : null}
+    {tourOpen && step > 0 ? <aside className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
+      <div className={styles.coachGlow} />
+      <header className={styles.coachHeader}>
+        <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
+        <div><strong>Fácil, seu guia</strong><small><i /> explicando esta tela</small></div>
+        <b>{step + 1}/{steps.length}</b>
+      </header>
+      <div className={styles.speech}>
+        <div className={styles.coachKicker}>{steps[step].kicker}</div>
+        <h3>{steps[step].title}</h3>
+        <p>{typedText}<span className={styles.typingCursor} /></p>
+        <div className={styles.benefits}>{steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
+      </div>
+      <div className={styles.coachProgress}>{steps.map((item, index) => <button aria-label={`Etapa ${index + 1}`} key={item.title} onClick={() => goToStep(index)} className={index === step ? styles.coachProgressOn : index < step ? styles.coachProgressDone : ""} />)}</div>
+      <div className={styles.coachActions}>
+        <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
+        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>
+        {step < steps.length - 1 ? <button className={styles.coachNext} onClick={() => goToStep(step + 1)}>Me mostre a próxima <span>→</span></button> : <button className={styles.coachNext} onClick={finishTour}>Tudo pronto! <span>✓</span></button>}</div>
+      </div>
+    </aside> : null}
 
     <div className={styles.helpActions}>
       <button className={styles.tourButton} onClick={() => { goToStep(0); setTourOpen(true); }}>Ver novidades</button>
