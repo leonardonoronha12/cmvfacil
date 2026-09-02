@@ -1,19 +1,19 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-migrados-v1";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v2";
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
-  { title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados vieram do sistema antigo. Este passeio mostra onde estão as funções conhecidas e o que ficou mais simples." },
-  { title: "Tudo organizado no menu", text: "CMV Real, compras, fichas, insumos, pré-preparos, fornecedores, entradas, inventários e desperdícios continuam disponíveis no menu lateral." },
-  { title: "Inventário por setores", text: "Separe Bar, Cozinha, Estoque Seco e outros setores para contar, acompanhar e revisar cada área com mais clareza." },
-  { title: "Novo conversor de unidades", text: "Converta caixas, pacotes, unidades, gramas, quilos, mililitros e litros sem fazer a conta manualmente." },
-  { title: "Todos os insumos nas notas", text: "Ao lançar uma entrada, o dropdown mostra todo o catálogo. Ao selecionar um item, o vínculo com o fornecedor é mantido automaticamente." },
-  { title: "Ajuda sem sair do sistema", text: "Use o novo assistente para tirar dúvidas ou enviar um problema com imagens e vídeos. Ele identifica sua conta e prepara o chamado para o suporte." },
+  { path: "/dashboard", title: "Bem-vindo ao novo CMV Fácil", text: "Este passeio abre as telas reais do sistema para mostrar onde estão as funções conhecidas e o que ficou mais simples." },
+  { path: "/dashboard", title: "Tudo organizado no menu", text: "Use o menu lateral para acessar CMV Real, compras, fichas, insumos, pré-preparos, fornecedores, entradas, inventários e desperdícios." },
+  { path: "/inventario", title: "Inventário por setores", text: "Você está na tela de Inventário. Separe Bar, Cozinha, Estoque Seco e outros setores para contar, acompanhar e revisar cada área." },
+  { path: "/entradas", title: "Novo conversor de unidades", text: "Na inclusão dos itens da nota, use o conversor para transformar caixas, pacotes, unidades, gramas, quilos, mililitros e litros." },
+  { path: "/entradas", title: "Todos os insumos nas notas", text: "Ao lançar uma entrada, o dropdown agora mostra todo o catálogo. Ao selecionar um item, o vínculo com o fornecedor é mantido automaticamente." },
+  { path: "/dashboard", title: "Ajuda sem sair do sistema", text: "O botão Ajuda fica sempre no canto da tela. Envie sua dúvida, imagem ou vídeo e o chamado chega automaticamente ao suporte." },
 ];
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
@@ -21,6 +21,7 @@ type ChatLine = { from: "bot" | "user"; text: string };
 
 export default function MigrationExperience() {
   const pathname = usePathname();
+  const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -39,12 +40,22 @@ export default function MigrationExperience() {
       .then((data: Me & { ok?: boolean }) => {
         if (!active || !data?.ok) return;
         setMe(data);
-        const migrated = Boolean(data.source?.hasBubbleMatch || data.source?.userBubbleId);
-        if (migrated && localStorage.getItem(`cmvfacil:onboarding:${TOUR_VERSION}:${data.userId}`) !== "done") setTourOpen(true);
+        if (localStorage.getItem(`cmvfacil:onboarding:${TOUR_VERSION}:${data.userId}`) !== "done") {
+          setStep(0);
+          setTourOpen(true);
+          if (pathname !== steps[0].path) router.push(steps[0].path);
+        }
       })
       .catch(() => {});
     return () => { active = false; };
   }, []);
+
+  const goToStep = (nextStep: number) => {
+    const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
+    setStep(bounded);
+    const destination = steps[bounded].path;
+    if (pathname !== destination) router.push(destination);
+  };
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
   const finishTour = () => {
@@ -86,14 +97,14 @@ export default function MigrationExperience() {
         <h2>{steps[step].title}</h2><p>{steps[step].text}</p>
         <div className={styles.tourActions}>
           <button className={styles.ghost} onClick={finishTour}>Pular passeio</button>
-          <div><button className={styles.ghost} disabled={step === 0} onClick={() => setStep(value => Math.max(0, value - 1))}>Voltar</button>
-          {step < steps.length - 1 ? <button className={styles.primary} onClick={() => setStep(value => value + 1)}>Próximo</button> : <button className={styles.primary} onClick={finishTour}>Começar a usar</button>}</div>
+          <div><button className={styles.ghost} disabled={step === 0} onClick={() => goToStep(step - 1)}>Voltar</button>
+          {step < steps.length - 1 ? <button className={styles.primary} onClick={() => goToStep(step + 1)}>Próximo</button> : <button className={styles.primary} onClick={finishTour}>Começar a usar</button>}</div>
         </div>
       </section>
     </div> : null}
 
     <div className={styles.helpActions}>
-      <button className={styles.tourButton} onClick={() => { setStep(0); setTourOpen(true); }}>Ver novidades</button>
+      <button className={styles.tourButton} onClick={() => { goToStep(0); setTourOpen(true); }}>Ver novidades</button>
       <button className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
     </div>
     {chatOpen ? <aside className={styles.chat} aria-label="Assistente de suporte">
