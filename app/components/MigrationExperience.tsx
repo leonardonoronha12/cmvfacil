@@ -1,10 +1,11 @@
 "use client";
 
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v2";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v3";
+const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
@@ -21,7 +22,6 @@ type ChatLine = { from: "bot" | "user"; text: string };
 
 export default function MigrationExperience() {
   const pathname = usePathname();
-  const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -41,9 +41,12 @@ export default function MigrationExperience() {
         if (!active || !data?.ok) return;
         setMe(data);
         if (localStorage.getItem(`cmvfacil:onboarding:${TOUR_VERSION}:${data.userId}`) !== "done") {
-          setStep(0);
+          const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
+          const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
+          sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
+          setStep(initialStep);
           setTourOpen(true);
-          if (pathname !== steps[0].path) router.push(steps[0].path);
+          if (pathname !== steps[initialStep].path) window.location.assign(steps[initialStep].path);
         }
       })
       .catch(() => {});
@@ -52,14 +55,16 @@ export default function MigrationExperience() {
 
   const goToStep = (nextStep: number) => {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
+    sessionStorage.setItem(ACTIVE_TOUR_KEY, String(bounded));
     setStep(bounded);
     const destination = steps[bounded].path;
-    if (pathname !== destination) router.push(destination);
+    if (pathname !== destination) window.location.assign(destination);
   };
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
   const finishTour = () => {
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
+    sessionStorage.removeItem(ACTIVE_TOUR_KEY);
     setTourOpen(false); setStep(0);
   };
   const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
