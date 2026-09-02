@@ -4,8 +4,9 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v3";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v4";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
+const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
@@ -35,19 +36,19 @@ export default function MigrationExperience() {
 
   useEffect(() => {
     let active = true;
+    if (localStorage.getItem(DONE_TOUR_KEY) !== "done") {
+      const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
+      const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
+      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
+      setStep(initialStep);
+      setTourOpen(true);
+      if (pathname !== steps[initialStep].path) window.location.assign(steps[initialStep].path);
+    }
     fetch(`/api/me?tour=1&ts=${Date.now()}`, { cache: "no-store" })
       .then(r => r.json())
       .then((data: Me & { ok?: boolean }) => {
         if (!active || !data?.ok) return;
         setMe(data);
-        if (localStorage.getItem(`cmvfacil:onboarding:${TOUR_VERSION}:${data.userId}`) !== "done") {
-          const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
-          const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
-          sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
-          setStep(initialStep);
-          setTourOpen(true);
-          if (pathname !== steps[initialStep].path) window.location.assign(steps[initialStep].path);
-        }
       })
       .catch(() => {});
     return () => { active = false; };
@@ -63,6 +64,7 @@ export default function MigrationExperience() {
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
   const finishTour = () => {
+    localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
     sessionStorage.removeItem(ACTIVE_TOUR_KEY);
     setTourOpen(false); setStep(0);
