@@ -8,6 +8,7 @@ import dash from "../dashboard/dashboard.module.css";
 
 const AppSidebar = dynamic(() => import("./AppSidebar"), { ssr: false });
 const TelemetryTracker = dynamic(() => import("./TelemetryTracker"), { ssr: false });
+const MigrationExperience = dynamic(() => import("./MigrationExperience"), { ssr: false });
 
 type SidebarKey =
   | "dashboard"
@@ -58,7 +59,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <TelemetryTracker />
       <AppSidebar active={active} />
       {children}
+      <MigrationExperience />
     </div>
   );
 }
-
