@@ -10,12 +10,12 @@ const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
-  { path: "/dashboard", title: "Bem-vindo ao novo CMV Fácil", text: "Este passeio abre as telas reais do sistema para mostrar onde estão as funções conhecidas e o que ficou mais simples." },
-  { path: "/dashboard", title: "Tudo organizado no menu", text: "Use o menu lateral para acessar CMV Real, compras, fichas, insumos, pré-preparos, fornecedores, entradas, inventários e desperdícios." },
-  { path: "/inventario", title: "Inventário por setores", text: "Você está na tela de Inventário. Separe Bar, Cozinha, Estoque Seco e outros setores para contar, acompanhar e revisar cada área." },
-  { path: "/entradas", title: "Novo conversor de unidades", text: "Na inclusão dos itens da nota, use o conversor para transformar caixas, pacotes, unidades, gramas, quilos, mililitros e litros." },
-  { path: "/entradas", title: "Todos os insumos nas notas", text: "Ao lançar uma entrada, o dropdown agora mostra todo o catálogo. Ao selecionar um item, o vínculo com o fornecedor é mantido automaticamente." },
-  { path: "/dashboard", title: "Ajuda sem sair do sistema", text: "O botão Ajuda fica sempre no canto da tela. Envie sua dúvida, imagem ou vídeo e o chamado chega automaticamente ao suporte." },
+  { path: "/dashboard", icon: "✨", kicker: "Uma experiência renovada", title: "Bem-vindo ao novo CMV Fácil", text: "Seus dados continuam aqui, agora em uma experiência mais rápida, organizada e simples de usar.", bullets: ["Dados preservados", "Mais agilidade", "Ajuda sempre disponível"] },
+  { path: "/dashboard", icon: "🧭", kicker: "Tudo no lugar certo", title: "Navegue sem se perder", text: "As rotinas que você já conhece estão reunidas no menu lateral e a troca entre telas ficou mais direta.", bullets: ["Relatórios", "Cadastros", "Rotina diária"] },
+  { path: "/inventario", icon: "📦", kicker: "Você está no Inventário", title: "Contagens por setor", text: "Organize Bar, Cozinha, Estoque Seco e outras áreas. Fica mais fácil saber o que falta e o que já foi contado.", bullets: ["Separação por setores", "Pendentes visíveis", "Histórico organizado"] },
+  { path: "/entradas", icon: "⚖️", kicker: "Novidade nas Entradas", title: "Conversor de unidades", text: "Converta caixas, pacotes, unidades, gramas, quilos, mililitros e litros enquanto lança a nota.", bullets: ["Conversão automática", "Menos contas manuais", "Menos erros de lançamento"] },
+  { path: "/entradas", icon: "🔎", kicker: "Catálogo completo", title: "Encontre qualquer insumo", text: "O dropdown da nota mostra todo o catálogo e mantém automaticamente o vínculo correto com o fornecedor.", bullets: ["Todos os insumos", "Busca mais rápida", "Fornecedor vinculado"] },
+  { path: "/dashboard", icon: "💬", kicker: "Estamos com você", title: "Suporte dentro do sistema", text: "Conte o que aconteceu e envie imagem ou vídeo. O chamado chega ao time do CMV Fácil com os dados da sua conta.", bullets: ["Protocolo automático", "Imagens e vídeos", "Envio direto ao suporte"] },
 ];
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
@@ -99,13 +99,25 @@ export default function MigrationExperience() {
   return <>
     {tourOpen ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
       <section className={styles.tourCard}>
-        <div className={styles.eyebrow}>NOVIDADES PARA VOCÊ</div>
-        <div className={styles.progress}>{steps.map((_, index) => <span key={index} className={index <= step ? styles.progressOn : ""} />)}</div>
-        <h2>{steps[step].title}</h2><p>{steps[step].text}</p>
+        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b></div></header>
+        <div className={styles.progress}>{steps.map((item, index) => <button key={item.title} aria-label={`Ir para etapa ${index + 1}`} onClick={() => goToStep(index)} className={index <= step ? styles.progressOn : ""}><span /></button>)}</div>
+        <div className={styles.tourBody}>
+          <div className={`${styles.visual} ${styles[`visual${step}`] || ""}`}>
+            <span className={styles.orbOne} /><span className={styles.orbTwo} />
+            <div className={styles.heroIcon}>{steps[step].icon}</div>
+            <div className={styles.miniWindow}><i /><i /><i /><div><span /><span /><span /></div></div>
+            <small>PASSO {String(step + 1).padStart(2, "0")}</small>
+          </div>
+          <div className={styles.copy}>
+            <div className={styles.eyebrow}>{steps[step].kicker}</div>
+            <h2>{steps[step].title}</h2><p>{steps[step].text}</p>
+            <ul>{steps[step].bullets.map(item => <li key={item}><span>✓</span>{item}</li>)}</ul>
+          </div>
+        </div>
         <div className={styles.tourActions}>
-          <button className={styles.ghost} onClick={finishTour}>Pular passeio</button>
+          <button className={styles.skip} onClick={finishTour}>Pular apresentação</button>
           <div><button className={styles.ghost} disabled={step === 0} onClick={() => goToStep(step - 1)}>Voltar</button>
-          {step < steps.length - 1 ? <button className={styles.primary} onClick={() => goToStep(step + 1)}>Próximo</button> : <button className={styles.primary} onClick={finishTour}>Começar a usar</button>}</div>
+          {step < steps.length - 1 ? <button className={styles.primary} onClick={() => goToStep(step + 1)}>Continuar <span>→</span></button> : <button className={styles.primary} onClick={finishTour}>Explorar o CMV Fácil <span>→</span></button>}</div>
         </div>
       </section>
     </div> : null}
