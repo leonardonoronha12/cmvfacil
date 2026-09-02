@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v7";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v8";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -16,7 +16,8 @@ const steps = [
   { path: "/inventario", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Simples e seguro", title: "Você conheceu a nova contagem", text: "É aqui que uma data de inventário é iniciada para depois receber as quantidades de cada setor.", improvement: "Feche a janela no X iluminado para seguirmos. Nenhum registro será criado durante este tour.", bullets: ["Clique no X para continuar"] },
   { path: "/inventario", target: { selector: 'a[href="/entradas"]' }, icon: "⚖️", kicker: "Próxima novidade", title: "Vamos para Entradas", text: "O lançamento de notas ganhou recursos que reduzem contas manuais e itens não encontrados.", improvement: "Clique em Entradas no menu lateral para eu mostrar onde tudo começa.", bullets: ["Clique em Entradas"] },
   { path: "/entradas", target: { text: "Nova Nota", tag: "button" }, icon: "🧾", kicker: "Lançamento mais fácil", title: "Abra uma nova nota", text: "O novo fluxo prepara fornecedor e data antes da inclusão dos produtos.", improvement: "Clique em Nova Nota. Você poderá conhecer a tela sem salvar nenhuma informação.", bullets: ["Fluxo guiado", "Sem salvar agora"] },
-  { path: "/entradas", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "🔎", kicker: "Catálogo e conversão", title: "Mais recursos ao lançar", text: "Depois de criar uma nota, o dropdown apresenta todos os insumos e o conversor ajusta caixas, unidades, quilos e litros.", improvement: "Isso reduz retrabalho e mantém fornecedor, quantidade e custo coerentes. Feche esta janela no X iluminado.", bullets: ["Todos os insumos", "Conversão automática"] },
+  { path: "/entradas", target: { selector: '[role="dialog"] select' }, icon: "🔎", kicker: "Fornecedor organizado", title: "Escolha o fornecedor da nota", text: "O primeiro dropdown reúne os fornecedores cadastrados e prepara a nota antes da inclusão dos produtos.", improvement: "Clique no campo iluminado para abrir a lista. Na etapa de itens, o novo dropdown mostra todos os insumos e o conversor ajusta caixas, unidades, quilos e litros.", bullets: ["Fornecedor vinculado", "Todos os insumos na próxima etapa", "Conversão automática"] },
+  { path: "/entradas", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Demonstração concluída", title: "Agora feche a nova nota", text: "Você conheceu o início do lançamento sem criar ou alterar nenhum registro.", improvement: "Clique somente no X iluminado para fechar esta janela e seguir para o suporte inteligente.", bullets: ["Nenhuma informação foi salva", "Clique no X"] },
   { path: "/entradas", target: { selector: 'button[data-tour="support"]' }, icon: "💬", kicker: "Suporte inteligente", title: "Fale comigo quando precisar", text: "O botão Ajuda acompanha você em todas as telas.", improvement: "Clique no botão iluminado. Você pode escrever, anexar imagem ou vídeo e enviar o chamado automaticamente ao WhatsApp do suporte.", bullets: ["Clique em Ajuda", "Atendimento com contexto"] },
 ];
 
