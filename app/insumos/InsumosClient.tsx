@@ -3276,10 +3276,10 @@ export default function InsumosClient() {
         {mounted && isSectorsOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsSectorsOpen(false)}>
-            <div className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div data-tour="sectors-modal" className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Setores de Itens</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsSectorsOpen(false)}>
+                <button data-tour="sectors-close" type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsSectorsOpen(false)}>
                   ×
                 </button>
               </div>
@@ -3323,7 +3323,7 @@ export default function InsumosClient() {
                               autoFocus
                             />
                             <div className={styles.categoryCount} />
-                            <div className={styles.categoryActions}>
+                            <div data-tour="sector-row-actions" className={styles.categoryActions}>
                               <button
                                 type="button"
                                 className={`${styles.categoryIconBtn} ${styles.categoryIconBtnConfirm}`}
@@ -3401,7 +3401,7 @@ export default function InsumosClient() {
                               ) : null}
                             </div>
                             <div className={styles.categoryCount}>{count}</div>
-                            <div className={styles.categoryActions}>
+                            <div data-tour="sector-row-actions" className={styles.categoryActions}>
                               <button
                                 type="button"
                                 className={styles.categoryIconBtn}

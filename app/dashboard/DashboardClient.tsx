@@ -3679,7 +3679,7 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div className={styles.historyTitle}>Histórico de Entradas</div>
+                        <div data-tour="item-entry-history" className={styles.historyTitle}>Histórico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>

@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-academia-v20";
+const TOUR_VERSION = "2026-09-academia-v21";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
@@ -80,9 +80,12 @@ const steps: TourStep[] = [
   { path: "/insumos", target: { selector: '[data-tour="insumos-unit"]' }, passive: true, completion: { selector: '[data-tour="insumos-unit"]', event: "change" }, icon: "⚖️", kicker: "Unidades e conversão", title: "Defina como o item é medido", text: "A unidade principal determina como o estoque será contado e calculado.", improvement: "Clique em Unidade de Medida e escolha Und, Kg, g ou L. O guia avançará somente depois da mudança desse campo — Categoria não será confundida com unidade.", bullets: ["Abra Unidade de Medida", "Escolha a unidade correta", "Avanço automático"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-cost"]' }, passive: true, completion: { selector: '[data-tour="insumos-cost"]', event: "blur" }, icon: "💰", kicker: "Passo 7 — custo", title: "Informe o custo inicial", text: "Digite o custo real da unidade escolhida.", improvement: "Esse valor será a base até a primeira entrada atualizar o custo médio.", bullets: ["Custo real", "Unidade conferida"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-save"]' }, icon: "✅", kicker: "Passo 8 — concluir", title: "Salve o insumo", text: "Revise os campos e clique em Salvar.", improvement: "Somente após salvar o guia seguirá para o fornecedor que vende esse item.", bullets: ["Cadastro completo", "Cascata liberada"] },
-  { path: "/insumos", target: { selector: '[data-tour="sectors-open"]' }, passive: true, icon: "🏪", kicker: "Setores dos insumos", title: "Organize onde cada item é usado", text: "Os setores determinam em quais áreas o insumo aparece no inventário. Um mesmo item pode pertencer a Bar, Cozinha, Estoque Seco ou outros setores.", improvement: "Em Ver Setores você pode cadastrar, editar ou remover setores. Antes de excluir, confira se existem itens vinculados.", bullets: ["Múltiplos setores", "Editar nome", "Remover com segurança"] },
+  { path: "/insumos", target: { selector: '[data-tour="sectors-open"]' }, icon: "🏪", kicker: "Setores dos insumos", title: "Abra o gerenciamento de setores", text: "Os setores determinam em quais áreas o insumo aparece no inventário.", improvement: "Clique em Ver Setores para conhecer o cadastro, a edição e a remoção. O guia só avançará após esse clique.", bullets: ["Clique em Ver Setores", "Múltiplos setores", "Organização do inventário"] },
+  { path: "/insumos", target: { selector: '[data-tour="sectors-modal"]' }, alertSelectors: ['[data-tour="sector-row-actions"] button'], passive: true, icon: "🏪", kicker: "Gerenciamento de setores", title: "Cadastre, edite ou remova setores", text: "Nesta janela você cria áreas como Bar, Cozinha e Estoque Seco. Os controles destacados em laranja permitem editar ou remover cada setor.", improvement: "Nesta apresentação, apenas confira os controles e clique em Continuar para preservar os dados.", bullets: ["Cadastrar setor", "Editar nome", "Remover com segurança"] },
+  { path: "/insumos", target: { selector: '[data-tour="sectors-close"]' }, icon: "✅", kicker: "Setores conferidos", title: "Feche a janela de setores", text: "Agora clique no X destacado para retornar à lista de insumos.", improvement: "O guia continuará somente após fechar esta janela.", bullets: ["Clique no X", "Volte aos insumos"] },
   { path: "/insumos", target: { selector: '[data-tour="insumo-actions"]' }, alertSelectors: ['[data-tour="insumo-actions"] button'], passive: true, icon: "✏️", kicker: "Manutenção do cadastro", title: "Edite ou remova um insumo", text: "Na coluna Ações, o lápis altera o cadastro e a lixeira remove ou arquiva o item conforme seus vínculos.", improvement: "Os botões laranja são somente um alerta visual. Clique em Continuar para não alterar dados durante o treinamento.", bullets: ["Editar cadastro", "Excluir ou arquivar", "Clique em Continuar"] },
   { path: "/insumos", target: { selector: 'a[aria-label^="Abrir detalhes do item"]' }, icon: "📚", kicker: "Histórico do insumo", title: "Clique no nome para ver as entradas", text: "O nome do insumo funciona como atalho para seus detalhes no CMV Real.", improvement: "Ali você consulta histórico de entradas, evolução de custo e movimentações relacionadas ao item.", bullets: ["Clique no nome", "Entradas do item", "Custos anteriores"] },
+  { path: "/dashboard", target: { selector: '[data-tour="item-entry-history"]' }, passive: true, icon: "📚", kicker: "Histórico aberto", title: "Confira as entradas deste insumo", text: "Aqui aparecem as compras que alteraram o estoque e o custo deste item, com data, fornecedor, quantidade e preço.", improvement: "Use este histórico para acompanhar a evolução do custo e investigar qualquer valor fora do esperado. Depois, clique em Continuar.", bullets: ["Data e fornecedor", "Quantidade e preço", "Evolução de custo"] },
   { path: "/fornecedores", icon: "🚚", kicker: "Compras organizadas", title: "Gerencie fornecedores", text: "Aqui você mantém os fornecedores e os produtos vinculados a cada um.", improvement: "Use os vínculos para acelerar notas, preservar o histórico de entradas e comparar de quem cada item foi comprado.", bullets: ["Contatos reunidos", "Produtos vinculados", "Histórico preservado"] },
   { path: "/fornecedores", target: { text: "Novo Fornecedor", tag: "button" }, icon: "➕", kicker: "Conheça o cadastro", title: "Abra um fornecedor", text: "O cadastro organiza a empresa e os contatos usados nas compras.", improvement: "Clique no botão iluminado. Você poderá conhecer a janela sem salvar.", bullets: ["Dados do fornecedor", "Contato", "Vínculos"] },
   { path: "/fornecedores", target: { selector: '[data-tour="supplier-name"]' }, passive: true, completion: { selector: '[data-tour="supplier-name"]', event: "blur" }, icon: "📝", kicker: "Cadastro obrigatório", title: "Digite o nome do fornecedor", text: "Informe um fornecedor real que vende o insumo cadastrado.", improvement: "Vendedor, WhatsApp e endereço são recomendados, mas o nome é o dado obrigatório para continuar.", bullets: ["Fornecedor real", "Contato recomendado"] },
@@ -410,9 +413,8 @@ export default function MigrationExperience() {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
       const element = findTourTarget(target);
       if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
-      if (element instanceof HTMLAnchorElement) {
-        event.preventDefault();
-      }
+      const clickedHref = element instanceof HTMLAnchorElement ? element.getAttribute("href") : null;
+      if (clickedHref) event.preventDefault();
       if (activeModule && step >= moduleEndStep(activeModule)) {
         saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
         return;
@@ -422,7 +424,8 @@ export default function MigrationExperience() {
       if (next === undefined || next < 0) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next)); setStep(next);
       const destination = steps[next]?.path;
-      if (destination && pathname !== destination) router.push(destination);
+      if (clickedHref) router.push(clickedHref);
+      else if (destination && pathname !== destination) router.push(destination);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
@@ -443,6 +446,15 @@ export default function MigrationExperience() {
     const showingContainer = Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
     const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
     const cardHeight = Math.min(showingContainer ? 520 : 440, window.innerHeight - 32);
+    const isCloseStep = steps[step]?.target?.selector?.includes("close") || steps[step]?.title.toLowerCase().includes("feche");
+    if (isCloseStep) {
+      const targetIsRight = anchorRect.left + anchorRect.width / 2 > window.innerWidth / 2;
+      return {
+        left: targetIsRight ? 10 : Math.max(10, window.innerWidth - cardWidth - 10),
+        top: 10, right: "auto", bottom: "auto", width: cardWidth,
+        maxHeight: Math.max(260, window.innerHeight - 20), overflowY: "auto" as const,
+      };
+    }
     if (showingContainer && revealRect && window.innerWidth >= 700) {
       const gap = 14;
       const spaces = {
@@ -494,7 +506,7 @@ export default function MigrationExperience() {
       : Math.min(window.innerWidth - cardWidth - 16, anchorRect.right + 24);
     const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, anchorRect.top + anchorRect.height / 2 - cardHeight / 2));
     return { left, top, right: "auto", bottom: "auto", width: cardWidth };
-  }, [targetRect, revealRect]);
+  }, [step, targetRect, revealRect]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
