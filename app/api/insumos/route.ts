@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
+import { resolveCurrentCompanyForUser } from "../../lib/billing";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -471,7 +472,10 @@ export async function GET(req: NextRequest) {
         .eq("user_id", userId)
         .limit(50);
       if (memberErr) return json({ error: memberErr.message }, { status: 500 });
-      const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      if (!companyId && supabaseAdmin) {
+        companyId = (await resolveCurrentCompanyForUser(supabaseAdmin, userId)).companyId ?? "";
+      }
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
       const { data: categoriesDbRaw, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
@@ -652,7 +656,10 @@ export async function POST(req: NextRequest) {
         .eq("user_id", userId)
         .limit(50);
       if (memberErr) return json({ error: memberErr.message }, { status: 500 });
-      const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+      if (!companyId && supabaseAdmin) {
+        companyId = (await resolveCurrentCompanyForUser(supabaseAdmin, userId)).companyId ?? "";
+      }
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
       const { data: categoriesDb, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
@@ -1103,7 +1110,12 @@ export async function DELETE(req: NextRequest) {
       .eq("user_id", userId)
       .limit(50);
     if (memberErr) return json({ ok: false, error: memberErr.message }, { status: 500 });
-    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    let companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+    if (!companyId) {
+      try {
+        companyId = (await resolveCurrentCompanyForUser(getSupabaseAdmin(), userId)).companyId ?? "";
+      } catch {}
+    }
     if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
 
     const url = new URL(req.url);

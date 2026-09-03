@@ -463,6 +463,7 @@ export default function InsumosClient() {
   const [fornecedorEquivalenciasMap, setFornecedorEquivalenciasMap] = useState<FornecedorEquivalenciasMap>({});
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const rowsReadyRef = useRef(false);
+  const loadFailedRef = useRef(false);
   const syncTimeoutRef = useRef<number | null>(null);
   const saveErrorShownRef = useRef(false);
   const persistedSnapshotRef = useRef("");
@@ -617,6 +618,7 @@ export default function InsumosClient() {
   useEffect(() => {
     (async () => {
       try {
+        loadFailedRef.current = false;
         setLoadError(null);
         if (readInsumosFromStore().length) {
           setIsLoadingTable(false);
@@ -624,12 +626,13 @@ export default function InsumosClient() {
         const state = await loadInsumosStateFromSupabase();
         applyLoadedState(state);
       } catch (err) {
-        rowsReadyRef.current = true;
-        setDataRows([]);
-        setCategories([]);
-        categoriesReadyRef.current = true;
+        loadFailedRef.current = true;
+        rowsReadyRef.current = false;
+        categoriesReadyRef.current = false;
         const msg = err instanceof Error ? err.message : String(err);
-        const message = `Não foi possível carregar os insumos do Supabase. Detalhes: ${msg}`;
+        const message = msg.includes("missing_company")
+          ? "Não foi possível identificar a empresa desta conta. Atualize a sessão ou entre novamente. Nenhum dado foi alterado."
+          : `Não foi possível carregar os insumos. Detalhes: ${msg}`;
         setLoadError(message);
         showToast(message, "error", 9000);
       } finally {
@@ -713,6 +716,7 @@ export default function InsumosClient() {
   }, [dataRows]);
 
   useEffect(() => {
+    if (loadFailedRef.current) return;
     if (!rowsReadyRef.current || !categoriesReadyRef.current) return;
     if (isReadOnly) return;
     if (isBootstrapRunning()) return;
