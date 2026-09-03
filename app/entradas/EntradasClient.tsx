@@ -2902,6 +2902,7 @@ export default function EntradasClient() {
                             onFocus={() => setIsItemMenuOpen(true)}
                           />
                           <button
+                            data-tour="entry-item-menu"
                             type="button"
                             className={styles.itemChevronBtn}
                             aria-label="Abrir lista de itens"
@@ -2916,6 +2917,7 @@ export default function EntradasClient() {
                             <div className={styles.itemOptions}>
                               {filteredNotaItems.map((m) => (
                                 <button
+                                  data-tour="entry-item-option"
                                   key={m.id}
                                   type="button"
                                   className={styles.itemOption}
@@ -2932,6 +2934,7 @@ export default function EntradasClient() {
                                 .filter((name) => !filteredNotaItems.some((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()))
                                 .map((name) => (
                                   <button
+                                    data-tour="entry-item-option"
                                     key={`p-${name}`}
                                     type="button"
                                     className={styles.itemOption}
@@ -2955,6 +2958,7 @@ export default function EntradasClient() {
 
                             <div className={styles.itemActions}>
                               <button
+                                data-tour="entry-item-new-link"
                                 type="button"
                                 className={styles.itemAddBtn}
                                 disabled={isReadOnly}
@@ -2983,6 +2987,7 @@ export default function EntradasClient() {
 
                       <div className={styles.qtyWrap}>
                         <input
+                          data-tour="entry-qty"
                           ref={detailQtyInputRef}
                           className={styles.qtyInput}
                           inputMode="decimal"
@@ -3030,6 +3035,7 @@ export default function EntradasClient() {
                       <div className={styles.moneyWrap}>
                         <div className={styles.moneyPrefix}>R$</div>
                         <input
+                          data-tour="entry-subtotal"
                           ref={detailSubtotalInputRef}
                           className={styles.moneyInput}
                           inputMode="decimal"
@@ -3078,6 +3084,7 @@ export default function EntradasClient() {
                       </div>
 
                       <button
+                        data-tour="entry-add-item"
                         type="button"
                         className={canAddNotaItem ? `${styles.plusBtn} ${styles.plusBtnOn}` : styles.plusBtn}
                         aria-label={editingNotaItemId ? "Salvar alterações do item" : "Adicionar item"}
@@ -3470,12 +3477,12 @@ export default function EntradasClient() {
               <div className={styles.modalBody}>
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Nome na nota</div>
-                  <input ref={configVinculacaoFirstInputRef} className={styles.formInput} value={mapNomeNota} onChange={(e) => setMapNomeNota(e.target.value)} />
+                  <input ref={configVinculacaoFirstInputRef} data-tour="link-name" className={styles.formInput} value={mapNomeNota} onChange={(e) => setMapNomeNota(e.target.value)} />
                 </div>
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida na nota</div>
-                  <select className={styles.formSelect} value={mapUnidadeNota} onChange={(e) => setMapUnidadeNota(e.target.value)}>
+                  <select className={styles.formSelect} data-tour="link-unit" value={mapUnidadeNota} onChange={(e) => setMapUnidadeNota(e.target.value)}>
                     {["Und", "Kg", "g", "L", "Pacote", "Caixa", "Fardo", "Rolo", "Bisnaga", "Frasco"].map((u) => (
                       <option key={u} value={u}>
                         {u}
@@ -3486,7 +3493,7 @@ export default function EntradasClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Insumo equivalente</div>
-                  <select className={styles.formSelect} value={mapInsumoEq} onChange={(e) => setMapInsumoEq(e.target.value)}>
+                  <select className={styles.formSelect} data-tour="link-item" value={mapInsumoEq} onChange={(e) => setMapInsumoEq(e.target.value)}>
                     {(insumosStore[0] ? insumosStore.map((i) => i.item) : ["Pão Brioche"]).map((name) => (
                       <option key={name} value={name}>
                         {name}
@@ -3498,7 +3505,7 @@ export default function EntradasClient() {
                 <div className={styles.mapHint}>
                   <div className={styles.mapHintLine}>
                     {`1${mapUnidadeNota || "Und"} de ${mapNomeNota.trim() || "(nome na nota)"} equivale a `}
-                    <input className={styles.mapHintInput} value={mapEqQtd} onChange={(e) => setMapEqQtd(e.target.value)} placeholder="____" />
+                    <input className={styles.mapHintInput} data-tour="link-factor" value={mapEqQtd} onChange={(e) => setMapEqQtd(e.target.value)} placeholder="____" />
                     {` ${insumosByName.get(mapInsumoEq.toLowerCase())?.medida ?? "Und"} de ${mapInsumoEq || "(insumo)"}`}
                   </div>
                 </div>
@@ -3510,6 +3517,7 @@ export default function EntradasClient() {
                 </button>
                 <button
                   type="button"
+                  data-tour="link-save"
                   className={styles.confirmSave}
                   disabled={isReadOnly || !mapNomeNota.trim() || !mapInsumoEq.trim()}
                   onClick={confirmAddItemFornecedor}
