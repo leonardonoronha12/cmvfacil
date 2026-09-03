@@ -189,9 +189,15 @@ export default function MigrationExperience() {
     let timer = 0;
     const locate = () => {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
-      let element = target.selector ? document.querySelector(target.selector) : null;
+      let element = target.selector ? Array.from(document.querySelectorAll(target.selector)).find(item => !item.closest('[data-cmv-tour-ui="true"]')) ?? null : null;
       if (!element && target.text) element = Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text!)) ?? null;
+      if (element instanceof HTMLElement && element.dataset.cmvTourUi === "true") element = null;
+      if (element instanceof HTMLElement && element.closest('[data-cmv-tour-ui="true"]')) element = null;
       if (element instanceof HTMLElement) {
+        const outerRect = element.getBoundingClientRect();
+        if (steps[step].passive && element.getAttribute("role") === "dialog" && outerRect.width > window.innerWidth * .82 && element.firstElementChild instanceof HTMLElement) {
+          element = element.firstElementChild;
+        }
         const rect = element.getBoundingClientRect();
         const revealElement = element.closest('[role="dialog"]') instanceof HTMLElement ? element.closest('[role="dialog"]') as HTMLElement : element;
         const visibleRect = revealElement.getBoundingClientRect();
@@ -295,7 +301,7 @@ export default function MigrationExperience() {
   };
 
   return <>
-    {learningOpen ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Academia CMV Fácil">
+    {learningOpen ? <div data-cmv-tour-ui="true" className={styles.overlay} role="dialog" aria-modal="true" aria-label="Academia CMV Fácil">
       <section className={`${styles.tourCard} ${styles.learningCard}`}>
         <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Academia CMV Fácil <b>{completedModules.length}/{learningModules.length}</b></div></header>
         <div className={styles.learningIntro}>
@@ -311,7 +317,7 @@ export default function MigrationExperience() {
         <div className={styles.learningFooter}><button className={styles.skip} onClick={() => setLearningOpen(false)}>Fechar academia</button><small>Você poderá abrir novamente pelo botão Tutorial do sistema.</small></div>
       </section>
     </div> : null}
-    {tourOpen && step === 0 ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
+    {tourOpen && step === 0 ? <div data-cmv-tour-ui="true" className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
       <section className={styles.tourCard}>
         <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b></div></header>
         <div className={styles.progress}>{steps.map((item, index) => <button key={item.title} aria-label={`Ir para etapa ${index + 1}`} onClick={() => goToStep(index)} className={index <= step ? styles.progressOn : ""}><span /></button>)}</div>
@@ -335,7 +341,7 @@ export default function MigrationExperience() {
         </div>
       </section>
     </div> : null}
-    {tourOpen && step > 0 ? <aside key={step} style={coachStyle} className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
+    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
@@ -366,7 +372,7 @@ export default function MigrationExperience() {
       <button className={styles.tourButton} onClick={restartTour}>🎓 Tutorial do sistema</button>
       <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
     </div>
-    {chatOpen ? <aside className={styles.chat} aria-label="Assistente de suporte">
+    {chatOpen ? <aside data-cmv-tour-ui="true" className={styles.chat} aria-label="Assistente de suporte">
       <header><div><strong>Assistente CMV Fácil</strong><small>Suporte e dúvidas</small></div><button onClick={() => setChatOpen(false)} aria-label="Fechar">×</button></header>
       <div className={styles.messages}>{lines.map((line, index) => <div key={index} className={line.from === "bot" ? styles.bot : styles.user}>{line.text}</div>)}</div>
       <div className={styles.composer}>
