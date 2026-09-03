@@ -117,6 +117,58 @@ function pickBestMemberUserId(memberRows: unknown[]) {
   return bestUserId;
 }
 
+async function resolveCompanyFromMigratedAliases(db: any, userId: string) {
+  const candidateUserIds = new Set<string>([userId]);
+  const bubbleIds = new Set<string>();
+  let email = "";
+  try {
+    const { data: profile } = await db.from("user_profiles").select("user_id,email,bubble_user_id").eq("user_id", userId).maybeSingle();
+    email = String(profile?.email ?? "").trim().toLowerCase();
+    const bubble = String(profile?.bubble_user_id ?? "").trim();
+    if (bubble) bubbleIds.add(bubble);
+  } catch {}
+  try {
+    if (!email && db?.auth?.admin?.getUserById) {
+      const { data } = await db.auth.admin.getUserById(userId);
+      email = String(data?.user?.email ?? "").trim().toLowerCase();
+    }
+  } catch {}
+  try {
+    if (email) {
+      const { data } = await db.from("user_profiles").select("user_id,bubble_user_id").ilike("email", email).limit(50);
+      for (const row of data ?? []) {
+        const uid = String(row?.user_id ?? "").trim();
+        const bubble = String(row?.bubble_user_id ?? "").trim();
+        if (uid) candidateUserIds.add(uid);
+        if (bubble) bubbleIds.add(bubble);
+      }
+    }
+    for (const bubble of Array.from(bubbleIds)) {
+      const { data } = await db.from("user_profiles").select("user_id,bubble_user_id").eq("bubble_user_id", bubble).limit(50);
+      for (const row of data ?? []) {
+        const uid = String(row?.user_id ?? "").trim();
+        if (uid) candidateUserIds.add(uid);
+      }
+    }
+  } catch {}
+  try {
+    const ids = Array.from(candidateUserIds).filter(isUuid);
+    if (ids.length) {
+      const { data } = await db.from("company_members").select("company_id,role,permission_level").in("user_id", ids).limit(100);
+      const companyId = pickBestCompanyId(data ?? []);
+      if (companyId) return companyId;
+    }
+  } catch {}
+  for (const bubble of Array.from(bubbleIds)) {
+    try {
+      const { data } = await db.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", bubble).limit(50);
+      const companyId = pickBestCompanyId(data ?? []);
+      if (companyId) return companyId;
+    } catch {}
+  }
+  return "";
+}
+
 function isAdminUserId(userId: string) {
   const ids = new Set(parseCsvEnv(process.env.ADMIN_USER_IDS).map((x) => x.toLowerCase()));
   const emails = new Set(
@@ -476,6 +528,7 @@ export async function GET(req: NextRequest) {
       if (!companyId && supabaseAdmin) {
         companyId = (await resolveCurrentCompanyForUser(supabaseAdmin, userId)).companyId ?? "";
       }
+      if (!companyId) companyId = await resolveCompanyFromMigratedAliases(db, userId);
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
       const { data: categoriesDbRaw, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
@@ -660,6 +713,7 @@ export async function POST(req: NextRequest) {
       if (!companyId && supabaseAdmin) {
         companyId = (await resolveCurrentCompanyForUser(supabaseAdmin, userId)).companyId ?? "";
       }
+      if (!companyId) companyId = await resolveCompanyFromMigratedAliases(db, userId);
       if (!companyId) return json({ error: "missing_company" }, { status: 500 });
 
       const { data: categoriesDb, error: catErr } = await db.from("categories").select("id,name").eq("company_id", companyId);
@@ -1115,6 +1169,9 @@ export async function DELETE(req: NextRequest) {
       try {
         companyId = (await resolveCurrentCompanyForUser(getSupabaseAdmin(), userId)).companyId ?? "";
       } catch {}
+    }
+    if (!companyId) {
+      try { companyId = await resolveCompanyFromMigratedAliases(getSupabaseAdmin(), userId); } catch {}
     }
     if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
 
