@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v10";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v11";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -116,12 +116,17 @@ export default function MigrationExperience() {
       if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
       const next = step + 1;
       if (next >= steps.length) { finishTour(); return; }
+      if (element instanceof HTMLAnchorElement) {
+        event.preventDefault();
+      }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
       setStep(next);
+      const destination = steps[next].path;
+      if (element instanceof HTMLAnchorElement && pathname !== destination) router.push(destination);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [step, tourOpen]);
+  }, [pathname, router, step, tourOpen]);
 
   const goToStep = (nextStep: number) => {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
