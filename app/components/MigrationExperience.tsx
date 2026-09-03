@@ -474,7 +474,7 @@ export default function MigrationExperience() {
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
-        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
+        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
     {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
