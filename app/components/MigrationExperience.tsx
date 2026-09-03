@@ -342,6 +342,33 @@ export default function MigrationExperience() {
     const showingContainer = Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
     const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
     const cardHeight = Math.min(showingContainer ? 520 : 440, window.innerHeight - 32);
+    if (showingContainer && revealRect && window.innerWidth >= 700) {
+      const gap = 14;
+      const spaces = {
+        top: revealRect.top - 16 - gap,
+        bottom: window.innerHeight - revealRect.bottom - 16 - gap,
+        left: revealRect.left - 16 - gap,
+        right: window.innerWidth - revealRect.right - 16 - gap,
+      };
+      const side = (Object.entries(spaces).sort((a, b) => b[1] - a[1])[0]?.[0] || "top") as keyof typeof spaces;
+      if (side === "top" || side === "bottom") {
+        const available = Math.max(190, spaces[side]);
+        return {
+          left: Math.min(window.innerWidth - cardWidth - 16, Math.max(16, revealRect.left + revealRect.width / 2 - cardWidth / 2)),
+          top: side === "top" ? 16 : revealRect.bottom + gap,
+          right: "auto", bottom: "auto", width: cardWidth,
+          maxHeight: available, overflowY: "auto" as const,
+        };
+      }
+      const availableWidth = Math.max(250, spaces[side]);
+      const width = Math.min(cardWidth, availableWidth);
+      return {
+        left: side === "left" ? 16 : revealRect.right + gap,
+        top: Math.min(window.innerHeight - cardHeight - 16, Math.max(16, revealRect.top + revealRect.height / 2 - cardHeight / 2)),
+        right: "auto", bottom: "auto", width,
+        maxHeight: window.innerHeight - 32, overflowY: "auto" as const,
+      };
+    }
     if (window.innerWidth < 700) {
       const targetIsLow = anchorRect.top + anchorRect.height / 2 > window.innerHeight / 2;
       return { left: 10, top: targetIsLow ? 10 : Math.max(10, window.innerHeight - cardHeight - 10), right: "auto", bottom: "auto" };
