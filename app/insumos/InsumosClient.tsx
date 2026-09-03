@@ -2747,7 +2747,7 @@ export default function InsumosClient() {
             <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Itens por Planilha</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsImportOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="insumos-import-close" onClick={() => setIsImportOpen(false)}>
                   ×
                 </button>
               </div>

@@ -10,6 +10,18 @@ const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
+function findTourTarget(target: { selector?: string; text?: string; tag?: string }) {
+  const candidates = target.selector
+    ? Array.from(document.querySelectorAll(target.selector))
+    : Array.from(document.querySelectorAll(target.tag || "button,a")).filter(item => item.textContent?.trim().includes(target.text || ""));
+  return candidates.find(item => {
+    if (!(item instanceof HTMLElement) || item.closest('[data-cmv-tour-ui="true"]')) return false;
+    const rect = item.getBoundingClientRect();
+    const style = window.getComputedStyle(item);
+    return rect.width > 2 && rect.height > 2 && style.display !== "none" && style.visibility !== "hidden";
+  }) ?? null;
+}
+
 type TourStep = {
   path: string;
   icon: string;
@@ -44,7 +56,7 @@ const steps: TourStep[] = [
   { path: "/dashboard", target: { text: "Calcular CMV", tag: "button" }, icon: "🧮", kicker: "Faça a leitura", title: "Calcule o período", text: "Depois de escolher o período e informar o faturamento, este botão atualiza o CMV Real.", improvement: "Confira os filtros antes de clicar. Durante o tutorial, você pode usar o botão para praticar com os dados já preenchidos.", bullets: ["Período conferido", "Faturamento informado", "Resultado atualizado"] },
   { path: "/insumos", icon: "🥫", kicker: "Base do sistema", title: "Organize seus insumos", text: "Insumos alimentam entradas, inventários, fichas técnicas, compras e desperdícios.", improvement: "Cadastre nome, unidade e setor com atenção. O conversor ajuda a relacionar caixas, unidades, quilos e litros sem contas manuais.", bullets: ["Cadastro central", "Conversão de unidades", "Histórico conectado"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-import-open"]' }, icon: "📥", kicker: "Cadastro em quantidade", title: "Importe uma planilha", text: "Além do cadastro individual, você pode trazer vários itens por planilha.", improvement: "Clique no botão destacado para abrir a importação. O guia só avançará depois do seu clique e não mostrará um atalho de Continuar.", bullets: ["Clique em Importar", "Abra a janela", "Avanço automático"] },
-  { path: "/insumos", target: { selector: '[data-tour="insumos-import-dialog"] button[aria-label="Fechar"]' }, icon: "📄", kicker: "Como importar", title: "Conheça a janela da planilha", text: "Aqui você baixa o modelo, preenche nome, categoria, unidade e demais campos e seleciona o arquivo pronto.", improvement: "Depois de importar, confira a prévia antes de confirmar. Neste treinamento, clique no X destacado para fechar sem alterar os dados e seguir ao cadastro manual.", bullets: ["Baixe o modelo", "Preencha e selecione", "Confira antes de importar"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumos-import-close"]' }, icon: "📄", kicker: "Como importar", title: "Conheça a janela da planilha", text: "Aqui você baixa o modelo, preenche nome, categoria, unidade e demais campos e seleciona o arquivo pronto.", improvement: "Depois de importar, confira a prévia antes de confirmar. Neste treinamento, clique no X destacado para fechar sem alterar os dados e seguir ao cadastro manual.", bullets: ["Baixe o modelo", "Preencha e selecione", "Confira antes de importar"] },
   { path: "/insumos", target: { text: "Novo Item", tag: "button" }, icon: "➕", kicker: "Pratique sem salvar", title: "Abra um novo insumo", text: "Este é o início do cadastro que abastece todo o sistema.", improvement: "Clique em Novo Item para conhecer os campos. Nada será gravado sem você confirmar o salvamento.", bullets: ["Nome claro", "Unidade correta", "Setor organizado"] },
   { path: "/insumos", target: { selector: '[role="dialog"]' }, passive: true, icon: "📝", kicker: "Cadastro do insumo", title: "Preencha a identidade do item", text: "O formulário reúne nome, categoria, setor, unidade de medida e informações usadas nas demais rotinas.", improvement: "Um cadastro consistente evita duplicidade e faz o mesmo item aparecer corretamente em notas, inventários, fichas e compras.", bullets: ["Nome padronizado", "Categoria e setor", "Unidade principal"] },
   { path: "/insumos", target: { selector: '[role="dialog"] select' }, passive: true, completion: { selector: '[role="dialog"] select', event: "change" }, icon: "⚖️", kicker: "Unidades e conversão", title: "Defina como o item é medido", text: "A unidade principal determina como o estoque será contado e calculado.", improvement: "Escolha a unidade. Quando a compra chega em caixa, pacote ou fardo, use a conversão para relacionar a embalagem à unidade real.", bullets: ["Escolha a unidade", "Confira a conversão", "Avanço automático"] },
@@ -240,8 +252,7 @@ export default function MigrationExperience() {
     let timer = 0;
     const locate = () => {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
-      let element = target.selector ? Array.from(document.querySelectorAll(target.selector)).find(item => !item.closest('[data-cmv-tour-ui="true"]')) ?? null : null;
-      if (!element && target.text) element = Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text!)) ?? null;
+      let element = findTourTarget(target);
       if (element instanceof HTMLElement && element.dataset.cmvTourUi === "true") element = null;
       if (element instanceof HTMLElement && element.closest('[data-cmv-tour-ui="true"]')) element = null;
       if (element instanceof HTMLElement) {
@@ -270,7 +281,7 @@ export default function MigrationExperience() {
     if (steps[step].passive) return;
     const onClick = (event: MouseEvent) => {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
-      const element = target.selector ? document.querySelector(target.selector) : Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text || ""));
+      const element = findTourTarget(target);
       if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
       if (element instanceof HTMLAnchorElement) {
         event.preventDefault();
