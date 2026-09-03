@@ -601,6 +601,7 @@ export default function AjustesClient() {
                 Minha Empresa
               </a>
               <a
+                data-tour="users-tab"
                 className={tabClass("usuarios")}
                 href="/ajustes?tab=usuarios"
                 onClick={(e) => {
@@ -898,6 +899,7 @@ export default function AjustesClient() {
                 <div>
                   <div className={styles.actions} style={{ marginTop: 0 }}>
                     <button
+                      data-tour="users-new"
                       type="button"
                       className={styles.btnPrimary}
                       onClick={() => {
@@ -919,6 +921,7 @@ export default function AjustesClient() {
                         <label style={{ fontSize: 13, fontWeight: 800, color: "#374151" }}>
                           Email
                           <input
+                            data-tour="users-email"
                             className={styles.input}
                             value={inviteEmail}
                             onChange={(e) => setInviteEmail(e.target.value)}
@@ -930,7 +933,7 @@ export default function AjustesClient() {
                         </label>
                         <label style={{ fontSize: 13, fontWeight: 800, color: "#374151" }}>
                           Permissão
-                          <select className={styles.input} value={inviteRole} onChange={(e) => setInviteRole(e.target.value === "Administrador" ? "Administrador" : "Colaborador")} style={{ marginTop: 6 }}>
+                          <select data-tour="users-role" className={styles.input} value={inviteRole} onChange={(e) => setInviteRole(e.target.value === "Administrador" ? "Administrador" : "Colaborador")} style={{ marginTop: 6 }}>
                             <option value="Colaborador">Colaborador</option>
                             <option value="Administrador">Administrador</option>
                           </select>
@@ -970,6 +973,7 @@ export default function AjustesClient() {
                             {inviteLoading ? "Gerando link…" : "Gerar convite"}
                           </button>
                           <button
+                            data-tour="users-close"
                             type="button"
                             className={styles.btnGhost}
                             disabled={inviteLoading}
