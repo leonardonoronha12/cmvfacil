@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v11";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v12";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -160,6 +160,13 @@ export default function MigrationExperience() {
     sessionStorage.removeItem(ACTIVE_TOUR_KEY);
     setTourOpen(false); setStep(0);
   };
+  const restartTour = () => {
+    localStorage.removeItem(DONE_TOUR_KEY);
+    sessionStorage.setItem(ACTIVE_TOUR_KEY, "0");
+    setStep(0);
+    setTourOpen(true);
+    if (pathname !== steps[0].path) router.push(steps[0].path);
+  };
   const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []).filter(file => /^(image|video)\//.test(file.type)).slice(0, 3);
     setFiles(selected);
@@ -240,7 +247,7 @@ export default function MigrationExperience() {
     </div> : null}
 
     <div className={styles.helpActions}>
-      <button className={styles.tourButton} onClick={() => { goToStep(0); setTourOpen(true); }}>Ver novidades</button>
+      <button className={styles.tourButton} onClick={restartTour}>Ver novidades</button>
       <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
     </div>
     {chatOpen ? <aside className={styles.chat} aria-label="Assistente de suporte">
