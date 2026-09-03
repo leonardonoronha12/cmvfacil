@@ -1491,7 +1491,7 @@ export default function ListaDeComprasClient() {
                 <span className={styles.searchFieldIcon}>
                   <SearchIcon />
                 </span>
-                <input type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Pesquise por itens..." />
+                <input data-tour="shopping-search" type="text" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Pesquise por itens..." />
               </div>
             </div>
 
@@ -1524,7 +1524,7 @@ export default function ListaDeComprasClient() {
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <select className={styles.dateSelect} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
+                    <select data-tour="shopping-period-start" className={styles.dateSelect} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
                       {periodOptions.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -1540,7 +1540,7 @@ export default function ListaDeComprasClient() {
                     <span className={styles.dateIcon}>
                       <CalendarIcon />
                     </span>
-                    <select className={styles.dateSelect} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
+                    <select data-tour="shopping-period-end" className={styles.dateSelect} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={!inventoryOptions.length}>
                       {!inventoryOptions.length ? <option value="">Selecione uma data</option> : null}
                       {periodOptions.map((o) => (
                         <option key={o.value} value={o.value}>
@@ -1567,7 +1567,7 @@ export default function ListaDeComprasClient() {
               <div className={styles.metricTitle}>Dias para Manter Estoque</div>
               <div className={styles.metricHint}>Qtd. de dias que cada item ficará no estoque até a próxima compra.</div>
               <div className={styles.metricInputRow}>
-                <input className={styles.metricInput} value={diasEstoque} onChange={(e) => setDiasEstoque(e.target.value.replace(/[^\d]/g, ""))} />
+                <input data-tour="shopping-stock-days" className={styles.metricInput} value={diasEstoque} onChange={(e) => setDiasEstoque(e.target.value.replace(/[^\d]/g, ""))} />
                 <span className={styles.metricSuffix}>Dia(s)</span>
               </div>
             </article>
@@ -1576,7 +1576,7 @@ export default function ListaDeComprasClient() {
               <div className={styles.metricTitle}>Prazo de Entrega do Fornecedor</div>
               <div className={styles.metricHint}>Qtd. de dias entre o pedido e o recebimento.</div>
               <div className={styles.metricInputRow}>
-                <input className={styles.metricInput} value={diasEntrega} onChange={(e) => setDiasEntrega(e.target.value.replace(/[^\d]/g, ""))} />
+                <input data-tour="shopping-delivery-days" className={styles.metricInput} value={diasEntrega} onChange={(e) => setDiasEntrega(e.target.value.replace(/[^\d]/g, ""))} />
                 <span className={styles.metricSuffix}>Dia(s)</span>
               </div>
             </article>
@@ -1657,7 +1657,7 @@ export default function ListaDeComprasClient() {
                               {isCompatMode ? (
                                 <div className={styles.itemName}>{row.displayItem}</div>
                               ) : (
-                                <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
+                                <Link data-tour="shopping-item-history" className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
                                   {row.displayItem}
                                 </Link>
                               )}
