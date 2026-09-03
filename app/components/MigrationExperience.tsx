@@ -361,6 +361,15 @@ export default function MigrationExperience() {
         left: revealRect.left - 16 - gap,
         right: window.innerWidth - revealRect.right - 16 - gap,
       };
+      const hasExternalRoom = spaces.left >= cardWidth || spaces.right >= cardWidth || spaces.top >= 250 || spaces.bottom >= 250;
+      if (!hasExternalRoom) {
+        const targetIsRight = targetRect.left + targetRect.width / 2 > window.innerWidth / 2;
+        const left = targetIsRight
+          ? Math.max(16, targetRect.left - cardWidth - 24)
+          : Math.min(window.innerWidth - cardWidth - 16, targetRect.right + 24);
+        const top = Math.min(window.innerHeight - Math.min(cardHeight, window.innerHeight - 32) - 16, Math.max(16, targetRect.top - 90));
+        return { left, top, right: "auto", bottom: "auto", width: cardWidth, maxHeight: window.innerHeight - 32, overflowY: "auto" as const };
+      }
       const side = (Object.entries(spaces).sort((a, b) => b[1] - a[1])[0]?.[0] || "top") as keyof typeof spaces;
       if (side === "top" || side === "bottom") {
         const available = Math.max(190, spaces[side]);
