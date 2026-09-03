@@ -623,7 +623,20 @@ export default function InsumosClient() {
         if (readInsumosFromStore().length) {
           setIsLoadingTable(false);
         }
-        const state = await loadInsumosStateFromSupabase();
+        let state;
+        let lastLoadError: unknown = null;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            state = await loadInsumosStateFromSupabase();
+            break;
+          } catch (error) {
+            lastLoadError = error;
+            const message = error instanceof Error ? error.message : String(error);
+            if (!message.includes("missing_company") || attempt === 2) throw error;
+            await new Promise((resolve) => window.setTimeout(resolve, 350 * (attempt + 1)));
+          }
+        }
+        if (!state) throw lastLoadError ?? new Error("missing_company");
         applyLoadedState(state);
       } catch (err) {
         loadFailedRef.current = true;

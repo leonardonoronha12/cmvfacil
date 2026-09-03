@@ -1432,11 +1432,16 @@ export default function DashboardClient() {
     })();
     const refreshTimeout = window.setTimeout(() => {
       void (async () => {
-        try {
-          const rows = await loadInsumosFromSupabase(userIdOverride || undefined);
-          writeInsumosToStore(rows);
-          setInsumos(rows);
-        } catch {}
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          try {
+            const rows = await loadInsumosFromSupabase(userIdOverride || undefined);
+            writeInsumosToStore(rows);
+            setInsumos(rows);
+            return;
+          } catch {
+            if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 450 * (attempt + 1)));
+          }
+        }
       })();
     }, 1200);
     const unsubInsumos = subscribeInsumos((rows) => setInsumos(rows));
