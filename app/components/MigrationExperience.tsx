@@ -267,6 +267,43 @@ export default function MigrationExperience() {
   }, [activeModule, step, tourOpen]);
 
   useEffect(() => {
+    if (!tourOpen) return;
+    const finishSavedFlow = (moduleId: "preparo" | "fichas", nextTitle: string) => {
+      if (activeModule === moduleId) {
+        saveModuleProgress(moduleId);
+        setTourOpen(false); setActiveModule(null); setLearningOpen(true);
+        return;
+      }
+      const next = steps.findIndex(item => item.title === nextTitle);
+      if (next < 0) return;
+      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
+      setStep(next);
+      if (pathname !== steps[next].path) router.push(steps[next].path);
+    };
+    const onPrepSaved = () => finishSavedFlow("preparo", "Prepare a lista de compras");
+    const onSheetSaved = () => finishSavedFlow("fichas", "Cadastre pré-preparos");
+    window.addEventListener("cmv:tour:prep-saved", onPrepSaved);
+    window.addEventListener("cmv:tour:sheet-saved", onSheetSaved);
+    return () => {
+      window.removeEventListener("cmv:tour:prep-saved", onPrepSaved);
+      window.removeEventListener("cmv:tour:sheet-saved", onSheetSaved);
+    };
+  }, [activeModule, pathname, router, tourOpen]);
+
+  useEffect(() => {
+    if (!tourOpen || !targetUnavailable) return;
+    const title = steps[step]?.title;
+    if (pathname === "/pre-preparo" && (title === "Confira os cálculos da receita" || title === "Salve o pré-preparo") && !document.querySelector('[data-tour="prep-summary"], [data-tour="prep-next"]')) {
+      const next = steps.findIndex(item => item.title === "Prepare a lista de compras");
+      const timer = window.setTimeout(() => {
+        if (activeModule === "preparo") { saveModuleProgress("preparo"); setTourOpen(false); setActiveModule(null); setLearningOpen(true); }
+        else if (next >= 0 && !document.querySelector('[data-tour="prep-summary"], [data-tour="prep-next"]')) { sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next)); setStep(next); router.push(steps[next].path); }
+      }, 350);
+      return () => window.clearTimeout(timer);
+    }
+  }, [activeModule, pathname, router, step, targetUnavailable, tourOpen]);
+
+  useEffect(() => {
     if (tourOpen) document.documentElement.dataset.cmvOnboardingTour = "active";
     else delete document.documentElement.dataset.cmvOnboardingTour;
     return () => { delete document.documentElement.dataset.cmvOnboardingTour; };

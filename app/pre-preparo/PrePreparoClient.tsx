@@ -4289,6 +4289,7 @@ export default function PrePreparoClient() {
                       setSelectedCategory("Categorias");
                       setQuery("");
                       setIsNewRecipeOpen(false);
+                      window.dispatchEvent(new CustomEvent("cmv:tour:prep-saved"));
                       return;
                     }
                     setNewRecipeStep((s) => (s === 1 ? 2 : s === 2 ? 3 : 3));

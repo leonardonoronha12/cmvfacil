@@ -1719,6 +1719,7 @@ export default function FichasTecnicasClient({
     setIsEditingPrep(false);
     setPrepDraft("");
     closeCreateModal();
+    window.dispatchEvent(new CustomEvent("cmv:tour:sheet-saved"));
   }
 
   function handleRecipeImageChange(event: React.ChangeEvent<HTMLInputElement>) {
