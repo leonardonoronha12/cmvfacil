@@ -1214,7 +1214,7 @@ export default function InventarioClient() {
             {isCompatSource ? null : (
             <div className={styles.cols}>
               <div className={styles.col}>
-                <div className={styles.colHeadPending}>Pendentes</div>
+                <div data-tour="inventory-pending-column" className={styles.colHeadPending}>Pendentes</div>
                 <div className={styles.colBody} ref={pendingColBodyRef}>
                   {pendentes.map((r) => (
                     <div key={r.id} className={styles.itemRow}>
@@ -1270,7 +1270,7 @@ export default function InventarioClient() {
               </div>
 
               <div className={styles.col}>
-                <div className={styles.colHeadDone}>Contabilizados</div>
+                <div data-tour="inventory-done-column" className={styles.colHeadDone}>Contabilizados</div>
                 <div className={styles.colBody}>
                   {contabilizados.map((r) => (
                     <div key={r.id} className={styles.itemRow}>

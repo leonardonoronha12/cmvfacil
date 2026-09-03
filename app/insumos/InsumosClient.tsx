@@ -2324,7 +2324,7 @@ export default function InsumosClient() {
                     openSectors();
                   }}
                 >
-                  Ver Setores
+                  <span data-tour="sectors-open">Ver Setores</span>
                 </button>
               </div>
               <div className={styles.kpiLabel}>SETORES</div>
@@ -2552,7 +2552,7 @@ export default function InsumosClient() {
                     );
                   })}
 
-                <div className={styles.tdActions}>
+                <div data-tour="insumo-actions" className={styles.tdActions}>
                   <button
                     type="button"
                     className={styles.iconBtn}
