@@ -1405,6 +1405,7 @@ export default function InventarioClient() {
                   <div className={styles.label}>Data da Contagem</div>
                   <div className={styles.calendarWrap} ref={newCalWrapRef}>
                     <input
+                      data-tour="inventory-date"
                       className={styles.input}
                       value={newData}
                       onChange={(e) => setNewData(e.target.value)}
@@ -1470,6 +1471,7 @@ export default function InventarioClient() {
                                 d.getDate() === selected.getDate();
                               cells.push(
                                 <button
+                                  data-tour="inventory-date-day"
                                   type="button"
                                   key={`d-${day}`}
                                   className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}

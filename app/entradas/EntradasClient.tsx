@@ -3235,6 +3235,7 @@ export default function EntradasClient() {
                   <div className={styles.formLabel}>Data de Recebimento</div>
                   <div className={styles.dateWrap} ref={recebWrapRef}>
                     <input
+                      data-tour="entry-date"
                       className={styles.formInput}
                       value={newDataReceb}
                       onChange={(e) => setNewDataReceb(e.target.value)}
@@ -3317,6 +3318,7 @@ export default function EntradasClient() {
                                 d.getDate() === selected.getDate();
                               cells.push(
                                 <button
+                                  data-tour="entry-date-day"
                                   type="button"
                                   key={`d-${day}`}
                                   className={isSelected ? `${styles.calDay} ${styles.calDayOn}` : styles.calDay}
