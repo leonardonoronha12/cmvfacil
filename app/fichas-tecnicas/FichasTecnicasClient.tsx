@@ -2952,6 +2952,7 @@ export default function FichasTecnicasClient({
                     <label className={styles.fieldBlock}>
                       <span className={styles.fieldLabel}>Nome da Receita</span>
                       <input
+                        data-tour="sheet-name"
                         type="text"
                         className={styles.textInput}
                         placeholder="Ex: Maionese da casa"
@@ -2966,6 +2967,7 @@ export default function FichasTecnicasClient({
                         <div className={`${styles.inputGroup} ${styles.inputGroupPrefix}`}>
                           <span className={styles.inputPrefix}>R$</span>
                           <input
+                            data-tour="sheet-price"
                             type="text"
                             className={styles.groupInput}
                             inputMode="decimal"
@@ -2990,6 +2992,7 @@ export default function FichasTecnicasClient({
                         <span className={styles.fieldLabel}>CMV Meta</span>
                         <div className={`${styles.inputGroup} ${styles.inputGroupSuffix}`}>
                           <input
+                            data-tour="sheet-target"
                             type="text"
                             className={styles.groupInput}
                             inputMode="decimal"
@@ -3013,7 +3016,7 @@ export default function FichasTecnicasClient({
 
                       <label className={styles.fieldBlock}>
                         <span className={styles.fieldLabel}>Popularidade</span>
-                        <select className={styles.modalSelect} value={popularidade} onChange={(e) => setPopularidade(e.target.value)}>
+                        <select data-tour="sheet-popularity" className={styles.modalSelect} value={popularidade} onChange={(e) => setPopularidade(e.target.value)}>
                           <option value="">Selecione</option>
                           <option value="alta">Alta</option>
                           <option value="baixa">Baixa</option>
@@ -3042,7 +3045,7 @@ export default function FichasTecnicasClient({
                         <span className={styles.itemSelectIcon}>
                           <SearchMiniIcon />
                         </span>
-                        <select value={selectedIngredientId} onChange={(e) => setSelectedIngredientId(e.target.value)} className={styles.itemSelect}>
+                        <select data-tour="sheet-ingredient" value={selectedIngredientId} onChange={(e) => setSelectedIngredientId(e.target.value)} className={styles.itemSelect}>
                           <option value="">Pesquise por itens...</option>
                           {ingredientOptionGroups.insumos.length ? (
                             <optgroup label="Insumos">
@@ -3076,6 +3079,7 @@ export default function FichasTecnicasClient({
 
                       <span className={styles.inlineGroup}>
                         <input
+                          data-tour="sheet-ingredient-qty"
                           type="text"
                           className={styles.inlineInput}
                           value={ingredientQty}
@@ -3102,7 +3106,7 @@ export default function FichasTecnicasClient({
                         <input type="text" className={styles.inlineInput} value={formatDecimal3(ingredientCost)} readOnly />
                       </span>
 
-                      <button type="button" className={styles.addBtn} onClick={addIngredientRow} disabled={!selectedIngredient || parseDecimalInput(ingredientQty) <= 0}>
+                      <button data-tour="sheet-ingredient-add" type="button" className={styles.addBtn} onClick={addIngredientRow} disabled={!selectedIngredient || parseDecimalInput(ingredientQty) <= 0}>
                         {editingIngredientRowId ? <EditIcon /> : <PlusIcon />}
                       </button>
                     </div>
@@ -3148,7 +3152,7 @@ export default function FichasTecnicasClient({
                     <div className={styles.stepTwoTitle}>Resumo</div>
                     <div className={styles.stepTwoSubtitle}>Confira abaixo o resumo da sua receita antes de finalizar o cadastro.</div>
                   </div>
-                  <div className={styles.summaryCard}>
+                  <div data-tour="sheet-summary" className={styles.summaryCard}>
                     <div className={styles.summaryHero}>
                       <div className={styles.summaryPreview}>
                         {recipeImage ? (
@@ -3203,6 +3207,7 @@ export default function FichasTecnicasClient({
                   Cancelar
                 </button>
                 <button
+                  data-tour="sheet-next"
                   type="button"
                   className={`${styles.nextBtn} ${canGoStep1 ? styles.nextBtnActive : ""}`}
                   disabled={!canGoStep1}
@@ -3222,6 +3227,7 @@ export default function FichasTecnicasClient({
                   </div>
                   <span className={styles.yieldInputWrap}>
                     <input
+                      data-tour="sheet-yield"
                       type="text"
                       className={styles.yieldInput}
                       inputMode="decimal"
@@ -3248,7 +3254,7 @@ export default function FichasTecnicasClient({
                   <button type="button" className={styles.backBtn} onClick={() => setCreateStep(1)}>
                     Voltar
                   </button>
-                  <button type="button" className={`${styles.nextBtn} ${canGoStep2 ? styles.nextBtnActive : ""}`} disabled={!canGoStep2} onClick={() => setCreateStep(3)}>
+                  <button data-tour="sheet-next" type="button" className={`${styles.nextBtn} ${canGoStep2 ? styles.nextBtnActive : ""}`} disabled={!canGoStep2} onClick={() => setCreateStep(3)}>
                     Próximo
                   </button>
                 </div>
@@ -3260,7 +3266,7 @@ export default function FichasTecnicasClient({
                 <button type="button" className={styles.backBtn} onClick={() => setCreateStep(2)}>
                   Voltar
                 </button>
-                <button type="button" className={`${styles.nextBtn} ${styles.nextBtnActive}`} onClick={openSavedRecipeDetails}>
+                <button data-tour="sheet-next" type="button" className={`${styles.nextBtn} ${styles.nextBtnActive}`} onClick={openSavedRecipeDetails}>
                   Salvar
                 </button>
               </div>
