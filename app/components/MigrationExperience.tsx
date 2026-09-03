@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v12";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v13";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
