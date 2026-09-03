@@ -2620,7 +2620,7 @@ export default function InsumosClient() {
         {mounted && isDeleteItemOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!isDeletingItem) setIsDeleteItemOpen(false); }}>
-            <div className={styles.modal} role="dialog" aria-modal="true" data-tour="insumos-import-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>
                   {deletingItemUsage?.suggestedAction === "block" ? "Não é possível excluir" : deletingItemUsage?.suggestedAction === "archive" ? "Arquivar item?" : "Excluir Item?"}
@@ -2744,7 +2744,7 @@ export default function InsumosClient() {
         {mounted && isImportOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => setIsImportOpen(false)}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modal} role="dialog" aria-modal="true" data-tour="insumos-import-dialog" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Importar Itens por Planilha</div>
                 <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="insumos-import-close" onClick={() => setIsImportOpen(false)}>
@@ -2813,10 +2813,10 @@ export default function InsumosClient() {
         {mounted && isNewItemOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation">
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modal} role="dialog" aria-modal="true" data-tour="insumos-new-dialog" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Cadastro de Item</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsNewItemOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="insumos-new-close" onClick={() => setIsNewItemOpen(false)}>
                   ×
                 </button>
               </div>
@@ -2916,7 +2916,7 @@ export default function InsumosClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Unidade de Medida</div>
-                  <select className={styles.formSelect} value={newUnit} onChange={(e) => setNewUnit(e.target.value)}>
+                  <select className={styles.formSelect} data-tour="insumos-unit" value={newUnit} onChange={(e) => setNewUnit(e.target.value)}>
                     <option value="">Selecione</option>
                     <option value="Und">Und</option>
                     <option value="Kg">Kg</option>

@@ -58,9 +58,9 @@ const steps: TourStep[] = [
   { path: "/insumos", target: { selector: '[data-tour="insumos-import-open"]' }, icon: "📥", kicker: "Cadastro em quantidade", title: "Importe uma planilha", text: "Além do cadastro individual, você pode trazer vários itens por planilha.", improvement: "Clique no botão destacado para abrir a importação. O guia só avançará depois do seu clique e não mostrará um atalho de Continuar.", bullets: ["Clique em Importar", "Abra a janela", "Avanço automático"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-import-close"]' }, icon: "📄", kicker: "Como importar", title: "Conheça a janela da planilha", text: "Aqui você baixa o modelo, preenche nome, categoria, unidade e demais campos e seleciona o arquivo pronto.", improvement: "Depois de importar, confira a prévia antes de confirmar. Neste treinamento, clique no X destacado para fechar sem alterar os dados e seguir ao cadastro manual.", bullets: ["Baixe o modelo", "Preencha e selecione", "Confira antes de importar"] },
   { path: "/insumos", target: { text: "Novo Item", tag: "button" }, icon: "➕", kicker: "Pratique sem salvar", title: "Abra um novo insumo", text: "Este é o início do cadastro que abastece todo o sistema.", improvement: "Clique em Novo Item para conhecer os campos. Nada será gravado sem você confirmar o salvamento.", bullets: ["Nome claro", "Unidade correta", "Setor organizado"] },
-  { path: "/insumos", target: { selector: '[role="dialog"]' }, passive: true, icon: "📝", kicker: "Cadastro do insumo", title: "Preencha a identidade do item", text: "O formulário reúne nome, categoria, setor, unidade de medida e informações usadas nas demais rotinas.", improvement: "Um cadastro consistente evita duplicidade e faz o mesmo item aparecer corretamente em notas, inventários, fichas e compras.", bullets: ["Nome padronizado", "Categoria e setor", "Unidade principal"] },
-  { path: "/insumos", target: { selector: '[role="dialog"] select' }, passive: true, completion: { selector: '[role="dialog"] select', event: "change" }, icon: "⚖️", kicker: "Unidades e conversão", title: "Defina como o item é medido", text: "A unidade principal determina como o estoque será contado e calculado.", improvement: "Escolha a unidade. Quando a compra chega em caixa, pacote ou fardo, use a conversão para relacionar a embalagem à unidade real.", bullets: ["Escolha a unidade", "Confira a conversão", "Avanço automático"] },
-  { path: "/insumos", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Cadastro conhecido", title: "Confira e feche a janela", text: "Observe nome, categoria, unidade e os demais dados disponíveis.", improvement: "Feche pelo X iluminado para concluir esta prática sem criar um item.", bullets: ["Sem salvar", "Pode refazer depois"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumos-new-dialog"]' }, passive: true, icon: "📝", kicker: "Cadastro do insumo", title: "Preencha a identidade do item", text: "O formulário reúne nome, categoria, setor, unidade de medida e informações usadas nas demais rotinas.", improvement: "Um cadastro consistente evita duplicidade e faz o mesmo item aparecer corretamente em notas, inventários, fichas e compras.", bullets: ["Nome padronizado", "Categoria e setor", "Unidade principal"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumos-unit"]' }, passive: true, completion: { selector: '[data-tour="insumos-unit"]', event: "change" }, icon: "⚖️", kicker: "Unidades e conversão", title: "Defina como o item é medido", text: "A unidade principal determina como o estoque será contado e calculado.", improvement: "Clique em Unidade de Medida e escolha Und, Kg, g ou L. O guia avançará somente depois da mudança desse campo — Categoria não será confundida com unidade.", bullets: ["Abra Unidade de Medida", "Escolha a unidade correta", "Avanço automático"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumos-new-close"]' }, icon: "✅", kicker: "Cadastro conhecido", title: "Confira e feche a janela", text: "Observe nome, categoria, unidade e os demais dados disponíveis.", improvement: "Feche pelo X iluminado para concluir esta prática sem criar um item.", bullets: ["Sem salvar", "Pode refazer depois"] },
   { path: "/fornecedores", icon: "🚚", kicker: "Compras organizadas", title: "Gerencie fornecedores", text: "Aqui você mantém os fornecedores e os produtos vinculados a cada um.", improvement: "Use os vínculos para acelerar notas, preservar o histórico de entradas e comparar de quem cada item foi comprado.", bullets: ["Contatos reunidos", "Produtos vinculados", "Histórico preservado"] },
   { path: "/fornecedores", target: { text: "Importar", tag: "button" }, passive: true, icon: "📥", kicker: "Cadastro em quantidade", title: "Importe fornecedores", text: "A planilha acelera o cadastro inicial de muitos fornecedores.", improvement: "Baixe ou siga o modelo, confira os dados e use o cadastro manual para ajustes individuais.", bullets: ["Planilha", "Conferência", "Edição posterior"] },
   { path: "/fornecedores", target: { text: "Novo Fornecedor", tag: "button" }, icon: "➕", kicker: "Conheça o cadastro", title: "Abra um fornecedor", text: "O cadastro organiza a empresa e os contatos usados nas compras.", improvement: "Clique no botão iluminado. Você poderá conhecer a janela sem salvar.", bullets: ["Dados do fornecedor", "Contato", "Vínculos"] },
@@ -147,6 +147,7 @@ export default function MigrationExperience() {
   const [typedText, setTypedText] = useState("");
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [revealRect, setRevealRect] = useState<DOMRect | null>(null);
+  const [targetUnavailable, setTargetUnavailable] = useState(false);
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -247,9 +248,11 @@ export default function MigrationExperience() {
   }, [step, tourOpen]);
 
   useEffect(() => {
-    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); return; }
+    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); setTargetUnavailable(false); return; }
     let didScroll = false;
     let timer = 0;
+    setTargetUnavailable(false);
+    const unavailableTimer = window.setTimeout(() => setTargetUnavailable(true), 2600);
     const locate = () => {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
       let element = findTourTarget(target);
@@ -265,15 +268,18 @@ export default function MigrationExperience() {
         const visibleRect = revealElement.getBoundingClientRect();
         setTargetRect(previous => previous && Math.abs(previous.left - rect.left) < 1 && Math.abs(previous.top - rect.top) < 1 && Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1 ? previous : rect);
         setRevealRect(previous => previous && Math.abs(previous.left - visibleRect.left) < 1 && Math.abs(previous.top - visibleRect.top) < 1 && Math.abs(previous.width - visibleRect.width) < 1 && Math.abs(previous.height - visibleRect.height) < 1 ? previous : visibleRect);
+        const noSelectableValue = element instanceof HTMLSelectElement
+          && Array.from(element.options).filter(option => !option.disabled && String(option.value).trim()).length === 0;
+        setTargetUnavailable(noSelectableValue);
         if (!didScroll && (rect.top < 8 || rect.bottom > window.innerHeight - 8)) { didScroll = true; element.scrollIntoView({ block: "center", behavior: "smooth" }); }
-        if (timer) window.clearInterval(timer);
-        return true;
+        if (!noSelectableValue && timer) window.clearInterval(timer);
+        return !noSelectableValue;
       }
       return false;
     };
     if (!locate()) timer = window.setInterval(locate, 160);
     window.addEventListener("resize", locate); window.addEventListener("scroll", locate, true);
-    return () => { if (timer) window.clearInterval(timer); window.removeEventListener("resize", locate); window.removeEventListener("scroll", locate, true); };
+    return () => { window.clearTimeout(unavailableTimer); if (timer) window.clearInterval(timer); window.removeEventListener("resize", locate); window.removeEventListener("scroll", locate, true); };
   }, [step, tourOpen, pathname]);
 
   useEffect(() => {
@@ -416,12 +422,13 @@ export default function MigrationExperience() {
         <div className={styles.coachKicker}>{steps[step].kicker}</div>
         <h3>{steps[step].title}</h3>
         <p>{typedText}<span className={styles.typingCursor} /></p>
+        {targetUnavailable ? <div className={styles.prerequisiteNote}>Esta conta ainda não possui os dados necessários para praticar esta ação. Cadastre o item indicado primeiro; o guia permite seguir sem salvar dados de demonstração.</div> : null}
         <div className={styles.benefits}>{steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
       </div>
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
-        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
+        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) && !targetUnavailable ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{targetUnavailable ? "Seguir sem dados" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
     {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
