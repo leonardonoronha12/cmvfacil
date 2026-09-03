@@ -2241,7 +2241,7 @@ export default function DesperdiciosClient({
                         {renderTableCell(r, column)}
                       </div>
                     ))}
-                    <div className={styles.actionsCell}>
+                    <div data-tour="waste-actions" className={styles.actionsCell}>
                       <button
                         type="button"
                         className={styles.iconBtn}

@@ -31,6 +31,7 @@ type TourStep = {
   improvement: string;
   bullets: string[];
   target?: { selector?: string; text?: string; tag?: string };
+  alertSelectors?: string[];
   passive?: boolean;
   completion?: { selector: string; event: "click" | "change" | "blur" | "input"; debounceMs?: number; requireValue?: boolean };
 };
@@ -45,7 +46,7 @@ const steps: TourStep[] = [
   { path: "/inventario", target: { selector: 'input[data-inv-pending="1"]' }, passive: true, completion: { selector: 'input[data-inv-pending="1"]', event: "blur" }, icon: "⌨️", kicker: "Passo 4 — registre a quantidade", title: "Digite o estoque contado", text: "No item pendente, informe a quantidade física encontrada usando a unidade mostrada ao lado: Kg, g, L, ml ou Und.", improvement: "Digite o valor e pressione Enter, ou toque fora do campo. Assim que o valor for confirmado, eu avanço. Para 700 gramas em Kg, digite 0,700.", bullets: ["Respeite a unidade", "Use vírgula nos decimais", "Pressione Enter"] },
   { path: "/inventario", passive: true, icon: "✅", kicker: "Passo 5 — confira", title: "Pendentes e contabilizados", text: "Pendentes ainda precisam de quantidade. Contabilizados já foram registrados e podem ser revisados.", improvement: "Antes de encerrar a rotina, verifique se não restaram itens pendentes no setor. Se errar, edite o valor contabilizado e confirme novamente.", bullets: ["Confira os pendentes", "Revise os contabilizados", "Corrija quando necessário"] },
   { path: "/inventario", target: { selector: '[data-tour="inventory-pending-column"]' }, passive: true, icon: "🟠", kicker: "Itens pendentes", title: "Entenda o que ainda falta contar", text: "A coluna Pendentes reúne todos os itens que ainda não receberam uma quantidade naquela contagem. Digitar e confirmar um valor move o item para Contabilizados.", improvement: "Use os filtros de setor e categoria para terminar uma área por vez e não deixar itens sem contagem.", bullets: ["Ainda não contado", "Organização por área", "Confirmação move o item"] },
-  { path: "/inventario", target: { selector: '[data-tour="inventory-done-column"]' }, passive: true, icon: "🟢", kicker: "Itens contabilizados", title: "Revise o que já foi contado", text: "A coluna Contabilizados mostra os itens já registrados, com quantidade e unidade. Clique no valor ou no lápis para editar uma contagem incorreta.", improvement: "Ao excluir, o item volta para Pendentes; ele não é removido do cadastro de insumos.", bullets: ["Editar quantidade", "Excluir devolve a Pendentes", "Cadastro preservado"] },
+  { path: "/inventario", target: { selector: '[data-tour="inventory-done-column"]' }, alertSelectors: ['[data-tour="inventory-done-actions"] button'], passive: true, icon: "🟢", kicker: "Itens contabilizados", title: "Revise o que já foi contado", text: "A coluna Contabilizados mostra os itens já registrados. O lápis edita e a lixeira devolve o item para Pendentes.", improvement: "Os botões laranja são apenas referência. Clique em Continuar para seguir sem alterar a contagem.", bullets: ["Editar quantidade", "Excluir devolve a Pendentes", "Clique em Continuar"] },
   { path: "/inventario", target: { selector: 'a[href="/entradas"]' }, icon: "⚖️", kicker: "Próxima novidade", title: "Vamos para Entradas", text: "O lançamento de notas ganhou recursos que reduzem contas manuais e itens não encontrados.", improvement: "Clique em Entradas no menu lateral para eu mostrar onde tudo começa.", bullets: ["Clique em Entradas"] },
   { path: "/entradas", target: { text: "Nova Nota", tag: "button" }, icon: "🧾", kicker: "Lançamento mais fácil", title: "Abra uma nova nota", text: "O novo fluxo prepara fornecedor e data antes da inclusão dos produtos.", improvement: "Clique em Nova Nota. Você poderá conhecer a tela sem salvar nenhuma informação.", bullets: ["Fluxo guiado", "Sem salvar agora"] },
   { path: "/entradas", target: { selector: '[role="dialog"] select' }, passive: true, completion: { selector: '[role="dialog"] select', event: "change" }, icon: "🚚", kicker: "Passo 1 — fornecedor", title: "Selecione de quem você comprou", text: "Clique no campo destacado e escolha o fornecedor que aparece na nota.", improvement: "Se ele não estiver cadastrado, use ADD Fornecedor. Assim que você escolher uma opção, eu avanço.", bullets: ["Abra a lista", "Escolha o fornecedor", "Avanço automático"] },
@@ -80,13 +81,13 @@ const steps: TourStep[] = [
   { path: "/insumos", target: { selector: '[data-tour="insumos-cost"]' }, passive: true, completion: { selector: '[data-tour="insumos-cost"]', event: "blur" }, icon: "💰", kicker: "Passo 7 — custo", title: "Informe o custo inicial", text: "Digite o custo real da unidade escolhida.", improvement: "Esse valor será a base até a primeira entrada atualizar o custo médio.", bullets: ["Custo real", "Unidade conferida"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-save"]' }, icon: "✅", kicker: "Passo 8 — concluir", title: "Salve o insumo", text: "Revise os campos e clique em Salvar.", improvement: "Somente após salvar o guia seguirá para o fornecedor que vende esse item.", bullets: ["Cadastro completo", "Cascata liberada"] },
   { path: "/insumos", target: { selector: '[data-tour="sectors-open"]' }, passive: true, icon: "🏪", kicker: "Setores dos insumos", title: "Organize onde cada item é usado", text: "Os setores determinam em quais áreas o insumo aparece no inventário. Um mesmo item pode pertencer a Bar, Cozinha, Estoque Seco ou outros setores.", improvement: "Em Ver Setores você pode cadastrar, editar ou remover setores. Antes de excluir, confira se existem itens vinculados.", bullets: ["Múltiplos setores", "Editar nome", "Remover com segurança"] },
-  { path: "/insumos", target: { selector: '[data-tour="insumo-actions"]' }, passive: true, icon: "✏️", kicker: "Manutenção do cadastro", title: "Edite ou remova um insumo", text: "Na coluna Ações, o lápis altera nome, categoria, unidade, custo, especificação e setores. A lixeira remove ou arquiva o item conforme seus vínculos.", improvement: "Itens usados em entradas, inventários ou receitas podem ser protegidos para preservar o histórico.", bullets: ["Editar cadastro", "Excluir ou arquivar", "Histórico protegido"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumo-actions"]' }, alertSelectors: ['[data-tour="insumo-actions"] button'], passive: true, icon: "✏️", kicker: "Manutenção do cadastro", title: "Edite ou remova um insumo", text: "Na coluna Ações, o lápis altera o cadastro e a lixeira remove ou arquiva o item conforme seus vínculos.", improvement: "Os botões laranja são somente um alerta visual. Clique em Continuar para não alterar dados durante o treinamento.", bullets: ["Editar cadastro", "Excluir ou arquivar", "Clique em Continuar"] },
   { path: "/insumos", target: { selector: 'a[aria-label^="Abrir detalhes do item"]' }, icon: "📚", kicker: "Histórico do insumo", title: "Clique no nome para ver as entradas", text: "O nome do insumo funciona como atalho para seus detalhes no CMV Real.", improvement: "Ali você consulta histórico de entradas, evolução de custo e movimentações relacionadas ao item.", bullets: ["Clique no nome", "Entradas do item", "Custos anteriores"] },
   { path: "/fornecedores", icon: "🚚", kicker: "Compras organizadas", title: "Gerencie fornecedores", text: "Aqui você mantém os fornecedores e os produtos vinculados a cada um.", improvement: "Use os vínculos para acelerar notas, preservar o histórico de entradas e comparar de quem cada item foi comprado.", bullets: ["Contatos reunidos", "Produtos vinculados", "Histórico preservado"] },
   { path: "/fornecedores", target: { text: "Novo Fornecedor", tag: "button" }, icon: "➕", kicker: "Conheça o cadastro", title: "Abra um fornecedor", text: "O cadastro organiza a empresa e os contatos usados nas compras.", improvement: "Clique no botão iluminado. Você poderá conhecer a janela sem salvar.", bullets: ["Dados do fornecedor", "Contato", "Vínculos"] },
   { path: "/fornecedores", target: { selector: '[data-tour="supplier-name"]' }, passive: true, completion: { selector: '[data-tour="supplier-name"]', event: "blur" }, icon: "📝", kicker: "Cadastro obrigatório", title: "Digite o nome do fornecedor", text: "Informe um fornecedor real que vende o insumo cadastrado.", improvement: "Vendedor, WhatsApp e endereço são recomendados, mas o nome é o dado obrigatório para continuar.", bullets: ["Fornecedor real", "Contato recomendado"] },
   { path: "/fornecedores", target: { selector: '[data-tour="supplier-save"]' }, icon: "✅", kicker: "Concluir fornecedor", title: "Salve o fornecedor", text: "Clique em Salvar para liberar a etapa de Entradas.", improvement: "A nota usará este fornecedor e o insumo que você já cadastrou.", bullets: ["Cadastro salvo", "Entradas liberadas"] },
-  { path: "/fornecedores", icon: "✏️", kicker: "Manutenção de fornecedores", title: "Edite ou remova fornecedores", text: "Use o lápis para atualizar empresa, vendedor, contato e endereço. Use a lixeira somente quando o fornecedor não precisar mais aparecer nos novos lançamentos.", improvement: "Os vínculos e entradas antigas devem permanecer rastreáveis mesmo quando um cadastro deixa de ser usado.", bullets: ["Editar contato", "Remover com cuidado", "Histórico preservado"] },
+  { path: "/fornecedores", target: { selector: '[data-tour="supplier-actions"]' }, alertSelectors: ['[data-tour="supplier-actions"] button'], passive: true, icon: "✏️", kicker: "Manutenção de fornecedores", title: "Edite ou remova fornecedores", text: "O lápis atualiza os dados e a lixeira remove o fornecedor dos novos lançamentos.", improvement: "Os controles laranja são demonstrativos. Clique em Continuar para preservar os dados e seguir.", bullets: ["Editar contato", "Remover com cuidado", "Clique em Continuar"] },
   { path: "/fornecedores", icon: "📚", kicker: "Histórico do fornecedor", title: "Consulte o que foi comprado", text: "Ao abrir um fornecedor, confira produtos vinculados e entradas realizadas para entender preços, frequência e origem das compras.", improvement: "Essa consulta ajuda a comparar fornecedores e localizar rapidamente notas anteriores.", bullets: ["Produtos vinculados", "Notas anteriores", "Comparação de compras"] },
   { path: "/fichas-tecnicas", icon: "🍽️", kicker: "Custo dos produtos", title: "Monte fichas técnicas", text: "A ficha transforma ingredientes e quantidades no custo real do produto vendido.", improvement: "Inclua os ingredientes, informe o rendimento e confira custo unitário, CMV atual e preço sugerido.", bullets: ["Ingredientes", "Rendimento", "Preço sugerido"] },
   { path: "/fichas-tecnicas", target: { text: "Nova Ficha Técnica", tag: "button" }, icon: "➕", kicker: "Monte uma receita", title: "Abra uma nova ficha", text: "Aqui começa a composição de um produto vendido.", improvement: "Clique para conhecer ingredientes, rendimento e preço. Nada será salvo sem confirmação.", bullets: ["Ingredientes", "Quantidade", "Rendimento"] },
@@ -131,7 +132,7 @@ const steps: TourStep[] = [
   { path: "/desperdicios", target: { text: "Desperdício", tag: "button" }, icon: "➕", kicker: "Registre a ocorrência", title: "Abra um lançamento", text: "O lançamento identifica o item perdido, a quantidade e o motivo.", improvement: "Clique para conhecer os campos. Nenhuma perda será registrada sem salvar.", bullets: ["Item", "Quantidade", "Motivo"] },
   { path: "/desperdicios", target: { selector: '[role="dialog"]' }, passive: true, icon: "📝", kicker: "Cadastro do desperdício", title: "Informe todos os detalhes", text: "Selecione item, data, quantidade, unidade e motivo para registrar a perda corretamente.", improvement: "O custo é calculado a partir do item e a saída passa a compor os relatórios sem ser confundida com venda.", bullets: ["Data e item", "Quantidade e unidade", "Motivo e custo"] },
   { path: "/desperdicios", icon: "🗓️", kicker: "Consulta de perdas", title: "Use período, busca e filtros", text: "O período limita as ocorrências exibidas. A busca encontra itens e os filtros ajudam a analisar tipos e motivos de desperdício.", improvement: "Compare períodos para identificar perdas repetidas e agir na causa.", bullets: ["Período", "Busca", "Motivos"] },
-  { path: "/desperdicios", icon: "✏️", kicker: "Correção de lançamentos", title: "Edite ou exclua um desperdício", text: "O lápis corrige item, data, quantidade, unidade ou motivo. A lixeira remove um lançamento incorreto após confirmação.", improvement: "Corrija a ocorrência original para que estoque, custo e relatórios permaneçam consistentes.", bullets: ["Editar lançamento", "Excluir com confirmação", "Estoque consistente"] },
+  { path: "/desperdicios", target: { selector: '[data-tour="waste-actions"]' }, alertSelectors: ['[data-tour="waste-actions"] button'], passive: true, icon: "✏️", kicker: "Correção de lançamentos", title: "Edite ou exclua um desperdício", text: "O lápis corrige o lançamento e a lixeira o remove após confirmação.", improvement: "Não altere dados reais no treinamento: observe os botões laranja e clique em Continuar.", bullets: ["Editar lançamento", "Excluir com confirmação", "Clique em Continuar"] },
   { path: "/desperdicios", icon: "⚙️", kicker: "Motivos configuráveis", title: "Gerencie os motivos de desperdício", text: "Cadastre motivos que façam sentido para a operação, como validade, erro de produção, quebra ou sobra.", improvement: "Os motivos também podem ser editados ou removidos e permitem descobrir onde as perdas se concentram.", bullets: ["Cadastrar motivos", "Editar ou remover", "Analisar causas"] },
   { path: "/desperdicios", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Sem alterar estoque", title: "Feche o lançamento", text: "Use essa rotina sempre que uma perda ocorrer para manter os números confiáveis.", improvement: "Feche pelo X para concluir sem salvar.", bullets: ["Nenhuma perda registrada"] },
   { path: "/ajustes", icon: "⚙️", kicker: "Sua operação", title: "Configure empresa e equipe", text: "Ajustes reúne dados da conta, usuários, empresa, unidades e preferências.", improvement: "Revise acessos e configurações sempre que a equipe ou a operação mudar.", bullets: ["Usuários", "Permissões", "Configurações"] },
@@ -202,6 +203,8 @@ export default function MigrationExperience() {
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
   const [revealRect, setRevealRect] = useState<DOMRect | null>(null);
   const [targetUnavailable, setTargetUnavailable] = useState(false);
+  const [alertRects, setAlertRects] = useState<DOMRect[]>([]);
+  const [continueNotice, setContinueNotice] = useState(false);
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -361,6 +364,8 @@ export default function MigrationExperience() {
     if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); setTargetUnavailable(false); return; }
     setTargetRect(null);
     setRevealRect(null);
+    setAlertRects([]);
+    setContinueNotice(false);
     let didScroll = false;
     let timer = 0;
     setTargetUnavailable(false);
@@ -380,6 +385,8 @@ export default function MigrationExperience() {
         const visibleRect = revealElement.getBoundingClientRect();
         setTargetRect(previous => previous && Math.abs(previous.left - rect.left) < 1 && Math.abs(previous.top - rect.top) < 1 && Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1 ? previous : rect);
         setRevealRect(previous => previous && Math.abs(previous.left - visibleRect.left) < 1 && Math.abs(previous.top - visibleRect.top) < 1 && Math.abs(previous.width - visibleRect.width) < 1 && Math.abs(previous.height - visibleRect.height) < 1 ? previous : visibleRect);
+        const nextAlerts = (steps[step].alertSelectors ?? []).flatMap(selector => Array.from(document.querySelectorAll(selector))).filter((item): item is HTMLElement => item instanceof HTMLElement).map(item => item.getBoundingClientRect()).filter(item => item.width > 2 && item.height > 2);
+        setAlertRects(nextAlerts);
         const noSelectableValue = element instanceof HTMLSelectElement
           && Array.from(element.options).filter(option => !option.disabled && String(option.value).trim()).length === 0;
         setTargetUnavailable(noSelectableValue);
@@ -564,7 +571,7 @@ export default function MigrationExperience() {
         </div>
       </section>
     </div> : null}
-    {tourOpen && continueOnlyStep ? <div data-cmv-tour-ui="true" className={`${styles.continueGuard} ${!steps[step]?.target ? styles.continueGuardDim : ""}`} aria-hidden /> : null}
+    {tourOpen && continueOnlyStep ? <div data-cmv-tour-ui="true" className={`${styles.continueGuard} ${!steps[step]?.target ? styles.continueGuardDim : ""}`} onClick={() => setContinueNotice(true)} aria-hidden /> : null}
     {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
       <header className={styles.coachHeader}>
@@ -577,6 +584,7 @@ export default function MigrationExperience() {
         <h3>{steps[step].title}</h3>
         <p>{typedText}<span className={styles.typingCursor} /></p>
         <div className={styles.benefits}>{steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
+        {continueNotice ? <div className={styles.continueNotice}>Nesta etapa, observe os controles destacados e clique em <strong>Continuar</strong>.</div> : null}
       </div>
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
@@ -584,12 +592,13 @@ export default function MigrationExperience() {
         <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
-    {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
+    {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} onClick={() => { if (continueOnlyStep) setContinueNotice(true); }} aria-hidden>
       <i style={{ left: 0, top: 0, width: "100%", height: Math.max(0, (revealRect ?? targetRect).top - 9) }} />
       <i style={{ left: 0, top: (revealRect ?? targetRect).bottom + 9, width: "100%", bottom: 0 }} />
       <i style={{ left: 0, top: Math.max(0, (revealRect ?? targetRect).top - 9), width: Math.max(0, (revealRect ?? targetRect).left - 9), height: (revealRect ?? targetRect).height + 18 }} />
       <i style={{ left: (revealRect ?? targetRect).right + 9, top: Math.max(0, (revealRect ?? targetRect).top - 9), right: 0, height: (revealRect ?? targetRect).height + 18 }} />
       <b style={{ left: targetRect.left - 7, top: targetRect.top - 7, width: targetRect.width + 14, height: targetRect.height + 14 }} />
+      {alertRects.map((rect, index) => <b key={index} className={styles.alertSpotlight} style={{ left: rect.left - 6, top: rect.top - 6, width: rect.width + 12, height: rect.height + 12 }} />)}
     </div> : null}
 
     <div className={styles.helpActions}>

@@ -1343,7 +1343,7 @@ export default function InventarioClient() {
                             {`${r.estoqueFinal} ${r.unidade}`}
                           </div>
                         )}
-                        <div className={styles.actions}>
+                        <div data-tour="inventory-done-actions" className={styles.actions}>
                           <button
                             type="button"
                             className={styles.iconBtn}

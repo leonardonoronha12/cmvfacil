@@ -1358,7 +1358,7 @@ export default function FornecedoresClient() {
                     );
                   })}
 
-                  <div className={styles.tdActions}>
+                  <div data-tour="supplier-actions" className={styles.tdActions}>
                     <button
                       type="button"
                       className={styles.iconBtn}
