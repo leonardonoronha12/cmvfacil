@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v8";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v9";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -37,6 +37,7 @@ export default function MigrationExperience() {
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean } | null>(null);
   const [typedText, setTypedText] = useState("");
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [revealRect, setRevealRect] = useState<DOMRect | null>(null);
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -83,7 +84,7 @@ export default function MigrationExperience() {
   }, [step, tourOpen]);
 
   useEffect(() => {
-    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); return; }
+    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); return; }
     let didScroll = false;
     let timer = 0;
     const locate = () => {
@@ -92,7 +93,10 @@ export default function MigrationExperience() {
       if (!element && target.text) element = Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text!)) ?? null;
       if (element instanceof HTMLElement) {
         const rect = element.getBoundingClientRect();
+        const revealElement = element.closest('[role="dialog"]') instanceof HTMLElement ? element.closest('[role="dialog"]') as HTMLElement : element;
+        const visibleRect = revealElement.getBoundingClientRect();
         setTargetRect(previous => previous && Math.abs(previous.left - rect.left) < 1 && Math.abs(previous.top - rect.top) < 1 && Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1 ? previous : rect);
+        setRevealRect(previous => previous && Math.abs(previous.left - visibleRect.left) < 1 && Math.abs(previous.top - visibleRect.top) < 1 && Math.abs(previous.width - visibleRect.width) < 1 && Math.abs(previous.height - visibleRect.height) < 1 ? previous : visibleRect);
         if (!didScroll && (rect.top < 8 || rect.bottom > window.innerHeight - 8)) { didScroll = true; element.scrollIntoView({ block: "center", behavior: "smooth" }); }
         if (timer) window.clearInterval(timer);
         return true;
@@ -130,19 +134,20 @@ export default function MigrationExperience() {
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
   const coachStyle = useMemo(() => {
     if (!targetRect || typeof window === "undefined") return undefined;
+    const anchorRect = revealRect ?? targetRect;
     const cardWidth = Math.min(430, window.innerWidth - 32);
     const cardHeight = Math.min(440, window.innerHeight - 32);
     if (window.innerWidth < 700) {
-      const targetIsLow = targetRect.top + targetRect.height / 2 > window.innerHeight / 2;
+      const targetIsLow = anchorRect.top + anchorRect.height / 2 > window.innerHeight / 2;
       return { left: 10, top: targetIsLow ? 10 : Math.max(10, window.innerHeight - cardHeight - 10), right: "auto", bottom: "auto" };
     }
-    const targetIsRight = targetRect.left + targetRect.width / 2 > window.innerWidth / 2;
+    const targetIsRight = anchorRect.left + anchorRect.width / 2 > window.innerWidth / 2;
     const left = targetIsRight
-      ? Math.max(16, targetRect.left - cardWidth - 24)
-      : Math.min(window.innerWidth - cardWidth - 16, targetRect.right + 24);
-    const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, targetRect.top + targetRect.height / 2 - cardHeight / 2));
+      ? Math.max(16, anchorRect.left - cardWidth - 24)
+      : Math.min(window.innerWidth - cardWidth - 16, anchorRect.right + 24);
+    const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, anchorRect.top + anchorRect.height / 2 - cardHeight / 2));
     return { left, top, right: "auto", bottom: "auto" };
-  }, [targetRect]);
+  }, [targetRect, revealRect]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
@@ -221,10 +226,10 @@ export default function MigrationExperience() {
       </div>
     </aside> : null}
     {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
-      <i style={{ left: 0, top: 0, width: "100%", height: Math.max(0, targetRect.top - 9) }} />
-      <i style={{ left: 0, top: targetRect.bottom + 9, width: "100%", bottom: 0 }} />
-      <i style={{ left: 0, top: Math.max(0, targetRect.top - 9), width: Math.max(0, targetRect.left - 9), height: targetRect.height + 18 }} />
-      <i style={{ left: targetRect.right + 9, top: Math.max(0, targetRect.top - 9), right: 0, height: targetRect.height + 18 }} />
+      <i style={{ left: 0, top: 0, width: "100%", height: Math.max(0, (revealRect ?? targetRect).top - 9) }} />
+      <i style={{ left: 0, top: (revealRect ?? targetRect).bottom + 9, width: "100%", bottom: 0 }} />
+      <i style={{ left: 0, top: Math.max(0, (revealRect ?? targetRect).top - 9), width: Math.max(0, (revealRect ?? targetRect).left - 9), height: (revealRect ?? targetRect).height + 18 }} />
+      <i style={{ left: (revealRect ?? targetRect).right + 9, top: Math.max(0, (revealRect ?? targetRect).top - 9), right: 0, height: (revealRect ?? targetRect).height + 18 }} />
       <b style={{ left: targetRect.left - 7, top: targetRect.top - 7, width: targetRect.width + 14, height: targetRect.height + 14 }} />
     </div> : null}
 
