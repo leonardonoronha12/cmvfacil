@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-academia-v15";
+const TOUR_VERSION = "2026-09-academia-v16";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
@@ -90,6 +90,30 @@ const learningModules = [
   { id: "ajustes", title: "Empresa e usuários", description: "Acessos e configurações", icon: "⚙️", step: steps.findIndex(item => item.title === "Configure empresa e equipe") },
 ] as const;
 
+const stepIndex = (title: string) => steps.findIndex(item => item.title === title);
+const stepRange = (firstTitle: string, nextTitle: string) => {
+  const first = stepIndex(firstTitle);
+  const next = stepIndex(nextTitle);
+  return Array.from({ length: Math.max(0, next - first) }, (_, index) => first + index);
+};
+
+// O curso completo acompanha a ordem real da operação: cadastros primeiro,
+// movimentos depois e análise gerencial por último.
+const fullCourseSteps = [
+  ...stepRange("Organize seus insumos", "Gerencie fornecedores"),
+  ...stepRange("Gerencie fornecedores", "Monte fichas técnicas"),
+  ...stepRange("Abra uma nova nota", "Entenda o CMV Real"),
+  ...stepRange("Cadastre pré-preparos", "Prepare a lista de compras"),
+  ...stepRange("Monte fichas técnicas", "Cadastre pré-preparos"),
+  ...stepRange("Crie uma nova contagem", "Vamos para Entradas"),
+  ...stepRange("Registre desperdícios", "Configure empresa e equipe"),
+  ...stepRange("Prepare a lista de compras", "Registre desperdícios"),
+  ...stepRange("Configure empresa e equipe", "Você já sabe onde revisar"),
+  stepIndex("Você já sabe onde revisar"),
+  ...stepRange("Entenda o CMV Real", "Organize seus insumos"),
+  stepIndex("Fale comigo quando precisar"),
+].filter((value, index, values) => value >= 0 && values.indexOf(value) === index);
+
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
 type ChatLine = { from: "bot" | "user"; text: string };
 
@@ -148,7 +172,7 @@ export default function MigrationExperience() {
 
   const startFullTour = () => {
     setActiveModule(null); setLearningOpen(false); setTourOpen(true);
-    goToStep(1);
+    goToStep(fullCourseSteps[0]);
   };
 
   const startModule = (moduleId: string, moduleStep: number) => {
@@ -166,10 +190,16 @@ export default function MigrationExperience() {
       saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
       return;
     }
-    const next = currentStep + 1;
-    if (next >= steps.length) { finishTour(); return; }
+    const coursePosition = fullCourseSteps.indexOf(currentStep);
+    const next = activeModule ? currentStep + 1 : fullCourseSteps[coursePosition + 1];
+    if (next === undefined || next < 0) { finishTour(); return; }
     goToStep(next);
   };
+
+  const visibleStepSequence = activeModule
+    ? Array.from({ length: moduleEndStep(activeModule) - (learningModules.find(module => module.id === activeModule)?.step ?? step) + 1 }, (_, index) => (learningModules.find(module => module.id === activeModule)?.step ?? step) + index)
+    : fullCourseSteps;
+  const visibleStepPosition = Math.max(0, visibleStepSequence.indexOf(step));
 
   useEffect(() => {
     if (!tourOpen) return;
@@ -248,7 +278,9 @@ export default function MigrationExperience() {
         saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
         return;
       }
-      const next = step + 1;
+      const coursePosition = fullCourseSteps.indexOf(step);
+      const next = activeModule ? step + 1 : fullCourseSteps[coursePosition + 1];
+      if (next === undefined || next < 0) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next)); setStep(next);
       const destination = steps[next]?.path;
       if (destination && pathname !== destination) router.push(destination);
@@ -366,7 +398,7 @@ export default function MigrationExperience() {
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
         <div><strong>Fácil, seu guia</strong><small><i /> explicando esta tela</small></div>
-        <b>{step + 1}/{steps.length}</b>
+        <b>{visibleStepPosition + 1}/{visibleStepSequence.length}</b>
       </header>
       <div className={styles.speech}>
         <div className={styles.coachKicker}>{steps[step].kicker}</div>
@@ -374,7 +406,7 @@ export default function MigrationExperience() {
         <p>{typedText}<span className={styles.typingCursor} /></p>
         <div className={styles.benefits}>{steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
       </div>
-      <div className={styles.coachProgress}>{steps.map((item, index) => <button aria-label={`Etapa ${index + 1}`} key={item.title} onClick={() => goToStep(index)} className={index === step ? styles.coachProgressOn : index < step ? styles.coachProgressDone : ""} />)}</div>
+      <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
         <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && !steps[step].passive ? <strong className={styles.clickHint}>Clique no destaque para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
