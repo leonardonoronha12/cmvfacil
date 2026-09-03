@@ -2876,7 +2876,7 @@ export default function EntradasClient() {
                     <div className={styles.detailsHeadSub}>Adicione abaixo os itens que fazem parte desta nota.</div>
                   </div>
 
-                  <div className={styles.itemsAdd}>
+                  <div className={styles.itemsAdd} data-tour="entry-items-form">
                     <div className={styles.itemsAddLabels}>
                       <div>Item</div>
                       <div>Quantidade</div>
