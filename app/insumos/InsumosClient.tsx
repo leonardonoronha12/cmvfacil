@@ -2497,7 +2497,7 @@ export default function InsumosClient() {
 
                   {columnOrder.map((col) => {
                     if (col === "item") {
-                      const itemHref = `/dashboard?itemId=${encodeURIComponent(r.id)}&tab=entradas`;
+                      const itemHref = `/dashboard?itemId=${encodeURIComponent(r.id)}&item=${encodeURIComponent(r.item)}&tab=entradas`;
                       return (
                         <div key={col}>
                           {bulkDeleteMode ? (

@@ -1572,7 +1572,13 @@ export default function DashboardClient() {
       insumos.find((i) => i.id === itemId) ??
       insumos.find((i) => normalizeKey(i.item) === normalizeKey(itemName));
 
-    if (!matched) return;
+    if (!matched) {
+      if (!itemId) return;
+      const fallbackName = itemName || "Item selecionado";
+      setHistoryItem((prev) => prev?.insumoId === itemId ? prev : { insumoId: itemId, item: fallbackName });
+      setDetailsTab(searchParams.get("tab") === "fornecedores" ? "fornecedores" : "entradas");
+      return;
+    }
 
     setHistoryItem((prev) => {
       if (prev?.insumoId === matched.id && prev.item === matched.item) return prev;
