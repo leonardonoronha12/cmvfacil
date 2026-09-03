@@ -4,9 +4,10 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v13";
+const TOUR_VERSION = "2026-09-academia-v14";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
+const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
 const steps = [
@@ -19,7 +20,28 @@ const steps = [
   { path: "/entradas", target: { selector: '[role="dialog"] select' }, icon: "🔎", kicker: "Fornecedor organizado", title: "Escolha o fornecedor da nota", text: "O primeiro dropdown reúne os fornecedores cadastrados e prepara a nota antes da inclusão dos produtos.", improvement: "Clique no campo iluminado para abrir a lista. Na etapa de itens, o novo dropdown mostra todos os insumos e o conversor ajusta caixas, unidades, quilos e litros.", bullets: ["Fornecedor vinculado", "Todos os insumos na próxima etapa", "Conversão automática"] },
   { path: "/entradas", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Demonstração concluída", title: "Agora feche a nova nota", text: "Você conheceu o início do lançamento sem criar ou alterar nenhum registro.", improvement: "Clique somente no X iluminado para fechar esta janela e seguir para o suporte inteligente.", bullets: ["Nenhuma informação foi salva", "Clique no X"] },
   { path: "/entradas", target: { selector: 'button[data-tour="support"]' }, icon: "💬", kicker: "Suporte inteligente", title: "Fale comigo quando precisar", text: "O botão Ajuda acompanha você em todas as telas.", improvement: "Clique no botão iluminado. Você pode escrever, anexar imagem ou vídeo e enviar o chamado automaticamente ao WhatsApp do suporte.", bullets: ["Clique em Ajuda", "Atendimento com contexto"] },
+  { path: "/dashboard", icon: "📊", kicker: "Gestão e resultado", title: "Entenda o CMV Real", text: "O painel reúne estoque inicial, entradas, estoque final, saídas, custo médio e CMV para transformar a operação em uma leitura gerencial.", improvement: "Use os filtros de período, confira os dados de origem e calcule o indicador. Você pode voltar a este módulo sempre que quiser revisar o cálculo.", bullets: ["Indicadores do período", "Custos conectados", "Decisão mais segura"] },
+  { path: "/insumos", icon: "🥫", kicker: "Base do sistema", title: "Organize seus insumos", text: "Insumos alimentam entradas, inventários, fichas técnicas, compras e desperdícios.", improvement: "Cadastre nome, unidade e setor com atenção. O conversor ajuda a relacionar caixas, unidades, quilos e litros sem contas manuais.", bullets: ["Cadastro central", "Conversão de unidades", "Histórico conectado"] },
+  { path: "/fornecedores", icon: "🚚", kicker: "Compras organizadas", title: "Gerencie fornecedores", text: "Aqui você mantém os fornecedores e os produtos vinculados a cada um.", improvement: "Use os vínculos para acelerar notas, preservar o histórico de entradas e comparar de quem cada item foi comprado.", bullets: ["Contatos reunidos", "Produtos vinculados", "Histórico preservado"] },
+  { path: "/fichas-tecnicas", icon: "🍽️", kicker: "Custo dos produtos", title: "Monte fichas técnicas", text: "A ficha transforma ingredientes e quantidades no custo real do produto vendido.", improvement: "Inclua os ingredientes, informe o rendimento e confira custo unitário, CMV atual e preço sugerido.", bullets: ["Ingredientes", "Rendimento", "Preço sugerido"] },
+  { path: "/pre-preparo", icon: "👨‍🍳", kicker: "Produção intermediária", title: "Cadastre pré-preparos", text: "Molhos, massas e outras bases podem ser produzidos antes e usados em várias fichas.", improvement: "Registre ingredientes e rendimento para que o custo seja reaproveitado corretamente nas receitas finais.", bullets: ["Bases reutilizáveis", "Custo automático", "Receitas conectadas"] },
+  { path: "/lista-de-compras", icon: "🛒", kicker: "Reposição inteligente", title: "Prepare a lista de compras", text: "A lista ajuda a transformar necessidade de estoque em uma rotina objetiva de compra.", improvement: "Revise itens e quantidades sugeridas, faça ajustes e use a lista como guia da reposição.", bullets: ["Necessidade visível", "Quantidades sugeridas", "Compra organizada"] },
+  { path: "/desperdicios", icon: "♻️", kicker: "Controle de perdas", title: "Registre desperdícios", text: "Perdas precisam sair do estoque e aparecer separadas das vendas.", improvement: "Escolha o item, informe quantidade e motivo. Assim o estoque e o CMV refletem o que realmente aconteceu.", bullets: ["Motivo registrado", "Estoque correto", "Impacto visível"] },
+  { path: "/ajustes", icon: "⚙️", kicker: "Sua operação", title: "Configure empresa e equipe", text: "Ajustes reúne dados da conta, usuários, empresa, unidades e preferências.", improvement: "Revise acessos e configurações sempre que a equipe ou a operação mudar.", bullets: ["Usuários", "Permissões", "Configurações"] },
 ];
+
+const learningModules = [
+  { id: "inventario", title: "Inventário", description: "Contagens, setores e conferência", icon: "📦", step: 1 },
+  { id: "entradas", title: "Entradas e notas", description: "Fornecedores, itens e conversão", icon: "🧾", step: 5 },
+  { id: "cmv", title: "CMV Real", description: "Indicadores e leitura do resultado", icon: "📊", step: 9 },
+  { id: "insumos", title: "Insumos", description: "Cadastros e unidades", icon: "🥫", step: 10 },
+  { id: "fornecedores", title: "Fornecedores", description: "Vínculos e histórico", icon: "🚚", step: 11 },
+  { id: "fichas", title: "Fichas técnicas", description: "Ingredientes, custo e rendimento", icon: "🍽️", step: 12 },
+  { id: "preparo", title: "Pré-preparos", description: "Bases e produção intermediária", icon: "👨‍🍳", step: 13 },
+  { id: "compras", title: "Lista de compras", description: "Reposição orientada", icon: "🛒", step: 14 },
+  { id: "desperdicios", title: "Desperdícios", description: "Perdas e impacto no estoque", icon: "♻️", step: 15 },
+  { id: "ajustes", title: "Empresa e usuários", description: "Acessos e configurações", icon: "⚙️", step: 16 },
+] as const;
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
 type ChatLine = { from: "bot" | "user"; text: string };
@@ -29,6 +51,9 @@ export default function MigrationExperience() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
+  const [learningOpen, setLearningOpen] = useState(false);
+  const [activeModule, setActiveModule] = useState<string | null>(null);
+  const [completedModules, setCompletedModules] = useState<string[]>([]);
   const [step, setStep] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -46,6 +71,8 @@ export default function MigrationExperience() {
     router.prefetch("/dashboard");
     router.prefetch("/inventario");
     router.prefetch("/entradas");
+    learningModules.forEach(module => router.prefetch(steps[module.step].path));
+    try { setCompletedModules(JSON.parse(localStorage.getItem(MODULE_PROGRESS_KEY) || "[]")); } catch { setCompletedModules([]); }
     if (localStorage.getItem(DONE_TOUR_KEY) !== "done") {
       const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
       const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
@@ -63,6 +90,39 @@ export default function MigrationExperience() {
       .catch(() => {});
     return () => { active = false; };
   }, []);
+
+  const saveModuleProgress = (moduleId: string) => {
+    setCompletedModules(current => {
+      const next = current.includes(moduleId) ? current : [...current, moduleId];
+      localStorage.setItem(MODULE_PROGRESS_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const startFullTour = () => {
+    setActiveModule(null); setLearningOpen(false); setTourOpen(true);
+    goToStep(1);
+  };
+
+  const startModule = (moduleId: string, moduleStep: number) => {
+    setActiveModule(moduleId); setLearningOpen(false); setTourOpen(true);
+    goToStep(moduleStep);
+  };
+
+  const moduleEndStep = (moduleId: string) => {
+    const index = learningModules.findIndex(module => module.id === moduleId);
+    return index < 0 ? steps.length - 1 : (learningModules[index + 1]?.step ?? steps.length) - 1;
+  };
+
+  const advance = (currentStep: number) => {
+    if (activeModule && currentStep >= moduleEndStep(activeModule)) {
+      saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
+      return;
+    }
+    const next = currentStep + 1;
+    if (next >= steps.length) { finishTour(); return; }
+    goToStep(next);
+  };
 
   useEffect(() => {
     if (tourOpen) document.documentElement.dataset.cmvOnboardingTour = "active";
@@ -114,19 +174,21 @@ export default function MigrationExperience() {
       const target = steps[step].target as { selector?: string; text?: string; tag?: string };
       const element = target.selector ? document.querySelector(target.selector) : Array.from(document.querySelectorAll(target.tag || "button,a")).find(item => item.textContent?.trim().includes(target.text || ""));
       if (!element || !(event.target instanceof Node) || !element.contains(event.target)) return;
-      const next = step + 1;
-      if (next >= steps.length) { finishTour(); return; }
       if (element instanceof HTMLAnchorElement) {
         event.preventDefault();
       }
-      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
-      setStep(next);
-      const destination = steps[next].path;
+      if (activeModule && step >= moduleEndStep(activeModule)) {
+        saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
+        return;
+      }
+      const next = step + 1;
+      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next)); setStep(next);
+      const destination = steps[next]?.path;
       if (element instanceof HTMLAnchorElement && pathname !== destination) router.push(destination);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
-  }, [pathname, router, step, tourOpen]);
+  }, [activeModule, pathname, router, step, tourOpen]);
 
   const goToStep = (nextStep: number) => {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
@@ -162,10 +224,7 @@ export default function MigrationExperience() {
   };
   const restartTour = () => {
     localStorage.removeItem(DONE_TOUR_KEY);
-    sessionStorage.setItem(ACTIVE_TOUR_KEY, "0");
-    setStep(0);
-    setTourOpen(true);
-    if (pathname !== steps[0].path) router.push(steps[0].path);
+    setTourOpen(false); setActiveModule(null); setLearningOpen(true);
   };
   const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []).filter(file => /^(image|video)\//.test(file.type)).slice(0, 3);
@@ -195,6 +254,22 @@ export default function MigrationExperience() {
   };
 
   return <>
+    {learningOpen ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Academia CMV Fácil">
+      <section className={`${styles.tourCard} ${styles.learningCard}`}>
+        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Academia CMV Fácil <b>{completedModules.length}/{learningModules.length}</b></div></header>
+        <div className={styles.learningIntro}>
+          <div><span className={styles.learningRobot}>🤖</span><div><div className={styles.eyebrow}>Seu guia permanente</div><h2>O que você quer aprender?</h2><p>Faça o treinamento completo se estiver começando ou abra somente uma rotina para relembrar. Seu progresso fica salvo.</p></div></div>
+          <button className={styles.primary} onClick={startFullTour}>Começar curso completo <span>→</span></button>
+        </div>
+        <div className={styles.moduleGrid}>{learningModules.map(module => {
+          const done = completedModules.includes(module.id);
+          return <button key={module.id} className={styles.moduleCard} onClick={() => startModule(module.id, module.step)}>
+            <span className={styles.moduleIcon}>{module.icon}</span><span><strong>{module.title}</strong><small>{module.description}</small></span><b>{done ? "✓ Revisado" : "Começar →"}</b>
+          </button>;
+        })}</div>
+        <div className={styles.learningFooter}><button className={styles.skip} onClick={() => setLearningOpen(false)}>Fechar academia</button><small>Você poderá abrir novamente pelo botão Tutorial do sistema.</small></div>
+      </section>
+    </div> : null}
     {tourOpen && step === 0 ? <div className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
       <section className={styles.tourCard}>
         <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b></div></header>
@@ -213,9 +288,9 @@ export default function MigrationExperience() {
           </div>
         </div>
         <div className={styles.tourActions}>
-          <button className={styles.skip} onClick={finishTour}>Pular apresentação</button>
+          <button className={styles.skip} onClick={() => { setTourOpen(false); setLearningOpen(true); }}>Escolher um módulo</button>
           <div><button className={styles.ghost} disabled={step === 0} onClick={() => goToStep(step - 1)}>Voltar</button>
-          {step < steps.length - 1 ? <button className={styles.primary} onClick={() => goToStep(step + 1)}>Continuar <span>→</span></button> : <button className={styles.primary} onClick={finishTour}>Explorar o CMV Fácil <span>→</span></button>}</div>
+          <button className={styles.primary} onClick={startFullTour}>Aprender o sistema completo <span>→</span></button></div>
         </div>
       </section>
     </div> : null}
@@ -235,7 +310,7 @@ export default function MigrationExperience() {
       <div className={styles.coachProgress}>{steps.map((item, index) => <button aria-label={`Etapa ${index + 1}`} key={item.title} onClick={() => goToStep(index)} className={index === step ? styles.coachProgressOn : index < step ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
-        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button><strong className={styles.clickHint}>Clique no destaque para continuar</strong></div>
+        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target ? <strong className={styles.clickHint}>Clique no destaque para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{activeModule ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
     {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} aria-hidden>
@@ -247,7 +322,7 @@ export default function MigrationExperience() {
     </div> : null}
 
     <div className={styles.helpActions}>
-      <button className={styles.tourButton} onClick={restartTour}>Ver novidades</button>
+      <button className={styles.tourButton} onClick={restartTour}>🎓 Tutorial do sistema</button>
       <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
     </div>
     {chatOpen ? <aside className={styles.chat} aria-label="Assistente de suporte">
