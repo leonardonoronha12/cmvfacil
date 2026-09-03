@@ -2840,7 +2840,12 @@ export default function InsumosClient() {
                       ADD Categoria
                     </button>
                   </div>
-                  <select className={styles.formSelect} data-tour="insumos-category" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
+                  <select className={styles.formSelect} data-tour="insumos-category" value={newCategory} onMouseDown={(e) => {
+                    if (categoriesSorted.length) return;
+                    e.preventDefault();
+                    openCategories();
+                    window.dispatchEvent(new Event("cmv:tour:category-required"));
+                  }} onChange={(e) => setNewCategory(e.target.value)}>
                     <option value="">Selecione</option>
                     {categoriesSorted.map((c) => (
                       <option key={c} value={c}>
@@ -3146,7 +3151,10 @@ export default function InsumosClient() {
             <div className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Categorias de Itens</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="categories-close" onClick={() => setIsCategoriesOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="categories-close" onClick={() => {
+                  setIsCategoriesOpen(false);
+                  if (isNewItemOpen) window.dispatchEvent(new Event("cmv:tour:category-return"));
+                }}>
                   ×
                 </button>
               </div>

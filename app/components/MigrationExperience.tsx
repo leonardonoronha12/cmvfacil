@@ -32,7 +32,7 @@ type TourStep = {
   bullets: string[];
   target?: { selector?: string; text?: string; tag?: string };
   passive?: boolean;
-  completion?: { selector: string; event: "click" | "change" | "blur" };
+  completion?: { selector: string; event: "click" | "change" | "blur" | "input"; debounceMs?: number; requireValue?: boolean };
 };
 
 const steps: TourStep[] = [
@@ -60,7 +60,7 @@ const steps: TourStep[] = [
   { path: "/insumos", target: { selector: '[data-tour="category-save"]' }, icon: "✅", kicker: "Passo 3 — salvar", title: "Salve a categoria", text: "Clique em ADD para gravar a categoria.", improvement: "O guia só seguirá depois que esse cadastro básico for concluído.", bullets: ["Cadastro real", "Base para o insumo"] },
   { path: "/insumos", target: { selector: '[data-tour="categories-close"]' }, icon: "➡️", kicker: "Categoria pronta", title: "Volte ao cadastro de insumos", text: "A categoria já está disponível.", improvement: "Feche a janela para criar o primeiro insumo.", bullets: ["Categoria disponível"] },
   { path: "/insumos", target: { text: "Novo Item", tag: "button" }, icon: "➕", kicker: "Pratique sem salvar", title: "Abra um novo insumo", text: "Este é o início do cadastro que abastece todo o sistema.", improvement: "Clique em Novo Item para conhecer os campos. Nada será gravado sem você confirmar o salvamento.", bullets: ["Nome claro", "Unidade correta", "Setor organizado"] },
-  { path: "/insumos", target: { selector: '[data-tour="insumos-name"]' }, passive: true, completion: { selector: '[data-tour="insumos-name"]', event: "blur" }, icon: "📝", kicker: "Passo 4 — insumo", title: "Digite o nome do insumo", text: "Informe um produto real usado na operação.", improvement: "Use um nome claro, como Arroz, Leite Integral ou Coca-Cola Lata.", bullets: ["Nome padronizado", "Produto real"] },
+  { path: "/insumos", target: { selector: '[data-tour="insumos-name"]' }, passive: true, completion: { selector: '[data-tour="insumos-name"]', event: "input", debounceMs: 700, requireValue: true }, icon: "📝", kicker: "Passo 4 — insumo", title: "Digite o nome do insumo", text: "Informe um produto real usado na operação.", improvement: "Use um nome claro, como Arroz, Leite Integral ou Coca-Cola Lata. Quando você parar de digitar, eu reconheço o nome e avanço automaticamente.", bullets: ["Nome padronizado", "Produto real", "Detecta a pausa"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-category"]' }, passive: true, completion: { selector: '[data-tour="insumos-category"]', event: "change" }, icon: "🗂️", kicker: "Passo 5 — organização", title: "Escolha a categoria criada", text: "Selecione a categoria que acabamos de cadastrar.", improvement: "Isso garante que filtros, inventário e relatórios encontrem o item corretamente.", bullets: ["Categoria cadastrada", "Organização"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-unit"]' }, passive: true, completion: { selector: '[data-tour="insumos-unit"]', event: "change" }, icon: "⚖️", kicker: "Unidades e conversão", title: "Defina como o item é medido", text: "A unidade principal determina como o estoque será contado e calculado.", improvement: "Clique em Unidade de Medida e escolha Und, Kg, g ou L. O guia avançará somente depois da mudança desse campo — Categoria não será confundida com unidade.", bullets: ["Abra Unidade de Medida", "Escolha a unidade correta", "Avanço automático"] },
   { path: "/insumos", target: { selector: '[data-tour="insumos-cost"]' }, passive: true, completion: { selector: '[data-tour="insumos-cost"]', event: "blur" }, icon: "💰", kicker: "Passo 7 — custo", title: "Informe o custo inicial", text: "Digite o custo real da unidade escolhida.", improvement: "Esse valor será a base até a primeira entrada atualizar o custo médio.", bullets: ["Custo real", "Unidade conferida"] },
@@ -222,13 +222,16 @@ export default function MigrationExperience() {
     if (!tourOpen) return;
     const completion = steps[step]?.completion;
     if (!completion) return;
+    let completionTimer = 0;
     const onComplete = (event: Event) => {
       if (!(event.target instanceof Element)) return;
       if (!event.target.closest(completion.selector)) return;
-      window.setTimeout(() => advance(step), 80);
+      if (completion.requireValue && event.target instanceof HTMLInputElement && !event.target.value.trim()) return;
+      if (completionTimer) window.clearTimeout(completionTimer);
+      completionTimer = window.setTimeout(() => advance(step), completion.debounceMs ?? 80);
     };
     document.addEventListener(completion.event, onComplete, true);
-    return () => document.removeEventListener(completion.event, onComplete, true);
+    return () => { if (completionTimer) window.clearTimeout(completionTimer); document.removeEventListener(completion.event, onComplete, true); };
   }, [activeModule, step, tourOpen]);
 
   useEffect(() => {
@@ -236,6 +239,20 @@ export default function MigrationExperience() {
     else delete document.documentElement.dataset.cmvOnboardingTour;
     return () => { delete document.documentElement.dataset.cmvOnboardingTour; };
   }, [tourOpen]);
+
+  useEffect(() => {
+    const onCategoryRequired = () => {
+      const categoryStep = steps.findIndex(item => item.title === "Dê um nome à categoria");
+      if (categoryStep >= 0) goToStep(categoryStep);
+    };
+    const onCategoryReturn = () => {
+      const categorySelectStep = steps.findIndex(item => item.title === "Escolha a categoria criada");
+      if (categorySelectStep >= 0) goToStep(categorySelectStep);
+    };
+    window.addEventListener("cmv:tour:category-required", onCategoryRequired);
+    window.addEventListener("cmv:tour:category-return", onCategoryReturn);
+    return () => { window.removeEventListener("cmv:tour:category-required", onCategoryRequired); window.removeEventListener("cmv:tour:category-return", onCategoryReturn); };
+  }, [pathname]);
 
   useEffect(() => {
     if (!tourOpen || step === 0) return;
