@@ -1458,6 +1458,7 @@ export default function FornecedoresClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Nome do Fornecedor</div>
                   <input
+                    data-tour="supplier-name"
                     className={styles.formInput}
                     placeholder="Ex: Mercado X"
                     value={draftFornecedor}
@@ -1507,6 +1508,7 @@ export default function FornecedoresClient() {
               <div className={styles.modalFooter}>
                 <button
                   type="button"
+                  data-tour="supplier-save"
                   className={styles.modalPrimaryWide}
                   onClick={saveForm}
                   disabled={!draftFornecedor.trim()}

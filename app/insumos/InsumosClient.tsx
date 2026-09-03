@@ -2293,7 +2293,7 @@ export default function InsumosClient() {
                     openCategories();
                   }}
                 >
-                  Ver Categorias
+                  <span data-tour="categories-open">Ver Categorias</span>
                 </button>
               </div>
               <div className={styles.kpiLabel}>CATEGORIAS</div>
@@ -2825,6 +2825,7 @@ export default function InsumosClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Nome do Item</div>
                   <input
+                    data-tour="insumos-name"
                     className={styles.formInput}
                     placeholder="Ex: Carne Bovina"
                     value={newItemName}
@@ -2839,7 +2840,7 @@ export default function InsumosClient() {
                       ADD Categoria
                     </button>
                   </div>
-                  <select className={styles.formSelect} value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
+                  <select className={styles.formSelect} data-tour="insumos-category" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}>
                     <option value="">Selecione</option>
                     {categoriesSorted.map((c) => (
                       <option key={c} value={c}>
@@ -2930,6 +2931,7 @@ export default function InsumosClient() {
                   <div className={styles.moneyRow}>
                     <div className={styles.moneyPrefix}>R$</div>
                     <input
+                      data-tour="insumos-cost"
                       className={styles.moneyInput}
                       placeholder="0,00"
                       inputMode="decimal"
@@ -2957,6 +2959,7 @@ export default function InsumosClient() {
               <div className={styles.modalFooter}>
                 <button
                   type="button"
+                  data-tour="insumos-save"
                   className={styles.modalPrimaryWide}
                   onClick={saveNewItem}
                   disabled={!newItemName.trim() || !newCategory.trim() || !newUnit.trim() || !newInitialCost.trim()}
@@ -3143,7 +3146,7 @@ export default function InsumosClient() {
             <div className={`${styles.modal} ${styles.categoriesModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Categorias de Itens</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsCategoriesOpen(false)}>
+                <button type="button" className={styles.modalClose} aria-label="Fechar" data-tour="categories-close" onClick={() => setIsCategoriesOpen(false)}>
                   ×
                 </button>
               </div>
@@ -3152,12 +3155,13 @@ export default function InsumosClient() {
                 <div className={styles.categoriesLabel}>Nome da Categoria</div>
                 <div className={styles.categoriesRow}>
                   <input
+                    data-tour="category-name"
                     className={styles.categoriesInput}
                     placeholder="Ex: Proteínas"
                     value={categoryNewDraft}
                     onChange={(e) => setCategoryNewDraft(e.target.value)}
                   />
-                  <button type="button" className={styles.categoriesAddBtn} onClick={addCategory} disabled={!normalizeCategoryName(categoryNewDraft)}>
+                  <button type="button" data-tour="category-save" className={styles.categoriesAddBtn} onClick={addCategory} disabled={!normalizeCategoryName(categoryNewDraft)}>
                     <IconPlus /> ADD
                   </button>
                 </div>
