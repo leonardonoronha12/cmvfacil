@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-primeiro-acesso-v9";
+const TOUR_VERSION = "2026-09-primeiro-acesso-v10";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
@@ -135,8 +135,9 @@ export default function MigrationExperience() {
   const coachStyle = useMemo(() => {
     if (!targetRect || typeof window === "undefined") return undefined;
     const anchorRect = revealRect ?? targetRect;
-    const cardWidth = Math.min(430, window.innerWidth - 32);
-    const cardHeight = Math.min(440, window.innerHeight - 32);
+    const showingContainer = Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
+    const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
+    const cardHeight = Math.min(showingContainer ? 520 : 440, window.innerHeight - 32);
     if (window.innerWidth < 700) {
       const targetIsLow = anchorRect.top + anchorRect.height / 2 > window.innerHeight / 2;
       return { left: 10, top: targetIsLow ? 10 : Math.max(10, window.innerHeight - cardHeight - 10), right: "auto", bottom: "auto" };
@@ -146,7 +147,7 @@ export default function MigrationExperience() {
       ? Math.max(16, anchorRect.left - cardWidth - 24)
       : Math.min(window.innerWidth - cardWidth - 16, anchorRect.right + 24);
     const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, anchorRect.top + anchorRect.height / 2 - cardHeight / 2));
-    return { left, top, right: "auto", bottom: "auto" };
+    return { left, top, right: "auto", bottom: "auto", width: cardWidth };
   }, [targetRect, revealRect]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
