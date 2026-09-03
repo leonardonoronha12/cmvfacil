@@ -2357,6 +2357,7 @@ export default function InsumosClient() {
           <div className={styles.actions}>
             <button
               type="button"
+              data-tour="insumos-import-open"
               className={styles.importBtn}
               disabled={isReadOnly}
               onClick={() => {
@@ -2619,7 +2620,7 @@ export default function InsumosClient() {
         {mounted && isDeleteItemOpen ? (
           createPortal(
           <div className={styles.modalOverlay} role="presentation" onClick={() => { if (!isDeletingItem) setIsDeleteItemOpen(false); }}>
-            <div className={styles.modal} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modal} role="dialog" aria-modal="true" data-tour="insumos-import-dialog" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>
                   {deletingItemUsage?.suggestedAction === "block" ? "Não é possível excluir" : deletingItemUsage?.suggestedAction === "archive" ? "Arquivar item?" : "Excluir Item?"}
