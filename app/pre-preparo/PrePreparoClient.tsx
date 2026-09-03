@@ -3934,6 +3934,7 @@ export default function PrePreparoClient() {
                     <div className={styles.formField}>
                       <div className={styles.formLabel}>Nome da Receita</div>
                       <input
+                        data-tour="prep-name"
                         className={styles.formInput}
                         placeholder="Ex: Maionese da casa"
                         value={newRecipeName}
@@ -3944,6 +3945,7 @@ export default function PrePreparoClient() {
                     <div className={styles.formField}>
                       <div className={styles.formLabel}>Especificação</div>
                       <input
+                        data-tour="prep-spec"
                         className={styles.formInput}
                         placeholder="Descreva como será usado..."
                         value={newRecipeSpec}
@@ -3959,7 +3961,7 @@ export default function PrePreparoClient() {
                             Add categoria
                           </button>
                         </div>
-                        <select className={styles.formSelect} value={newRecipeCategory} onChange={(e) => setNewRecipeCategory(e.target.value)}>
+                        <select data-tour="prep-category" className={styles.formSelect} value={newRecipeCategory} onChange={(e) => setNewRecipeCategory(e.target.value)}>
                           <option value="">Selecione</option>
                           {recipeCategories.map((c) => (
                             <option key={c} value={c}>
@@ -3972,6 +3974,7 @@ export default function PrePreparoClient() {
                       <div className={styles.formField}>
                         <div className={styles.formLabel}>Unidade de Medida</div>
                         <select
+                          data-tour="prep-unit"
                           className={styles.formSelect}
                           value={newRecipeUnit}
                           onChange={(e) => {
@@ -3994,7 +3997,7 @@ export default function PrePreparoClient() {
                         Prazo de Validade <span className={styles.optional}>(opcional)</span>
                       </div>
                       <div className={styles.validityRow}>
-                        <input className={styles.validityInput} inputMode="numeric" value={newRecipeValidity} onChange={(e) => setNewRecipeValidity(e.target.value)} />
+                        <input data-tour="prep-validity" className={styles.validityInput} inputMode="numeric" value={newRecipeValidity} onChange={(e) => setNewRecipeValidity(e.target.value)} />
                       <select className={styles.validitySelect} value={newRecipeValidityUnit} onChange={() => {}} disabled>
                         <option value="Dia(s)">Dia(s)</option>
                         </select>
@@ -4008,6 +4011,7 @@ export default function PrePreparoClient() {
                         {sectors.map((sector) => (
                           <label key={sector.id} style={{ display: "flex", alignItems: "center", gap: 7, padding: "9px 12px", border: "1px solid #d9e1df", borderRadius: 10, cursor: "pointer" }}>
                             <input
+                              data-tour="prep-sector"
                               type="checkbox"
                               checked={newRecipeSectorIds.includes(sector.id)}
                               onChange={(event) => setNewRecipeSectorIds((previous) => event.target.checked ? [...new Set([...previous, sector.id])] : previous.filter((id) => id !== sector.id))}
@@ -4050,6 +4054,7 @@ export default function PrePreparoClient() {
                             onFocus={() => setIsIngredientMenuOpen(true)}
                           />
                           <button
+                            data-tour="prep-ingredient-menu"
                             type="button"
                             className={styles.ingredientChevronBtn}
                             aria-label="Abrir lista de insumos"
@@ -4063,6 +4068,7 @@ export default function PrePreparoClient() {
                             <div className={styles.ingredientDropdown} role="listbox" aria-label="Insumos cadastrados">
                               {ingredientSuggestions.map((name) => (
                                 <button
+                                  data-tour="prep-ingredient-option"
                                   key={name}
                                   type="button"
                                   className={styles.ingredientOption}
@@ -4089,6 +4095,7 @@ export default function PrePreparoClient() {
 
                         <div className={styles.ingredientQtyWrap}>
                           <input
+                            data-tour="prep-ingredient-qty"
                             className={styles.ingredientQtyInput}
                             value={ingredientQty}
                             onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
@@ -4110,6 +4117,7 @@ export default function PrePreparoClient() {
                         </div>
 
                         <button
+                          data-tour="prep-ingredient-add"
                           type="button"
                           className={styles.ingredientAddBtn}
                           aria-label="Adicionar ingrediente"
@@ -4165,6 +4173,7 @@ export default function PrePreparoClient() {
                       </div>
                       <div className={styles.yieldInputWrap}>
                         <input
+                          data-tour="prep-yield"
                           className={styles.yieldInput}
                           value={newRecipeYield}
                           onChange={(e) => setNewRecipeYield(formatDecimalDraft(e.target.value, 3))}
@@ -4186,7 +4195,7 @@ export default function PrePreparoClient() {
                     <div className={styles.stepTitle}>Resumo</div>
                     <div className={styles.stepSubtitle}>Confira abaixo o resumo da sua receita antes de finalizar o cadastro.</div>
 
-                    <div className={styles.summaryCard}>
+                    <div data-tour="prep-summary" className={styles.summaryCard}>
                       <div className={styles.summaryTop}>
                         <div className={styles.summaryIcon} aria-hidden>
                           <IconCubeOutline />
@@ -4235,6 +4244,7 @@ export default function PrePreparoClient() {
                   {newRecipeStep === 1 ? "Cancelar" : "Voltar"}
                 </button>
                 <button
+                  data-tour="prep-next"
                   type="button"
                   className={styles.recipeNextBtn}
                   disabled={isSavingNewRecipe || (newRecipeStep === 1 ? !canGoNextRecipe : newRecipeStep === 2 ? !canGoNextRecipeStep2 : false)}
