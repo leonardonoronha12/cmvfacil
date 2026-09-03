@@ -226,12 +226,13 @@ export default function MigrationExperience() {
     const onComplete = (event: Event) => {
       if (!(event.target instanceof Element)) return;
       if (!event.target.closest(completion.selector)) return;
-      if (completion.requireValue && event.target instanceof HTMLInputElement && !event.target.value.trim()) return;
+      if ((completion.requireValue || completion.event === "blur") && event.target instanceof HTMLInputElement && !event.target.value.trim()) return;
       if (completionTimer) window.clearTimeout(completionTimer);
-      completionTimer = window.setTimeout(() => advance(step), completion.debounceMs ?? 80);
+      completionTimer = window.setTimeout(() => advance(step), completion.debounceMs ?? (completion.event === "blur" ? 700 : 80));
     };
-    document.addEventListener(completion.event, onComplete, true);
-    return () => { if (completionTimer) window.clearTimeout(completionTimer); document.removeEventListener(completion.event, onComplete, true); };
+    const observedEvent = completion.event === "blur" ? "input" : completion.event;
+    document.addEventListener(observedEvent, onComplete, true);
+    return () => { if (completionTimer) window.clearTimeout(completionTimer); document.removeEventListener(observedEvent, onComplete, true); };
   }, [activeModule, step, tourOpen]);
 
   useEffect(() => {
@@ -363,7 +364,7 @@ export default function MigrationExperience() {
       const availableWidth = Math.max(250, spaces[side]);
       const width = Math.min(cardWidth, availableWidth);
       return {
-        left: side === "left" ? 16 : revealRect.right + gap,
+        left: side === "left" ? 16 : Math.min(window.innerWidth - width - 16, revealRect.right + gap),
         top: Math.min(window.innerHeight - cardHeight - 16, Math.max(16, revealRect.top + revealRect.height / 2 - cardHeight / 2)),
         right: "auto", bottom: "auto", width,
         maxHeight: window.innerHeight - 32, overflowY: "auto" as const,
