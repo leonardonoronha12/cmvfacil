@@ -1330,7 +1330,7 @@ export default function FornecedoresClient() {
                   {columnOrder.map((col) => {
                     if (col === "fornecedor") {
                       return (
-                        <button key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)} data-qa-grid-cell>
+                        <button data-tour="supplier-open" key={col} type="button" className={styles.supplierCellBtn} onClick={() => openProdutos(r)} data-qa-grid-cell>
                           <span className={styles.supplierIcon} aria-hidden>
                             <IconBox />
                           </span>
@@ -1657,10 +1657,11 @@ export default function FornecedoresClient() {
                   setProdFornecedorLabel("");
                 }}
               >
-                <div className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+                <div data-tour="supplier-details" className={`${styles.modal} ${styles.produtosModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>{prodFornecedorLabel || prodFornecedorKey}</div>
                 <button
+                  data-tour="supplier-details-close"
                   type="button"
                   className={styles.modalClose}
                   aria-label="Fechar"
