@@ -4,7 +4,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-academia-v18";
+const TOUR_VERSION = "2026-09-academia-v19";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
@@ -342,6 +342,8 @@ export default function MigrationExperience() {
 
   useEffect(() => {
     if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); setTargetUnavailable(false); return; }
+    setTargetRect(null);
+    setRevealRect(null);
     let didScroll = false;
     let timer = 0;
     setTargetUnavailable(false);
@@ -561,7 +563,7 @@ export default function MigrationExperience() {
       </div>
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
-        <button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button>
+        <div className={styles.coachExitActions}><button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button><button className={styles.coachSkipStep} onClick={() => advance(step)}>Pular etapa</button></div>
         <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
