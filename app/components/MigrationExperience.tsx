@@ -248,6 +248,7 @@ export default function MigrationExperience() {
     ? Array.from({ length: moduleEndStep(activeModule) - (learningModules.find(module => module.id === activeModule)?.step ?? step) + 1 }, (_, index) => (learningModules.find(module => module.id === activeModule)?.step ?? step) + index)
     : fullCourseSteps;
   const visibleStepPosition = Math.max(0, visibleStepSequence.indexOf(step));
+  const continueOnlyStep = step > 0 && (!steps[step]?.target || (steps[step]?.passive && !steps[step]?.completion));
 
   useEffect(() => {
     if (!tourOpen) return;
@@ -541,7 +542,8 @@ export default function MigrationExperience() {
         </div>
       </section>
     </div> : null}
-    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={styles.coach} role="dialog" aria-label="Guia do novo CMV Fácil">
+    {tourOpen && continueOnlyStep ? <div data-cmv-tour-ui="true" className={styles.continueGuard} aria-hidden /> : null}
+    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
