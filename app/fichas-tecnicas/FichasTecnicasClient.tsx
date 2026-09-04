@@ -2646,7 +2646,7 @@ export default function FichasTecnicasClient({
             </div>
 
             {isReadOnly ? null : (
-              <button type="button" className={styles.newButton} onClick={openCreateModal}>
+              <button data-tour="sheet-new" type="button" className={styles.newButton} onClick={openCreateModal}>
                 <PlusIcon />
                 Nova Ficha Técnica
               </button>
@@ -2693,7 +2693,7 @@ export default function FichasTecnicasClient({
                 <div className={styles.emptyStateTitle}>Nenhuma ficha técnica cadastrada</div>
                 <div className={styles.emptyStateText}>Cadastre sua primeira ficha técnica para acompanhar custos e CMV do cardápio.</div>
                 {isReadOnly ? null : (
-                  <button type="button" className={styles.newButton} onClick={openCreateModal}>
+                  <button data-tour="sheet-new" type="button" className={styles.newButton} onClick={openCreateModal}>
                     <PlusIcon />
                     Nova Ficha Técnica
                   </button>
