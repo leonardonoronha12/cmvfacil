@@ -7,13 +7,6 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function safeEqual(a: string, b: string) {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
-}
-
 function whatsapp(value: string) {
   const normalized = value.trim();
   return normalized.toLowerCase().startsWith("whatsapp:") ? normalized : `whatsapp:${normalized}`;
@@ -22,9 +15,13 @@ function whatsapp(value: string) {
 serve(async (req) => {
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
-  const serviceRole = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? Deno.env.get("SERVICE_ROLE_KEY") ?? "").trim();
   const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (!serviceRole || !bearer || !safeEqual(serviceRole, bearer)) return json({ ok: false, error: "unauthorized" }, 401);
+  const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
+  if (!supabaseUrl || !bearer) return json({ ok: false, error: "unauthorized" }, 401);
+  const authCheck = await fetch(`${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1`, {
+    headers: { authorization: `Bearer ${bearer}`, apikey: bearer },
+  }).catch(() => null);
+  if (!authCheck?.ok) return json({ ok: false, error: "unauthorized" }, 401);
 
   const accountSid = (Deno.env.get("TWILIO_ACCOUNT_SID") ?? "").trim();
   const authToken = (Deno.env.get("TWILIO_AUTH_TOKEN") ?? "").trim();
