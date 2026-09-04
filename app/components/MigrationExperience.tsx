@@ -473,7 +473,15 @@ export default function MigrationExperience() {
       if (next === undefined || next < 0) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
       const destination = steps[next]?.path;
-      if (clickedHref) { setLocatedStep(-1); setPendingStep(next); router.push(clickedHref); }
+      if (clickedHref) {
+        setLocatedStep(-1);
+        setPendingStep(next);
+        // Atalhos de histórico carregam o identificador do item na query.
+        // Uma navegação completa evita que atualizações concorrentes da tela
+        // removam esses parâmetros antes de o painel de detalhes ser montado.
+        if (clickedHref.includes("?")) window.location.assign(clickedHref);
+        else router.push(clickedHref);
+      }
       else if (destination && pathname !== destination) { setLocatedStep(-1); setPendingStep(next); router.prefetch(destination); router.push(destination); }
       else setStep(next);
     };

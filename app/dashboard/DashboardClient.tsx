@@ -3670,7 +3670,7 @@ export default function DashboardClient() {
                 </div>
               </div>
 
-              <div className={styles.itemDetailsGrid} ref={historyRef}>
+              <div className={styles.itemDetailsGrid} ref={historyRef} data-tour="item-entry-history">
                 <div className={styles.itemDetailsMain}>
                   <div className={styles.itemDetailsTabs}>
                     <button
@@ -3692,7 +3692,7 @@ export default function DashboardClient() {
                   <div className={styles.itemDetailsBody}>
                     {detailsTab === "entradas" ? (
                       <>
-                        <div data-tour="item-entry-history" className={styles.historyTitle}>Histórico de Entradas</div>
+                        <div className={styles.historyTitle}>Histórico de Entradas</div>
                         <div className={styles.historyTable} style={{ position: "relative" }}>
                           {isLoadingTables ? (
                             <div className={styles.loadingOverlay}>
