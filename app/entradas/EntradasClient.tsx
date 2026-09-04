@@ -1770,7 +1770,7 @@ export default function EntradasClient() {
     const existing = fornecedorItemMap[fornecedorKey]?.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
     setMapNomeNota(name);
     setMapUnidadeNota(existing?.unidadeNaNota || "Und");
-    setMapInsumoEq(existing?.insumoEquivalente || (insumosStore[0]?.item ?? "").trim());
+    setMapInsumoEq(existing?.insumoEquivalente || "");
     setMapEqQtd(existing?.equivalenteQuantidade ?? "");
     setIsAddFornecedorItemOpen(true);
   }
@@ -3494,6 +3494,7 @@ export default function EntradasClient() {
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Insumo equivalente</div>
                   <select className={styles.formSelect} data-tour="link-item" value={mapInsumoEq} onChange={(e) => setMapInsumoEq(e.target.value)}>
+                    <option value="" disabled>Selecione um insumo</option>
                     {(insumosStore[0] ? insumosStore.map((i) => i.item) : ["Pão Brioche"]).map((name) => (
                       <option key={name} value={name}>
                         {name}
