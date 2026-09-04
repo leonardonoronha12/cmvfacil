@@ -533,7 +533,9 @@ export async function GET(req: NextRequest) {
             const custoUnitario = Number.isFinite(custoUnitNum) ? custoUnitNum : parsePtNumber(String(it?.custo_unitario ?? ""));
             const custoUnitarioLabel = custoUnitario ? formatMoneyBRL(custoUnitario) : "R$0,00";
             const subtotalLabel = subtotal ? formatMoneyBRL(subtotal) : "R$0,00";
-            const itemId = String(it?.item?.bubble_id ?? "").trim();
+            const itemBubbleId = String(it?.item?.bubble_id ?? "").trim();
+            const itemDbId = String(it?.item?.id ?? it?.item_id ?? "").trim();
+            const itemId = itemBubbleId || (itemDbId ? `db:${itemDbId}` : "");
             const ocultarCmv = Boolean(it?.ocultar_cmv);
             return {
               id: itemKey,
