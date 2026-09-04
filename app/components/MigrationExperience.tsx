@@ -247,7 +247,7 @@ export default function MigrationExperience() {
   }, [pathname, pendingStep]);
 
   useEffect(() => {
-    if (pendingStep === null) return;
+    if (!tourOpen || pendingStep === null) return;
     const destination = steps[pendingStep]?.path;
     if (!destination || pathname === destination) return;
 
@@ -263,7 +263,7 @@ export default function MigrationExperience() {
       window.clearTimeout(retryTimer);
       window.clearTimeout(hardNavigationTimer);
     };
-  }, [pathname, pendingStep, router]);
+  }, [pathname, pendingStep, router, tourOpen]);
 
   useEffect(() => {
     if (!tourOpen || pendingStep !== null || pathname === steps[step]?.path) return;
@@ -284,12 +284,12 @@ export default function MigrationExperience() {
   };
 
   const startFullTour = () => {
-    setActiveModule(null); setLearningOpen(false); setTourOpen(true);
+    setPendingStep(null); setActiveModule(null); setLearningOpen(false); setTourOpen(true);
     goToStep(fullCourseSteps[0]);
   };
 
   const startModule = (moduleId: string, moduleStep: number) => {
-    setActiveModule(moduleId); setLearningOpen(false); setTourOpen(true);
+    setPendingStep(null); setActiveModule(moduleId); setLearningOpen(false); setTourOpen(true);
     goToStep(moduleStep);
   };
 
@@ -562,11 +562,11 @@ export default function MigrationExperience() {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
     sessionStorage.removeItem(ACTIVE_TOUR_KEY);
-    setTourOpen(false); setStep(0);
+    setPendingStep(null); setTourOpen(false); setActiveModule(null); setStep(0);
   };
   const restartTour = () => {
     localStorage.removeItem(DONE_TOUR_KEY);
-    setTourOpen(false); setActiveModule(null); setLearningOpen(true);
+    setPendingStep(null); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
   };
   const onFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(event.target.files ?? []).filter(file => /^(image|video)\//.test(file.type)).slice(0, 3);
