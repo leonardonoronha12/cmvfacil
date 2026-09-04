@@ -1445,9 +1445,10 @@ export default function ListaDeComprasClient() {
               </div>
             </div>
 
-            <div className={styles.modeSwitch}>
+            <div className={styles.modeSwitch} data-tour="shopping-group-mode">
               <button
                 type="button"
+                data-tour="shopping-mode-category"
                 className={mode === "categoria" ? styles.modeActive : styles.modeBtn}
                 onClick={() => {
                   setMode("categoria");
@@ -1458,6 +1459,7 @@ export default function ListaDeComprasClient() {
               </button>
               <button
                 type="button"
+                data-tour="shopping-mode-supplier"
                 className={mode === "fornecedor" ? styles.modeActive : styles.modeBtn}
                 onClick={() => {
                   setMode("fornecedor");
@@ -1498,6 +1500,7 @@ export default function ListaDeComprasClient() {
             <div className={styles.filterField}>
               <label className={styles.fieldLabel}>{mode === "categoria" ? "Categoria" : "Fornecedor"}</label>
               <select
+                data-tour="shopping-group-filter"
                 className={styles.select}
                 value={mode === "categoria" ? categoriaFilter : fornecedorFilter}
                 onChange={(e) => {
