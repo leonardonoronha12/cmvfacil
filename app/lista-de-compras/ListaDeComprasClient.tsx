@@ -1518,7 +1518,7 @@ export default function ListaDeComprasClient() {
 
             <div className={styles.periodBlock}>
               <div className={styles.fieldLabel}>Período:</div>
-              <div className={styles.periodFields}>
+              <div className={styles.periodFields} data-tour="shopping-period-range">
                 <div className={styles.dateFieldWrap}>
                   <div className={isPeriodReady || !inventoryOptions.length ? styles.dateSelectWrap : `${styles.dateSelectWrap} ${styles.dateSelectWrapInvalid}`}>
                     <span className={styles.dateIcon}>
