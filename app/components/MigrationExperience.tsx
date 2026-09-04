@@ -465,7 +465,9 @@ export default function MigrationExperience() {
   const coachStyle = useMemo(() => {
     if (locatedStep !== step || !targetRect || typeof window === "undefined") return undefined;
     const anchorRect = targetRect;
-    const showingContainer = Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
+    const targetSelector = steps[step]?.target?.selector ?? "";
+    const targetNamesAModal = targetSelector.includes("modal") || targetSelector.includes('[role="dialog"]');
+    const showingContainer = targetNamesAModal || Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
     const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
     const cardHeight = Math.min(showingContainer ? 520 : 440, window.innerHeight - 32);
     const isCloseStep = steps[step]?.target?.selector?.includes("close") || steps[step]?.title.toLowerCase().includes("feche");
