@@ -329,7 +329,9 @@ export async function GET(req: NextRequest) {
             const ocultarCmv = Boolean(it?.ocultar_cmv || it?.item?.ocultar_cmv);
             return {
               id: itemOutId,
-              itemId: String(it?.item?.bubble_id ?? "").trim() || null,
+              itemId:
+                String(it?.item?.bubble_id ?? "").trim() ||
+                (String(it?.item?.id ?? it?.item_id ?? "").trim() ? `db:${String(it?.item?.id ?? it?.item_id).trim()}` : null),
               item: itemName,
               categoria,
               unidade: unit,
