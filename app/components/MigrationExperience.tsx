@@ -292,6 +292,7 @@ export default function MigrationExperience() {
     : fullCourseSteps;
   const visibleStepPosition = Math.max(0, visibleStepSequence.indexOf(step));
   const isRouteTransition = pendingStep !== null && pathname !== steps[pendingStep]?.path;
+  const coachTargetsModal = Boolean(steps[step]?.target?.selector?.includes("modal") || steps[step]?.target?.selector?.includes('[role="dialog"]'));
   const continueOnlyStep = step > 0 && (!steps[step]?.target || (steps[step]?.passive && !steps[step]?.completion));
 
   useEffect(() => {
@@ -468,7 +469,7 @@ export default function MigrationExperience() {
     const targetSelector = steps[step]?.target?.selector ?? "";
     const targetNamesAModal = targetSelector.includes("modal") || targetSelector.includes('[role="dialog"]');
     const showingContainer = targetNamesAModal || Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
-    const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
+    const cardWidth = Math.min(430, window.innerWidth - 32);
     const cardHeight = Math.min(showingContainer ? 520 : 440, window.innerHeight - 32);
     const isCloseStep = steps[step]?.target?.selector?.includes("close") || steps[step]?.title.toLowerCase().includes("feche");
     if (isCloseStep) {
@@ -614,7 +615,7 @@ export default function MigrationExperience() {
       </section>
     </div> : null}
     {tourOpen && continueOnlyStep ? <div data-cmv-tour-ui="true" className={`${styles.continueGuard} ${!steps[step]?.target ? styles.continueGuardDim : ""}`} onClick={() => setContinueNotice(true)} aria-hidden /> : null}
-    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
+    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""} ${coachTargetsModal ? styles.coachModalCompact : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
