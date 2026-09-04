@@ -17,6 +17,7 @@ import {
   writeFornecedorEquivalenciasMap,
   writeFornecedorInfoMap,
   writeFornecedorProdutosMap,
+  validateSupplierConversion,
   type FornecedorEquivalenciasMap,
   type FornecedorItemEquivalencia,
   type FornecedorInfoMap,
@@ -1841,7 +1842,7 @@ export default function EntradasClient() {
     setMapNomeNota("");
     setMapUnidadeNota("Und");
     setMapInsumoEq((insumosStore[0]?.item ?? "").trim());
-    setMapEqQtd("");
+    setMapEqQtd("1");
     setIsAddFornecedorItemOpen(true);
   }
 
@@ -1861,6 +1862,11 @@ export default function EntradasClient() {
       return;
     }
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
+    const conversionError = validateSupplierConversion(unidadeNaNota, equivalenteUnidade, mapEqQtd);
+    if (conversionError) {
+      showToast(conversionError, "error", 8000);
+      return;
+    }
     const novo: FornecedorItemEquivalencia = {
       id: String(Date.now()),
       nomeNaNota,
@@ -1871,7 +1877,8 @@ export default function EntradasClient() {
     };
     setFornecedorItemMap((prev) => {
       const cur = prev[fornecedor] ?? [];
-      const next: FornecedorEquivalenciasMap = { ...prev, [fornecedor]: [...cur, novo] };
+      const withoutDuplicate = cur.filter((item) => item.nomeNaNota.toLowerCase() !== nomeNaNota.toLowerCase());
+      const next: FornecedorEquivalenciasMap = { ...prev, [fornecedor]: [...withoutDuplicate, novo] };
       writeFornecedorEquivalenciasMap(next);
       return next;
     });
@@ -3525,7 +3532,15 @@ export default function EntradasClient() {
                 <div className={styles.mapHint}>
                   <div className={styles.mapHintLine}>
                     {`1${mapUnidadeNota || "Und"} de ${mapNomeNota.trim() || "(nome na nota)"} equivale a `}
-                    <input className={styles.mapHintInput} data-tour="link-factor" value={mapEqQtd} onChange={(e) => setMapEqQtd(e.target.value)} placeholder="____" />
+                    <input
+                      className={styles.mapHintInput}
+                      data-tour="link-factor"
+                      inputMode="decimal"
+                      value={mapEqQtd}
+                      onChange={(e) => setMapEqQtd(e.target.value.replace(/[^\d,.]/g, ""))}
+                      placeholder="Ex.: 6"
+                      aria-label="Quantidade equivalente"
+                    />
                     {` ${insumosByName.get(mapInsumoEq.toLowerCase())?.medida ?? "Und"} de ${mapInsumoEq || "(insumo)"}`}
                   </div>
                 </div>
@@ -3539,7 +3554,7 @@ export default function EntradasClient() {
                   type="button"
                   data-tour="link-save"
                   className={styles.confirmSave}
-                  disabled={isReadOnly || !mapNomeNota.trim() || !mapInsumoEq.trim()}
+                  disabled={isReadOnly || !mapNomeNota.trim() || !mapInsumoEq.trim() || Boolean(validateSupplierConversion(mapUnidadeNota, insumosByName.get(mapInsumoEq.toLowerCase())?.medida ?? "Und", mapEqQtd))}
                   onClick={confirmAddItemFornecedor}
                 >
                   Salvar
