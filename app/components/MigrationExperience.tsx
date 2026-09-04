@@ -64,7 +64,7 @@ const steps: TourStep[] = [
   { path: "/entradas", target: { selector: '[data-tour="entry-qty"]' }, passive: true, completion: { selector: '[data-tour="entry-qty"]', event: "input", debounceMs: 700, requireValue: true }, icon: "🔢", kicker: "Passo 13 — quantidade", title: "Informe a quantidade comprada", text: "Digite quantas embalagens ou unidades vieram na nota.", improvement: "O conversor aplicará a equivalência salva ao estoque.", bullets: ["Quantidade da nota", "Conversão automática"] },
   { path: "/entradas", target: { selector: '[data-tour="entry-subtotal"]' }, passive: true, completion: { selector: '[data-tour="entry-subtotal"]', event: "input", debounceMs: 700, requireValue: true }, icon: "💰", kicker: "Passo 14 — valor", title: "Informe o subtotal", text: "Digite o valor total pago por esse item.", improvement: "O custo unitário será calculado automaticamente.", bullets: ["Valor total", "Custo automático"] },
   { path: "/entradas", target: { selector: '[data-tour="entry-add-item"]' }, icon: "➕", kicker: "Passo 15 — adicionar", title: "Adicione o item à nota", text: "Confira a linha e clique no botão de adicionar.", improvement: "O item passa a fazer parte da nota e do histórico de entradas.", bullets: ["Linha conferida", "Entrada registrada"] },
-  { path: "/entradas", target: { selector: '[role="dialog"] button[aria-label="Fechar"]' }, icon: "✅", kicker: "Passo 6 — finalizar", title: "Confira e feche a nota", text: "Revise fornecedor, data, itens, quantidades, custos e total antes de sair.", improvement: "Clique no X iluminado quando terminar. A nota e os itens já adicionados ficam disponíveis no histórico de entradas.", bullets: ["Revise os itens", "Confira o total", "Feche a janela"] },
+  { path: "/entradas", target: { selector: '[data-tour="entry-note-close"]' }, icon: "✅", kicker: "Passo 6 — finalizar", title: "Confira e feche a nota", text: "Revise fornecedor, data, itens, quantidades, custos e total antes de sair.", improvement: "Clique no X iluminado quando terminar. A nota e os itens já adicionados ficam disponíveis no histórico de entradas.", bullets: ["Revise os itens", "Confira o total", "Feche a janela"] },
   { path: "/dashboard", icon: "📊", kicker: "Gestão e resultado", title: "Entenda o CMV Real", text: "O painel reúne estoque inicial, entradas, estoque final, saídas, custo médio e CMV para transformar a operação em uma leitura gerencial.", improvement: "Use os filtros de período, confira os dados de origem e calcule o indicador. Você pode voltar a este módulo sempre que quiser revisar o cálculo.", bullets: ["Indicadores do período", "Custos conectados", "Decisão mais segura"] },
   { path: "/dashboard", target: { text: "Calcular CMV", tag: "button" }, icon: "🧮", kicker: "Faça a leitura", title: "Calcule o período", text: "Depois de escolher o período e informar o faturamento, este botão atualiza o CMV Real.", improvement: "Confira os filtros antes de clicar. Durante o tutorial, você pode usar o botão para praticar com os dados já preenchidos.", bullets: ["Período conferido", "Faturamento informado", "Resultado atualizado"] },
   { path: "/dashboard", icon: "📐", kicker: "Como o CMV Real funciona", title: "Entenda a fórmula do resultado", text: "O CMV Real considera estoque inicial mais entradas, menos estoque final. O resultado é comparado ao faturamento do período para chegar ao percentual real.", improvement: "Se o painel ficar zerado, confira se existem inventários nas duas datas, entradas no período e faturamento preenchido.", bullets: ["Estoque inicial + entradas", "Menos estoque final", "Dividido pelo faturamento"] },
@@ -199,6 +199,7 @@ export default function MigrationExperience() {
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [completedModules, setCompletedModules] = useState<string[]>([]);
   const [step, setStep] = useState(0);
+  const [pendingStep, setPendingStep] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -206,6 +207,7 @@ export default function MigrationExperience() {
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean } | null>(null);
   const [typedText, setTypedText] = useState("");
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+  const [locatedStep, setLocatedStep] = useState(-1);
   const [revealRect, setRevealRect] = useState<DOMRect | null>(null);
   const [targetUnavailable, setTargetUnavailable] = useState(false);
   const [alertRects, setAlertRects] = useState<DOMRect[]>([]);
@@ -224,9 +226,9 @@ export default function MigrationExperience() {
       const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
       const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
-      setStep(initialStep);
       setTourOpen(true);
-      if (pathname !== steps[initialStep].path) router.replace(steps[initialStep].path);
+      if (pathname !== steps[initialStep].path) { setPendingStep(initialStep); router.replace(steps[initialStep].path); }
+      else setStep(initialStep);
     }
     fetch(`/api/me?tour=1&ts=${Date.now()}`, { cache: "no-store" })
       .then(r => r.json())
@@ -237,6 +239,12 @@ export default function MigrationExperience() {
       .catch(() => {});
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (pendingStep === null || pathname !== steps[pendingStep]?.path) return;
+    setStep(pendingStep);
+    setPendingStep(null);
+  }, [pathname, pendingStep]);
 
   const saveModuleProgress = (moduleId: string) => {
     setCompletedModules(current => {
@@ -366,7 +374,8 @@ export default function MigrationExperience() {
   }, [step, tourOpen]);
 
   useEffect(() => {
-    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); setTargetUnavailable(false); return; }
+    if (!tourOpen || step === 0 || !steps[step].target) { setTargetRect(null); setRevealRect(null); setLocatedStep(-1); setTargetUnavailable(false); return; }
+    setLocatedStep(-1);
     setTargetRect(null);
     setRevealRect(null);
     setAlertRects([]);
@@ -389,6 +398,7 @@ export default function MigrationExperience() {
         const revealElement = element.closest('[role="dialog"]') instanceof HTMLElement ? element.closest('[role="dialog"]') as HTMLElement : element;
         const visibleRect = revealElement.getBoundingClientRect();
         setTargetRect(previous => previous && Math.abs(previous.left - rect.left) < 1 && Math.abs(previous.top - rect.top) < 1 && Math.abs(previous.width - rect.width) < 1 && Math.abs(previous.height - rect.height) < 1 ? previous : rect);
+        setLocatedStep(step);
         setRevealRect(previous => previous && Math.abs(previous.left - visibleRect.left) < 1 && Math.abs(previous.top - visibleRect.top) < 1 && Math.abs(previous.width - visibleRect.width) < 1 && Math.abs(previous.height - visibleRect.height) < 1 ? previous : visibleRect);
         const nextAlerts = (steps[step].alertSelectors ?? []).flatMap(selector => Array.from(document.querySelectorAll(selector))).filter((item): item is HTMLElement => item instanceof HTMLElement).map(item => item.getBoundingClientRect()).filter(item => item.width > 2 && item.height > 2);
         setAlertRects(nextAlerts);
@@ -422,10 +432,11 @@ export default function MigrationExperience() {
       const coursePosition = fullCourseSteps.indexOf(step);
       const next = activeModule ? step + 1 : fullCourseSteps[coursePosition + 1];
       if (next === undefined || next < 0) { finishTour(); return; }
-      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next)); setStep(next);
+      sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
       const destination = steps[next]?.path;
-      if (clickedHref) router.push(clickedHref);
-      else if (destination && pathname !== destination) router.push(destination);
+      if (clickedHref) { setLocatedStep(-1); setPendingStep(next); router.push(clickedHref); }
+      else if (destination && pathname !== destination) { setLocatedStep(-1); setPendingStep(next); router.push(destination); }
+      else setStep(next);
     };
     document.addEventListener("click", onClick, true);
     return () => document.removeEventListener("click", onClick, true);
@@ -434,14 +445,14 @@ export default function MigrationExperience() {
   const goToStep = (nextStep: number) => {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
     sessionStorage.setItem(ACTIVE_TOUR_KEY, String(bounded));
-    setStep(bounded);
     const destination = steps[bounded].path;
-    if (pathname !== destination) router.push(destination);
+    if (pathname !== destination) { setLocatedStep(-1); setPendingStep(bounded); router.push(destination); }
+    else setStep(bounded);
   };
 
   const fileLabel = useMemo(() => files.map(file => file.name).join(", "), [files]);
   const coachStyle = useMemo(() => {
-    if (!targetRect || typeof window === "undefined") return undefined;
+    if (locatedStep !== step || !targetRect || typeof window === "undefined") return undefined;
     const anchorRect = targetRect;
     const showingContainer = Boolean(revealRect && (Math.abs(revealRect.width - targetRect.width) > 4 || Math.abs(revealRect.height - targetRect.height) > 4));
     const cardWidth = Math.min(showingContainer ? 310 : 430, window.innerWidth - 32);
@@ -506,7 +517,7 @@ export default function MigrationExperience() {
       : Math.min(window.innerWidth - cardWidth - 16, anchorRect.right + 24);
     const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, anchorRect.top + anchorRect.height / 2 - cardHeight / 2));
     return { left, top, right: "auto", bottom: "auto", width: cardWidth };
-  }, [step, targetRect, revealRect]);
+  }, [step, locatedStep, targetRect, revealRect]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
@@ -606,7 +617,7 @@ export default function MigrationExperience() {
         <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
-    {tourOpen && step > 0 && targetRect ? <div className={styles.spotlight} onClick={() => { if (continueOnlyStep) setContinueNotice(true); }} aria-hidden>
+    {tourOpen && step > 0 && locatedStep === step && targetRect ? <div className={styles.spotlight} onClick={() => { if (continueOnlyStep) setContinueNotice(true); }} aria-hidden>
       <i style={{ left: 0, top: 0, width: "100%", height: Math.max(0, (revealRect ?? targetRect).top - 9) }} />
       <i style={{ left: 0, top: (revealRect ?? targetRect).bottom + 9, width: "100%", bottom: 0 }} />
       <i style={{ left: 0, top: Math.max(0, (revealRect ?? targetRect).top - 9), width: Math.max(0, (revealRect ?? targetRect).left - 9), height: (revealRect ?? targetRect).height + 18 }} />

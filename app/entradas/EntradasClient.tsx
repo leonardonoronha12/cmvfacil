@@ -2832,7 +2832,7 @@ export default function EntradasClient() {
                 >
               <div className={styles.detailsHeader}>
                 <div className={styles.detailsTitle}>{`Detalhes da Nota${detailsNoteNumber ? ` ${detailsNoteNumber}` : ""}`}</div>
-                <button type="button" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
+                <button type="button" data-tour="entry-note-close" className={styles.modalClose} aria-label="Fechar" onClick={() => setIsDetailsOpen(false)}>
                   ×
                 </button>
               </div>
