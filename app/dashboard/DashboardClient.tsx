@@ -2497,6 +2497,7 @@ export default function DashboardClient() {
             <button
               type="button"
               className={styles.rowItemBtn}
+              data-tour="cmv-table-item-history"
               onClick={() => {
                 openDashboardRow(row);
               }}
