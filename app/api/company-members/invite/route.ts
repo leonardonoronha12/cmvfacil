@@ -130,6 +130,9 @@ export async function POST(req: NextRequest) {
     const invitedUserId = String(authUser?.id ?? "").trim();
     if (!isUuid(invitedUserId)) return json({ ok: false, error: "invalid_invited_user" }, { status: 500 });
 
+    const profile = await supabase.from("user_profiles").upsert({ user_id: invitedUserId, email } as any, { onConflict: "user_id" });
+    if (profile.error) throw new Error(profile.error.message);
+
     const up = await supabase.from("company_members").upsert(
       { company_id: companyId, user_id: invitedUserId, role: memberRole, permission_level: permissionLevel } as any,
       { onConflict: "company_id,user_id" },
@@ -164,6 +167,7 @@ export async function POST(req: NextRequest) {
         role,
         existingUser: !isNewUser,
         emailSent: emailRes.ok,
+        actionLink,
         ...(emailRes.ok ? {} : { emailError: emailRes.error }),
       },
       { status: 200 },

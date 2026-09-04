@@ -148,6 +148,8 @@ export default function AjustesClient() {
   const [memberToRemove, setMemberToRemove] = useState<{ name: string; email: string } | null>(null);
   const [memberRemoveLoading, setMemberRemoveLoading] = useState(false);
   const [memberRemoveError, setMemberRemoveError] = useState("");
+  const [memberRoleLoading, setMemberRoleLoading] = useState("");
+  const [memberRoleError, setMemberRoleError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -191,10 +193,7 @@ export default function AjustesClient() {
       setSobrenome((prev) => (prev.trim() ? prev : String(me.sobrenome ?? "").trim()));
       setEmail((prev) => (prev.trim() ? prev : String(me.email ?? "").trim()));
       setWhatsapp((prev) => (prev.trim() ? prev : maskPhoneBR(whatsappLocal)));
-      setPermissao((prev) => {
-        const desired = String((me as any).role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador";
-        return prev === "Colaborador" ? desired : prev;
-      });
+      setPermissao(String((me as any).role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador");
       setEmpresaNome((prev) => (prev.trim() ? prev : String(me.companyName ?? "").trim()));
       setCnpj((prev) => (prev.trim() ? prev : String((me as any).companyCnpj ?? "").trim()));
       setEmailCorp((prev) => (prev.trim() ? prev : String((me as any).companyEmail ?? "").trim()));
@@ -897,7 +896,7 @@ export default function AjustesClient() {
 
               {tab === "usuarios" ? (
                 <div>
-                  <div className={styles.actions} style={{ marginTop: 0 }}>
+                  {permissao === "Administrador" ? <div className={styles.actions} style={{ marginTop: 0 }}>
                     <button
                       data-tour="users-new"
                       type="button"
@@ -912,7 +911,9 @@ export default function AjustesClient() {
                     >
                       Cadastrar novo usuário
                     </button>
-                  </div>
+                  </div> : (
+                    <div className={styles.memberPermissionNotice}>Somente administradores podem cadastrar, editar ou remover usuários.</div>
+                  )}
 
                   {inviteOpen ? (
                     <div style={{ marginTop: 12, padding: 12, borderRadius: 12, border: "1px solid #e5e7eb", background: "#ffffff" }}>
@@ -1036,7 +1037,44 @@ export default function AjustesClient() {
                           </div>
                         </div>
                         <div>{m.joinedAt || "—"}</div>
-                        <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                        <div>
+                          {permissao === "Administrador" && m.email.toLowerCase() !== email.toLowerCase() && !m.name.includes("(Proprietário)") ? (
+                            <select
+                              className={styles.memberRoleSelect}
+                              value={m.role}
+                              disabled={memberRoleLoading === m.email}
+                              aria-label={`Permissão de ${m.name}`}
+                              onChange={async (event) => {
+                                const nextRole = event.target.value === "Administrador" ? "Administrador" : "Colaborador";
+                                const previousRole = m.role;
+                                setMemberRoleLoading(m.email);
+                                setMemberRoleError("");
+                                setMembers((current) => current.map((member) => member.email === m.email ? { ...member, role: nextRole } : member));
+                                try {
+                                  const res = await fetch("/api/company-members", {
+                                    method: "PATCH",
+                                    headers: { "content-type": "application/json" },
+                                    body: JSON.stringify({ email: m.email, role: nextRole }),
+                                  });
+                                  const result = (await res.json().catch(() => null)) as any;
+                                  if (!res.ok || !result?.ok) throw new Error(String(result?.error ?? "update_member_failed"));
+                                  await loadMeFromApi();
+                                } catch (error) {
+                                  setMembers((current) => current.map((member) => member.email === m.email ? { ...member, role: previousRole } : member));
+                                  const code = error instanceof Error ? error.message : String(error);
+                                  setMemberRoleError(code === "forbidden" ? "Somente administradores podem alterar permissões." : "Não foi possível alterar a permissão deste usuário.");
+                                } finally {
+                                  setMemberRoleLoading("");
+                                }
+                              }}
+                            >
+                              <option value="Colaborador">Colaborador</option>
+                              <option value="Administrador">Administrador</option>
+                            </select>
+                          ) : (
+                            <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                          )}
+                        </div>
                         <div className={styles.memberActions}>
                           {permissao === "Administrador" && m.role !== "Administrador" ? (
                             <button
@@ -1056,6 +1094,7 @@ export default function AjustesClient() {
                       </div>
                     ))}
                   </div>
+                  {memberRoleError ? <div className={styles.memberRemoveError}>{memberRoleError}</div> : null}
 
                   {memberToRemove ? (
                     <div className={styles.memberRemoveOverlay} role="presentation">

@@ -94,7 +94,7 @@ function isAdminMemberRow(row: any) {
   const permRaw = String(row?.permission_level ?? "").trim().toLowerCase();
   if (permRaw.includes("owner") || permRaw.includes("admin") || permRaw.includes("administrador")) return true;
   const permNum = parsePermissionLevel(row?.permission_level);
-  return Number.isFinite(permNum) && permNum >= 1;
+  return Number.isFinite(permNum) && permNum >= 3;
 }
 
 function scoreRole(role: unknown) {

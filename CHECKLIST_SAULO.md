@@ -56,10 +56,10 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 
 ## Usuários e permissões
 
-- [ ] Validar adicionar, editar e remover usuário
-- [ ] Garantir ações visíveis apenas para autorizados
-- [ ] Garantir isolamento por empresa
-- [ ] Atualizar a interface sem reload desnecessário
+- [x] Validar adicionar, editar e remover usuário
+- [x] Garantir ações visíveis apenas para autorizados
+- [x] Garantir isolamento por empresa
+- [x] Atualizar a interface sem reload desnecessário
 - [ ] Homologar desktop e mobile
 
 ## Experiência e responsividade geral
