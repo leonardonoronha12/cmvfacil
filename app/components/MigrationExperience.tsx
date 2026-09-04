@@ -444,8 +444,8 @@ export default function MigrationExperience() {
       if (next === undefined || next < 0) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
       const destination = steps[next]?.path;
-      if (clickedHref) { setLocatedStep(-1); setPendingStep(next); router.push(clickedHref); }
-      else if (destination && pathname !== destination) { setLocatedStep(-1); setPendingStep(next); router.push(destination); }
+      if (clickedHref) { setLocatedStep(-1); setStep(next); setPendingStep(next); router.push(clickedHref); }
+      else if (destination && pathname !== destination) { setLocatedStep(-1); setStep(next); setPendingStep(next); router.push(destination); }
       else setStep(next);
     };
     document.addEventListener("click", onClick, true);
@@ -456,7 +456,7 @@ export default function MigrationExperience() {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
     sessionStorage.setItem(ACTIVE_TOUR_KEY, String(bounded));
     const destination = steps[bounded].path;
-    if (pathname !== destination) { setLocatedStep(-1); setPendingStep(bounded); router.push(destination); }
+    if (pathname !== destination) { setLocatedStep(-1); setStep(bounded); setPendingStep(bounded); router.push(destination); }
     else setStep(bounded);
   };
 
