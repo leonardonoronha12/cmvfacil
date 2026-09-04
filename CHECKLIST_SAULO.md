@@ -40,7 +40,7 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [x] Melhorar busca por nome, categoria e unidade
 - [x] Aceitar somente quantidade numérica, com até três decimais
 - [x] Abrir o histórico ao clicar no nome do item
-- [-] Revisar visual e responsividade de Pendentes, Contabilizados e Sem categoria
+- [x] Revisar visual e responsividade de Pendentes, Contabilizados e Sem categoria
 - [ ] Homologar desktop, tablet e celular
 
 ## Itens e equivalências do fornecedor
