@@ -534,6 +534,21 @@
   color: rgba(255, 255, 255, 0.92);
 }
 
+.topFieldSpinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: cmvTopFieldSpin 650ms linear infinite;
+}
+
+@keyframes cmvTopFieldSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .topInput {
   flex-grow: 1;
   appearance: none;

@@ -76,11 +76,11 @@ export async function loadInventarioStateFromSupabase(userId?: string): Promise<
   } | null;
   if (!res.ok || !json?.rows) throw new Error(json?.error || "failed_to_load");
   const isCompat = String(json?.source ?? "legacy") === "compat";
-  persistPageSource("legacy");
+  persistPageSource(isCompat ? "compat" : "legacy");
   return {
     rows: (json.rows ?? []).map(toStoreRow),
     compat: (json as any)?.compat,
-    meta: { source: "legacy", readOnly: Boolean(json?.readOnly) || isCompat },
+    meta: { source: isCompat ? "compat" : "legacy", readOnly: Boolean(json?.readOnly) || isCompat },
   };
 }
 

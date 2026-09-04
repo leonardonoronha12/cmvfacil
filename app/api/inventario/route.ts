@@ -79,7 +79,20 @@ function resolveUserScopedId(req: NextRequest) {
 }
 
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  return false;
+  const forced = String(new URL(args.req.url).searchParams.get("source") ?? "").trim().toLowerCase();
+  if (forced === "compat") return true;
+  if (forced === "legacy") return false;
+
+  const scope = await resolveCompanyScope(args.supabase, args.userId);
+  if (!scope.companyId) return false;
+  const parts = scope.allowedPrefixes.length ? scope.allowedPrefixes : [`user:${args.userId}:`];
+  const { data: legacyRows } = await args.supabase.from("inventario").select("id,categorias").or(parts.map((prefix) => `id.like.${prefix}%`).join(","));
+  const legacyItems = (legacyRows ?? []).reduce((total: number, inventory: any) => {
+    const categories = Array.isArray(inventory?.categorias) ? inventory.categorias : [];
+    return total + categories.reduce((subtotal: number, category: any) => subtotal + (Array.isArray(category?.itens) ? category.itens.length : 0), 0);
+  }, 0);
+  const { count } = await args.supabase.from("inventory_items").select("id", { count: "exact", head: true }).eq("company_id", scope.companyId);
+  return Number(count ?? 0) > legacyItems;
 }
 
 type CompanyScope = {

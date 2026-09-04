@@ -1121,6 +1121,7 @@ export default function DashboardClient() {
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
+  const [isRevenueLoading, setIsRevenueLoading] = useState(false);
   const [targetCmv, setTargetCmv] = useState(() => readDashboardCmvPrefsFromStore().targetCmv);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
@@ -1699,6 +1700,7 @@ export default function DashboardClient() {
     setCalc(null);
     setCalcComputedAt(0);
     setCalcError("");
+    setIsRevenueLoading(true);
     void fetch(`/api/cmv-revenue?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&ts=${Date.now()}`, {
       cache: "no-store",
     })
@@ -1711,7 +1713,10 @@ export default function DashboardClient() {
         setRevenue(formatted);
         writeDashboardRevenueForPeriod(startDate, endDate, formatted);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setIsRevenueLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -3504,8 +3509,8 @@ export default function DashboardClient() {
 
             <div className={styles.topField}>
               <span className={styles.topLabel}>Faturamento:</span>
-              <span className={styles.topFieldIcon}>
-                <IconMoneySmall />
+              <span className={styles.topFieldIcon} aria-hidden="true">
+                {isRevenueLoading ? <span className={styles.topFieldSpinner} /> : <IconMoneySmall />}
               </span>
               <input
                 ref={revenueInputRef}
@@ -3514,10 +3519,9 @@ export default function DashboardClient() {
                 inputMode="decimal"
                 placeholder="R$0,00"
                 value={revenue}
-                onFocus={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
-                onClick={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
                 onChange={(e) => {
-                  setRevenue(sanitizeBrlInput(e.target.value));
+                  const digits = e.target.value.replace(/\D/g, "").slice(0, 15);
+                  setRevenue(digits ? formatBrlFromCents(Number(digits)) : "");
                 }}
                 onBlur={() => {
                   if (parseBrlToCents(revenue) > 0) setRevenue(formatBrlFromCents(parseBrlToCents(revenue)));

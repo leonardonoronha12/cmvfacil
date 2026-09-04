@@ -100,7 +100,20 @@ function resolveUserScopedId(req: NextRequest) {
 }
 
 async function shouldUseCompatSource(args: { req: NextRequest; supabase: ReturnType<typeof getSupabaseServerClient>; userId: string; isAdmin: boolean }) {
-  return false;
+  const forced = String(new URL(args.req.url).searchParams.get("source") ?? "").trim().toLowerCase();
+  if (forced === "compat") return true;
+  if (forced === "legacy") return false;
+
+  const stateId = `user:${args.userId}`;
+  const { data: state } = await args.supabase.from("pre_preparo_state").select("payload").eq("id", stateId).maybeSingle();
+  const payload = Array.isArray((state as any)?.payload) ? ((state as any).payload as any[]) : [];
+  const legacyIngredients = payload.reduce((total, recipe) => total + (Array.isArray(recipe?.ingredientes) ? recipe.ingredientes.length : 0), 0);
+
+  const { data: memberships } = await args.supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", args.userId).limit(50);
+  const companyId = pickBestCompanyId((memberships ?? []) as any[]);
+  if (!companyId) return false;
+  const { count } = await args.supabase.from("recipe_ingredients").select("id", { count: "exact", head: true }).eq("company_id", companyId);
+  return Number(count ?? 0) > legacyIngredients;
 }
 
 function formatQty3(value: number) {

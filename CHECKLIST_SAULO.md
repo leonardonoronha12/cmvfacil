@@ -19,6 +19,8 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [-] Investigar valores históricos absurdamente altos de custo/CMV
 - [ ] Comparar amostras do sistema antigo com o novo
 - [ ] Homologar cenários completos com empresa criada do zero e empresa migrada
+- [x] Formatar o faturamento como moeda brasileira durante a digitação
+- [x] Exibir carregamento ao buscar o faturamento salvo do período
 
 ## Fornecedores nas Entradas
 
@@ -42,6 +44,9 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [x] Abrir o histórico ao clicar no nome do item
 - [x] Revisar visual e responsividade de Pendentes, Contabilizados e Sem categoria
 - [ ] Homologar desktop, tablet e celular
+- [x] Preservar uma nova contagem localmente antes de navegar para outra tela
+- [x] Manter o menu de três pontos ancorado ao botão acionado
+- [x] Recuperar inventários normalizados quando a cópia antiga estiver vazia
 
 ## Itens e equivalências do fornecedor
 
@@ -53,6 +58,20 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [x] Impedir fator zero, negativo, não numérico ou excessivamente alto
 - [x] Garantir que a unidade equivalente seja herdada do insumo cadastrado
 - [-] Homologar a unidade resultante no Inventário, CMV e histórico com dados reais
+
+## Fichas técnicas e pré-preparo migrados
+
+- [x] Recuperar ingredientes do banco normalizado quando a cópia antiga estiver incompleta
+- [x] Aplicar a recuperação tanto em Fichas Técnicas quanto em Pré-Preparo
+- [ ] Homologar edição de receitas recuperadas da migração
+
+## Contas migradas em auditoria
+
+- [-] Ivson: autenticação confirmada; perfil sem dados importados e reimportação administrativa pendente
+- [-] Alcemir: autenticação confirmada; vínculo com empresa/perfil ausente e isolamento de dados precisa ser reparado
+- [-] Bistrô Lausi: recuperação automática pela fonte normalizada publicada; homologação específica da conta pendente
+- [ ] Reexecutar a migração das contas afetadas com acesso administrativo
+- [ ] Comparar inventários, entradas, categorias e receitas antes/depois da reimportação
 
 ## Usuários e permissões
 

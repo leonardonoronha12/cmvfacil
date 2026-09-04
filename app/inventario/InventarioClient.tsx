@@ -792,11 +792,17 @@ export default function InventarioClient() {
         data,
         categorias,
       };
-      setContagens((prev) => sortContagensDesc([...prev, next]));
+      const nextRows = sortContagensDesc([...contagens, next]);
+      writeInventarioToStore(nextRows);
+      setContagens(nextRows);
       setSelectedContagemId(id);
       setQuery("");
       setIsNewOpen(false);
-      void upsertInventarioToSupabase(next).catch(() => {});
+      try {
+        await upsertInventarioToSupabase(next);
+      } catch {
+        // O cache local síncrono mantém a contagem disponível para nova tentativa.
+      }
     })();
   }
 
@@ -1094,13 +1100,17 @@ export default function InventarioClient() {
                           }
                           menuAnchorRef.current = e.currentTarget;
                           const r = e.currentTarget.getBoundingClientRect();
-                          setMenuRect({ left: Math.max(8, r.right - 160), top: r.bottom + 6 });
+                          const menuWidth = 160;
+                          const menuHeight = 104;
+                          const left = Math.min(Math.max(8, r.right - menuWidth), Math.max(8, window.innerWidth - menuWidth - 8));
+                          const top = r.bottom + 6 + menuHeight <= window.innerHeight ? r.bottom + 6 : Math.max(8, r.top - menuHeight - 6);
+                          setMenuRect({ left, top });
                           setMenuContagemId(next);
                         }}
                       >
                         ⋮
                       </button>
-                      {menuContagemId === c.id ? (
+                      {menuContagemId === c.id && mounted ? createPortal(
                         <div className={styles.moreMenu} ref={menuRef} role="menu" style={menuRect ? { left: menuRect.left, top: menuRect.top } : undefined}>
                           <button
                             type="button"
@@ -1122,7 +1132,8 @@ export default function InventarioClient() {
                           >
                             Excluir
                           </button>
-                        </div>
+                        </div>,
+                        document.body,
                       ) : null}
                     </>
                   )}
