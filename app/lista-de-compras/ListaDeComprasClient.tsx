@@ -726,6 +726,8 @@ export default function ListaDeComprasClient() {
     const endT = endIso ? Date.parse(endIso) : NaN;
     const diasCorridos = Number.isFinite(startT) && Number.isFinite(endT) ? Math.max(Math.round((endT - startT) / 86_400_000), 0) : 0;
 
+    const insumoById = new Map(insumos.map((item) => [String(item.id), item]));
+    const insumoByName = new Map(insumos.map((item) => [normalizeText(String(item.item ?? "")), item]));
     const entradasByKey = new Map<string, { qty: number; unit: string }>();
     for (const entrada of entradas) {
       const t = parseDateLoose(entrada.dataLancamento);
@@ -733,12 +735,16 @@ export default function ListaDeComprasClient() {
       if (Number.isFinite(startT) && t < startT) continue;
       if (Number.isFinite(endT) && t > endT + 86_399_000) continue;
       for (const item of entrada.itensNota ?? []) {
-        const key = normalizeText(item.nome);
+        const linkedId = String((item as any).itemId ?? "").trim();
+        const matchedInsumo = (linkedId ? insumoById.get(linkedId) : null) ?? insumoByName.get(normalizeText(item.nome)) ?? null;
+        const key = normalizeText(String(matchedInsumo?.item ?? item.nome));
         if (!key) continue;
         const parsed = parseQtyLabel(item.quantidadeLabel);
         if (!parsed.qty) continue;
+        const baseUnit = String(matchedInsumo?.medida ?? parsed.unit ?? "Und").trim() || "Und";
+        const convertedQty = convertUnitQty(parsed.qty, parsed.unit, baseUnit);
         const cur = entradasByKey.get(key);
-        entradasByKey.set(key, { qty: (cur?.qty ?? 0) + parsed.qty, unit: cur?.unit || parsed.unit });
+        entradasByKey.set(key, { qty: (cur?.qty ?? 0) + convertedQty, unit: baseUnit });
       }
     }
 
