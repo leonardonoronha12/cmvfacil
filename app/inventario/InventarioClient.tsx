@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -147,38 +148,49 @@ function sortContagensDesc(list: InventarioContagem[]) {
 
 function normalizeContagens(list: InventarioContagem[]) {
   return list.map((c) => {
-    const categorias = (c.categorias ?? []).map((cat) => {
-      const itens = cat.itens ?? [];
-      const byId = new Map<string, { it: InventarioItemRow; index: number }>();
-      for (let i = 0; i < itens.length; i += 1) {
-        const it = itens[i];
-        const id = String(it.id ?? "");
+    const categoryCopies = (c.categorias ?? []).map((cat) => ({ ...cat, itens: [] as InventarioItemRow[] }));
+    const winnerById = new Map<string, { it: InventarioItemRow; categoryIndex: number; order: number }>();
+    let order = 0;
+    for (let categoryIndex = 0; categoryIndex < (c.categorias ?? []).length; categoryIndex += 1) {
+      const cat = c.categorias[categoryIndex]!;
+      for (const it of cat.itens ?? []) {
+        const id = String(it.id ?? "").trim();
         if (!id) continue;
-        const existing = byId.get(id);
-        if (!existing) {
-          byId.set(id, { it, index: i });
+        const current = winnerById.get(id);
+        if (!current) {
+          winnerById.set(id, { it, categoryIndex, order: order++ });
           continue;
         }
-        if (it.removido) {
-          if (!existing.it.removido) byId.set(id, { it, index: existing.index });
-          continue;
-        }
-        const existingHas = Boolean(String(existing.it.estoqueFinal ?? "").trim());
-        const nextHas = Boolean(String(it.estoqueFinal ?? "").trim());
-        if (!existingHas && nextHas) byId.set(id, { it, index: existing.index });
+        const currentHasQty = Boolean(String(current.it.estoqueFinal ?? "").trim());
+        const nextHasQty = Boolean(String(it.estoqueFinal ?? "").trim());
+        const shouldReplace = (!it.removido && current.it.removido) || (nextHasQty && !currentHasQty);
+        if (shouldReplace) winnerById.set(id, { it, categoryIndex, order: current.order });
       }
-      const deduped = Array.from(byId.values())
-        .sort((a, b) => a.index - b.index)
-        .map((x) => x.it);
-      return { ...cat, itens: deduped };
-    });
+    }
+    for (const winner of Array.from(winnerById.values()).sort((a, b) => a.order - b.order)) {
+      categoryCopies[winner.categoryIndex]?.itens.push(winner.it);
+    }
+    const categorias = categoryCopies.map((cat) => ({
+      ...cat,
+      status: cat.itens.some((it) => !it.removido && !String(it.estoqueFinal ?? "").trim()) ? ("pendente" as const) : ("concluida" as const),
+    }));
     return { ...c, categorias };
   });
+}
+
+function sanitizeQuantityInput(value: string) {
+  const raw = String(value ?? "").replace(/[^\d,.]/g, "");
+  if (!raw) return "";
+  const separator = Math.max(raw.lastIndexOf(","), raw.lastIndexOf("."));
+  const integer = (separator >= 0 ? raw.slice(0, separator) : raw).replace(/\D/g, "").replace(/^0+(?=\d)/, "") || "0";
+  const decimal = separator >= 0 ? raw.slice(separator + 1).replace(/\D/g, "").slice(0, 3) : "";
+  return separator >= 0 ? `${integer},${decimal}` : integer;
 }
 
 const initialContagens: InventarioContagem[] = [];
 
 export default function InventarioClient() {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [isLoadingInventario, setIsLoadingInventario] = useState(true);
   const [insumosStore, setInsumosStore] = useState<InsumoStoreItem[]>([]);
@@ -287,8 +299,13 @@ export default function InventarioClient() {
         out.push(it);
       }
     }
-    const q = query.trim().toLowerCase();
-    const afterQuery = q ? out.filter((r) => r.item.toLowerCase().includes(q)) : out;
+    const q = normalizeNameKey(query);
+    const afterQuery = q
+      ? out.filter((r) => {
+          const category = itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria";
+          return normalizeNameKey(`${r.item} ${category} ${r.unidade}`).includes(q);
+        })
+      : out;
     if (categoriaFilter !== "Categorias pendentes") {
       const desired = normCatName(categoriaFilter).toLowerCase();
       return afterQuery.filter((r) => normCatName(itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria").toLowerCase() === desired);
@@ -548,6 +565,7 @@ export default function InventarioClient() {
         for (const c0 of insumoCategorias) addDesiredCategory(String(c0 ?? ""));
         for (const ins of insumosStore) {
           const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
+          if (!itemKey) continue;
           if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
           const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
           sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
@@ -572,6 +590,8 @@ export default function InventarioClient() {
 
         const allIds = new Set<string>();
         for (const id of existingById.keys()) allIds.add(id);
+        const isOpenCount = prevCats.some((cat) => cat.status === "pendente" || (cat.itens ?? []).some((it) => !it.removido && !String(it.estoqueFinal ?? "").trim()));
+        if (isOpenCount) for (const id of sourceById.keys()) allIds.add(id);
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
           const src = sourceById.get(id) ?? null;
@@ -728,6 +748,7 @@ export default function InventarioClient() {
       const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
       for (const ins of insumosStore) {
         const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
+        if (!itemKey) continue;
         if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
         const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
         sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
@@ -782,10 +803,11 @@ export default function InventarioClient() {
   function updateItemQty(itemId: string, value: string) {
     const cId = selectedContagem?.id;
     if (!cId) return;
+    const sanitizedValue = sanitizeQuantityInput(value);
     setContagens((prev) => {
       const next = prev.map((c) => {
         if (c.id !== cId) return c;
-        const categorias = (c.categorias ?? []).map((cat) => ({ ...cat, itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, estoqueFinal: value } : it)) }));
+        const categorias = (c.categorias ?? []).map((cat) => ({ ...cat, itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, estoqueFinal: sanitizedValue } : it)) }));
         return { ...c, categorias };
       });
       const normalized = normalizeContagens(next);
@@ -1221,7 +1243,14 @@ export default function InventarioClient() {
                       <div className={styles.itemLeft}>
                         <div className={styles.dotPending} aria-hidden />
                         <div className={styles.itemText}>
-                          <div className={styles.itemTitle}>{r.item}</div>
+                          <button
+                            type="button"
+                            className={styles.itemTitleButton}
+                            onClick={() => router.push(`/dashboard?itemId=${encodeURIComponent(r.id)}&item=${encodeURIComponent(r.item)}`)}
+                            aria-label={`Abrir histórico de ${r.item}`}
+                          >
+                            {r.item}
+                          </button>
                             <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
@@ -1230,7 +1259,7 @@ export default function InventarioClient() {
                           data-inv-pending="1"
                           className={styles.qtyInput}
                           value={pendingDrafts[r.id] ?? r.estoqueFinal}
-                          onChange={(e) => setPendingDrafts((prev) => ({ ...prev, [r.id]: e.target.value }))}
+                          onChange={(e) => setPendingDrafts((prev) => ({ ...prev, [r.id]: sanitizeQuantityInput(e.target.value) }))}
                           onBlur={() => commitPendingDraft(r.id)}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") {
@@ -1279,7 +1308,14 @@ export default function InventarioClient() {
                           ✓
                         </div>
                         <div className={styles.itemText}>
-                          <div className={styles.itemTitle}>{r.item}</div>
+                          <button
+                            type="button"
+                            className={styles.itemTitleButton}
+                            onClick={() => router.push(`/dashboard?itemId=${encodeURIComponent(r.id)}&item=${encodeURIComponent(r.item)}`)}
+                            aria-label={`Abrir histórico de ${r.item}`}
+                          >
+                            {r.item}
+                          </button>
                             <div className={styles.itemSub}>{itemCategoryMap.get(String(r.id ?? "")) ?? "Sem categoria"}</div>
                         </div>
                       </div>
@@ -1290,7 +1326,7 @@ export default function InventarioClient() {
                               ref={editInputRef}
                               className={styles.qtyInput}
                               value={editingValue}
-                              onChange={(e) => setEditingValue(e.target.value)}
+                              onChange={(e) => setEditingValue(sanitizeQuantityInput(e.target.value))}
                               onKeyDown={(e) => {
                                 if (e.key === "Enter") {
                                   e.preventDefault();
