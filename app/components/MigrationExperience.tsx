@@ -416,12 +416,15 @@ export default function MigrationExperience() {
           && Array.from(element.options).filter(option => !option.disabled && String(option.value).trim()).length === 0;
         setTargetUnavailable(noSelectableValue);
         if (!didScroll && (rect.top < 8 || rect.bottom > window.innerHeight - 8)) { didScroll = true; element.scrollIntoView({ block: "center", behavior: "smooth" }); }
-        if (!noSelectableValue && timer) window.clearInterval(timer);
         return !noSelectableValue;
       }
       return false;
     };
-    if (!locate()) timer = window.setInterval(locate, 160);
+    locate();
+    // Modais entram com animação e podem mudar de posição após a primeira
+    // medição. Continue acompanhando o alvo para o contorno nunca ficar preso
+    // na coordenada inicial (principalmente nos botões X).
+    timer = window.setInterval(locate, 120);
     window.addEventListener("resize", locate); window.addEventListener("scroll", locate, true);
     return () => { window.clearTimeout(unavailableTimer); if (timer) window.clearInterval(timer); window.removeEventListener("resize", locate); window.removeEventListener("scroll", locate, true); };
   }, [step, tourOpen, pathname]);
