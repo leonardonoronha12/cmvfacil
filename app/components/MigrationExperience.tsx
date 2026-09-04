@@ -304,12 +304,15 @@ export default function MigrationExperience() {
   };
 
   const advance = (currentStep: number) => {
-    if (activeModule && currentStep >= moduleEndStep(activeModule)) {
+    const skippedItemHistory = steps[currentStep]?.title === "Clique no nome para ver as entradas";
+    if (activeModule && (currentStep >= moduleEndStep(activeModule) || skippedItemHistory)) {
       saveModuleProgress(activeModule); setTourOpen(false); setActiveModule(null); setLearningOpen(true);
       return;
     }
     const coursePosition = fullCourseSteps.indexOf(currentStep);
-    const next = activeModule ? currentStep + 1 : fullCourseSteps[coursePosition + 1];
+    const next = skippedItemHistory
+      ? steps.findIndex(item => item.title === "Gerencie fornecedores")
+      : activeModule ? currentStep + 1 : fullCourseSteps[coursePosition + 1];
     if (next === undefined || next < 0) { finishTour(); return; }
     goToStep(next);
   };
@@ -366,6 +369,13 @@ export default function MigrationExperience() {
   useEffect(() => {
     if (!tourOpen || !targetUnavailable) return;
     const title = steps[step]?.title;
+    if (title === "Confira as entradas deste insumo" && !document.querySelector('[data-tour="item-entry-history"]')) {
+      const next = steps.findIndex(item => item.title === "Gerencie fornecedores");
+      const timer = window.setTimeout(() => {
+        if (next >= 0 && !document.querySelector('[data-tour="item-entry-history"]')) goToStep(next);
+      }, 500);
+      return () => window.clearTimeout(timer);
+    }
     if (pathname === "/pre-preparo" && (title === "Confira os cálculos da receita" || title === "Salve o pré-preparo") && !document.querySelector('[data-tour="prep-summary"], [data-tour="prep-next"]')) {
       const next = steps.findIndex(item => item.title === "Prepare a lista de compras");
       const timer = window.setTimeout(() => {
