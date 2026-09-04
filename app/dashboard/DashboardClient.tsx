@@ -3529,12 +3529,12 @@ export default function DashboardClient() {
           </div>
 
           <div className={styles.detailsCards}>
-            <div className={styles.cmvCard}>
+            <div className={styles.cmvCard} data-tour="cmv-result-card">
               <p className={styles.cmvCardLabel}>SEU CMV REAL</p>
               <p className={styles.cmvCardValue}>{cmvLabel}</p>
             </div>
 
-            <div className={styles.deltaCard}>
+            <div className={styles.deltaCard} data-tour="cmv-comparison-card">
               <div className={styles.deltaList}>
                 <div className={styles.deltaRow}>{deltaLabel}</div>
                 <div className={styles.deltaRow}>{comparativoAnteriorLabel || "—"}</div>
@@ -3545,7 +3545,7 @@ export default function DashboardClient() {
               </button>
             </div>
 
-            <div className={styles.chartCard}>
+            <div className={styles.chartCard} data-tour="cmv-category-chart">
               <div className={styles.chartCanvas}>
                 <div className={styles.chartArea}>
                   <PieChart slices={chartDisplay.slices} size={148} />
@@ -3579,7 +3579,7 @@ export default function DashboardClient() {
                 <div className={styles.summarySpacer} />
               </div>
 
-              <div className={styles.cardsRow}>
+              <div className={styles.cardsRow} data-tour="cmv-flow-cards">
                 <div className={styles.statCard}>
                   <div className={styles.statIconBlue}>
                     <IconCubeOutline />
@@ -3798,7 +3798,7 @@ export default function DashboardClient() {
               </div>
             </div>
           ) : (
-            <div className={styles.tableWrapper} data-qa-grid="dashboard-cmv-real">
+            <div className={styles.tableWrapper} data-qa-grid="dashboard-cmv-real" data-tour="cmv-items-table">
               {isLoadingTables ? (
                 <div className={styles.loadingOverlay}>
                   <LoadingSpinner />
