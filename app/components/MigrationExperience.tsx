@@ -247,6 +247,25 @@ export default function MigrationExperience() {
   }, [pathname, pendingStep]);
 
   useEffect(() => {
+    if (pendingStep === null) return;
+    const destination = steps[pendingStep]?.path;
+    if (!destination || pathname === destination) return;
+
+    // Em alguns navegadores o primeiro router.push pode ser interrompido pela
+    // atualização assíncrona do painel (principalmente após calcular o CMV).
+    // Refaça a navegação e, se necessário, use uma troca completa de página
+    // para o guia nunca permanecer indefinidamente em "Carregando".
+    const retryTimer = window.setTimeout(() => router.replace(destination), 900);
+    const hardNavigationTimer = window.setTimeout(() => {
+      if (window.location.pathname !== destination) window.location.assign(destination);
+    }, 2400);
+    return () => {
+      window.clearTimeout(retryTimer);
+      window.clearTimeout(hardNavigationTimer);
+    };
+  }, [pathname, pendingStep, router]);
+
+  useEffect(() => {
     if (!tourOpen || pendingStep !== null || pathname === steps[step]?.path) return;
     const coursePosition = fullCourseSteps.indexOf(step);
     const next = activeModule ? step + 1 : fullCourseSteps[coursePosition + 1];
@@ -634,7 +653,7 @@ export default function MigrationExperience() {
       </div>
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
-        <div className={styles.coachExitActions}><button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button><button className={styles.coachSkipStep} onClick={() => advance(step)}>Pular etapa</button></div>
+        <div className={styles.coachExitActions}><button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button><button className={styles.coachSkipStep} disabled={isRouteTransition} onClick={() => advance(step)}>Pular etapa</button></div>
         <div><button className={styles.coachBack} disabled={isRouteTransition} onClick={() => goToStep(step - 1)}>←</button>{isRouteTransition ? <strong className={styles.clickHint}>Carregando…</strong> : steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
