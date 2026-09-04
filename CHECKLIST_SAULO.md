@@ -68,7 +68,7 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [ ] Revisar todas as telas em desktop, notebook, tablet e celular
 - [ ] Eliminar cortes, sobreposições e scroll horizontal
 - [ ] Padronizar estados vazios, skeletons, foco, hover e seleção
-- [ ] Aplicar `prefers-reduced-motion`
+- [x] Aplicar `prefers-reduced-motion`
 - [ ] Reduzir digitação e linguagem técnica
 
 ## Leitura de nota e fotos
