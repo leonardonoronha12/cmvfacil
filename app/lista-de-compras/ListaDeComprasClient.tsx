@@ -1657,13 +1657,13 @@ export default function ListaDeComprasClient() {
                         if (column === "item") {
                           return (
                             <div key={column} className={styles.itemCell}>
-                              {isCompatMode ? (
-                                <div className={styles.itemName}>{row.displayItem}</div>
-                              ) : (
-                                <Link data-tour="shopping-item-history" className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                  {row.displayItem}
-                                </Link>
-                              )}
+                              <Link
+                                data-tour="shopping-item-history"
+                                className={`${styles.itemName} ${styles.itemNameLink}`}
+                                href={`/dashboard?itemId=${encodeURIComponent(row.id)}&item=${encodeURIComponent(row.displayItem)}&tab=entradas`}
+                              >
+                                {row.displayItem}
+                              </Link>
                               <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                             </div>
                           );
