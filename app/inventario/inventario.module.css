@@ -497,6 +497,30 @@
   text-overflow: ellipsis;
 }
 
+.itemTitleButton {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #01040e;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.itemTitleButton:hover,
+.itemTitleButton:focus-visible {
+  color: #009f70;
+  text-decoration: underline;
+  outline: none;
+}
+
 .itemSub {
   font-size: 10px;
   font-weight: 800;
