@@ -43,23 +43,29 @@ export async function POST(req: NextRequest) {
     const companyName = clean(company?.fantasy_name) || "Não identificada";
     const protocol = `CMV-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${randomUUID().slice(0, 6).toUpperCase()}`;
     const root = `${new Date().toISOString().slice(0, 10)}/${protocol}`;
-    const existingBucket = await db.storage.getBucket(BUCKET);
-    if (existingBucket.error) {
-      const created = await db.storage.createBucket(BUCKET, { public: false, fileSizeLimit: MAX_FILE_BYTES, allowedMimeTypes: ["image/*", "video/*"] });
-      if (created.error && !/already exists/i.test(created.error.message)) throw created.error;
-    }
     const attachments: Array<{ name: string; type: string; size: number; path: string; url: string }> = [];
-    for (let index = 0; index < files.length; index++) {
-      const file = files[index];
-      const path = `${root}/${index + 1}-${safeName(file.name)}`;
-      const uploaded = await db.storage.from(BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: false });
-      if (uploaded.error) throw uploaded.error;
-      const signed = await db.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
-      attachments.push({ name: file.name, type: file.type, size: file.size, path, url: clean(signed.data?.signedUrl) });
+    let persistenceError = "";
+    try {
+      const existingBucket = await db.storage.getBucket(BUCKET);
+      if (existingBucket.error) {
+        const created = await db.storage.createBucket(BUCKET, { public: false, fileSizeLimit: MAX_FILE_BYTES, allowedMimeTypes: ["image/*", "video/*"] });
+        if (created.error && !/already exists/i.test(created.error.message)) throw created.error;
+      }
+      for (let index = 0; index < files.length; index++) {
+        const file = files[index];
+        const path = `${root}/${index + 1}-${safeName(file.name)}`;
+        const uploaded = await db.storage.from(BUCKET).upload(path, Buffer.from(await file.arrayBuffer()), { contentType: file.type, upsert: false });
+        if (uploaded.error) throw uploaded.error;
+        const signed = await db.storage.from(BUCKET).createSignedUrl(path, 60 * 60 * 24 * 7);
+        attachments.push({ name: file.name, type: file.type, size: file.size, path, url: clean(signed.data?.signedUrl) });
+      }
+      const ticketData = { protocol, createdAt: new Date().toISOString(), status: "open", user: { id: userId, name, email, whatsapp: clean(profile?.whatsapp) }, company: { id: companyId, name: companyName, email: clean(company?.email), phone: clean(company?.phone_e164) }, page, message, attachments };
+      const ticketUpload = await db.storage.from(BUCKET).upload(`${root}/ticket.json`, JSON.stringify(ticketData, null, 2), { contentType: "application/json", upsert: false });
+      if (ticketUpload.error) throw ticketUpload.error;
+    } catch (error) {
+      // A storage outage must not prevent the support message from reaching WhatsApp.
+      persistenceError = error instanceof Error ? error.message : String(error);
     }
-    const ticketData = { protocol, createdAt: new Date().toISOString(), status: "open", user: { id: userId, name, email, whatsapp: clean(profile?.whatsapp) }, company: { id: companyId, name: companyName, email: clean(company?.email), phone: clean(company?.phone_e164) }, page, message, attachments };
-    const ticketUpload = await db.storage.from(BUCKET).upload(`${root}/ticket.json`, JSON.stringify(ticketData, null, 2), { contentType: "application/json", upsert: false });
-    if (ticketUpload.error) throw ticketUpload.error;
     const attachmentLines = attachments.map((item, index) => `Anexo ${index + 1}: ${item.url}`).join("\n");
     const whatsappText = [`Olá, preciso de suporte no CMV Fácil.`, `Protocolo: ${protocol}`, `Usuário: ${name} (${email})`, `Empresa: ${companyName}`, `Página: ${page}`, `Problema: ${message}`, attachmentLines].filter(Boolean).join("\n");
     const whatsappUrl = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(whatsappText)}`;
@@ -84,7 +90,7 @@ export async function POST(req: NextRequest) {
     } else {
       forwardingError = "supabase_not_configured";
     }
-    return json({ ok: true, protocol, whatsappUrl, attachments: attachments.length, forwarded, forwardingError: forwarded ? undefined : forwardingError });
+    return json({ ok: true, protocol, whatsappUrl, attachments: attachments.length, forwarded, persistenceError: persistenceError || undefined, forwardingError: forwarded ? undefined : forwardingError });
   } catch (error) {
     return json({ ok: false, error: "Não foi possível registrar o chamado agora.", detail: error instanceof Error ? error.message : String(error) }, 500);
   }
