@@ -1340,7 +1340,7 @@ export default function EntradasClient() {
       out.push({ key, label });
     }
 
-    return out;
+    return out.sort((a, b) => a.label.localeCompare(b.label, "pt-BR", { sensitivity: "base", numeric: true }));
   }, [customFornecedores, fornecedorDbLabelCache, fornecedorInfoMap, rows]);
 
   function openNewModal() {
@@ -1676,7 +1676,7 @@ export default function EntradasClient() {
       return;
     }
     setEditingId(row.id);
-    setDraftFornecedor(displayFornecedorRow(row));
+    setDraftFornecedor(resolveFornecedorKey(row.fornecedor, fornecedorInfoMap) || row.fornecedor);
     setDraftDataLancamento(row.dataLancamento);
     const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
     setEditMonth(startOfMonth(parsed));
@@ -1684,7 +1684,7 @@ export default function EntradasClient() {
     setIsEditOpen(true);
   }
 
-  function confirmEdit() {
+  async function confirmEdit() {
     if (isReadOnly) {
       showToast("Modo somente leitura.", "error");
       return;
@@ -1698,12 +1698,26 @@ export default function EntradasClient() {
     }
     const base = rows.find((r) => r.id === id);
     if (!base) return;
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, dataLancamento } : r)));
-    void upsertEntradaToSupabase({ ...base, dataLancamento } as unknown as any).catch(() => {});
-    setIsEditOpen(false);
-    setEditingId(null);
-    setIsEditCalendarOpen(false);
-    showToast("Alterações salvas!", "success");
+    const fornecedor = draftFornecedor.trim();
+    if (!fornecedor) {
+      showToast("Selecione o fornecedor.", "error");
+      return;
+    }
+    const updated = { ...base, fornecedor, fornecedorNome: fornecedorOptions.find((option) => option.key === fornecedor)?.label };
+    if (isCreatingNota) return;
+    setIsCreatingNota(true);
+    try {
+      await upsertEntradaToSupabase({ ...updated, dataLancamento } as unknown as any);
+      setRows((prev) => prev.map((r) => (r.id === id ? { ...updated, dataLancamento } : r)));
+      setIsEditOpen(false);
+      setEditingId(null);
+      setIsEditCalendarOpen(false);
+      showToast("Fornecedor e data salvos.", "success");
+    } catch (error) {
+      showToast(`Não foi possível salvar a nota: ${error instanceof Error ? error.message : String(error)}`, "error", 9000);
+    } finally {
+      setIsCreatingNota(false);
+    }
   }
 
   function openDeleteModal(row: EntradaRow) {
@@ -2580,8 +2594,13 @@ export default function EntradasClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Fornecedor</div>
-                  <select className={styles.formSelect} value={draftFornecedor} onChange={() => {}} disabled>
-                    <option value={draftFornecedor}>{draftFornecedor || "-"}</option>
+                  <select className={styles.formSelect} value={draftFornecedor} onChange={(e) => setDraftFornecedor(e.target.value)} disabled={isCreatingNota}>
+                    <option value="">Selecione</option>
+                    {fornecedorOptions.map((opt) => (
+                      <option key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -2735,8 +2754,8 @@ export default function EntradasClient() {
               </div>
 
               <div className={styles.modalFooter}>
-                <button type="button" className={styles.saveBtn} disabled={isReadOnly || !draftDataLancamento.trim()} onClick={confirmEdit}>
-                  Salvar edição
+                <button type="button" className={styles.saveBtn} disabled={isReadOnly || isCreatingNota || !draftFornecedor.trim() || !draftDataLancamento.trim()} onClick={confirmEdit}>
+                  {isCreatingNota ? "Salvando..." : "Salvar edição"}
                 </button>
               </div>
             </div>
