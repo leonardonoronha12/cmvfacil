@@ -17,6 +17,7 @@ import {
   writeFornecedorEquivalenciasMap,
   writeFornecedorInfoMap,
   writeFornecedorProdutosMap,
+  validateSupplierConversion,
   type FornecedorInfoMap,
   type FornecedorEquivalenciasMap,
   type FornecedorProdutos,
@@ -657,7 +658,7 @@ export default function FornecedoresClient() {
     setVincNomeNota(name);
     setVincUnidadeNota(existing?.unidadeNaNota || "Und");
     setVincInsumoEq(existing?.insumoEquivalente || defaultEq);
-    setVincEqQtd(existing?.equivalenteQuantidade || "");
+    setVincEqQtd(existing?.equivalenteQuantidade || "1");
     setIsVincOpen(true);
   }
 
@@ -674,6 +675,11 @@ export default function FornecedoresClient() {
     const insumoEquivalente = vincInsumoEq.trim();
     if (!nomeNaNota || !insumoEquivalente) return;
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
+    const conversionError = validateSupplierConversion(unidadeNaNota, equivalenteUnidade, vincEqQtd);
+    if (conversionError) {
+      showToast(conversionError, "error", 8000);
+      return;
+    }
     const originalName = vincNomeOriginal.trim();
     const existingList = getEquivalenciasForKey(equivalenciasMap, fornecedorKeyRaw);
     const existing = existingList.find((m) => m.nomeNaNota.toLowerCase() === (originalName || nomeNaNota).toLowerCase()) ?? null;
@@ -1885,7 +1891,14 @@ export default function FornecedoresClient() {
                 <div className={styles.mapHint}>
                   <div className={styles.mapHintLine}>
                     {`1${vincUnidadeNota || "Und"} de ${vincNomeNota.trim() || "(nome na nota)"} equivale a `}
-                    <input className={styles.mapHintInput} value={vincEqQtd} onChange={(e) => setVincEqQtd(e.target.value)} placeholder="____" />
+                    <input
+                      className={styles.mapHintInput}
+                      inputMode="decimal"
+                      value={vincEqQtd}
+                      onChange={(e) => setVincEqQtd(e.target.value.replace(/[^\d,.]/g, ""))}
+                      placeholder="Ex.: 6"
+                      aria-label="Quantidade equivalente"
+                    />
                     {` ${insumosByName.get(vincInsumoEq.toLowerCase())?.medida ?? "Und"} de ${vincInsumoEq || "(insumo)"}`}
                   </div>
                 </div>
@@ -1895,7 +1908,12 @@ export default function FornecedoresClient() {
                 <button type="button" className={styles.modalCancel} onClick={() => setIsVincOpen(false)}>
                   Cancelar
                 </button>
-                <button type="button" className={styles.modalPrimary} onClick={saveVinculacao} disabled={!vincNomeNota.trim() || !vincInsumoEq.trim()}>
+                <button
+                  type="button"
+                  className={styles.modalPrimary}
+                  onClick={saveVinculacao}
+                  disabled={!vincNomeNota.trim() || !vincInsumoEq.trim() || Boolean(validateSupplierConversion(vincUnidadeNota, insumosByName.get(vincInsumoEq.toLowerCase())?.medida ?? "Und", vincEqQtd))}
+                >
                   Salvar
                 </button>
               </div>
