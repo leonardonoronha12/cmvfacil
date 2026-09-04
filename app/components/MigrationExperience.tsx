@@ -246,6 +246,16 @@ export default function MigrationExperience() {
     setPendingStep(null);
   }, [pathname, pendingStep]);
 
+  useEffect(() => {
+    if (!tourOpen || pendingStep !== null || pathname === steps[step]?.path) return;
+    const coursePosition = fullCourseSteps.indexOf(step);
+    const next = activeModule ? step + 1 : fullCourseSteps[coursePosition + 1];
+    if (next === undefined || steps[next]?.path !== pathname) return;
+    sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
+    setLocatedStep(-1);
+    setStep(next);
+  }, [activeModule, pathname, pendingStep, step, tourOpen]);
+
   const saveModuleProgress = (moduleId: string) => {
     setCompletedModules(current => {
       const next = current.includes(moduleId) ? current : [...current, moduleId];
