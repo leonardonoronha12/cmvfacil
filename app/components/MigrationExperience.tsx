@@ -599,6 +599,9 @@ export default function MigrationExperience() {
   const submit = async () => {
     const bodyText = message.trim();
     if (!bodyText || sending) return;
+    // Reserve a janela during the user's click so popup blockers do not
+    // prevent the WhatsApp fallback after the asynchronous request finishes.
+    const whatsappWindow = window.open("about:blank", "cmvfacil-support-whatsapp");
     setLines(current => [...current, { from: "user", text: bodyText }]);
     setSending(true); setTicket(null);
     try {
@@ -608,14 +611,17 @@ export default function MigrationExperience() {
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) throw new Error(data?.error || "Não foi possível registrar o chamado.");
       setTicket({ protocol: data.protocol, whatsappUrl: data.whatsappUrl, forwarded: data.forwarded === true });
+      if (data.forwarded === true) whatsappWindow?.close();
+      else if (whatsappWindow) whatsappWindow.location.href = data.whatsappUrl;
       setLines(current => [...current, { from: "bot", text: data.forwarded === true
         ? `Chamado ${data.protocol} registrado e enviado automaticamente ao suporte. Você receberá o retorno pelo WhatsApp.`
-        : `Chamado ${data.protocol} registrado. O envio automático não respondeu; use o botão abaixo para encaminhar pelo WhatsApp.` }]);
+        : `Chamado ${data.protocol} registrado. Como o envio direto não respondeu, abri o WhatsApp com a mensagem pronta para você confirmar.` }]);
       setMessage(""); setFiles([]); if (inputRef.current) inputRef.current.value = "";
     } catch (error) {
       const fallback = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(`Olá, preciso de suporte no CMV Fácil.\nUsuário: ${me?.email || "não identificado"}\nEmpresa: ${me?.companyName || "não identificada"}\nPágina: ${pathname}\nProblema: ${bodyText}`)}`;
       setTicket({ protocol: "sem protocolo", whatsappUrl: fallback, forwarded: false });
-      setLines(current => [...current, { from: "bot", text: error instanceof Error ? `${error.message} Você ainda pode encaminhar a mensagem pelo WhatsApp.` : "Você pode encaminhar a mensagem pelo WhatsApp." }]);
+      if (whatsappWindow) whatsappWindow.location.href = fallback;
+      setLines(current => [...current, { from: "bot", text: error instanceof Error ? `${error.message} Abri o WhatsApp com a mensagem pronta para envio.` : "Abri o WhatsApp com a mensagem pronta para envio." }]);
     } finally { setSending(false); }
   };
 
@@ -702,8 +708,8 @@ export default function MigrationExperience() {
         <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onFiles} />
         <button className={styles.attach} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
-        <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Registrando…" : "Registrar chamado"}</button>
-        {ticket ? <a className={styles.whatsapp} href={ticket.whatsappUrl} target="_blank" rel="noreferrer">{ticket.forwarded ? "Abrir conversa no WhatsApp" : "Enviar pelo WhatsApp"}</a> : null}
+        <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Enviando ao suporte…" : "Enviar chamado"}</button>
+        {ticket ? <a className={styles.whatsapp} href={ticket.whatsappUrl} target="_blank" rel="noreferrer">{ticket.forwarded ? "Abrir conversa no WhatsApp" : "WhatsApp não abriu? Clique aqui"}</a> : null}
       </div>
     </aside> : null}
   </>;
