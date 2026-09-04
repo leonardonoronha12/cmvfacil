@@ -21,6 +21,29 @@ export type FornecedorItemEquivalencia = {
 };
 export type FornecedorEquivalenciasMap = Record<string, FornecedorItemEquivalencia[]>;
 
+export function parseSupplierConversionFactor(value: string) {
+  const raw = String(value ?? "").trim().replace(/\s/g, "");
+  if (!raw) return 0;
+  const normalized = raw.includes(",") ? raw.replace(/\./g, "").replace(",", ".") : raw;
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+}
+
+export function validateSupplierConversion(unitFrom: string, unitTo: string, factorRaw: string): string {
+  const factor = parseSupplierConversionFactor(factorRaw);
+  if (!(factor > 0)) return "Informe uma quantidade equivalente maior que zero.";
+  if (factor > 1_000_000) return "A quantidade equivalente é muito alta. Confira a embalagem e a unidade.";
+  const normalizeUnit = (value: string) => String(value ?? "").trim().toLowerCase();
+  const mass = new Set(["kg", "g", "mg"]);
+  const volume = new Set(["l", "lt", "litro", "litros", "ml"]);
+  const from = normalizeUnit(unitFrom);
+  const to = normalizeUnit(unitTo);
+  if ((mass.has(from) && volume.has(to)) || (volume.has(from) && mass.has(to))) {
+    return "As unidades são incompatíveis: não é possível converter peso diretamente em volume.";
+  }
+  return "";
+}
+
 const INFO_EVENT = "cmvfacil:fornecedores:info";
 const PROD_EVENT = "cmvfacil:fornecedores:produtos";
 const MAP_EVENT = "cmvfacil:fornecedores:mapa";
