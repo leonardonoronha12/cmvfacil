@@ -22,7 +22,12 @@ import { buildExpiredPrePreparoEtiquetaDesperdicios, getEtiquetaIdFromWasteId, i
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import { readFichasTecnicasFromStore, subscribeFichasTecnicas, type FichaTecnicaRow, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
-import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
+import {
+  readDashboardCmvPrefsFromStore,
+  readDashboardRevenueForPeriod,
+  writeDashboardCmvPrefsToStore,
+  writeDashboardRevenueForPeriod,
+} from "../lib/dashboardCmvPrefsStore";
 import { requireUserScopePrefix } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import {
@@ -728,6 +733,16 @@ function formatBrlInput(input: string) {
   return formatBrlFromCents(parseBrlToCents(cleaned));
 }
 
+function sanitizeBrlInput(input: string) {
+  const raw = String(input ?? "").replace(/[^\d,.]/g, "").trim();
+  if (!raw) return "";
+  const separator = Math.max(raw.lastIndexOf(","), raw.lastIndexOf("."));
+  const integerDigits = (separator >= 0 ? raw.slice(0, separator) : raw).replace(/\D/g, "").replace(/^0+(?=\d)/, "") || "0";
+  const decimals = separator >= 0 ? raw.slice(separator + 1).replace(/\D/g, "").slice(0, 2) : "";
+  const integerLabel = integerDigits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return separator >= 0 ? `${integerLabel},${decimals}` : integerLabel;
+}
+
 function formatPercentInput(input: string) {
   const cleaned = input.replace(/[^\d,]/g, "").trim();
   if (!cleaned) return "";
@@ -1123,6 +1138,7 @@ export default function DashboardClient() {
   const [isVariacaoOpen, setIsVariacaoOpen] = useState(false);
   const [lastCalc, setLastCalc] = useState<LastCalc | null>(null);
   const [calcError, setCalcError] = useState<string>("");
+  const [isSavingCalculation, setIsSavingCalculation] = useState(false);
   const [isLoadingTables, setIsLoadingTables] = useState(true);
   const [historyItem, setHistoryItem] = useState<{ insumoId: string; item: string } | null>(null);
   const [detailsTab, setDetailsTab] = useState<"entradas" | "fornecedores">("entradas");
@@ -1616,7 +1632,8 @@ export default function DashboardClient() {
           const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
           if (Number.isFinite(f) && f > 0) fator = f;
         }
-        const id = insumoIdByKey.get(mappedKey);
+        const linkedItemId = String((it as any).itemId ?? "").trim();
+        const id = (linkedItemId && insumoNameById.has(linkedItemId) ? linkedItemId : "") || insumoIdByKey.get(mappedKey);
         if (!id) continue;
         const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
         const qtyForSubtotal = qty * fator;
@@ -1673,6 +1690,32 @@ export default function DashboardClient() {
     setStartDate((prev) => (prev ? prev : periodOptions[periodOptions.length - 1]!.iso));
     setEndDate((prev) => (prev ? prev : periodOptions[0]!.iso));
   }, [periodOptions]);
+
+  useEffect(() => {
+    if (!startDate || !endDate) return;
+    let cancelled = false;
+    const localRevenue = readDashboardRevenueForPeriod(startDate, endDate);
+    setRevenue(localRevenue);
+    setCalc(null);
+    setCalcComputedAt(0);
+    setCalcError("");
+    void fetch(`/api/cmv-revenue?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}&ts=${Date.now()}`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const payload = (await response.json().catch(() => null)) as { revenue?: number | null } | null;
+        if (!response.ok || cancelled || payload?.revenue == null) return;
+        const cents = Math.round(Number(payload.revenue) * 100);
+        if (!Number.isFinite(cents) || cents <= 0) return;
+        const formatted = formatBrlFromCents(cents);
+        setRevenue(formatted);
+        writeDashboardRevenueForPeriod(startDate, endDate, formatted);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [endDate, startDate]);
 
   useEffect(() => {
     if (inventoryOptions.length >= 2 && calcError.includes("Cadastre pelo menos 2 inventários")) setCalcError("");
@@ -1771,10 +1814,13 @@ export default function DashboardClient() {
             const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
             if (Number.isFinite(f) && f > 0) fator = f;
           }
-          const id = insumoIdByKey.get(mappedKey);
+          const linkedItemId = String((it as any).itemId ?? "").trim();
+          const id = (linkedItemId && insumoNameById.has(linkedItemId) ? linkedItemId : "") || insumoIdByKey.get(mappedKey);
           const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
-          const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-          const qtyEq = qty * fator;
+          const { qty, unit: entryUnit } = parseQtyLabel(it.quantidadeLabel ?? "");
+          const baseUnit = id ? String(insumos.find((item) => item.id === id)?.medida ?? "Und") : "Und";
+          const convertedQty = fator === 1 && id ? convertQty(qty, entryUnit || baseUnit, baseUnit) : qty * fator;
+          const qtyEq = Number.isFinite(convertedQty) ? convertedQty : 0;
           if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
           let sub = parseBrlToCents(it.subtotalLabel ?? "");
           if (!sub) {
@@ -1932,7 +1978,7 @@ export default function DashboardClient() {
     parseBrlToCents(revenue) > 0 &&
     targetCmvIsValid;
 
-  function handleCalculate() {
+  async function handleCalculate() {
     try {
       if (isLoadingTables) {
         calculateAfterLoadRef.current = true;
@@ -1991,6 +2037,17 @@ export default function DashboardClient() {
           desperdiciosCents += parseBrlToCents(d.custo ?? "");
         }
 
+        setIsSavingCalculation(true);
+        const saveResponse = await fetch("/api/cmv-revenue", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ startDate: startOpt.iso, endDate: endOpt.iso, revenueCents }),
+        });
+        const savePayload = (await saveResponse.json().catch(() => null)) as { error?: string } | null;
+        if (!saveResponse.ok) throw new Error(savePayload?.error || "Não foi possível salvar o faturamento do período.");
+        const formattedRevenue = formatBrlFromCents(revenueCents);
+        writeDashboardRevenueForPeriod(startOpt.iso, endOpt.iso, formattedRevenue);
+        setRevenue(formattedRevenue);
         setLastCalc(readLastCalc());
         setCalc({
           cmvPercent,
@@ -2007,7 +2064,7 @@ export default function DashboardClient() {
         const computedAt = Date.now();
         setCalcComputedAt(computedAt);
         writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
-        showToast("Cálculo feito.", "success");
+        showToast("CMV calculado e faturamento do período salvo.", "success");
         if (!searchParams.get("itemId") && !searchParams.get("item")) {
           setHistoryItem(null);
           setDetailsTab("entradas");
@@ -2084,7 +2141,8 @@ export default function DashboardClient() {
               const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
               if (Number.isFinite(f) && f > 0) fator = f;
             }
-            const id = insumoIdByKey.get(mappedKey);
+            const linkedItemId = String((it as any).itemId ?? "").trim();
+            const id = (linkedItemId && insumoNameById.has(linkedItemId) ? linkedItemId : "") || insumoIdByKey.get(mappedKey);
             const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
             const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
             const qtyEq = qty * fator;
@@ -2202,6 +2260,17 @@ export default function DashboardClient() {
       }
 
       const prev = readLastCalc();
+      setIsSavingCalculation(true);
+      const saveResponse = await fetch("/api/cmv-revenue", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ startDate: startOpt.iso, endDate: endOpt.iso, revenueCents }),
+      });
+      const savePayload = (await saveResponse.json().catch(() => null)) as { error?: string } | null;
+      if (!saveResponse.ok) throw new Error(savePayload?.error || "Não foi possível salvar o faturamento do período.");
+      const formattedRevenue = formatBrlFromCents(revenueCents);
+      writeDashboardRevenueForPeriod(startOpt.iso, endOpt.iso, formattedRevenue);
+      setRevenue(formattedRevenue);
       setLastCalc(prev);
 
       setCalc({
@@ -2219,7 +2288,7 @@ export default function DashboardClient() {
       const computedAt = Date.now();
       setCalcComputedAt(computedAt);
       writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
-      showToast("Cálculo feito.", "success");
+      showToast("CMV calculado e faturamento do período salvo.", "success");
       if (!searchParams.get("itemId") && !searchParams.get("item")) {
         setHistoryItem(null);
         setDetailsTab("entradas");
@@ -2228,6 +2297,8 @@ export default function DashboardClient() {
       const msg = err instanceof Error ? err.message : String(err);
       setCalcError(`Erro ao calcular CMV (${msg}).`);
       showToast(`Erro ao calcular CMV (${msg}).`, "error", 20000);
+    } finally {
+      setIsSavingCalculation(false);
     }
   }
 
@@ -3446,8 +3517,10 @@ export default function DashboardClient() {
                 onFocus={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
                 onClick={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
                 onChange={(e) => {
-                  setRevenue(formatBrlInput(e.target.value));
-                  placeCaretBeforeCurrencyDecimals(revenueInputRef.current);
+                  setRevenue(sanitizeBrlInput(e.target.value));
+                }}
+                onBlur={() => {
+                  if (parseBrlToCents(revenue) > 0) setRevenue(formatBrlFromCents(parseBrlToCents(revenue)));
                 }}
               />
             </div>
@@ -3477,11 +3550,12 @@ export default function DashboardClient() {
               type="button"
               className={canCalculate ? `${styles.topAction} ${styles.topActionEnabled}` : styles.topAction}
               onClick={handleCalculate}
+              disabled={isSavingCalculation}
             >
               <span className={styles.topActionIcon}>
                 <IconCalendarSmall />
               </span>
-              Calcular CMV
+              {isSavingCalculation ? "Salvando..." : "Calcular CMV"}
             </button>
           </div>
 
