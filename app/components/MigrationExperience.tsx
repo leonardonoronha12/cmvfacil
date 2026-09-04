@@ -217,10 +217,7 @@ export default function MigrationExperience() {
 
   useEffect(() => {
     let active = true;
-    router.prefetch("/dashboard");
-    router.prefetch("/inventario");
-    router.prefetch("/entradas");
-    learningModules.forEach(module => router.prefetch(steps[module.step].path));
+    Array.from(new Set(steps.map(item => item.path))).forEach(path => router.prefetch(path));
     try { setCompletedModules(JSON.parse(localStorage.getItem(MODULE_PROGRESS_KEY) || "[]")); } catch { setCompletedModules([]); }
     if (localStorage.getItem(DONE_TOUR_KEY) !== "done") {
       const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
@@ -294,6 +291,7 @@ export default function MigrationExperience() {
     ? Array.from({ length: moduleEndStep(activeModule) - (learningModules.find(module => module.id === activeModule)?.step ?? step) + 1 }, (_, index) => (learningModules.find(module => module.id === activeModule)?.step ?? step) + index)
     : fullCourseSteps;
   const visibleStepPosition = Math.max(0, visibleStepSequence.indexOf(step));
+  const isRouteTransition = pendingStep !== null && pathname !== steps[pendingStep]?.path;
   const continueOnlyStep = step > 0 && (!steps[step]?.target || (steps[step]?.passive && !steps[step]?.completion));
 
   useEffect(() => {
@@ -447,8 +445,8 @@ export default function MigrationExperience() {
       if (next === undefined || next < 0) { finishTour(); return; }
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(next));
       const destination = steps[next]?.path;
-      if (clickedHref) { setLocatedStep(-1); setStep(next); setPendingStep(next); router.push(clickedHref); }
-      else if (destination && pathname !== destination) { setLocatedStep(-1); setStep(next); setPendingStep(next); router.push(destination); }
+      if (clickedHref) { setLocatedStep(-1); setPendingStep(next); router.push(clickedHref); }
+      else if (destination && pathname !== destination) { setLocatedStep(-1); setPendingStep(next); router.prefetch(destination); router.push(destination); }
       else setStep(next);
     };
     document.addEventListener("click", onClick, true);
@@ -459,7 +457,7 @@ export default function MigrationExperience() {
     const bounded = Math.max(0, Math.min(steps.length - 1, nextStep));
     sessionStorage.setItem(ACTIVE_TOUR_KEY, String(bounded));
     const destination = steps[bounded].path;
-    if (pathname !== destination) { setLocatedStep(-1); setStep(bounded); setPendingStep(bounded); router.push(destination); }
+    if (pathname !== destination) { setLocatedStep(-1); setPendingStep(bounded); router.prefetch(destination); router.push(destination); }
     else setStep(bounded);
   };
 
@@ -622,16 +620,16 @@ export default function MigrationExperience() {
         <b>{visibleStepPosition + 1}/{visibleStepSequence.length}</b>
       </header>
       <div className={styles.speech}>
-        <div className={styles.coachKicker}>{steps[step].kicker}</div>
-        <h3>{steps[step].title}</h3>
-        <p>{typedText}<span className={styles.typingCursor} /></p>
-        <div className={styles.benefits}>{steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
+        <div className={styles.coachKicker}>{isRouteTransition ? "ABRINDO A PRÓXIMA TELA" : steps[step].kicker}</div>
+        <h3>{isRouteTransition ? `Indo para ${steps[pendingStep!].path === "/insumos" ? "Insumos" : "a próxima etapa"}…` : steps[step].title}</h3>
+        <p>{isRouteTransition ? "Aguarde só um instante. A próxima orientação aparecerá quando os controles estiverem prontos para usar." : typedText}<span className={styles.typingCursor} /></p>
+        <div className={styles.benefits}>{isRouteTransition ? <span>✓ Clique reconhecido</span> : steps[step].bullets.map(item => <span key={item}>✓ {item}</span>)}</div>
         {continueNotice ? <div className={styles.continueNotice}>Nesta etapa, observe os controles destacados e clique em <strong>Continuar</strong>.</div> : null}
       </div>
       <div className={styles.coachProgress}>{visibleStepSequence.map((stepIndexValue, index) => <button aria-label={`Etapa ${index + 1}`} key={`${steps[stepIndexValue].title}-${stepIndexValue}`} onClick={() => goToStep(stepIndexValue)} className={index === visibleStepPosition ? styles.coachProgressOn : index < visibleStepPosition ? styles.coachProgressDone : ""} />)}</div>
       <div className={styles.coachActions}>
         <div className={styles.coachExitActions}><button className={styles.coachSkip} onClick={finishTour}>Encerrar tour</button><button className={styles.coachSkipStep} onClick={() => advance(step)}>Pular etapa</button></div>
-        <div><button className={styles.coachBack} onClick={() => goToStep(step - 1)}>←</button>{steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
+        <div><button className={styles.coachBack} disabled={isRouteTransition} onClick={() => goToStep(step - 1)}>←</button>{isRouteTransition ? <strong className={styles.clickHint}>Carregando…</strong> : steps[step].target && (!steps[step].passive || steps[step].completion) ? <strong className={styles.clickHint}>Faça a ação destacada para continuar</strong> : <button className={styles.coachNext} onClick={() => advance(step)}>{visibleStepPosition === 0 ? "Começar" : activeModule && step >= moduleEndStep(activeModule) ? "Concluir módulo" : "Continuar"} <span>→</span></button>}</div>
       </div>
     </aside> : null}
     {tourOpen && step > 0 && locatedStep === step && targetRect ? <div className={styles.spotlight} onClick={() => { if (continueOnlyStep) setContinueNotice(true); }} aria-hidden>
