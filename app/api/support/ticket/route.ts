@@ -79,7 +79,17 @@ export async function POST(req: NextRequest) {
           const response = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/functions/v1/support-whatsapp`, {
             method: "POST",
             headers: { authorization: `Bearer ${serviceRole}`, apikey: serviceRole, "content-type": "application/json", "x-cmv-attempt": String(attempt) },
-            body: JSON.stringify({ message: whatsappText, protocol }),
+            body: JSON.stringify({
+              message: whatsappText,
+              protocol,
+              contentVariables: {
+                "1": protocol,
+                "2": `${name} (${email})`,
+                "3": companyName,
+                "4": page,
+                "5": message + (attachmentLines ? `\n${attachmentLines}` : ""),
+              },
+            }),
             cache: "no-store",
             signal: AbortSignal.timeout(15_000),
           });

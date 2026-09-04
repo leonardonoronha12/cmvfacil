@@ -29,15 +29,25 @@ serve(async (req) => {
   const to = (Deno.env.get("CMV_SUPPORT_WHATSAPP_TO") ?? "+5513936180830").trim();
   if (!accountSid || !authToken || !from || !to) return json({ ok: false, error: "twilio_not_configured" }, 500);
 
-  const payload = await req.json().catch(() => null) as { message?: unknown; protocol?: unknown } | null;
+  const payload = await req.json().catch(() => null) as {
+    message?: unknown;
+    protocol?: unknown;
+    contentVariables?: Record<string, unknown>;
+  } | null;
   const message = String(payload?.message ?? "").trim();
   const protocol = String(payload?.protocol ?? crypto.randomUUID()).trim();
+  const contentSid = (Deno.env.get("TWILIO_SUPPORT_CONTENT_SID") ?? "HXda60a45528a794d78b6e59802e30d187").trim();
+  const contentVariables = Object.fromEntries(
+    Object.entries(payload?.contentVariables ?? {}).map(([key, value]) => [key, String(value ?? "").trim()]),
+  );
   if (message.length < 3 || message.length > 6000) return json({ ok: false, error: "invalid_message" }, 400);
+  if (!contentSid || Object.keys(contentVariables).length !== 5) return json({ ok: false, error: "invalid_template_data" }, 400);
 
   const form = new URLSearchParams();
   form.set("From", whatsapp(from));
   form.set("To", whatsapp(to));
-  form.set("Body", message);
+  form.set("ContentSid", contentSid);
+  form.set("ContentVariables", JSON.stringify(contentVariables));
   let lastDetail = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
     const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
