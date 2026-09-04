@@ -473,9 +473,13 @@ export default function MigrationExperience() {
     const isCloseStep = steps[step]?.target?.selector?.includes("close") || steps[step]?.title.toLowerCase().includes("feche");
     if (isCloseStep) {
       const targetIsRight = anchorRect.left + anchorRect.width / 2 > window.innerWidth / 2;
+      const freeSideWidth = revealRect
+        ? (targetIsRight ? revealRect.left - 20 : window.innerWidth - revealRect.right - 20)
+        : cardWidth;
+      const closeCardWidth = freeSideWidth >= 230 ? Math.min(cardWidth, freeSideWidth) : cardWidth;
       return {
-        left: targetIsRight ? 10 : Math.max(10, window.innerWidth - cardWidth - 10),
-        top: 10, right: "auto", bottom: "auto", width: cardWidth,
+        left: targetIsRight ? 10 : Math.max(10, window.innerWidth - closeCardWidth - 10),
+        top: 10, right: "auto", bottom: "auto", width: closeCardWidth,
         maxHeight: Math.max(260, window.innerHeight - 20), overflowY: "auto" as const,
       };
     }
