@@ -3407,7 +3407,7 @@ export default function DashboardClient() {
               <span className={styles.topFieldIcon}>
                 <IconCalendarSmall />
               </span>
-              <select className={styles.topInput} value={startDate} onChange={(e) => setStartDate(e.target.value)}>
+              <select data-tour="cmv-start-date" className={styles.topInput} value={startDate} onChange={(e) => setStartDate(e.target.value)}>
                 {periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
@@ -3421,7 +3421,7 @@ export default function DashboardClient() {
               <span className={styles.topFieldIcon}>
                 <IconCalendarSmall />
               </span>
-              <select className={styles.topInput} value={endDate} onChange={(e) => setEndDate(e.target.value)}>
+              <select data-tour="cmv-end-date" className={styles.topInput} value={endDate} onChange={(e) => setEndDate(e.target.value)}>
                 {periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
@@ -3437,6 +3437,7 @@ export default function DashboardClient() {
               </span>
               <input
                 ref={revenueInputRef}
+                data-tour="cmv-revenue"
                 className={styles.topInput}
                 inputMode="decimal"
                 placeholder="R$0,00"
@@ -3457,6 +3458,7 @@ export default function DashboardClient() {
               </span>
               <input
                 ref={targetCmvInputRef}
+                data-tour="cmv-target"
                 className={styles.topInput}
                 inputMode="decimal"
                 placeholder="30,00%"
