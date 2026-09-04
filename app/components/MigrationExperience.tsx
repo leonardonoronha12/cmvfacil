@@ -599,9 +599,6 @@ export default function MigrationExperience() {
   const submit = async () => {
     const bodyText = message.trim();
     if (!bodyText || sending) return;
-    // Reserve a janela during the user's click so popup blockers do not
-    // prevent the WhatsApp fallback after the asynchronous request finishes.
-    const whatsappWindow = window.open("about:blank", "cmvfacil-support-whatsapp");
     setLines(current => [...current, { from: "user", text: bodyText }]);
     setSending(true); setTicket(null);
     try {
@@ -611,24 +608,21 @@ export default function MigrationExperience() {
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) throw new Error(data?.error || "Não foi possível registrar o chamado.");
       setTicket({ protocol: data.protocol, whatsappUrl: data.whatsappUrl, forwarded: data.forwarded === true });
-      if (data.forwarded === true) whatsappWindow?.close();
-      else if (whatsappWindow) whatsappWindow.location.href = data.whatsappUrl;
       setLines(current => [...current, { from: "bot", text: data.forwarded === true
         ? `Chamado ${data.protocol} registrado e enviado automaticamente ao suporte. Você receberá o retorno pelo WhatsApp.`
-        : `Chamado ${data.protocol} registrado. Como o envio direto não respondeu, abri o WhatsApp com a mensagem pronta para você confirmar.` }]);
+        : `Chamado ${data.protocol} registrado. O envio automático está temporariamente indisponível; use o link abaixo somente se precisar falar com o suporte agora.` }]);
       setMessage(""); setFiles([]); if (inputRef.current) inputRef.current.value = "";
     } catch (error) {
       const fallback = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(`Olá, preciso de suporte no CMV Fácil.\nUsuário: ${me?.email || "não identificado"}\nEmpresa: ${me?.companyName || "não identificada"}\nPágina: ${pathname}\nProblema: ${bodyText}`)}`;
       setTicket({ protocol: "sem protocolo", whatsappUrl: fallback, forwarded: false });
-      if (whatsappWindow) whatsappWindow.location.href = fallback;
-      setLines(current => [...current, { from: "bot", text: error instanceof Error ? `${error.message} Abri o WhatsApp com a mensagem pronta para envio.` : "Abri o WhatsApp com a mensagem pronta para envio." }]);
+      setLines(current => [...current, { from: "bot", text: error instanceof Error ? `${error.message} Use o link abaixo para falar com o suporte.` : "Use o link abaixo para falar com o suporte." }]);
     } finally { setSending(false); }
   };
 
   return <>
     {learningOpen ? <div data-cmv-tour-ui="true" className={styles.overlay} role="dialog" aria-modal="true" aria-label="Academia CMV Fácil">
       <section className={`${styles.tourCard} ${styles.learningCard}`}>
-        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Academia CMV Fácil <b>{completedModules.length}/{learningModules.length}</b></div></header>
+        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Academia CMV Fácil <b>{completedModules.length}/{learningModules.length}</b><button className={styles.tourClose} onClick={() => setLearningOpen(false)} aria-label="Fechar guia">×</button></div></header>
         <div className={styles.learningIntro}>
           <div><span className={styles.learningRobot}>🤖</span><div><div className={styles.eyebrow}>Seu guia permanente</div><h2>O que você quer aprender?</h2><p>Faça o treinamento completo se estiver começando ou abra somente uma rotina para relembrar. Seu progresso fica salvo.</p></div></div>
           <button className={styles.primary} onClick={startFullTour}>Começar curso completo <span>→</span></button>
@@ -644,7 +638,7 @@ export default function MigrationExperience() {
     </div> : null}
     {tourOpen && step === 0 ? <div data-cmv-tour-ui="true" className={styles.overlay} role="dialog" aria-modal="true" aria-label="Conheça o novo CMV Fácil">
       <section className={styles.tourCard}>
-        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b></div></header>
+        <header className={styles.tourHeader}><strong><span>cmv</span>fácil</strong><div>Tour de novidades <b>{step + 1}/{steps.length}</b><button className={styles.tourClose} onClick={finishTour} aria-label="Fechar guia">×</button></div></header>
         <div className={styles.progress}>{steps.map((item, index) => <button key={item.title} aria-label={`Ir para etapa ${index + 1}`} onClick={() => goToStep(index)} className={index <= step ? styles.progressOn : ""}><span /></button>)}</div>
         <div className={styles.tourBody}>
           <div className={`${styles.visual} ${styles[`visual${step}`] || ""}`}>
@@ -672,7 +666,7 @@ export default function MigrationExperience() {
       <header className={styles.coachHeader}>
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
         <div><strong>Fácil, seu guia</strong><small><i /> explicando esta tela</small></div>
-        <b>{visibleStepPosition + 1}/{visibleStepSequence.length}</b>
+        <b>{visibleStepPosition + 1}/{visibleStepSequence.length}</b><button className={styles.coachClose} onClick={finishTour} aria-label="Fechar guia">×</button>
       </header>
       <div className={styles.speech}>
         <div className={styles.coachKicker}>{isRouteTransition ? "ABRINDO A PRÓXIMA TELA" : steps[step].kicker}</div>

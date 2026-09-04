@@ -74,18 +74,23 @@ export async function POST(req: NextRequest) {
     const supabaseUrl = env("SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL");
     const serviceRole = env("SUPABASE_SERVICE_ROLE_KEY", "SUPABASE_SERVICE_ROLE", "SERVICE_ROLE_KEY", "SUPABASE_SERVICE_KEY");
     if (supabaseUrl && serviceRole) {
-      try {
-        const response = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/functions/v1/support-whatsapp`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${serviceRole}`, apikey: serviceRole, "content-type": "application/json" },
-          body: JSON.stringify({ message: whatsappText }),
-          cache: "no-store",
-        });
-        const result = await response.json().catch(() => ({}));
-        forwarded = response.ok && result?.ok === true;
-        if (!forwarded) forwardingError = clean(result?.error || `http_${response.status}`);
-      } catch (error) {
-        forwardingError = error instanceof Error ? error.message : String(error);
+      for (let attempt = 1; attempt <= 3 && !forwarded; attempt++) {
+        try {
+          const response = await fetch(`${supabaseUrl.replace(/\/+$/, "")}/functions/v1/support-whatsapp`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${serviceRole}`, apikey: serviceRole, "content-type": "application/json", "x-cmv-attempt": String(attempt) },
+            body: JSON.stringify({ message: whatsappText, protocol }),
+            cache: "no-store",
+            signal: AbortSignal.timeout(15_000),
+          });
+          const result = await response.json().catch(() => ({}));
+          forwarded = response.ok && result?.ok === true;
+          if (!forwarded) forwardingError = clean(result?.detail || result?.error || `http_${response.status}`);
+          if (!forwarded && attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 700));
+        } catch (error) {
+          forwardingError = error instanceof Error ? error.message : String(error);
+          if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 700));
+        }
       }
     } else {
       forwardingError = "supabase_not_configured";

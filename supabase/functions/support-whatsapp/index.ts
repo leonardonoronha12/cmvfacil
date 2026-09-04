@@ -29,24 +29,32 @@ serve(async (req) => {
   const to = (Deno.env.get("CMV_SUPPORT_WHATSAPP_TO") ?? "+5513936180830").trim();
   if (!accountSid || !authToken || !from || !to) return json({ ok: false, error: "twilio_not_configured" }, 500);
 
-  const payload = await req.json().catch(() => null) as { message?: unknown } | null;
+  const payload = await req.json().catch(() => null) as { message?: unknown; protocol?: unknown } | null;
   const message = String(payload?.message ?? "").trim();
+  const protocol = String(payload?.protocol ?? crypto.randomUUID()).trim();
   if (message.length < 3 || message.length > 6000) return json({ ok: false, error: "invalid_message" }, 400);
 
   const form = new URLSearchParams();
   form.set("From", whatsapp(from));
   form.set("To", whatsapp(to));
   form.set("Body", message);
-  const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
-    method: "POST",
-    headers: {
-      authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
-      "content-type": "application/x-www-form-urlencoded",
-      accept: "application/json",
-    },
-    body: form.toString(),
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok) return json({ ok: false, error: "twilio_send_failed", detail: String(result?.message ?? "") }, 502);
-  return json({ ok: true, sid: result?.sid ?? null, status: result?.status ?? null });
+  let lastDetail = "";
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
+      method: "POST",
+      headers: {
+        authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`,
+        "content-type": "application/x-www-form-urlencoded",
+        accept: "application/json",
+        "Idempotency-Key": `cmv-support-${protocol}`,
+      },
+      body: form.toString(),
+    }).catch(() => null);
+    const result = response ? await response.json().catch(() => ({})) : {};
+    if (response?.ok) return json({ ok: true, sid: result?.sid ?? null, status: result?.status ?? null });
+    lastDetail = String(result?.message ?? "network_error");
+    if (response && response.status < 500) break;
+    if (attempt < 3) await new Promise(resolve => setTimeout(resolve, attempt * 600));
+  }
+  return json({ ok: false, error: "twilio_send_failed", detail: lastDetail }, 502);
 });
