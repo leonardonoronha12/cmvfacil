@@ -84,6 +84,10 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 ## Experiência e responsividade geral
 
 - [-] Feedback de carregamento, salvamento, cálculo e erros nas telas corrigidas
+- [x] Bloquear o avanço do guia até a ação obrigatória ser concluída
+- [x] Impedir acesso direto a etapas futuras pela barra de progresso
+- [x] Manter somente o controle destacado disponível durante etapas práticas
+- [x] Validar valor preenchido em inputs, selects e textareas antes de avançar
 - [ ] Revisar todas as telas em desktop, notebook, tablet e celular
 - [ ] Eliminar cortes, sobreposições e scroll horizontal
 - [ ] Padronizar estados vazios, skeletons, foco, hover e seleção
