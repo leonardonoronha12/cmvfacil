@@ -4,7 +4,7 @@ import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, use
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
-const TOUR_VERSION = "2026-09-academia-v22";
+const TOUR_VERSION = "2026-09-academia-v23";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
@@ -152,7 +152,7 @@ const steps: TourStep[] = [
   { path: "/ajustes", target: { selector: '[data-tour="settings-tabs"]' }, alertSelectors: ['[data-tour="settings-tabs"] a'], passive: true, icon: "⚙️", kicker: "Sua operação", title: "Conheça as áreas de Ajustes", text: "As abas destacadas organizam sua conta, senha, dados da empresa, usuários e plano contratado.", improvement: "Confira as opções iluminadas. Na próxima etapa, vamos abrir Usuários para mostrar convites e níveis de acesso.", bullets: ["Minha Conta e senha", "Empresa e usuários", "Plano contratado"] },
   { path: "/ajustes", target: { selector: '[data-tour="users-tab"]' }, icon: "👥", kicker: "Equipe e acesso", title: "Abra a área de usuários", text: "Os convites e as permissões ficam separados dos dados da sua conta.", improvement: "Clique na aba Usuários destacada. Eu continuarei assim que a área da equipe abrir.", bullets: ["Clique em Usuários", "Acessos da equipe"] },
   { path: "/ajustes", target: { selector: '[data-tour="users-new"]' }, icon: "➕", kicker: "Novo acesso", title: "Abra o cadastro de usuário", text: "Administradores podem convidar uma pessoa e escolher o nível de acesso.", improvement: "Clique em Cadastrar novo usuário para abrir o formulário.", bullets: ["Novo integrante", "Permissão controlada"] },
-  { path: "/ajustes", target: { selector: '[data-tour="users-email"]' }, passive: true, completion: { selector: '[data-tour="users-email"]', event: "input", debounceMs: 700, requireValue: true }, icon: "✉️", kicker: "E-mail do usuário", title: "Informe quem receberá o convite", text: "Digite o e-mail profissional da pessoa que utilizará o CMV Fácil.", improvement: "Quando você parar de digitar, avançarei automaticamente. O convite ainda não será enviado.", bullets: ["E-mail correto", "Sem envio nesta etapa"] },
+  { path: "/ajustes", target: { selector: '[data-tour="users-email"]' }, passive: true, completion: { selector: '[data-tour="users-email"]', event: "input", requireValue: true }, icon: "✉️", kicker: "E-mail do usuário", title: "Informe quem receberá o convite", text: "Digite o e-mail profissional completo da pessoa que utilizará o CMV Fácil. Pode escrever com calma e pausar sempre que precisar.", improvement: "O guia ficará nesta etapa enquanto você estiver digitando. Ele só continuará quando você sair do campo com o e-mail preenchido. O convite ainda não será enviado.", bullets: ["Digite sem pressa", "E-mail completo", "Sem envio nesta etapa"] },
   { path: "/ajustes", target: { selector: '[data-tour="users-role"]' }, passive: true, completion: { selector: '[data-tour="users-role"]', event: "change" }, icon: "🔐", kicker: "Nível de acesso", title: "Escolha a permissão", text: "Colaborador executa as rotinas. Administrador também gerencia configurações e acessos.", improvement: "Escolha a função adequada para evitar permissões além do necessário.", bullets: ["Colaborador", "Administrador"] },
   { path: "/ajustes", target: { selector: '[data-tour="users-close"]' }, icon: "✅", kicker: "Cadastro conhecido", title: "Feche sem enviar o convite", text: "O botão Gerar convite envia um acesso real. Neste treinamento, use Fechar.", improvement: "Clique em Fechar para continuar sem convidar ninguém por engano.", bullets: ["Nenhum convite enviado", "Treinamento seguro"] },
   { path: "/ajustes", icon: "🎓", kicker: "Treinamento concluído", title: "Você já sabe onde revisar", text: "A Academia CMV Fácil continua disponível no botão Tutorial do sistema.", improvement: "Volte sempre que quiser praticar um cadastro, relembrar uma rotina ou ensinar alguém da equipe.", bullets: ["Curso completo", "Módulos separados", "Progresso salvo"] },
@@ -336,16 +336,19 @@ export default function MigrationExperience() {
     const completion = steps[step]?.completion;
     if (!completion) return;
     let completionTimer = 0;
+    // Text fields must never advance because the user paused while typing.
+    // An `input` completion is confirmed only when focus leaves the field.
+    const completionEvent = completion.event === "input" ? "blur" : completion.event;
     const onComplete = (event: Event) => {
       if (!(event.target instanceof Element)) return;
       if (!event.target.closest(completion.selector)) return;
       const field = event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement || event.target instanceof HTMLTextAreaElement ? event.target : null;
       if ((completion.requireValue || completion.event === "blur" || completion.event === "change") && field && !String(field.value).trim()) return;
       if (completionTimer) window.clearTimeout(completionTimer);
-      completionTimer = window.setTimeout(() => advance(step), completion.debounceMs ?? (completion.event === "blur" ? 700 : 80));
+      completionTimer = window.setTimeout(() => advance(step), completionEvent === "blur" ? 150 : 80);
     };
-    document.addEventListener(completion.event, onComplete, true);
-    return () => { if (completionTimer) window.clearTimeout(completionTimer); document.removeEventListener(completion.event, onComplete, true); };
+    document.addEventListener(completionEvent, onComplete, true);
+    return () => { if (completionTimer) window.clearTimeout(completionTimer); document.removeEventListener(completionEvent, onComplete, true); };
   }, [activeModule, step, tourOpen]);
 
   useEffect(() => {

@@ -66,6 +66,7 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [x] Restringir `Und` e porções a números inteiros e manter decimais nas unidades fracionáveis
 - [x] Permitir arrastar o guia pelo cabeçalho sem deixá-lo sair da tela
 - [x] Destacar as abas reais de Ajustes antes de orientar o cadastro de usuários
+- [x] Impedir que pausas durante a digitação façam o guia avançar automaticamente
 - [ ] Homologar edição de receitas recuperadas da migração
 
 ## Contas migradas em auditoria
