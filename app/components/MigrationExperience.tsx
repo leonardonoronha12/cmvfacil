@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, PointerEvent as ReactPointerEvent, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import styles from "./MigrationExperience.module.css";
 
@@ -222,8 +222,11 @@ export default function MigrationExperience() {
   const [alertRects, setAlertRects] = useState<DOMRect[]>([]);
   const [continueNotice, setContinueNotice] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [coachDragPosition, setCoachDragPosition] = useState<{ left: number; top: number } | null>(null);
   const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const coachRef = useRef<HTMLElement>(null);
+  const coachDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -613,6 +616,46 @@ export default function MigrationExperience() {
     const top = Math.min(window.innerHeight - cardHeight - 16, Math.max(16, anchorRect.top + anchorRect.height / 2 - cardHeight / 2));
     return { left, top, right: "auto", bottom: "auto", width: cardWidth };
   }, [step, locatedStep, targetRect, revealRect]);
+  const movableCoachStyle = useMemo(() => coachDragPosition ? {
+    ...coachStyle,
+    left: coachDragPosition.left,
+    top: coachDragPosition.top,
+    right: "auto",
+    bottom: "auto",
+  } : coachStyle, [coachDragPosition, coachStyle]);
+  const clampCoachPosition = (left: number, top: number) => {
+    const rect = coachRef.current?.getBoundingClientRect();
+    const width = rect?.width ?? Math.min(430, window.innerWidth - 20);
+    const height = rect?.height ?? Math.min(440, window.innerHeight - 20);
+    return {
+      left: Math.max(8, Math.min(left, window.innerWidth - width - 8)),
+      top: Math.max(8, Math.min(top, window.innerHeight - height - 8)),
+    };
+  };
+  const startCoachDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (event.button !== 0 || (event.target instanceof Element && event.target.closest("button,a,input,select,textarea"))) return;
+    const rect = coachRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    coachDragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+  const moveCoach = (event: ReactPointerEvent<HTMLElement>) => {
+    const drag = coachDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    setCoachDragPosition(clampCoachPosition(event.clientX - drag.offsetX, event.clientY - drag.offsetY));
+  };
+  const stopCoachDrag = (event: ReactPointerEvent<HTMLElement>) => {
+    if (coachDragRef.current?.pointerId !== event.pointerId) return;
+    coachDragRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  };
+
+  useEffect(() => {
+    if (!coachDragPosition) return;
+    const keepCoachVisible = () => setCoachDragPosition(current => current ? clampCoachPosition(current.left, current.top) : null);
+    window.addEventListener("resize", keepCoachVisible);
+    return () => window.removeEventListener("resize", keepCoachVisible);
+  }, [coachDragPosition]);
   const finishTour = () => {
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
@@ -692,9 +735,9 @@ export default function MigrationExperience() {
       </section>
     </div> : null}
     {tourOpen && continueOnlyStep ? <div data-cmv-tour-ui="true" className={`${styles.continueGuard} ${!steps[step]?.target ? styles.continueGuardDim : ""}`} onClick={() => setContinueNotice(true)} aria-hidden /> : null}
-    {tourOpen && step > 0 ? <aside data-cmv-tour-ui="true" key={step} style={coachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""} ${coachTargetsModal ? styles.coachModalCompact : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
+    {tourOpen && step > 0 ? <aside ref={coachRef} data-cmv-tour-ui="true" key={step} style={movableCoachStyle} className={`${styles.coach} ${continueOnlyStep ? styles.coachContinueOnly : ""} ${coachTargetsModal ? styles.coachModalCompact : ""}`} role="dialog" aria-label="Guia do novo CMV Fácil">
       <div className={styles.coachGlow} />
-      <header className={styles.coachHeader}>
+      <header className={styles.coachHeader} onPointerDown={startCoachDrag} onPointerMove={moveCoach} onPointerUp={stopCoachDrag} onPointerCancel={stopCoachDrag} title="Arraste para mover o guia">
         <div className={styles.robot}><span>{steps[step].icon}</span><i>🤖</i></div>
         <div><strong>Fácil, seu guia</strong><small><i /> explicando esta tela</small></div>
         <b>{visibleStepPosition + 1}/{visibleStepSequence.length}</b><button className={styles.coachClose} onClick={finishTour} aria-label="Fechar guia">×</button>
