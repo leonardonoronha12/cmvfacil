@@ -568,7 +568,7 @@ export default function AjustesClient() {
               <h1 className={styles.title}>Ajustes da Conta</h1>
             </div>
 
-            <div className={styles.tabs}>
+            <div className={styles.tabs} data-tour="settings-tabs">
               <a
                 className={tabClass("minha-conta")}
                 href="/ajustes?tab=minha-conta"
