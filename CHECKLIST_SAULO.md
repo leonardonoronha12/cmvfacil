@@ -65,6 +65,7 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 - [x] Aplicar a recuperação tanto em Fichas Técnicas quanto em Pré-Preparo
 - [x] Restringir `Und` e porções a números inteiros e manter decimais nas unidades fracionáveis
 - [x] Permitir arrastar o guia pelo cabeçalho sem deixá-lo sair da tela
+- [x] Destacar as abas reais de Ajustes antes de orientar o cadastro de usuários
 - [ ] Homologar edição de receitas recuperadas da migração
 
 ## Contas migradas em auditoria
