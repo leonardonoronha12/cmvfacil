@@ -63,6 +63,7 @@ Legenda: `[x]` concluído e publicado; `[-]` parcialmente implementado; `[ ]` pe
 
 - [x] Recuperar ingredientes do banco normalizado quando a cópia antiga estiver incompleta
 - [x] Aplicar a recuperação tanto em Fichas Técnicas quanto em Pré-Preparo
+- [x] Restringir `Und` e porções a números inteiros e manter decimais nas unidades fracionáveis
 - [ ] Homologar edição de receitas recuperadas da migração
 
 ## Contas migradas em auditoria

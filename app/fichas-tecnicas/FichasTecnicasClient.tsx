@@ -413,6 +413,18 @@ function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
     : `0,${"0".repeat(maxDecimals)}`;
 }
 
+function isWholeQuantityUnit(unit: string) {
+  const normalized = String(unit ?? "").trim().toLocaleLowerCase("pt-BR");
+  return normalized === "und" || normalized.startsWith("unidade") || normalized.startsWith("porç");
+}
+
+function formatQuantityDraft(input: string, unit: string, fixed = false) {
+  if (!isWholeQuantityUnit(unit)) return fixed ? formatDecimalFixedDraft(input, 3) : formatDecimalDraft(input, 3);
+  const integerPart = String(input ?? "").split(/[,.]/, 1)[0].replace(/\D/g, "");
+  if (!integerPart) return fixed ? "0" : "";
+  return Number.parseInt(integerPart, 10).toLocaleString("pt-BR");
+}
+
 function popularityLabel(value: string) {
   switch (value) {
     case "alta":
@@ -3046,7 +3058,7 @@ export default function FichasTecnicasClient({
                         <span className={styles.itemSelectIcon}>
                           <SearchMiniIcon />
                         </span>
-                        <select data-tour="sheet-ingredient" value={selectedIngredientId} onChange={(e) => setSelectedIngredientId(e.target.value)} className={styles.itemSelect}>
+                        <select data-tour="sheet-ingredient" value={selectedIngredientId} onChange={(e) => { const id = e.target.value; setSelectedIngredientId(id); const unit = ingredientOptions.find((item) => item.id === id)?.medida || "Und"; setIngredientQty((value) => formatQuantityDraft(value, unit, true)); }} className={styles.itemSelect}>
                           <option value="">Pesquise por itens...</option>
                           {ingredientOptionGroups.insumos.length ? (
                             <optgroup label="Insumos">
@@ -3084,7 +3096,7 @@ export default function FichasTecnicasClient({
                           type="text"
                           className={styles.inlineInput}
                           value={ingredientQty}
-                          inputMode="decimal"
+                          inputMode={isWholeQuantityUnit(selectedIngredient?.medida || "Und") ? "numeric" : "decimal"}
                           onMouseDown={(e) => {
                             if (document.activeElement !== e.currentTarget) {
                               e.preventDefault();
@@ -3096,8 +3108,8 @@ export default function FichasTecnicasClient({
                             if (/^0,0+$/.test(e.currentTarget.value.trim())) setIngredientQty("");
                             e.currentTarget.select();
                           }}
-                          onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
-                          onBlur={(e) => setIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
+                          onChange={(e) => setIngredientQty(formatQuantityDraft(e.target.value, selectedIngredient?.medida || "Und"))}
+                          onBlur={(e) => setIngredientQty(formatQuantityDraft(e.target.value, selectedIngredient?.medida || "Und", true))}
                         />
                         <span className={styles.inlineSuffix}>{selectedIngredient?.medida || "Und"}</span>
                       </span>
@@ -3231,7 +3243,7 @@ export default function FichasTecnicasClient({
                       data-tour="sheet-yield"
                       type="text"
                       className={styles.yieldInput}
-                      inputMode="decimal"
+                      inputMode="numeric"
                       value={recipeYield}
                       onMouseDown={(e) => {
                         if (document.activeElement !== e.currentTarget) {
@@ -3244,8 +3256,8 @@ export default function FichasTecnicasClient({
                         if (/^0,0+$/.test(e.currentTarget.value.trim())) setRecipeYield("");
                         e.currentTarget.select();
                       }}
-                      onChange={(e) => setRecipeYield(formatDecimalDraft(e.target.value, 3))}
-                      onBlur={(e) => setRecipeYield(formatDecimalFixedDraft(e.target.value, 3))}
+                      onChange={(e) => setRecipeYield(formatQuantityDraft(e.target.value, "Porções"))}
+                      onBlur={(e) => setRecipeYield(formatQuantityDraft(e.target.value, "Porções", true))}
                     />
                     <span className={styles.yieldSuffix}>Porções</span>
                   </span>

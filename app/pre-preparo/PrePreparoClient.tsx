@@ -280,6 +280,18 @@ function formatDecimalFixedDraft(input: string, maxDecimals = 3) {
     : `0,${"0".repeat(maxDecimals)}`;
 }
 
+function isWholeQuantityUnit(unit: string) {
+  const normalized = String(unit ?? "").trim().toLocaleLowerCase("pt-BR");
+  return normalized === "und" || normalized.startsWith("unidade") || normalized.startsWith("porç");
+}
+
+function formatQuantityDraft(input: string, unit: string, fixed = false) {
+  if (!isWholeQuantityUnit(unit)) return fixed ? formatDecimalFixedDraft(input, 3) : formatDecimalDraft(input, 3);
+  const integerPart = String(input ?? "").split(/[,.]/, 1)[0].replace(/\D/g, "");
+  if (!integerPart) return fixed ? "0" : "";
+  return Number.parseInt(integerPart, 10).toLocaleString("pt-BR");
+}
+
 function parseMoneyLabel(value?: string) {
   const raw = String(value ?? "").replace(/[^\d,.-]/g, "").trim();
   if (!raw) return 0;
@@ -3025,8 +3037,8 @@ export default function PrePreparoClient() {
                                 <input
                                   className={ft.detailsYieldInput}
                                   value={yieldDraftQty}
-                                  onChange={(e) => setYieldDraftQty(formatDecimalDraft(e.target.value, 3))}
-                                  onBlur={(e) => setYieldDraftQty(formatDecimalFixedDraft(e.target.value, 3))}
+                                  onChange={(e) => setYieldDraftQty(formatQuantityDraft(e.target.value, yieldDraftUnit))}
+                                  onBlur={(e) => setYieldDraftQty(formatQuantityDraft(e.target.value, yieldDraftUnit, true))}
                                   onPointerDown={(e) => {
                                     e.preventDefault();
                                     e.currentTarget.focus();
@@ -3036,7 +3048,7 @@ export default function PrePreparoClient() {
                                   inputMode="numeric"
                                   autoFocus
                                 />
-                                <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => setYieldDraftUnit(e.target.value)}>
+                                <select className={ft.detailsYieldSuffix} value={yieldDraftUnit} onChange={(e) => { const unit = e.target.value; setYieldDraftUnit(unit); setYieldDraftQty((value) => formatQuantityDraft(value, unit, true)); }}>
                                   <option value="Und">Und</option>
                                   <option value="Kg">Kg</option>
                                   <option value="g">g</option>
@@ -3980,7 +3992,10 @@ export default function PrePreparoClient() {
                           onChange={(e) => {
                             const v = e.target.value;
                             setNewRecipeUnit(v);
-                            if (v) setNewRecipeYieldUnit(v);
+                            if (v) {
+                              setNewRecipeYieldUnit(v);
+                              setNewRecipeYield((value) => formatQuantityDraft(value, v, true));
+                            }
                           }}
                         >
                           <option value="">Selecione</option>
@@ -4076,11 +4091,15 @@ export default function PrePreparoClient() {
                                     setIngredientQuery(name);
                                     const ins = insumosByName.get(name.toLowerCase()) ?? null;
                                     if (ins) {
-                                      setIngredientUnit(ins.medida ?? "Und");
+                                      const unit = ins.medida ?? "Und";
+                                      setIngredientUnit(unit);
+                                      setIngredientQty((value) => formatQuantityDraft(value, unit, true));
                                     } else {
                                       const prep = resolvePrePreparoFromQuery(name);
                                       const parsed = prep ? parseQtyLabel(String(prep.rendimento ?? "")) : { qty: 0, unit: "" };
-                                      setIngredientUnit((parsed.unit || "Und").trim() || "Und");
+                                      const unit = (parsed.unit || "Und").trim() || "Und";
+                                      setIngredientUnit(unit);
+                                      setIngredientQty((value) => formatQuantityDraft(value, unit, true));
                                     }
                                     setIsIngredientMenuOpen(false);
                                   }}
@@ -4098,15 +4117,15 @@ export default function PrePreparoClient() {
                             data-tour="prep-ingredient-qty"
                             className={styles.ingredientQtyInput}
                             value={ingredientQty}
-                            onChange={(e) => setIngredientQty(formatDecimalDraft(e.target.value, 3))}
-                            onBlur={(e) => setIngredientQty(formatDecimalFixedDraft(e.target.value, 3))}
+                            onChange={(e) => setIngredientQty(formatQuantityDraft(e.target.value, ingredientUnit))}
+                            onBlur={(e) => setIngredientQty(formatQuantityDraft(e.target.value, ingredientUnit, true))}
                             onPointerDown={(e) => {
                               e.preventDefault();
                               e.currentTarget.focus();
                               e.currentTarget.select();
                             }}
                             onFocus={(e) => e.currentTarget.select()}
-                            inputMode="numeric"
+                            inputMode={isWholeQuantityUnit(ingredientUnit) ? "numeric" : "decimal"}
                           />
                           <div className={styles.ingredientQtyUnit}>{ingredientUnit}</div>
                         </div>
@@ -4176,15 +4195,15 @@ export default function PrePreparoClient() {
                           data-tour="prep-yield"
                           className={styles.yieldInput}
                           value={newRecipeYield}
-                          onChange={(e) => setNewRecipeYield(formatDecimalDraft(e.target.value, 3))}
-                          onBlur={(e) => setNewRecipeYield(formatDecimalFixedDraft(e.target.value, 3))}
+                          onChange={(e) => setNewRecipeYield(formatQuantityDraft(e.target.value, newRecipeYieldUnit))}
+                          onBlur={(e) => setNewRecipeYield(formatQuantityDraft(e.target.value, newRecipeYieldUnit, true))}
                           onPointerDown={(e) => {
                             e.preventDefault();
                             e.currentTarget.focus();
                             e.currentTarget.select();
                           }}
                           onFocus={(e) => e.currentTarget.select()}
-                          inputMode="numeric"
+                          inputMode={isWholeQuantityUnit(newRecipeYieldUnit) ? "numeric" : "decimal"}
                         />
                         <div className={styles.yieldUnit}>{newRecipeYieldUnit}</div>
                       </div>
