@@ -85,6 +85,7 @@ export function clearMeStore() {
     window.sessionStorage.removeItem("cmvfacil:bootstrap:v1:lastRunMs");
     window.sessionStorage.removeItem("cmvfacil:bootstrapRunning:v5");
     window.sessionStorage.removeItem("cmvfacil:bootstrapDone:v5");
+    window.sessionStorage.removeItem("cmvfacil:profile-selected:v1");
   } catch {}
 }
 
