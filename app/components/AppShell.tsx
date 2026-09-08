@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import dash from "../dashboard/dashboard.module.css";
 
 const AppSidebar = dynamic(() => import("./AppSidebar"), { ssr: false });
+const ProfileChooser = dynamic(() => import("./ProfileChooser"), { ssr: false });
 
 type SidebarKey =
   | "dashboard"
@@ -52,6 +53,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className={dash.dashboard}>
+      <ProfileChooser />
       <AppSidebar active={active} />
       {children}
     </div>

@@ -794,8 +794,10 @@ export async function GET(req: NextRequest) {
       const fallback = await supabase.from("company_members").select("company_id,role,permission_level").eq("bubble_user_id", bubbleUserId).limit(50);
       memberRows = fallback.data ?? [];
     }
-    const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-    const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
+    const requestedCompanyId = String(req.cookies.get("cmv_active_company")?.value ?? "").trim();
+    const allowedRequestedCompany = (memberRows ?? []).some((row: any) => String(row?.company_id ?? "").trim() === requestedCompanyId);
+    const companyId = allowedRequestedCompany ? requestedCompanyId : pickBestCompanyId((memberRows ?? []) as any[]);
+      const membershipForCompany = (memberRows ?? []).find((r: any) => String(r?.company_id ?? "").trim() === companyId) as any;
 
     if (companyId) {
       let outNome = String((profileDb as any)?.nome ?? "").trim();
@@ -890,6 +892,25 @@ export async function GET(req: NextRequest) {
         return { name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
       });
 
+      const membershipCompanyIds = Array.from(
+        new Set((memberRows ?? []).map((row: any) => String(row?.company_id ?? "").trim()).filter(Boolean)),
+      );
+      const { data: availableCompanies } = membershipCompanyIds.length
+        ? await supabase.from("companies").select("id,fantasy_name,legal_name,logo_url").in("id", membershipCompanyIds)
+        : { data: [] as any[] };
+      const membershipByCompany = new Map(
+        (memberRows ?? []).map((row: any) => [String(row?.company_id ?? "").trim(), row]),
+      );
+      const companies = (availableCompanies ?? []).map((company: any) => {
+        const id = String(company?.id ?? "").trim();
+        return {
+          id,
+          name: String(company?.fantasy_name ?? company?.legal_name ?? "").trim() || "Empresa",
+          logoUrl: String(company?.logo_url ?? "").trim(),
+          role: isAdminMemberRow(membershipByCompany.get(id)) ? "Administrador" : "Colaborador",
+        };
+      });
+
       return json(
         {
           ok: true,
@@ -907,6 +928,7 @@ export async function GET(req: NextRequest) {
           companyWhatsapp: String(companyDb?.phone_e164 ?? "").trim(),
           companyIndustry: String(companyDb?.industry ?? "").trim(),
           role: permissionRole,
+          companies,
           plan,
           members,
           source: { db: true, companyId: companyId || null },

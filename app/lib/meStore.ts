@@ -22,6 +22,7 @@ export type MeProfile = {
   planStatus: string;
   cardLast4: string;
   members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }>;
+  companies: Array<{ id: string; name: string; logoUrl: string; role: "Administrador" | "Colaborador" }>;
 };
 
 let state: MeProfile | null = null;
@@ -161,6 +162,14 @@ export async function loadMeFromApi() {
               joinedAt: String(m?.joinedAt ?? "").trim(),
               avatarUrl: String(m?.avatarUrl ?? "").trim(),
             }))
+          : [],
+        companies: Array.isArray(j.companies)
+          ? (j.companies as any[]).map((company) => ({
+              id: String(company?.id ?? "").trim(),
+              name: String(company?.name ?? "").trim() || "Empresa",
+              logoUrl: String(company?.logoUrl ?? company?.logo_url ?? "").trim(),
+              role: (String(company?.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador") as "Administrador" | "Colaborador",
+            })).filter((company) => Boolean(company.id))
           : [],
       };
       if (next.userId && next.userId !== sessionUserId) {
