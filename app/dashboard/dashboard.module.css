@@ -183,6 +183,24 @@
   font-weight: 500;
 }
 
+.companySelect {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #01040e;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.companySelect:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .companyPlan {
   margin: 0;
   line-height: 15px;
@@ -224,15 +242,19 @@
   display: flex;
   align-items: center;
   column-gap: 8px;
+  border: 0;
   border-radius: 10px;
   background: transparent;
   padding: 0 10px;
   width: 100%;
   min-height: 28px;
+  font-family: inherit;
+  text-align: left;
   text-decoration: none;
   color: #111111;
   font-size: 11px;
   font-weight: 400;
+  cursor: pointer;
   transition: background 140ms ease, color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
@@ -295,6 +317,99 @@
   align-self: stretch;
   row-gap: 10px;
   margin-top: auto;
+  position: relative;
+}
+
+.accountMenu {
+  position: fixed;
+  z-index: 120;
+  left: 10px;
+  bottom: 76px;
+  width: 174px;
+  max-height: calc(100vh - 90px);
+  overflow-y: auto;
+  overflow: hidden;
+  border: 1px solid #d8e3e1;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 20px 50px rgba(0, 35, 38, 0.22);
+  padding: 7px;
+  transform-origin: left bottom;
+  animation: accountMenuIn 150ms ease-out both;
+}
+
+.accountMenuCompanies {
+  max-height: 220px;
+  overflow-y: auto;
+  padding-bottom: 6px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid #e7efed;
+}
+
+.accountCompany {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  padding: 7px 6px;
+  color: #123b3e;
+  text-align: left;
+  cursor: pointer;
+}
+
+.accountCompany:hover:not(:disabled) { background: #eff8f5; }
+.accountCompany:disabled { cursor: default; opacity: 1; }
+.accountCompany > span:nth-child(2) { min-width: 0; flex: 1; }
+.accountCompany strong,.accountCompany small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.accountCompany strong { font-size: 12px; }
+.accountCompany small { margin-top: 2px; color: #6b8183; font-size: 10px; }
+.accountCompany b { color: #00a86b; font-size: 16px; }
+
+.accountCompanyAvatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  background: linear-gradient(145deg,#00a878,#006c67);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.accountTone1 { background: linear-gradient(145deg,#e6a326,#a25b1e); }
+.accountTone2 { background: linear-gradient(145deg,#4f8eea,#4749a8); }
+.accountTone3 { background: linear-gradient(145deg,#d45f88,#8e3b70); }
+
+.accountMenuItem {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  padding: 9px 6px;
+  color: #1d3436;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.accountMenuItem:hover { background: #eff8f5; }
+.accountMenuItem span { display: grid; width: 20px; height: 20px; flex: 0 0 20px; place-items: center; color: #557174; font-size: 14px; }
+.accountLogout { margin-top: 6px; border-top: 1px solid #e7efed; border-radius: 0 0 10px 10px; padding-top: 13px; color: #b2252d; }
+
+@keyframes accountMenuIn {
+  from { opacity: 0; transform: translateY(6px) scale(.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .usersActiveCard {
@@ -377,6 +492,8 @@
   padding: 10px 12px;
   text-decoration: none;
   color: inherit;
+  width: 100%;
+  cursor: pointer;
   transition:
     transform 120ms ease,
     box-shadow 120ms ease,
@@ -385,10 +502,21 @@
 }
 
 .userDropdown:hover {
-  background: #ffffff;
-  border-color: #dbe1e0;
-  box-shadow: 0 10px 24px rgba(16, 18, 20, 0.08);
-  transform: translateY(-1px);
+  background: #e9f8f3;
+  border-color: #63cdb0;
+  box-shadow: 0 10px 24px rgba(0, 96, 78, 0.14);
+  transform: translateY(-2px);
+}
+
+.userDropdown:focus-visible {
+  outline: 3px solid rgba(0, 206, 136, 0.28);
+  outline-offset: 2px;
+  border-color: #00a86b;
+}
+
+.userDropdown:hover .userChevron {
+  color: #008a62;
+  transform: translateX(3px);
 }
 
 .userLeft {
@@ -428,6 +556,17 @@
   flex-shrink: 0;
   width: 16px;
   height: 16px;
+  transition: transform 140ms ease, color 140ms ease;
+}
+
+@media (max-width: 760px) {
+  .accountMenu {
+    left: 24px;
+    right: 24px;
+    bottom: 82px;
+    width: auto;
+    max-height: calc(100vh - 110px);
+  }
 }
 
 .content {
@@ -530,6 +669,21 @@
   color: rgba(255, 255, 255, 0.92);
 }
 
+.topFieldSpinner {
+  width: 13px;
+  height: 13px;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  border-top-color: #ffffff;
+  border-radius: 999px;
+  animation: cmvTopFieldSpin 650ms linear infinite;
+}
+
+@keyframes cmvTopFieldSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .topInput {
   flex-grow: 1;
   appearance: none;
@@ -560,6 +714,12 @@ select.topInput option:checked {
 
 .topInput::placeholder {
   color: rgba(255, 255, 255, 0.6);
+}
+
+.topInputLoading {
+  color: rgba(255, 255, 255, 0.82) !important;
+  font-weight: 700;
+  cursor: wait;
 }
 
 .topInput::-webkit-calendar-picker-indicator {
@@ -1439,6 +1599,55 @@ select.topInput option:checked {
   justify-content: center;
   background: rgba(255, 255, 255, 0.6);
   z-index: 5;
+}
+
+.historyLoadingOverlay {
+  align-items: flex-start;
+  padding-top: 54px;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(1px);
+}
+
+.loadingFeedbackCard {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(460px, calc(100% - 32px));
+  padding: 18px 22px;
+  border: 1px solid #cfe9df;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(0, 68, 61, 0.14);
+  color: #003f3b;
+}
+
+.loadingFeedbackText {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.loadingFeedbackText strong {
+  font-size: 16px;
+  line-height: 22px;
+}
+
+.loadingFeedbackText span {
+  color: #607a78;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+@media (max-width: 640px) {
+  .historyLoadingOverlay {
+    padding-top: 32px;
+  }
+
+  .loadingFeedbackCard {
+    align-items: flex-start;
+    padding: 16px;
+  }
 }
 
 .loadingSpinner {

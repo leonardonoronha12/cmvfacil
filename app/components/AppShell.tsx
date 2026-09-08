@@ -8,6 +8,7 @@ import dash from "../dashboard/dashboard.module.css";
 
 const AppSidebar = dynamic(() => import("./AppSidebar"), { ssr: false });
 const ProfileChooser = dynamic(() => import("./ProfileChooser"), { ssr: false });
+const MigrationExperience = dynamic(() => import("./MigrationExperience"), { ssr: false });
 
 type SidebarKey =
   | "dashboard"
@@ -56,6 +57,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <ProfileChooser />
       <AppSidebar active={active} />
       {children}
+      <MigrationExperience />
     </div>
   );
 }

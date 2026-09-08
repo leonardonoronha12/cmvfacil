@@ -12,7 +12,7 @@ import { writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
 import { writeInsumosToStore } from "../lib/insumosStore";
 import { type PrePreparoEtiquetaRow, readPrePreparoEtiquetasFromStore, subscribePrePreparoEtiquetas, writePrePreparoEtiquetasToStore } from "../lib/prePreparoEtiquetasStore";
 import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasSupabase";
-import { loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
+import { clearMeStore, loadMeFromApi, readMeFromStore, subscribeMe } from "../lib/meStore";
 import suporteStyles from "../suporte/suporte.module.css";
 
 function parseDateLabelLoose(value: string) {
@@ -62,10 +62,6 @@ function parseDateLabelLoose(value: string) {
   const d = new Date(year, month, day);
   if (d.getFullYear() !== year || d.getMonth() !== month || d.getDate() !== day) return null;
   return d;
-}
-
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
 
 function formatIntPT(n: number) {
@@ -337,15 +333,22 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   if (isEmbedded) return null;
   const [etiquetas, setEtiquetas] = useState<PrePreparoEtiquetaRow[]>(() => readPrePreparoEtiquetasFromStore());
   const [isSupportOpen, setIsSupportOpen] = useState(false);
+  const [isAccountMenuOpen, setIsAccountMenuOpen] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [me, setMe] = useState(() => readMeFromStore());
+  const [switchingCompany, setSwitchingCompany] = useState(false);
   const [bootstrapOverlayVisible, setBootstrapOverlayVisible] = useState(false);
   const [bootstrapDisplayPct, setBootstrapDisplayPct] = useState(0);
   const lastSyncRunIdRef = useRef("");
   const bootstrapSkipUntilRef = useRef(0);
   const bootstrapControlRef = useRef<{ tickUrl: string; statePath: string } | null>(null);
   const bootstrapStopRef = useRef(false);
+  const tabHiddenAtRef = useRef(0);
+  const tabResumedAtRef = useRef(0);
+  const navigationRequestRef = useRef(0);
+  const navigationFallbackRef = useRef<number | null>(null);
+  const accountMenuRef = useRef<HTMLDivElement | null>(null);
   const bubbleObjOverlayKey = "cmvfacil:bubbleObjMigrationOverlayHidden:v1";
   const bubbleObjEnsureKey = "cmvfacil:bubbleObjEnsureStarted:v1";
   const [bubbleObjOverlayVisible, setBubbleObjOverlayVisible] = useState(true);
@@ -861,30 +864,67 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   }, []);
 
   useEffect(() => {
-    try {
-      const key = "cmvfacil:sidebarPrefetch:lastAtMs:v1";
-      const last = Number(window.sessionStorage.getItem(key) ?? "0");
-      if (Number.isFinite(last) && last > 0 && Date.now() - last < 5 * 60_000) return;
-      window.sessionStorage.setItem(key, String(Date.now()));
-    } catch {}
+    const prefetchRoutes = (routes: string[]) => {
+      for (const route of routes) {
+        if (route === pathname) continue;
+        try {
+          router.prefetch(route);
+        } catch {}
+      }
+    };
+
+    prefetchRoutes(["/dashboard", "/lista-de-compras", "/fichas-tecnicas", "/insumos"]);
 
     const id = window.setTimeout(() => {
       try {
         if (document.visibilityState !== "visible") return;
       } catch {}
 
-      void (async () => {
-        const routes = ["/lista-de-compras", "/insumos", "/fichas-tecnicas", "/entradas", "/inventario"];
-        for (const r of routes) {
-          try {
-            await router.prefetch(r);
-          } catch {}
-          await sleep(80);
-        }
-      })();
-    }, 900);
+      prefetchRoutes(["/pre-preparo", "/fornecedores", "/entradas", "/inventario", "/desperdicios", "/ajustes"]);
+    }, 250);
 
     return () => window.clearTimeout(id);
+  }, [pathname, router]);
+
+  useEffect(() => {
+    const resumeAfterSuspension = () => {
+      if (document.visibilityState !== "visible") return;
+      const hiddenAt = tabHiddenAtRef.current;
+      if (!hiddenAt) return;
+
+      tabHiddenAtRef.current = 0;
+      if (Date.now() - hiddenAt < 15_000) return;
+
+      tabResumedAtRef.current = Date.now();
+      try {
+        router.refresh();
+      } catch {}
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        tabHiddenAtRef.current = Date.now();
+        return;
+      }
+      resumeAfterSuspension();
+    };
+
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      tabResumedAtRef.current = Date.now();
+      try {
+        router.refresh();
+      } catch {}
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", resumeAfterSuspension);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", resumeAfterSuspension);
+      window.removeEventListener("pageshow", onPageShow);
+    };
   }, [router]);
 
   useEffect(() => {
@@ -1051,9 +1091,52 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   };
 
   const handleSidebarNavClick = (e: any) => {
-    closeDrawer();
     if (e?.metaKey || e?.ctrlKey || e?.shiftKey || e?.altKey) return;
+    if (document.documentElement.dataset.cmvOnboardingTour === "active") {
+      e.preventDefault();
+      return;
+    }
+    if (e?.defaultPrevented) return;
+
+    const href = String(e?.currentTarget?.getAttribute?.("href") ?? "").trim();
+    if (!href) {
+      closeDrawer();
+      return;
+    }
+
+    e.preventDefault();
+    const requestId = ++navigationRequestRef.current;
+    if (navigationFallbackRef.current) {
+      window.clearTimeout(navigationFallbackRef.current);
+      navigationFallbackRef.current = null;
+    }
+    const target = new URL(href, window.location.origin);
+    const resumedRecently = Date.now() - tabResumedAtRef.current < 15_000;
+    if (document.visibilityState !== "visible" || resumedRecently) {
+      closeDrawer();
+      window.location.assign(target.href);
+      return;
+    }
+
+    router.push(href);
+    closeDrawer();
+
+    // If a stalled client transition does not update the URL, fall back to a
+    // regular navigation so the sidebar never becomes unresponsive.
+    navigationFallbackRef.current = window.setTimeout(() => {
+      if (requestId !== navigationRequestRef.current) return;
+      const current = `${window.location.pathname}${window.location.search}`;
+      const expected = `${target.pathname}${target.search}`;
+      if (current !== expected) window.location.assign(target.href);
+      navigationFallbackRef.current = null;
+    }, 1200);
   };
+
+  useEffect(() => {
+    return () => {
+      if (navigationFallbackRef.current) window.clearTimeout(navigationFallbackRef.current);
+    };
+  }, []);
 
   const companyName = String(me?.companyName ?? "").trim() || "—";
   const userLabel =
@@ -1066,6 +1149,53 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const companyAvatarUrl = companyLogoUrl || avatarUrl;
   const userAvatarUrl = avatarUrl || companyLogoUrl;
   const planLabel = String(me?.planType ?? "").trim() || "—";
+  const companies = Array.isArray(me?.companies) ? me.companies : [];
+
+  const switchCompany = async (companyId: string) => {
+    const nextId = String(companyId ?? "").trim();
+    if (!nextId || nextId === me?.companyId || switchingCompany) return;
+    setIsAccountMenuOpen(false);
+    setSwitchingCompany(true);
+    try {
+      const response = await fetch("/api/companies/active", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyId: nextId }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "company_switch_failed");
+      clearMeStore();
+      window.location.reload();
+    } catch {
+      setSwitchingCompany(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isAccountMenuOpen) return;
+    const closeIfOutside = (event: MouseEvent) => {
+      if (!accountMenuRef.current?.contains(event.target as Node)) setIsAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setIsAccountMenuOpen(false);
+    };
+    document.addEventListener("mousedown", closeIfOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeIfOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [isAccountMenuOpen]);
+
+  const logout = async () => {
+    setIsAccountMenuOpen(false);
+    try {
+      await fetch("/api/auth/logout", { method: "POST" });
+    } finally {
+      clearMeStore();
+      window.location.replace("/login");
+    }
+  };
 
   const sidebarBody = (includeBrand: boolean) => (
     <>
@@ -1086,7 +1216,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           </div>
           <div className={dash.companyMeta}>
             <p className={dash.companyName}>{companyName}</p>
-            <p className={dash.companyPlan}>{planLabel}</p>
+            <p className={dash.companyPlan}>{switchingCompany ? "Trocando empresa…" : planLabel}</p>
           </div>
         </div>
 
@@ -1195,30 +1325,53 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             <span className={dash.navIcon}><IconGear /></span>
             Ajustes
           </Link>
-          <a
+          <button
+            type="button"
             className={navClass(active, "suporte")}
-            href="/suporte"
-            onClick={(e) => {
-              e.preventDefault();
+            aria-haspopup="dialog"
+            aria-expanded={isSupportOpen}
+            onClick={() => {
               setIsSupportOpen(true);
               setIsDrawerOpen(false);
             }}
           >
             <span className={dash.navIcon}><IconChat /></span>
             Suporte
-          </a>
+          </button>
         </div>
       </div>
 
-      <div className={dash.menuBottom}>
-        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, fontSize: 10 }}>
-          <Link href="/termos-de-uso" target="_blank" style={{ color: "#61736f" }}>Termos de Uso</Link>
-        </div>
-        <Link
+      <div className={dash.menuBottom} ref={accountMenuRef}>
+        {isAccountMenuOpen ? (
+          <div className={dash.accountMenu} role="menu" aria-label="Conta e empresas">
+            <div className={dash.accountMenuCompanies}>
+              {companies.map((company, index) => {
+                const isActive = company.id === me?.companyId;
+                const letters = company.name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "CM";
+                return (
+                  <button key={company.id} type="button" role="menuitem" className={dash.accountCompany} disabled={switchingCompany || isActive} onClick={() => void switchCompany(company.id)}>
+                    <span className={`${dash.accountCompanyAvatar} ${dash[`accountTone${index % 4}`]}`}>{letters}</span>
+                    <span><strong>{company.name}</strong><small>{isActive ? "Empresa atual" : "Trocar para esta empresa"}</small></span>
+                    {isActive ? <b aria-label="Selecionada">✓</b> : null}
+                  </button>
+                );
+              })}
+            </div>
+            {companies.length > 1 ? <Link role="menuitem" className={dash.accountMenuItem} href="/selecionar-empresa" onClick={() => setIsAccountMenuOpen(false)}><span>▦</span>Ver todos os perfis</Link> : null}
+            {companies.length > 1 && me?.role === "Administrador" ? <Link role="menuitem" className={dash.accountMenuItem} href="/consolidado" onClick={() => setIsAccountMenuOpen(false)}><span>◫</span>Visão geral das empresas</Link> : null}
+            <Link role="menuitem" className={dash.accountMenuItem} href="/ajustes?tab=minha-empresa" onClick={() => setIsAccountMenuOpen(false)}><span>⚙</span>Gerenciar empresa</Link>
+            <Link role="menuitem" className={dash.accountMenuItem} href="/ajustes?tab=minha-conta" onClick={() => setIsAccountMenuOpen(false)}><span>♙</span>Minha conta</Link>
+            <Link role="menuitem" className={dash.accountMenuItem} href="/termos-de-uso" target="_blank" onClick={() => setIsAccountMenuOpen(false)}><span>§</span>Termos de Uso</Link>
+            <button type="button" role="menuitem" className={dash.accountMenuItem} onClick={() => { setIsAccountMenuOpen(false); setIsSupportOpen(true); }}><span>?</span>Central de ajuda</button>
+            <button type="button" role="menuitem" className={`${dash.accountMenuItem} ${dash.accountLogout}`} onClick={() => void logout()}><span>↪</span>Sair do CMV Fácil</button>
+          </div>
+        ) : null}
+        <button
           className={dash.userDropdown}
-          href="/ajustes?tab=minha-conta"
-          data-sidebar-nav="1"
-          onClick={handleSidebarNavClick}
+          type="button"
+          aria-haspopup="menu"
+          aria-expanded={isAccountMenuOpen}
+          onClick={() => setIsAccountMenuOpen((open) => !open)}
         >
           <div className={dash.userLeft}>
             <div className={dash.userAvatar} aria-hidden>
@@ -1229,7 +1382,7 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
           <span className={dash.userChevron} aria-hidden>
             <IconChevronRight />
           </span>
-        </Link>
+        </button>
       </div>
     </>
   );
