@@ -560,8 +560,7 @@ export async function GET(req: NextRequest) {
         .from("inventario")
         .select("id,data,categorias,created_at")
         .like("id", `${legacyPeriodPrefix}%`)
-        .order("created_at", { ascending: false })
-        .limit(400);
+        .order("created_at", { ascending: false });
       if (legacyInventoryErr) {
         return json({ ok: false, error: legacyInventoryErr.message, source: "compat", readOnly: true }, { status: 500 });
       }
@@ -619,7 +618,6 @@ export async function GET(req: NextRequest) {
             .select("id,data,categorias,created_at")
             .like("id", `${legacyPrefix}%`)
             .order("created_at", { ascending: false })
-            .limit(400)
         : { data: [], error: null as any };
       if ((legacyInventarios as any)?.error) {
         await dbg("E", "api/lista-de-compras", "legacy_inventario_load_failed", { error: String((legacyInventarios as any)?.error?.message ?? "") });
