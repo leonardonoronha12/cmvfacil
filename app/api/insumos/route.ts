@@ -488,35 +488,10 @@ export async function GET(req: NextRequest) {
       let itemsDb = (itemsDbRaw ?? []) as any[];
       const diagCompat: any = diag ? { companyId, before: { categories: categoriesDb.length, items: itemsDb.length } } : null;
 
-      if (!itemsDb.length) {
-        const seedRes = await seedCompanyItemsFromLegacy({ supabase, companyId, diag });
-        const seeded = Boolean(seedRes?.ok);
-        if (diagCompat) diagCompat.seed = seedRes?.diag ?? { ok: seeded };
-        if (seeded) {
-          const { data: categoriesDb2, error: catErr2 } = await db.from("categories").select("id,name").eq("company_id", companyId);
-          if (!catErr2) categoriesDb = (categoriesDb2 ?? []) as any[];
-
-          const { data: itemsDb2, error: itemsErr2 } = await db
-            .from("items")
-            .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
-            .eq("company_id", companyId)
-            .or("item_receita.is.null,item_receita.eq.false")
-            .order("name", { ascending: true });
-          if (!itemsErr2) itemsDb = (itemsDb2 ?? []) as any[];
-        }
-        if (diagCompat) diagCompat.after = { categories: categoriesDb.length, items: itemsDb.length };
-      }
-
-      if (!itemsDb.length) {
-        const { data, error } = await supabase.from("insumos_state").select("*").eq("id", id).maybeSingle();
-        if (!error) {
-          const payload = (data as any)?.payload;
-          const rows = Array.isArray(payload?.rows) ? (payload.rows as unknown[]) : [];
-          const categories = Array.isArray(payload?.categories) ? (payload.categories as unknown[]) : [];
-          if (diagCompat) diagCompat.fallbackLegacyState = { rows: rows.length, categories: categories.length };
-          if (rows.length) return json({ source: "legacy", readOnly: false, rows, categories, ...(diagCompat ? { diag: diagCompat } : {}) }, { status: 200 });
-        }
-      }
+      // Never repopulate an intentionally emptied company from migration data.
+      // Legacy import is an explicit administrative operation; a normal read
+      // must treat the relational database as authoritative, including zero rows.
+      if (diagCompat && !itemsDb.length) diagCompat.emptyRelationalCatalog = true;
 
       const categoryNameById = new Map<string, string>();
       for (const c of categoriesDb) {
@@ -1005,6 +980,17 @@ async function deleteOneCompatItem(args: {
   const itemId = String((findRes.data as any)?.id ?? "").trim();
   if (!itemId) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
 
+  for (const table of ["invoice_items", "inventory_items", "wastes", "shopping_list_items", "avg_cost_events"]) {
+    const { error } = await args.supabase.from(table).update({ item_id: null } as any).eq("company_id", args.companyId).eq("item_id", itemId);
+    if (error) return { status: 500, body: { ...base, ok: false, error: error.message } };
+  }
+  const supplierLinks = await args.supabase.from("supplier_items").delete().eq("company_id", args.companyId).eq("item_id", itemId);
+  if (supplierLinks.error) return { status: 500, body: { ...base, ok: false, error: supplierLinks.error.message } };
+  const ingredientLinks = await args.supabase.from("recipe_ingredients").delete().eq("company_id", args.companyId).eq("ingredient_item_id", itemId);
+  if (ingredientLinks.error) return { status: 500, body: { ...base, ok: false, error: ingredientLinks.error.message } };
+  const recipeLinks = await args.supabase.from("recipe_ingredients").delete().eq("company_id", args.companyId).eq("recipe_item_id", itemId);
+  if (recipeLinks.error) return { status: 500, body: { ...base, ok: false, error: recipeLinks.error.message } };
+
   const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
   if (delRes.error) return { status: 500, body: { ...base, ok: false, error: delRes.error.message } };
   const deletedIds = (delRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
@@ -1063,6 +1049,28 @@ async function deleteCompatItemsBatch(args: {
   const deletedIds: string[] = [];
   for (let offset = 0; offset < idsToDelete.length; offset += 100) {
     const chunk = idsToDelete.slice(offset, offset + 100);
+
+    // Preserve historical documents while removing their live catalog link.
+    // Relationship rows that only exist to connect the supply are removed.
+    for (const table of ["invoice_items", "inventory_items", "wastes", "shopping_list_items", "avg_cost_events"]) {
+      const { error } = await args.supabase.from(table).update({ item_id: null } as any).eq("company_id", args.companyId).in("item_id", chunk);
+      if (error) throw error;
+    }
+    const { error: supplierLinksError } = await args.supabase.from("supplier_items").delete().eq("company_id", args.companyId).in("item_id", chunk);
+    if (supplierLinksError) throw supplierLinksError;
+    const { error: ingredientLinksError } = await args.supabase
+      .from("recipe_ingredients")
+      .delete()
+      .eq("company_id", args.companyId)
+      .in("ingredient_item_id", chunk);
+    if (ingredientLinksError) throw ingredientLinksError;
+    const { error: recipeLinksError } = await args.supabase
+      .from("recipe_ingredients")
+      .delete()
+      .eq("company_id", args.companyId)
+      .in("recipe_item_id", chunk);
+    if (recipeLinksError) throw recipeLinksError;
+
     const { data, error } = await args.supabase.from("items").delete().eq("company_id", args.companyId).in("id", chunk).select("id");
     if (error) throw error;
     deletedIds.push(...(data ?? []).map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
@@ -1106,6 +1114,13 @@ export async function DELETE(req: NextRequest) {
     const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
     if (!companyId) return json({ ok: false, error: "missing_company" }, { status: 500 });
 
+    let db = supabase;
+    try {
+      db = getSupabaseAdmin() as typeof supabase;
+    } catch {
+      // RLS remains the fallback when the service client is unavailable.
+    }
+
     const url = new URL(req.url);
     const qId = String(url.searchParams.get("id") ?? "").trim();
     const qBubbleId = String(url.searchParams.get("bubbleId") ?? url.searchParams.get("bubble_id") ?? "").trim();
@@ -1130,7 +1145,7 @@ export async function DELETE(req: NextRequest) {
     );
 
     if (batchTargets.length) {
-      const { deletedIds, results } = await deleteCompatItemsBatch({ supabase, companyId, targets: batchTargets });
+      const { deletedIds, results } = await deleteCompatItemsBatch({ supabase: db, companyId, targets: batchTargets });
       const deletedCount = results.reduce((acc, r) => acc + (typeof r.deletedCount === "number" ? r.deletedCount : 0), 0);
       return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
     }
@@ -1139,7 +1154,7 @@ export async function DELETE(req: NextRequest) {
       return json({ ok: false, source: "compat", deletedCount: 0, deletedIds: [], error: "missing_id" }, { status: 400 });
     }
 
-    const res = await deleteOneCompatItem({ supabase, companyId, target: singleTarget });
+    const res = await deleteOneCompatItem({ supabase: db, companyId, target: singleTarget });
     return json(res.body, { status: res.status });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

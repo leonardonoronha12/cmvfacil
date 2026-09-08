@@ -1447,14 +1447,15 @@ export default function InsumosClient() {
       const res = await deleteInsumosBatchFromSupabase({ ids, bubbleIds, source: "compat" });
       const okCount = typeof (res as any)?.deletedCount === "number" ? (res as any).deletedCount : 0;
       const failures = Array.isArray((res as any)?.results) ? (res as any).results.filter((r: any) => !r?.ok) : [];
-      if (failures.length) showToast("Alguns itens não puderam ser excluídos. A lista foi atualizada.", "error");
-      else showToast(rawIds.length === 1 ? "Insumo deletado com sucesso." : `${okCount} insumos deletados com sucesso.`, "success");
-      void (async () => {
-        try {
-          const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
-          applyLoadedState(state);
-        } catch {}
-      })();
+      const state = await loadInsumosStateFromSupabase(undefined, { source: "compat" });
+      applyLoadedState(state);
+      const remainingIds = new Set((state.rows ?? []).map((row) => String(row.id ?? "").trim()));
+      const returned = rawIds.filter((id) => remainingIds.has(String(id).trim()));
+      if (failures.length || returned.length || okCount !== rawIds.length) {
+        showToast(`Exclusão incompleta: ${Math.max(0, rawIds.length - returned.length)} de ${rawIds.length} removidos.`, "error");
+      } else {
+        showToast(rawIds.length === 1 ? "Insumo excluído definitivamente." : `${okCount} insumos excluídos definitivamente.`, "success");
+      }
     } catch (err) {
       showToast(deleteErrorMessage(err), "error");
       void (async () => {

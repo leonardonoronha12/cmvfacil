@@ -716,23 +716,10 @@ export async function GET(req: NextRequest) {
         .limit(50_000);
       if (itemsErr) return json({ ok: false, error: itemsErr.message, source: "compat", readOnly: true }, { status: 500 });
       let itemsRowsSafe = (itemsRows ?? []) as any[];
-      let seedDiag: any = null;
-      if (!itemsRowsSafe.length) {
-        const seedRes = await seedCompanyItemsFromLegacy({ supabaseServer, companyId, diag: diagEnabled });
-        const seeded = Boolean(seedRes?.ok);
-        seedDiag = seedRes?.diag ?? null;
-        if (seeded) {
-          const { data: itemsRows2, error: itemsErr2 } = await supabaseServer
-            .from("items")
-            .select("id,bubble_id,name,unidade_medida,custo_medio,category_id,item_receita")
-            .eq("company_id", companyId)
-            .or("item_receita.is.null,item_receita.eq.false")
-            .order("name", { ascending: true })
-            .limit(50_000);
-          if (!itemsErr2) itemsRowsSafe = (itemsRows2 ?? []) as any[];
-        }
-      }
-      if (!itemsRowsSafe.length) return json({ ok: true, source: "legacy", readOnly: false, rows: [] }, { status: 200 });
+      // The relational catalog is authoritative after migration. An empty
+      // catalog can be intentional after a bulk deletion and must stay empty.
+      const seedDiag: any = diagEnabled && !itemsRowsSafe.length ? { skipped: true, reason: "explicit_import_only" } : null;
+      if (!itemsRowsSafe.length) return json({ ok: true, source: "compat", readOnly: false, rows: [], ...(seedDiag ? { seedDiag } : {}) }, { status: 200 });
 
       const itemUuidByBubbleId = new Map<string, string>();
       const itemUuidByNameKey = new Map<string, string>();
