@@ -572,7 +572,8 @@ export async function GET(req: NextRequest) {
           nome: `Inventário ${String(r?.data ?? "").trim()}`,
           data_contagem: parseDateOnlyLoose(r?.data),
         }))
-        .filter((r: any) => r.id && r.data_contagem);
+        .filter((r: any) => r.id && r.data_contagem)
+        .sort((a: any, b: any) => String(b.data_contagem).localeCompare(String(a.data_contagem)));
       const inventoryRowsForPeriod = legacyInventoryRowsForPeriod.length ? legacyInventoryRowsForPeriod : ((invRows ?? []) as any[]);
       const inventories = inventoryRowsForPeriod.map((r: any) => ({
         id: String(r?.id ?? "").trim(),
