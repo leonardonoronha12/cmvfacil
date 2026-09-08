@@ -446,6 +446,7 @@ export default function ListaDeComprasClient() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [selectedIds, setSelectedIds] = useState<Record<string, boolean>>({});
   const [estoqueFinalMap, setEstoqueFinalMap] = useState<Record<string, string>>({});
+  const [comprarManualMap, setComprarManualMap] = useState<Record<string, string>>({});
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
@@ -1076,7 +1077,11 @@ export default function ListaDeComprasClient() {
 
   function computeCompra(row: CompraRow) {
     const fornecedorFactor = row.fornecedorFator > 0 ? row.fornecedorFator : 1;
-    const comprarCalculado = Math.max(row.comprar, 0);
+    const manual = comprarManualMap[`${mode}:${row.id}`];
+    const manualValue = manual === undefined ? null : Math.max(parseDecimalInput(manual), 0);
+    const comprarCalculado = manualValue === null
+      ? Math.max(row.comprar, 0)
+      : mode === "fornecedor" ? manualValue * fornecedorFactor : manualValue;
     const compraFornecedor = comprarCalculado / fornecedorFactor;
     return {
       estoqueFinalNum: 0,
@@ -1365,6 +1370,10 @@ export default function ListaDeComprasClient() {
     estoqueFinalIsManualRef.current = true;
     setEstoqueFinalMap((prev) => ({ ...prev, [id]: cleaned }));
   }
+  function updateComprar(id: string, value: string) {
+    const cleaned = value.replace(/[^\d,]/g, "");
+    setComprarManualMap((previous) => ({ ...previous, [`${mode}:${id}`]: cleaned }));
+  }
   const isCompatMode = compat?.source === "compat";
   const isReadOnly = Boolean(isCompatMode && compat?.readOnly);
 
@@ -1375,6 +1384,8 @@ export default function ListaDeComprasClient() {
       const custoFornecedor = row.custoMedio * fornecedorFactor;
       const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
       const comprarValue = (() => {
+        const manual = comprarManualMap[`${mode}:${row.id}`];
+        if (manual !== undefined) return manual;
         if (isCompatMode) {
           const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
           return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
@@ -1415,6 +1426,7 @@ export default function ListaDeComprasClient() {
   }, [
     allVisibleSelected,
     baseRows.length,
+    comprarManualMap,
     bubbleListaRows.length,
     categoriaFilter,
     columnOrder,
@@ -1640,6 +1652,8 @@ export default function ListaDeComprasClient() {
                   const custoFornecedor = row.custoMedio * fornecedorFactor;
                   const estoqueFinalValue = isCompatMode ? formatDecimal3(row.estoqueFinal) : estoqueFinalMap[row.id] ?? "0,000";
                   const comprarValue = (() => {
+                    const manual = comprarManualMap[`${mode}:${row.id}`];
+                    if (manual !== undefined) return manual;
                     if (isCompatMode) {
                       const base = mode === "fornecedor" ? row.comprar / fornecedorFactor : row.comprar;
                       return formatDecimalUpTo3(Number.isFinite(base) ? base : 0);
@@ -1710,7 +1724,13 @@ export default function ListaDeComprasClient() {
                         }
                         return (
                           <div key={column} className={styles.measureCell}>
-                            <input className={styles.buyInput} value={comprarValue} readOnly inputMode="decimal" />
+                            <input
+                              className={styles.buyInput}
+                              value={comprarValue}
+                              onChange={(event) => updateComprar(row.id, event.target.value)}
+                              inputMode="decimal"
+                              aria-label={`Quantidade a comprar de ${row.displayItem}`}
+                            />
                             <span className={styles.unitTag}>{mode === "fornecedor" ? row.fornecedorMedida : row.medida}</span>
                           </div>
                         );

@@ -839,7 +839,7 @@ export default function InventarioClient() {
     });
   }
 
-  function removeItem(itemId: string) {
+  function removeItem(itemId: string, returnToPending = false) {
     const cId = selectedContagem?.id;
     if (!cId) return;
     setContagens((prev) => {
@@ -847,7 +847,9 @@ export default function InventarioClient() {
         if (c.id !== cId) return c;
         const categorias = (c.categorias ?? []).map((cat) => ({
           ...cat,
-          itens: (cat.itens ?? []).map((it) => (it.id === itemId ? { ...it, removido: true, estoqueFinal: "" } : it)),
+          itens: (cat.itens ?? []).map((it) =>
+            it.id === itemId ? { ...it, removido: returnToPending ? false : true, estoqueFinal: "" } : it,
+          ),
         }));
         return { ...c, categorias };
       });
@@ -1536,7 +1538,7 @@ export default function InventarioClient() {
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
-                            onClick={() => removeItem(r.id)}
+                            onClick={() => removeItem(r.id, true)}
                           >
                             <IconTrash />
                           </button>
