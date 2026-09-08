@@ -1204,6 +1204,13 @@ export default function AjustesClient() {
                         </div>
                         <div className={styles.planSavings}>Economize R$ 291 por ano</div>
                         <div className={styles.planSeat}>Até 3 usuários inclusos</div>
+                        <div className={styles.preContractSummary}>
+                          <strong>R$ 873/ano · cobrança antecipada · duração de 12 meses</strong>
+                          <span>25% de desconto em relação a 12 mensalidades de R$ 97 (R$ 1.164).</span>
+                          <span>Renovação automática anual, com aviso pelo menos 30 dias antes.</span>
+                          <span>Cancele a próxima renovação a qualquer momento; o acesso continua até o fim do período já pago.</span>
+                          <span><a href="/termos-de-uso" target="_blank" rel="noreferrer">Consultar os Termos de Uso</a></span>
+                        </div>
                       </div>
                       <button
                         type="button"

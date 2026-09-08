@@ -1211,6 +1211,9 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
       </div>
 
       <div className={dash.menuBottom}>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 8, fontSize: 10 }}>
+          <Link href="/termos-de-uso" target="_blank" style={{ color: "#61736f" }}>Termos de Uso</Link>
+        </div>
         <Link
           className={dash.userDropdown}
           href="/ajustes?tab=minha-conta"

@@ -387,6 +387,21 @@
   color: #0ab86d;
 }
 
+.preContractSummary {
+  display: grid;
+  gap: 5px;
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #f1faf7;
+  color: #35534b;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.preContractSummary strong { color: #063f34; }
+.preContractSummary a { color: #007d59; font-weight: 800; text-decoration: underline; }
+
 .planSeat {
   font-size: 11px;
   color: #101214;

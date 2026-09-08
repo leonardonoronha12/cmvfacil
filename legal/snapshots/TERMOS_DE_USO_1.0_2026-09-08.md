@@ -1,0 +1,73 @@
+# Termos de Uso do CMV Fácil
+
+**Versão 1.0 — última atualização: 8 de setembro de 2026**
+
+Estes Termos regulam o uso do CMV Fácil, fornecido por **CMV FACIL LTDA**, CNPJ **60.628.048/0001-70**, com sede na Rua Potiguares, nº 526, Apto. 141, bairro Tupi, Praia Grande/SP, CEP 11703-230.
+
+## 1. O CMV Fácil
+
+O CMV Fácil oferece ferramentas para gestão de custos, inventários, entradas, desperdícios, fichas técnicas, fornecedores, compras e indicadores. Os resultados dependem das informações inseridas pelo cliente e não substituem serviços de contabilidade, auditoria ou consultoria profissional.
+
+## 2. Conta e equipe
+
+O usuário deve fornecer informações corretas, proteger sua senha e comunicar acessos indevidos. O administrador gerencia a empresa, os perfis e as permissões. Colaboradores usam somente os recursos para os quais receberam acesso. O cliente é responsável pela legitimidade dos dados inseridos por sua equipe.
+
+## 3. Planos e contratação
+
+Antes da contratação, o CMV Fácil apresenta o plano escolhido, o preço, a periodicidade, as condições essenciais de renovação e cancelamento e o acesso a estes Termos.
+
+O **Plano PRO Mensal custa R$ 97 por mês**, com cobrança mensal.
+
+O **Plano PRO Anual custa R$ 873 por ano**, possui vigência de 12 meses e é pago antecipadamente. Esse preço representa **25% de desconto** em comparação com 12 mensalidades de R$ 97, que totalizariam R$ 1.164.
+
+O pagamento é processado por um prestador especializado. O CMV Fácil não armazena o número completo nem o código de segurança do cartão.
+
+## 4. Renovação automática do plano anual
+
+O Plano PRO Anual é renovado automaticamente por novos períodos de 12 meses, salvo se o cliente cancelar a próxima renovação.
+
+O CMV Fácil enviará um aviso ao cliente com pelo menos 30 dias de antecedência da renovação, informando a data prevista, o plano, o valor e o canal disponível para cancelamento. Eventual alteração de preço também será informada antes da renovação.
+
+## 5. Cancelamento do plano anual
+
+O cliente pode solicitar o cancelamento a qualquer momento pelo sistema ou pelo e-mail **cmvfacil@gmail.com**.
+
+O cancelamento impede a próxima renovação automática. Ele não encerra imediatamente o período anual já contratado: o acesso permanece ativo até o final dos 12 meses pagos antecipadamente.
+
+## 6. Arrependimento e reembolso
+
+Quando o direito legal de arrependimento for aplicável, inclusive nas contratações abrangidas pelo artigo 49 do Código de Defesa do Consumidor, ele será respeitado integralmente.
+
+Depois do prazo legal aplicável, o simples cancelamento do Plano PRO Anual não gera reembolso proporcional dos meses restantes. Essa regra não elimina direitos obrigatórios previstos em lei, inclusive em caso de cobrança indevida, falha comprovada do serviço ou outra situação em que reembolso, estorno ou reparação sejam legalmente devidos.
+
+## 7. Uso correto
+
+Não é permitido usar a plataforma para atividades ilegais, violar direitos, tentar obter acesso não autorizado, transmitir código malicioso, contornar limitações de segurança ou prejudicar o funcionamento do serviço.
+
+## 8. Dados e propriedade intelectual
+
+O cliente mantém seus direitos sobre os dados inseridos e autoriza seu tratamento na medida necessária para prestar, proteger e manter o serviço, cumprir suas instruções e atender obrigações legais. A plataforma, a marca, o código, o design e os conteúdos próprios pertencem ao CMV Fácil ou a seus licenciadores.
+
+## 9. Disponibilidade e responsabilidade
+
+O CMV Fácil emprega esforços razoáveis para manter a plataforma segura e disponível, mas podem ocorrer manutenções, falhas de comunicação, eventos externos ou indisponibilidade de fornecedores.
+
+Cada parte responde pelos danos diretos que comprovadamente causar, conforme sua responsabilidade. O CMV Fácil não responde por decisões baseadas em informações incorretas inseridas pelo cliente. Nenhuma disposição destes Termos limita direitos ou responsabilidades que a lei não permita afastar.
+
+## 10. Suspensão e encerramento
+
+A conta pode ser suspensa ou encerrada em caso de fraude, risco de segurança, violação grave destes Termos, ordem legal ou inadimplência, com medida proporcional à situação e aviso quando possível.
+
+## 11. Alterações destes Termos
+
+Alterações relevantes serão informadas aos usuários. Quando a lei ou a natureza da mudança exigir novo consentimento, o CMV Fácil solicitará aceite expresso. O histórico de versões poderá ser consultado nos canais oficiais.
+
+## 12. Lei aplicável e contato
+
+Aplicam-se as leis brasileiras, preservados os direitos e o foro legal do consumidor.
+
+Para suporte, cancelamento, reembolso ou dúvidas sobre estes Termos, entre em contato:
+
+- e-mail: **cmvfacil@gmail.com**;
+- WhatsApp: **+55 13 93618-0830**;
+- endereço: Rua Potiguares, nº 526, Apto. 141, bairro Tupi, Praia Grande/SP, CEP 11703-230.

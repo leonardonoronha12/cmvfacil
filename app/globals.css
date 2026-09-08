@@ -27,6 +27,17 @@ body {
   height: 100%;
 }
 
+.legal-page { min-height: 100vh; background: #f2f7f5; padding: 48px 20px; color: #12332d; }
+.legal-card { max-width: 860px; margin: auto; background: #fff; border: 1px solid #dce9e5; border-radius: 24px; padding: 42px; box-shadow: 0 16px 50px rgba(0,56,48,.08); }
+.legal-card h1 { font-size: 36px; margin: 18px 0; }
+.legal-card h2 { font-size: 20px; margin: 30px 0 8px; }
+.legal-card p { font-size: 16px; line-height: 1.7; }
+.legal-lead { color: #526963; }
+.legal-badge { display: inline-block; background: #fff4cf; color: #745800; border-radius: 99px; padding: 7px 12px; font-weight: 700; font-size: 13px; }
+.legal-card nav { display: flex; gap: 18px; margin-top: 36px; padding-top: 22px; border-top: 1px solid #e3ece9; }
+.legal-card a { color: #007d59; font-weight: 700; }
+@media (max-width: 640px) { .legal-card { padding: 24px; } .legal-card h1 { font-size: 28px; } }
+
 body {
   background: radial-gradient(1200px 700px at 10% -10%, rgba(0, 153, 255, 0.08), transparent 55%),
     radial-gradient(900px 520px at 105% 0%, rgba(10, 184, 109, 0.10), transparent 60%), var(--cmv-bg);

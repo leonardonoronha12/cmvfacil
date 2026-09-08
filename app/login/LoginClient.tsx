@@ -164,6 +164,9 @@ export default function LoginClient() {
                 Criar conta.
               </a>
             </p>
+            <p className="cmv-login-footer">
+              <a className="cmv-login-link" href="/termos-de-uso" target="_blank" rel="noreferrer">Termos de Uso</a>
+            </p>
           </div>
         </div>
       </section>
