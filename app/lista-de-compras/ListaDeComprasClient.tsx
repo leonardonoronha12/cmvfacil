@@ -110,6 +110,7 @@ type CompatListaComprasResponse = {
   totals?: { itens: number; custoPrevisto: number; custoReal: number };
   filters?: { startInventoryId: string | null; endInventoryId: string | null; diasEstoque: number; prazoFornecedor: number };
   inventories?: Array<{ id: string; bubble_id: string | null; nome: string; data_contagem: string | null }>;
+  suppliers?: Array<{ id: string; name: string }>;
   error?: string;
 };
 
@@ -831,6 +832,10 @@ export default function ListaDeComprasClient() {
   const fornecedores = useMemo(() => {
     if (compat?.source === "compat" && Array.isArray(compat.rows)) {
       const labels = new Set<string>();
+      for (const supplier of compat.suppliers ?? []) {
+        const name = String(supplier?.name ?? "").trim();
+        if (name && normalizeText(name) !== "sem fornecedor") labels.add(name);
+      }
       for (const r of compat.rows) {
         const primary = String(r.fornecedor ?? "").trim();
         if (primary && primary !== "-") labels.add(primary);

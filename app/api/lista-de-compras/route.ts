@@ -781,10 +781,14 @@ export async function GET(req: NextRequest) {
 
       const { data: supplierItemRows, error: siErr } = await supabaseServer.from("supplier_items").select("item_id,supplier_id").eq("company_id", companyId).limit(50_000);
       if (siErr) return json({ ok: false, error: siErr.message, source: "compat", readOnly: true }, { status: 500 });
-      const supplierIds = Array.from(new Set((supplierItemRows ?? []).map((r: any) => String(r?.supplier_id ?? "").trim()).filter(Boolean)));
-      const { data: supRows, error: supErr } = supplierIds.length
-        ? await supabaseServer.from("suppliers").select("id,nome").eq("company_id", companyId).in("id", supplierIds)
-        : { data: [], error: null as any };
+      // Load the complete company catalogue. The supplier selector must not be
+      // restricted to suppliers already linked to one of the calculated rows.
+      const { data: supRows, error: supErr } = await supabaseServer
+        .from("suppliers")
+        .select("id,nome")
+        .eq("company_id", companyId)
+        .order("nome", { ascending: true })
+        .limit(10_000);
       if (supErr) return json({ ok: false, error: supErr.message, source: "compat", readOnly: true }, { status: 500 });
       const supplierNameById = new Map<string, string>();
       for (const r of (supRows ?? []) as any[]) {
@@ -794,6 +798,7 @@ export async function GET(req: NextRequest) {
         if (normalizeNameKey(nome) === "sem fornecedor") continue;
         supplierNameById.set(id, nome);
       }
+      const suppliers = Array.from(supplierNameById, ([id, name]) => ({ id, name }));
       const supplierNamesByItemId = new Map<string, string[]>();
       for (const r of (supplierItemRows ?? []) as any[]) {
         const itemId = String(r?.item_id ?? "").trim();
@@ -1059,6 +1064,7 @@ export async function GET(req: NextRequest) {
           readOnly: true,
           banner: "Modo somente leitura.",
           rows: rowsCompat,
+          suppliers,
           totals,
           filters: { startInventoryId: startInvId || null, endInventoryId: endInvId || null, diasEstoque, prazoFornecedor },
           inventories,
