@@ -656,7 +656,7 @@ export default function InsumosClient() {
     setDataRows((prev) => {
       const nextRows = prev.map((r) => (r.id === id ? { ...r, ocultar: !r.ocultar } : r));
       const changed = nextRows.find((r) => r.id === id) ?? null;
-      if (changed) showToast(changed.ocultar ? "Item ocultado do CMV Real." : "Item incluído no CMV Real.", "success");
+      if (changed) showToast(changed.ocultar ? "Item inativado e removido das rotinas operacionais." : "Item reativado nas rotinas operacionais.", "success");
       writeInsumosToStore(
         nextRows.map((r) => ({
           id: r.id,
@@ -1739,7 +1739,7 @@ export default function InsumosClient() {
             </div>
             <div className={styles.kpiBody}>
               <div className={styles.kpiValue}>{totalOcultados}</div>
-              <div className={styles.kpiLabel}>OCULTADOS DO CMV</div>
+              <div className={styles.kpiLabel}>ITENS INATIVOS</div>
             </div>
           </div>
 
@@ -1854,7 +1854,7 @@ export default function InsumosClient() {
               </div>
             ) : null}
             <div className={styles.tableHead} style={{ gridTemplateColumns }}>
-              <div className={styles.thSmall}>Ocultar</div>
+              <div className={styles.thSmall} title="Itens inativos deixam de aparecer em novos inventários, desperdícios e fichas técnicas">Inativo</div>
 
               {columnOrder.map((col) => {
                 const label =
@@ -1919,7 +1919,13 @@ export default function InsumosClient() {
                 <div key={r.id} className={styles.tr} style={{ gridTemplateColumns }} data-qa-grid-row data-qa-row-id={r.id}>
                   <div className={styles.tdSmall}>
                     <label className={styles.toggle}>
-                      <input type="checkbox" checked={r.ocultar} onChange={() => toggleOcultar(r.id)} />
+                      <input
+                        type="checkbox"
+                        checked={r.ocultar}
+                        onChange={() => toggleOcultar(r.id)}
+                        aria-label={`${r.ocultar ? "Reativar" : "Inativar"} ${r.item}`}
+                        title={r.ocultar ? "Reativar item" : "Inativar sem excluir o histórico"}
+                      />
                       <span className={styles.toggleTrack} aria-hidden />
                     </label>
                   </div>

@@ -305,6 +305,7 @@ export default function InventarioClient() {
     const list = selectedContagem?.categorias ?? [];
     const out: InventarioItemRow[] = [];
     const seen = new Set<string>();
+    const seenNames = new Set<string>();
     for (const cat of list) {
       for (const it of cat.itens ?? []) {
         if (it.removido) continue;
@@ -312,8 +313,10 @@ export default function InventarioClient() {
         if (!id) continue;
         const itemKey = normalizeNameKey(String((it as any)?.item ?? ""));
         if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
+        if (itemKey && seenNames.has(itemKey)) continue;
         if (seen.has(id)) continue;
         seen.add(id);
+        if (itemKey) seenNames.add(itemKey);
         out.push(it);
       }
     }
@@ -568,6 +571,7 @@ export default function InventarioClient() {
         }
 
         const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
+        const sourceByName = new Map<string, { item: string; unidade: string; categoria: string }>();
         const desiredCatByKey = new Map<string, string>();
         function addDesiredCategory(nameRaw: string) {
           const name = normCatName(String(nameRaw ?? ""));
@@ -577,10 +581,14 @@ export default function InventarioClient() {
         }
         for (const c0 of insumoCategorias) addDesiredCategory(String(c0 ?? ""));
         for (const ins of insumosStore) {
+          if (ins.ocultar) continue;
           const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
           if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
+          if (!itemKey || sourceByName.has(itemKey)) continue;
           const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
-          sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
+          const source = { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName };
+          sourceById.set(String(ins.id), source);
+          sourceByName.set(itemKey, source);
           addDesiredCategory(catName);
         }
         for (const prep of prePreparoStore) {
@@ -606,8 +614,9 @@ export default function InventarioClient() {
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
-          const src = sourceById.get(id) ?? null;
           const prevIt = existingById.get(id) ?? null;
+          const prevNameKey = normalizeNameKey(String(prevIt?.item ?? ""));
+          const src = sourceById.get(id) ?? (prevNameKey ? sourceByName.get(prevNameKey) : null) ?? null;
           const categoria = src?.categoria ?? existingCatById.get(id) ?? "Sem categoria";
           const catKey = categoria.toLowerCase();
           const nextRow: InventarioItemRow = {
@@ -643,7 +652,7 @@ export default function InventarioClient() {
           };
         });
 
-        return { ...c, categorias: nextCats };
+        return normalizeContagens([{ ...c, categorias: nextCats }])[0] ?? { ...c, categorias: nextCats };
       });
       if (!changed) return prev;
       const sel = selectedContagemId ? next.find((x) => x.id === selectedContagemId) : null;
@@ -758,9 +767,13 @@ export default function InventarioClient() {
     void (async () => {
       const id = await buildUserScopedId(`c-${Date.now()}`);
       const sourceById = new Map<string, { item: string; unidade: string; categoria: string }>();
+      const sourceNames = new Set<string>();
       for (const ins of insumosStore) {
+        if (ins.ocultar) continue;
         const itemKey = normalizeNameKey(String((ins as any)?.item ?? ""));
         if (itemKey && fichaTecnicaNameKeys.has(itemKey)) continue;
+        if (!itemKey || sourceNames.has(itemKey)) continue;
+        sourceNames.add(itemKey);
         const catName = normCatName(String(ins.categoria ?? "")) || "Sem categoria";
         sourceById.set(String(ins.id), { item: String(ins.item ?? ""), unidade: String(ins.medida ?? "") || "Und", categoria: catName });
       }

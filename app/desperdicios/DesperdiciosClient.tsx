@@ -988,7 +988,7 @@ export default function DesperdiciosClient({
   const yTicks = useMemo(() => [yMax, Math.round((yMax * 3) / 4), Math.round(yMax / 2), Math.round(yMax / 4), 0], [yMax]);
 
   const suggestions = useMemo(() => {
-    const list = [...insumosStore.map((i) => i.item), ...prePreparoStore.map((r) => r.receita), ...fichasTecnicas.map((r) => r.receita)];
+    const list = [...insumosStore.filter((i) => !i.ocultar).map((i) => i.item), ...prePreparoStore.map((r) => r.receita), ...fichasTecnicas.map((r) => r.receita)];
     const q = draftItem.trim().toLowerCase();
     if (!q) return list.slice(0, 6);
     return list.filter((n) => n.toLowerCase().includes(q)).slice(0, 6);
@@ -1006,11 +1006,21 @@ export default function DesperdiciosClient({
       return Array.from(set).sort(collator.compare);
     };
     return {
-      insumos: uniqSorted(insumosStore.map((i) => i.item)),
+      insumos: uniqSorted(insumosStore.filter((i) => !i.ocultar).map((i) => i.item)),
       prePreparo: uniqSorted(prePreparoStore.map((p) => p.receita)),
       fichas: uniqSorted(fichasTecnicas.map((f) => f.receita)),
     };
   }, [fichasTecnicas, insumosStore, prePreparoStore]);
+
+  const isDraftUnitLocked = useMemo(() => {
+    const key = draftItem.trim().toLowerCase();
+    if (!key) return false;
+    return Boolean(
+      insumosStore.some((row) => !row.ocultar && row.item.trim().toLowerCase() === key) ||
+      prePreparoStore.some((row) => row.receita.trim().toLowerCase() === key) ||
+      fichasTecnicas.some((row) => row.receita.trim().toLowerCase() === key),
+    );
+  }, [draftItem, fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
     if (isReadOnly) return;
@@ -1258,12 +1268,12 @@ export default function DesperdiciosClient({
       if (avgCents > 0) {
         const raw = formatBrlFromCents(avgCents).replace(/^R\$\s?/, "").trim();
         if (raw) setDraftUnitCost(raw);
-        if (ins.medida) setDraftQtyUnit(String(ins.medida).trim().toUpperCase());
+        if (ins.medida) setDraftQtyUnit(normalizeUnitLabel(ins.medida));
         return;
       }
       const raw = String(ins.custoMedio ?? "").replace(/^R\$\s?/, "").trim();
       if (raw) setDraftUnitCost(raw);
-      if (ins.medida) setDraftQtyUnit(String(ins.medida).trim().toUpperCase());
+      if (ins.medida) setDraftQtyUnit(normalizeUnitLabel(ins.medida));
       return;
     }
     const prep = prePreparoStore.find((r) => r.receita.toLowerCase() === nameKey) ?? null;
@@ -1272,7 +1282,7 @@ export default function DesperdiciosClient({
       const m = unitCostLabel.match(/R\$\s*([\d.,]+)\s*\/\s*([A-Za-zÀ-ÿ]+)/i);
       if (m) {
         const v = String(m[1] ?? "").trim();
-        const u = String(m[2] ?? "").trim().toUpperCase();
+        const u = normalizeUnitLabel(String(m[2] ?? ""));
         if (v) setDraftUnitCost(v);
         if (u) setDraftQtyUnit(u);
       }
@@ -1284,7 +1294,7 @@ export default function DesperdiciosClient({
     if (unitCents <= 0) return;
     const raw = formatBrlFromCents(unitCents).replace(/^R\$\s?/, "").trim();
     if (raw) setDraftUnitCost(raw);
-    setDraftQtyUnit("UND");
+    setDraftQtyUnit("Und");
   }, [draftItem, avgUnitCostCentsByInsumoId, fichasTecnicas, insumosStore, prePreparoStore]);
 
   useEffect(() => {
@@ -2394,8 +2404,15 @@ export default function DesperdiciosClient({
                         }}
                         placeholder="0,000"
                       />
-                      <select className={styles.suffixSelect} value={draftQtyUnit} onChange={(e) => setDraftQtyUnit(e.target.value)}>
-                        {["Und", "Kg", "g", "L"].map((u) => (
+                      <select
+                        className={styles.suffixSelect}
+                        value={draftQtyUnit}
+                        onChange={(e) => setDraftQtyUnit(e.target.value)}
+                        disabled={isDraftUnitLocked}
+                        title={isDraftUnitLocked ? "Unidade definida no cadastro do item" : "Unidade da quantidade"}
+                        aria-label="Unidade da quantidade desperdiçada"
+                      >
+                        {["Und", "Kg", "g", "L", "ml"].map((u) => (
                           <option key={u} value={u}>
                             {u}
                           </option>

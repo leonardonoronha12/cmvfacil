@@ -382,6 +382,16 @@ function formatMoney(value: number) {
   });
 }
 
+function normalizeMeasureLabel(value: string) {
+  const unit = String(value ?? "").trim().toLowerCase();
+  if (unit === "kg" || unit === "quilo" || unit === "quilograma") return "Kg";
+  if (unit === "g" || unit === "grama") return "g";
+  if (unit === "l" || unit === "litro") return "L";
+  if (unit === "ml" || unit === "mililitro") return "ml";
+  if (unit === "und" || unit === "un" || unit === "u" || unit === "unidade") return "Und";
+  return String(value ?? "").trim() || "Und";
+}
+
 function formatMoneyDraft(input: string) {
   const digits = String(input ?? "").replace(/\D/g, "");
   if (!digits) return "0,00";
@@ -1588,12 +1598,18 @@ export default function FichasTecnicasClient({
   }, [prePreparoRows]);
 
   const insumoIngredientOptions = useMemo(() => {
-    return insumos
-      .filter((row) => !row.ocultar)
-      .map((row) => ({
+    const unique = new Map<string, (typeof insumos)[number]>();
+    for (const row of insumos) {
+      if (row.ocultar) continue;
+      const key = normalizeKey(row.item);
+      if (!key) continue;
+      const current = unique.get(key);
+      if (!current || (!String(current.custoMedio ?? "").trim() && String(row.custoMedio ?? "").trim())) unique.set(key, row);
+    }
+    return Array.from(unique.values()).map((row) => ({
         id: row.id,
         item: row.item,
-        medida: row.medida || "Und",
+        medida: normalizeMeasureLabel(row.medida),
         custoMedio: row.custoMedio || "0,00",
         kind: "insumo" as const,
       }));
