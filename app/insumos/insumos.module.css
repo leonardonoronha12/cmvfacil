@@ -306,6 +306,9 @@
   justify-content: space-between;
   gap: 10px;
   margin-top: 12px;
+  /* Keep pagination clear of the fixed Tutorial/Ajuda controls. */
+  padding-right: clamp(250px, 22vw, 360px);
+  padding-bottom: 12px;
   color: #95a8a6;
   font-size: 12px;
 }
@@ -328,6 +331,19 @@
 
 .pageBtn:disabled {
   opacity: 0.5;
+}
+
+@media (max-width: 1100px) {
+  .footer {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-right: 0;
+    padding-bottom: 78px;
+  }
+
+  .pagination {
+    align-self: flex-start;
+  }
 }
 
 .pageInfo {
