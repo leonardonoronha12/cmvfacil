@@ -452,6 +452,8 @@
   min-height: 0;
   height: 100%;
   max-height: 100%;
+  min-width: 0;
+  container-type: inline-size;
 }
 
 .colHeadPending {
@@ -502,11 +504,14 @@
   min-height: 260px;
   align-content: start;
   grid-auto-rows: max-content;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
+  width: 100%;
 }
 
 .itemRow {
@@ -514,10 +519,14 @@
   background: #ffffff;
   border-radius: 12px;
   padding: 10px 10px;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .itemLeft {
@@ -553,6 +562,45 @@
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
+  min-width: 0;
+}
+
+@container (max-width: 410px) {
+  .colBody {
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .itemRow {
+    padding: 8px;
+    gap: 6px;
+  }
+
+  .itemLeft,
+  .itemRight,
+  .actions {
+    gap: 6px;
+  }
+
+  .dotPending,
+  .dotDone {
+    width: 18px;
+    height: 18px;
+  }
+
+  .qtyInput {
+    width: clamp(48px, 17cqi, 64px);
+    padding-inline: 6px;
+  }
+
+  .unitPill {
+    min-width: 38px;
+    padding-inline: 7px;
+  }
+
+  .iconBtn {
+    width: 28px;
+  }
 }
 
 .dotPending {
