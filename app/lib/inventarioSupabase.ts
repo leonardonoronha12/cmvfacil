@@ -89,7 +89,9 @@ export async function loadInventarioFromSupabase(userId?: string) {
   return st.rows;
 }
 
-export async function upsertInventarioToSupabase(row: InventarioContagem) {
+const inventoryWriteQueues = new Map<string, Promise<void>>();
+
+async function sendInventarioUpsert(row: InventarioContagem) {
   const res = await fetch("/api/inventario", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -97,6 +99,22 @@ export async function upsertInventarioToSupabase(row: InventarioContagem) {
   });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
+}
+
+export function upsertInventarioToSupabase(row: InventarioContagem) {
+  const id = String(row.id ?? "").trim();
+  // Snapshot the payload now and serialize writes per inventory. This prevents
+  // a slower, older request from overwriting quantities entered afterwards.
+  const snapshot = JSON.parse(JSON.stringify(row)) as InventarioContagem;
+  const previous = inventoryWriteQueues.get(id) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(() => sendInventarioUpsert(snapshot));
+  inventoryWriteQueues.set(id, next);
+  void next.then(() => {
+    if (inventoryWriteQueues.get(id) === next) inventoryWriteQueues.delete(id);
+  }, () => {
+    if (inventoryWriteQueues.get(id) === next) inventoryWriteQueues.delete(id);
+  });
+  return next;
 }
 
 export async function deleteInventarioFromSupabase(id: string) {

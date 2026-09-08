@@ -140,7 +140,22 @@ function sortContagensDesc(list: InventarioContagem[]) {
 
 function normalizeContagens(list: InventarioContagem[]) {
   return list.map((c) => {
-    const categorias = (c.categorias ?? []).map((cat) => {
+    const categories = c.categorias ?? [];
+    const winnerByName = new Map<string, { id: string; quantity: string; score: number }>();
+    for (const cat of categories) {
+      const categoryName = normCatName(String(cat.nome ?? ""));
+      for (const item of cat.itens ?? []) {
+        const nameKey = normalizeNameKey(String(item.item ?? ""));
+        if (!nameKey) continue;
+        const quantity = String(item.estoqueFinal ?? "").trim();
+        const score = (item.removido ? 0 : 100) + (quantity ? 20 : 0) + (categoryName && categoryName.toLowerCase() !== "sem categoria" ? 5 : 0);
+        const previous = winnerByName.get(nameKey);
+        if (!previous || score > previous.score) winnerByName.set(nameKey, { id: String(item.id ?? ""), quantity, score });
+        else if (!previous.quantity && quantity) winnerByName.set(nameKey, { ...previous, quantity });
+      }
+    }
+
+    const categorias = categories.map((cat) => {
       const itens = cat.itens ?? [];
       const byId = new Map<string, { it: InventarioItemRow; index: number }>();
       for (let i = 0; i < itens.length; i += 1) {
@@ -162,7 +177,18 @@ function normalizeContagens(list: InventarioContagem[]) {
       }
       const deduped = Array.from(byId.values())
         .sort((a, b) => a.index - b.index)
-        .map((x) => x.it);
+        .map((x) => x.it)
+        .filter((item) => {
+          const key = normalizeNameKey(String(item.item ?? ""));
+          return !key || winnerByName.get(key)?.id === String(item.id ?? "");
+        })
+        .map((item) => {
+          const key = normalizeNameKey(String(item.item ?? ""));
+          const winner = key ? winnerByName.get(key) : null;
+          return winner && !String(item.estoqueFinal ?? "").trim() && winner.quantity
+            ? { ...item, estoqueFinal: winner.quantity }
+            : item;
+        });
       return { ...cat, itens: deduped };
     });
     return { ...c, categorias };
@@ -772,11 +798,11 @@ export default function InventarioClient() {
         status: "pendente",
         itens: byCat.get(name.toLowerCase()) ?? [],
       }));
-      const next: InventarioContagem = {
+      const next = normalizeContagens([{
         id,
         data,
         categorias,
-      };
+      }])[0]!;
       setContagens((prev) => sortContagensDesc([...prev, next]));
       setSelectedContagemId(id);
       setQuery("");
