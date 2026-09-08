@@ -1005,14 +1005,6 @@ async function deleteOneCompatItem(args: {
   const itemId = String((findRes.data as any)?.id ?? "").trim();
   if (!itemId) return { status: 404, body: { ...base, ok: false, error: "not_found" } };
 
-  try {
-    const links = await getLinksBlockingDelete({ supabase: args.supabase, companyId: args.companyId, itemId });
-    if (links.length) return { status: 409, body: { ...base, ok: false, error: "conflict_links", links } };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return { status: 500, body: { ...base, ok: false, error: msg } };
-  }
-
   const delRes = await args.supabase.from("items").delete().eq("company_id", args.companyId).eq("id", itemId).select("id");
   if (delRes.error) return { status: 500, body: { ...base, ok: false, error: delRes.error.message } };
   const deletedIds = (delRes.data ?? []).map((r: any) => String(r?.id ?? "").trim()).filter(Boolean);
@@ -1023,6 +1015,74 @@ async function deleteOneCompatItem(args: {
   if (verify.data) return { status: 500, body: { ...base, ok: false, error: "delete_not_applied" } };
 
   return { status: 200, body: { ...base, ok: true, deletedCount: deletedIds.length, deletedIds } };
+}
+
+async function deleteCompatItemsBatch(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  companyId: string;
+  targets: DeleteTarget[];
+}) {
+  const requestedIds = Array.from(new Set(args.targets.flatMap((target) => (target.id ? [target.id] : []))));
+  const requestedBubbleIds = Array.from(new Set(args.targets.flatMap((target) => (target.bubbleId ? [target.bubbleId] : []))));
+  const foundRows: Array<{ id?: unknown; bubble_id?: unknown }> = [];
+
+  if (requestedIds.length) {
+    const { data, error } = await args.supabase.from("items").select("id,bubble_id").eq("company_id", args.companyId).in("id", requestedIds);
+    if (error) throw error;
+    foundRows.push(...(data ?? []));
+  }
+  if (requestedBubbleIds.length) {
+    const { data, error } = await args.supabase
+      .from("items")
+      .select("id,bubble_id")
+      .eq("company_id", args.companyId)
+      .in("bubble_id", requestedBubbleIds);
+    if (error) throw error;
+    foundRows.push(...(data ?? []));
+  }
+
+  const rowById = new Map<string, { id: string; bubbleId: string }>();
+  const rowByBubbleId = new Map<string, { id: string; bubbleId: string }>();
+  for (const row of foundRows) {
+    const id = String(row.id ?? "").trim();
+    const bubbleId = String(row.bubble_id ?? "").trim();
+    if (!id) continue;
+    const normalized = { id, bubbleId };
+    rowById.set(id, normalized);
+    if (bubbleId) rowByBubbleId.set(bubbleId, normalized);
+  }
+
+  const idsToDelete = Array.from(
+    new Set(
+      args.targets
+        .map((target) => (target.id ? rowById.get(target.id) : rowByBubbleId.get(String(target.bubbleId ?? ""))))
+        .map((row) => row?.id ?? "")
+        .filter(Boolean),
+    ),
+  );
+  const deletedIds: string[] = [];
+  for (let offset = 0; offset < idsToDelete.length; offset += 100) {
+    const chunk = idsToDelete.slice(offset, offset + 100);
+    const { data, error } = await args.supabase.from("items").delete().eq("company_id", args.companyId).in("id", chunk).select("id");
+    if (error) throw error;
+    deletedIds.push(...(data ?? []).map((row: any) => String(row?.id ?? "").trim()).filter(Boolean));
+  }
+
+  const deletedSet = new Set(deletedIds);
+  const results = args.targets.map((target) => {
+    const row = target.id ? rowById.get(target.id) : rowByBubbleId.get(String(target.bubbleId ?? ""));
+    const deleted = Boolean(row?.id && deletedSet.has(row.id));
+    return {
+      key: target.key,
+      source: "compat" as const,
+      ok: deleted,
+      status: deleted ? 200 : 404,
+      deletedCount: deleted ? 1 : 0,
+      deletedIds: deleted && row ? [row.id] : [],
+      ...(deleted ? {} : { error: "not_found" }),
+    };
+  });
+  return { deletedIds, results };
 }
 
 export async function DELETE(req: NextRequest) {
@@ -1070,13 +1130,8 @@ export async function DELETE(req: NextRequest) {
     );
 
     if (batchTargets.length) {
-      const results: any[] = [];
-      for (const t of batchTargets) {
-        const r = await deleteOneCompatItem({ supabase, companyId, target: t });
-        results.push({ key: t.key, ...r.body, status: r.status });
-      }
+      const { deletedIds, results } = await deleteCompatItemsBatch({ supabase, companyId, targets: batchTargets });
       const deletedCount = results.reduce((acc, r) => acc + (typeof r.deletedCount === "number" ? r.deletedCount : 0), 0);
-      const deletedIds = results.flatMap((r) => (Array.isArray(r.deletedIds) ? r.deletedIds : [])).filter(Boolean);
       return json({ ok: true, source: "compat", deletedCount, deletedIds, results }, { status: 200 });
     }
 
