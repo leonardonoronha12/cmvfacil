@@ -397,7 +397,9 @@
 }
 
 .nestedModalOverlay {
-  z-index: 100;
+  /* Nested mapping dialogs must stay above every page modal and floating widget. */
+  z-index: 2147483000;
+  isolation: isolate;
 }
 
 .modal {
