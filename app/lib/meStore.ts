@@ -21,7 +21,7 @@ export type MeProfile = {
   planType: string;
   planStatus: string;
   cardLast4: string;
-  members: Array<{ name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }>;
+  members: Array<{ userId: string; name: string; email: string; role: "Administrador" | "Colaborador"; joinedAt: string; avatarUrl: string }>;
   companies: Array<{ id: string; name: string; logoUrl: string; role: "Administrador" | "Colaborador" }>;
 };
 
@@ -157,6 +157,7 @@ export async function loadMeFromApi() {
         cardLast4: String(j.plan?.cardLast4 ?? j.cardLast4 ?? "").trim(),
         members: Array.isArray(j.members)
           ? (j.members as any[]).map((m) => ({
+              userId: String(m?.userId ?? "").trim(),
               name: String(m?.name ?? "").trim(),
               email: String(m?.email ?? "").trim(),
               role: String(m?.role ?? "").trim() === "Administrador" ? "Administrador" : "Colaborador",

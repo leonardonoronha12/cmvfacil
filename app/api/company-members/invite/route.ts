@@ -69,11 +69,25 @@ export async function POST(req: NextRequest) {
     if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
 
     const supabase = getSupabaseAdmin();
-    const { companyId } = await resolveCurrentCompanyForUser(supabase, uid);
-    if (!companyId) return json({ ok: false, error: "company_not_found" }, { status: 400 });
+    const { companyId: currentCompanyId } = await resolveCurrentCompanyForUser(supabase, uid);
+    const requestedCompanyIds: string[] = Array.from(new Set<string>((Array.isArray(body?.companyIds) ? body.companyIds : [currentCompanyId]).map((value: unknown) => String(value ?? "").trim()).filter(isUuid)));
+    if (!requestedCompanyIds.length) return json({ ok: false, error: "company_not_found" }, { status: 400 });
 
-    const { data: companyDb } = await supabase.from("companies").select("fantasy_name,legal_name").eq("id", companyId).maybeSingle();
-    const companyName = String((companyDb as any)?.fantasy_name ?? (companyDb as any)?.legal_name ?? "").trim() || "Minha Empresa";
+    const inviterMemberships = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", uid).in("company_id", requestedCompanyIds);
+    if (inviterMemberships.error) throw new Error(inviterMemberships.error.message);
+    const authorizedIds = new Set((inviterMemberships.data ?? []).filter(isCompanyAdminMember).map((row: any) => String(row.company_id)));
+    if (requestedCompanyIds.some((id) => !authorizedIds.has(id))) return json({ ok: false, error: "forbidden_company" }, { status: 403 });
+
+    if (role === "Administrador") {
+      const existingAdmins = await supabase.from("company_members").select("company_id,role,permission_level").in("company_id", requestedCompanyIds);
+      if (existingAdmins.error) throw new Error(existingAdmins.error.message);
+      if ((existingAdmins.data ?? []).some(isCompanyAdminMember)) return json({ ok: false, error: "company_already_has_admin" }, { status: 409 });
+    }
+
+    const companiesResult = await supabase.from("companies").select("id,fantasy_name,legal_name").in("id", requestedCompanyIds);
+    if (companiesResult.error) throw new Error(companiesResult.error.message);
+    const companyNames = (companiesResult.data ?? []).map((row: any) => String(row.fantasy_name ?? row.legal_name ?? "").trim() || "Minha Empresa");
+    const companyName = companyNames.join(", ");
 
     const { data: inviterDb } = await supabase
       .from("user_profiles")
@@ -86,32 +100,23 @@ export async function POST(req: NextRequest) {
       String((inviterDb as any)?.email ?? "").trim() ||
       "";
 
-    const membership = await supabase
-      .from("company_members")
-      .select("company_id,role,permission_level")
-      .eq("company_id", companyId)
-      .eq("user_id", uid)
-      .limit(1)
-      .maybeSingle();
-    if (membership.error) throw new Error(membership.error.message);
-    if (!membership.data || !isCompanyAdminMember(membership.data)) return json({ ok: false, error: "forbidden" }, { status: 403 });
-
     await supabase.auth.admin.createUser({ email, password: randomPassword(), email_confirm: true, user_metadata: { source: "company-invite" } } as any).catch(() => null);
 
     const origin = requestOrigin(req) || "https://cmvfacil.app";
     const redirectTo = `${origin}/restaurar-senha?invite=1&company=${encodeURIComponent(companyName)}&role=${encodeURIComponent(role)}&email=${encodeURIComponent(
       email,
     )}`;
-    const invite = await supabase.auth.admin.generateLink({ type: "invite", email, options: { redirectTo } } as any);
+    const existingProfile = await supabase.from("user_profiles").select("user_id").eq("email", email).maybeSingle();
+    const invite = await supabase.auth.admin.generateLink({ type: existingProfile.data?.user_id ? "magiclink" : "invite", email, options: { redirectTo } } as any);
     if (invite.error) return json({ ok: false, error: invite.error.message }, { status: 500 });
 
     const actionLink = String((invite.data as any)?.properties?.action_link ?? "").trim();
-    const createdUserId = String((invite.data as any)?.user?.id ?? "").trim();
+    const createdUserId = String((existingProfile.data as any)?.user_id ?? (invite.data as any)?.user?.id ?? "").trim();
     if (!actionLink) return json({ ok: false, error: "missing_action_link" }, { status: 500 });
 
     if (createdUserId && isUuid(createdUserId)) {
       const up = await supabase.from("company_members").upsert(
-        { company_id: companyId, user_id: createdUserId, role, permission_level: permissionLevel } as any,
+        requestedCompanyIds.map((companyId) => ({ company_id: companyId, user_id: createdUserId, role, permission_level: permissionLevel })) as any,
         { onConflict: "company_id,user_id" },
       );
       if (up.error) throw new Error(up.error.message);
@@ -120,7 +125,7 @@ export async function POST(req: NextRequest) {
     const emailRes = await sendCompanyInviteEmail({ to: email, companyName, roleLabel: role, inviterName, actionLink });
 
     return json(
-      { ok: true, email, role, actionLink, emailSent: emailRes.ok, ...(emailRes.ok ? {} : { emailError: emailRes.error }) },
+      { ok: true, email, role, companyIds: requestedCompanyIds, actionLink, emailSent: emailRes.ok, ...(emailRes.ok ? {} : { emailError: emailRes.error }) },
       { status: 200 },
     );
   } catch (err) {

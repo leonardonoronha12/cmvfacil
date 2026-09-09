@@ -889,7 +889,7 @@ export async function GET(req: NextRequest) {
         const p = profileById.get(mid) ?? {};
         const role = isAdminMemberRow(m) ? "Administrador" : "Colaborador";
         const nomeCompleto = String(p?.nome_completo ?? p?.nomeCompleto ?? "").trim() || String(p?.nome ?? "").trim() || String(p?.email ?? "").trim() || "—";
-        return { name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
+        return { userId: mid, name: nomeCompleto, email: String(p?.email ?? "").trim() || "—", role, joinedAt: "", avatarUrl: "" };
       });
 
       const membershipCompanyIds = Array.from(

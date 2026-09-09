@@ -131,9 +131,12 @@ export default function AjustesClient() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<"Administrador" | "Colaborador">("Colaborador");
+  const [inviteCompanyIds, setInviteCompanyIds] = useState<string[]>([]);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [memberSavingId, setMemberSavingId] = useState("");
+  const [memberError, setMemberError] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -898,6 +901,8 @@ export default function AjustesClient() {
                         setInviteLink("");
                         setInviteEmail("");
                         setInviteRole("Colaborador");
+                        const current = readMeFromStore();
+                        setInviteCompanyIds(current?.companyId ? [current.companyId] : []);
                         setInviteOpen(true);
                       }}
                     >
@@ -928,11 +933,22 @@ export default function AjustesClient() {
                             <option value="Administrador">Administrador</option>
                           </select>
                         </label>
+                        <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
+                          <legend style={{ fontSize: 13, fontWeight: 800, color: "#374151", marginBottom: 7 }}>Empresas que o colaborador poderá acessar</legend>
+                          <div style={{ display: "grid", gap: 7 }}>
+                            {(readMeFromStore()?.companies ?? []).filter((company) => company.role === "Administrador").map((company) => (
+                              <label key={company.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#374151" }}>
+                                <input type="checkbox" checked={inviteCompanyIds.includes(company.id)} onChange={(event) => setInviteCompanyIds((current) => event.target.checked ? Array.from(new Set([...current, company.id])) : current.filter((id) => id !== company.id))} />
+                                <span>{company.name}</span>
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
                         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                           <button
                             type="button"
                             className={styles.btnPrimary}
-                            disabled={inviteLoading || !inviteEmail.trim()}
+                            disabled={inviteLoading || !inviteEmail.trim() || inviteCompanyIds.length === 0}
                             onClick={async () => {
                               if (inviteLoading) return;
                               setInviteLoading(true);
@@ -942,7 +958,7 @@ export default function AjustesClient() {
                                 const res = await fetch("/api/company-members/invite", {
                                   method: "POST",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole }),
+                                  body: JSON.stringify({ email: inviteEmail.trim(), role: inviteRole, companyIds: inviteCompanyIds }),
                                 });
                                 const j = (await res.json().catch(() => null)) as any;
                                 if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "invite_failed"));
@@ -1024,10 +1040,37 @@ export default function AjustesClient() {
                           </div>
                         </div>
                         <div>{m.joinedAt || "—"}</div>
-                        <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                        <div>
+                          <select
+                            className={styles.memberRoleSelect}
+                            aria-label={`Permissão de ${m.name}`}
+                            value={m.role}
+                            disabled={!m.userId || memberSavingId === m.userId || m.role === "Administrador"}
+                            onChange={async (event) => {
+                              const role = event.target.value === "Administrador" ? "Administrador" : "Colaborador";
+                              setMemberSavingId(m.userId);
+                              setMemberError("");
+                              try {
+                                const current = readMeFromStore();
+                                const response = await fetch("/api/company-members", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ companyId: current?.companyId, targetUserId: m.userId, role }) });
+                                const data = await response.json().catch(() => null);
+                                if (!response.ok || !data?.ok) throw new Error(data?.error === "company_already_has_admin" ? "Esta empresa já possui um administrador." : String(data?.error ?? "Não foi possível alterar a permissão."));
+                                await loadMeFromApi();
+                              } catch (error) {
+                                setMemberError(error instanceof Error ? error.message : String(error));
+                              } finally {
+                                setMemberSavingId("");
+                              }
+                            }}
+                          >
+                            <option value="Colaborador">Colaborador</option>
+                            <option value="Administrador" disabled={members.some((member) => member.role === "Administrador" && member.userId !== m.userId)}>Administrador</option>
+                          </select>
+                        </div>
                       </div>
                     ))}
                   </div>
+                  {memberError ? <div style={{ marginTop: 10, color: "#b42318", fontSize: 13, fontWeight: 800 }}>{memberError}</div> : null}
                 </div>
               ) : null}
 
