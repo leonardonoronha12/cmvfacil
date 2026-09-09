@@ -155,6 +155,8 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/resetar-senha/") ||
     pathname === "/restaurar-senha" ||
     pathname.startsWith("/restaurar-senha/") ||
+    pathname === "/termos-de-uso" ||
+    pathname.startsWith("/termos-de-uso/") ||
     pathname === "/robots.txt" ||
     pathname === "/sitemap.xml" ||
     isPublicFile ||
@@ -169,6 +171,10 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/api/bubble-compat/") ||
     pathname.startsWith("/api/billing/") ||
     pathname.startsWith("/api/cron/") ||
+    pathname === "/api/admin/terms-v1-communication" ||
+    pathname === "/api/webhooks/resend" ||
+    pathname === "/api/webhooks/twilio/support" ||
+    pathname.startsWith("/api/support/attachment-link/") ||
     pathname === "/api/stripe/webhook"
   ) {
     return NextResponse.next();
