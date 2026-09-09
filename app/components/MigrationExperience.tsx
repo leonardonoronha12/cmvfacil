@@ -11,6 +11,28 @@ const HIDE_WELCOME_KEY = `cmvfacil:onboarding:hide-welcome:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
+function playSupportResolutionSound() {
+  try {
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextClass) return;
+    const context = new AudioContextClass();
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, context.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.18, context.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.55);
+    gain.connect(context.destination);
+    [660, 880].forEach((frequency, index) => {
+      const oscillator = context.createOscillator();
+      oscillator.type = "sine";
+      oscillator.frequency.value = frequency;
+      oscillator.connect(gain);
+      oscillator.start(context.currentTime + index * 0.14);
+      oscillator.stop(context.currentTime + 0.42 + index * 0.14);
+    });
+    window.setTimeout(() => void context.close(), 800);
+  } catch {}
+}
+
 function findTourTarget(target: { selector?: string; text?: string; tag?: string }) {
   const candidates = target.selector
     ? Array.from(document.querySelectorAll(target.selector))
@@ -267,6 +289,13 @@ export default function MigrationExperience() {
         if (fresh.length) {
           fresh.forEach(item => seenResolutionsRef.current.add(item.protocol));
           setLines(current => [...current, ...fresh.map(item => ({ from: "bot" as const, text: `O chamado ${item.protocol} foi solucionado pela equipe de suporte técnico. Por favor, teste novamente. Se o problema continuar, envie uma nova mensagem por aqui.` }))]);
+          const alreadyAlerted = new Set<string>(JSON.parse(localStorage.getItem("cmvfacil:support-resolutions-alerted") || "[]"));
+          const newAlerts = fresh.filter(item => !alreadyAlerted.has(item.protocol));
+          if (newAlerts.length) {
+            playSupportResolutionSound();
+            newAlerts.forEach(item => alreadyAlerted.add(item.protocol));
+            localStorage.setItem("cmvfacil:support-resolutions-alerted", JSON.stringify(Array.from(alreadyAlerted).slice(-100)));
+          }
         }
         setUnreadSupportCount(resolutions.filter(item => !acknowledged.has(item.protocol)).length);
       } catch {}

@@ -18,7 +18,11 @@ export async function POST(req: NextRequest) {
   if (clean(ticket.status).toLowerCase() !== "resolved") return NextResponse.json({ ok: false, error: "ticket_not_resolved" }, { status: 409 });
   const metadata = ticket.raw_metadata && typeof ticket.raw_metadata === "object" ? ticket.raw_metadata : {};
   const previous = metadata.resolutionNotification && typeof metadata.resolutionNotification === "object" ? metadata.resolutionNotification : {};
-  const email = clean(metadata.email);
+  let email = clean(metadata.email);
+  if (!email && ticket.user_id) {
+    const authUser = await db.auth.admin.getUserById(ticket.user_id);
+    email = clean(authUser.data.user?.email);
+  }
   let phone = clean(metadata.phone);
   if (!phone && ticket.company_id) {
     const company = await db.from("companies").select("phone_e164").eq("id", ticket.company_id).maybeSingle();
@@ -27,7 +31,9 @@ export async function POST(req: NextRequest) {
   const channels: Record<string, any> = { ...previous.channels };
   if (!channels.email?.accepted && email) {
     const sent = await sendSupportResolvedEmail({ to: email, protocol: ticket.protocol, idempotencyKey: `support-resolved-${ticket.id}` });
-    channels.email = sent.ok ? { accepted: true, emailId: sent.id || null, at: new Date().toISOString() } : { accepted: false, error: sent.error, at: new Date().toISOString() };
+    channels.email = sent.ok
+      ? { accepted: true, emailId: sent.id || null, recipient: email, at: new Date().toISOString() }
+      : { accepted: false, recipient: email, error: sent.error, at: new Date().toISOString() };
   }
   if (!channels.whatsapp?.accepted && phone) {
     const supabaseUrl = clean(process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL).replace(/\/+$/, "");
