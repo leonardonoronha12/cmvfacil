@@ -486,6 +486,7 @@
 
 .editModal {
   width: 640px;
+  overflow: visible;
 }
 
 .newModal {
@@ -693,6 +694,11 @@
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.12);
   padding: 10px 10px 8px;
   z-index: 80;
+}
+
+.editCalendarPopover {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .calendarHeader {

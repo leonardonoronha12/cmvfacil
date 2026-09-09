@@ -1895,7 +1895,8 @@ export default function EntradasClient() {
       return;
     }
     setEditingId(row.id);
-    setDraftFornecedor(displayFornecedorRow(row));
+    const fornecedorRaw = String(row.fornecedor ?? "").trim();
+    setDraftFornecedor(resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) || fornecedorRaw);
     setDraftDataLancamento(row.dataLancamento);
     const parsed = parseDateLabelLoose(row.dataLancamento) ?? new Date();
     setEditMonth(startOfMonth(parsed));
@@ -1917,8 +1918,15 @@ export default function EntradasClient() {
     }
     const base = rows.find((r) => r.id === id);
     if (!base) return;
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, dataLancamento } : r)));
-    void upsertEntradaToSupabase({ ...base, dataLancamento } as unknown as any).catch(() => {});
+    const fornecedor = draftFornecedor.trim();
+    if (!fornecedor) {
+      showToast("Selecione o fornecedor.", "error");
+      return;
+    }
+    const fornecedorNome = fornecedorOptions.find((opt) => opt.key === fornecedor)?.label || displayFornecedor(fornecedor);
+    const updated = { ...base, dataLancamento, fornecedor, fornecedorNome };
+    setRows((prev) => prev.map((r) => (r.id === id ? updated : r)));
+    void upsertEntradaToSupabase(updated as unknown as any).catch(() => {});
     setIsEditOpen(false);
     setEditingId(null);
     setIsEditCalendarOpen(false);
@@ -2778,8 +2786,13 @@ export default function EntradasClient() {
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Fornecedor</div>
-                  <select className={styles.formSelect} value={draftFornecedor} onChange={() => {}} disabled>
-                    <option value={draftFornecedor}>{draftFornecedor || "-"}</option>
+                  <select className={styles.formSelect} value={draftFornecedor} onChange={(e) => setDraftFornecedor(e.target.value)}>
+                    <option value="">Selecione</option>
+                    {fornecedorOptions.map((opt) => (
+                      <option key={opt.key} value={opt.key}>
+                        {opt.label}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -2804,7 +2817,7 @@ export default function EntradasClient() {
                     />
 
                     {isEditCalendarOpen ? (
-                      <div className={styles.calendarPopover} role="dialog" aria-label="Selecionar data">
+                      <div className={`${styles.calendarPopover} ${styles.editCalendarPopover}`} role="dialog" aria-label="Selecionar data">
                         <div className={styles.calendarHeader}>
                           <button type="button" className={styles.calNavBtn} aria-label="Mês anterior" onClick={() => setEditMonth((m) => addMonths(m, -1))}>
                             ◀
