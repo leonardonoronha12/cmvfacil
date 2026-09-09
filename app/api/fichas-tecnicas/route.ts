@@ -103,6 +103,103 @@ function formatSignedPercent1(value: number) {
   return `${sign}${formatPercentTrim(n, 1)}%`;
 }
 
+function normalizeName(value: unknown) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+async function hydrateMigratedIngredients(args: {
+  req: NextRequest;
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  userId: string;
+  rows: any[];
+}) {
+  const { req, supabase, userId, rows } = args;
+  if (!rows.length || !rows.some(row => !Array.isArray(row?.ingredientRows) || row.ingredientRows.length === 0)) return rows;
+
+  const activeCompany = String(req.cookies.get("cmv_active_company")?.value ?? "").trim();
+  const memberships = await supabase.from("company_members").select("company_id,role,permission_level").eq("user_id", userId).limit(50);
+  if (memberships.error) return rows;
+  const membershipRows = (memberships.data ?? []) as any[];
+  const companyId = membershipRows.some(row => String(row?.company_id ?? "") === activeCompany)
+    ? activeCompany
+    : pickBestCompanyId(membershipRows);
+  if (!companyId) return rows;
+
+  const recipesResult = await supabase
+    .from("items")
+    .select("id,bubble_id,name")
+    .eq("company_id", companyId)
+    .eq("item_receita", true)
+    .limit(10_000);
+  if (recipesResult.error || !(recipesResult.data ?? []).length) return rows;
+
+  const recipes = (recipesResult.data ?? []) as any[];
+  const recipeIds = recipes.map(row => String(row?.id ?? "").trim()).filter(Boolean);
+  const ingredientsResult = await supabase
+    .from("recipe_ingredients")
+    .select("id,bubble_id,recipe_item_id,ingredient_item_id,quantidade,custo,ingredient:items!recipe_ingredients_ingredient_item_id_fkey(id,bubble_id,name,unidade_medida,custo_medio)")
+    .eq("company_id", companyId)
+    .in("recipe_item_id", recipeIds)
+    .limit(20_000);
+  if (ingredientsResult.error || !(ingredientsResult.data ?? []).length) return rows;
+
+  const recipeByBubbleId = new Map<string, string>();
+  const recipeByName = new Map<string, string>();
+  for (const recipe of recipes) {
+    const id = String(recipe?.id ?? "").trim();
+    const bubbleId = String(recipe?.bubble_id ?? "").trim();
+    const name = normalizeName(recipe?.name);
+    if (id && bubbleId) recipeByBubbleId.set(bubbleId, id);
+    if (id && name) recipeByName.set(name, id);
+  }
+
+  const ingredientsByRecipe = new Map<string, any[]>();
+  for (const ingredient of (ingredientsResult.data ?? []) as any[]) {
+    const recipeId = String(ingredient?.recipe_item_id ?? "").trim();
+    if (!recipeId) continue;
+    const quantity = typeof ingredient?.quantidade === "number" ? ingredient.quantidade : Number(ingredient?.quantidade ?? 0) || 0;
+    const storedCost = typeof ingredient?.custo === "number" ? ingredient.custo : Number(ingredient?.custo ?? 0) || 0;
+    const unitCost = typeof ingredient?.ingredient?.custo_medio === "number" ? ingredient.ingredient.custo_medio : Number(ingredient?.ingredient?.custo_medio ?? 0) || 0;
+    const list = ingredientsByRecipe.get(recipeId) ?? [];
+    list.push({
+      id: String(ingredient?.bubble_id ?? "").trim() || String(ingredient?.id ?? "").trim(),
+      ingredientId: String(ingredient?.ingredient?.bubble_id ?? "").trim() || String(ingredient?.ingredient_item_id ?? "").trim(),
+      item: String(ingredient?.ingredient?.name ?? "Ingrediente").trim() || "Ingrediente",
+      quantidade: formatQty3(quantity),
+      unidade: String(ingredient?.ingredient?.unidade_medida ?? "Und").trim() || "Und",
+      custoTotal: storedCost > 0 ? storedCost : Math.max(0, quantity * unitCost),
+    });
+    ingredientsByRecipe.set(recipeId, list);
+  }
+
+  let recovered = 0;
+  const hydrated = rows.map(row => {
+    if (Array.isArray(row?.ingredientRows) && row.ingredientRows.length > 0) return row;
+    const rawId = String(row?.id ?? "").replace(/^db:/, "").trim();
+    const recipeId = recipeByBubbleId.get(rawId) || recipeByName.get(normalizeName(row?.receita)) || "";
+    const ingredientRows = ingredientsByRecipe.get(recipeId) ?? [];
+    if (!ingredientRows.length) return row;
+    recovered += 1;
+    return {
+      ...row,
+      ingredientRows,
+      ingredientsTotal: ingredientRows.reduce((total, ingredient) => total + Math.max(0, Number(ingredient.custoTotal) || 0), 0),
+    };
+  });
+
+  if (recovered > 0) {
+    try {
+      await supabase.from("fichas_tecnicas_state").upsert({ id: `user:${userId}`, payload: hydrated } as any, { onConflict: "id" });
+    } catch {}
+  }
+  return hydrated;
+}
+
 export async function GET(req: NextRequest) {
   try {
     const { accessToken, id, rawUserId } = resolveUserScopedId(req);
@@ -268,7 +365,9 @@ export async function GET(req: NextRequest) {
     const { data, error } = await supabase.from("fichas_tecnicas_state").select("*").eq("id", id).maybeSingle();
     if (error) return json({ error: error.message }, { status: 500 });
     const payload = (data as any)?.payload;
-    return json({ source: "legacy", readOnly: false, rows: Array.isArray(payload) ? payload : [] }, { status: 200 });
+    const rows = Array.isArray(payload) ? payload : [];
+    const hydratedRows = await hydrateMigratedIngredients({ req, supabase, userId, rows });
+    return json({ source: "legacy", readOnly: false, rows: hydratedRows }, { status: 200 });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }
