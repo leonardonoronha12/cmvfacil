@@ -65,12 +65,8 @@ export default function ConsolidadoClient() {
 
   return (
     <div className={styles.shell}>
-      <nav aria-label="Navegação global" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: "1px solid #dce7e5", background: "#fff", padding: "18px clamp(18px,4vw,56px)" }}>
-        <Link href="/selecionar-empresa" style={{ color: "#063e43", fontSize: 25, fontWeight: 900, textDecoration: "none" }}>cmv<span style={{ color: "#00a96f" }}>fácil</span></Link>
-        <Link href="/selecionar-empresa" style={{ border: "1px solid #cfe2de", borderRadius: 12, background: "#fff", padding: "10px 14px", color: "#076b5a", fontSize: 13, fontWeight: 800, textDecoration: "none" }}>← Escolher empresa</Link>
-      </nav>
-      <main className={styles.main} style={{ maxWidth: 1440, margin: "0 auto" }}>
-        <header className={styles.pageHeader}><div><p className={styles.eyebrow}>MULTIEMPRESA</p><h1>Visão consolidada</h1><p>Acompanhe todas as empresas que você administra em um só lugar.</p></div><button className={styles.tutorialButton} onClick={() => { setTourStep(0); setTourOpen(true); }}>🎓 Ver tutorial</button></header>
+      <main className={styles.main}>
+        <header className={styles.pageHeader}><div><p className={styles.eyebrow}>MULTIEMPRESA</p><h1>Visão consolidada</h1><p>Acompanhe todas as empresas que você administra em um só lugar.</p></div><div className={styles.headerActions}><Link href="/selecionar-empresa" className={styles.backButton}>← Escolher empresa</Link><button className={styles.tutorialButton} onClick={() => { setTourStep(0); setTourOpen(true); }}>🎓 Ver tutorial</button></div></header>
         {!data && !error ? <div className={styles.loading}><LoadingSpinner /><strong>Reunindo os dados das suas empresas…</strong></div> : null}
         {error ? <div className={styles.error}>{error}</div> : null}
         {data ? <>
@@ -99,4 +95,3 @@ export default function ConsolidadoClient() {
     </div>
   );
 }
-
