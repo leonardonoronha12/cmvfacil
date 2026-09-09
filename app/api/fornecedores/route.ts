@@ -972,17 +972,20 @@ export async function POST(req: NextRequest) {
 
       const desiredByKey = new Map<string, { company_id: string; supplier_id: string; item_id: string }>();
       const missing: string[] = [];
+      const resolvedProductsBySupplier = new Map<string, string[]>();
       for (const [supplierId, produtos] of supplierProductsById.entries()) {
-        if (!produtos.length) continue;
+        const resolvedProducts: string[] = [];
         for (const nome of produtos) {
           const itemId = itemIdByKey.get(normalizeLookupKey(nome)) ?? "";
           if (!itemId) {
             if (missing.length < 12) missing.push(nome);
             continue;
           }
+          resolvedProducts.push(nome);
           const k = `${supplierId}:${itemId}`;
           if (!desiredByKey.has(k)) desiredByKey.set(k, { company_id: companyId, supplier_id: supplierId, item_id: itemId });
         }
+        resolvedProductsBySupplier.set(supplierId, resolvedProducts);
       }
       const desiredRows = Array.from(desiredByKey.values());
 
@@ -1005,14 +1008,30 @@ export async function POST(req: NextRequest) {
       });
       // #endregion
 
+      // Supplier product names can outlive an item that was renamed or removed.
+      // A stale reference must not make the whole supplier form impossible to
+      // save. Keep only links that still resolve in this company's catalog and
+      // clean the persisted product list so the stale name does not return.
       if (missing.length) {
-        return errJson({
-          status: 400,
-          traceId,
-          stage: "compat.items_not_found",
-          error: `items_not_found: ${missing.join(" | ")}`,
-          source: "compat",
-        });
+        const supplierIds = Array.from(resolvedProductsBySupplier.keys());
+        const { data: rawRows, error: rawRowsErr } = await supabase
+          .from("suppliers")
+          .select("id,raw")
+          .eq("company_id", companyId)
+          .in("id", supplierIds);
+        if (rawRowsErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_stale_products_select", error: rawRowsErr.message, source: "compat" });
+        for (const row of rawRows ?? []) {
+          const supplierId = String((row as any)?.id ?? "").trim();
+          if (!supplierId) continue;
+          const produtos = resolvedProductsBySupplier.get(supplierId) ?? [];
+          const nextRaw = normalizeFornecedoresRaw((row as any)?.raw, { produtos });
+          const { error: cleanErr } = await supabase
+            .from("suppliers")
+            .update({ raw: nextRaw } as any)
+            .eq("company_id", companyId)
+            .eq("id", supplierId);
+          if (cleanErr) return errJson({ status: 500, traceId, stage: "compat.suppliers_stale_products_cleanup", error: cleanErr.message, source: "compat" });
+        }
       }
 
       const supplierIdsToClear = supplierIdsForSync.filter((sid) => !(supplierProductsById.get(sid)?.length ?? 0));
