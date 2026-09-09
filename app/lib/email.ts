@@ -74,6 +74,52 @@ export async function sendWelcomeEmail(args: {
   return { ok: true, ...(id ? { id } : {}) };
 }
 
+export async function sendSubscriptionWelcomeEmail(args: {
+  to: string;
+  firstName?: string | null;
+  planLabel?: string | null;
+  idempotencyKey: string;
+}): Promise<SendEmailResult> {
+  const to = safeEmail(args.to);
+  if (!to) return { ok: false, error: "invalid_to_email" };
+
+  const apiKey = env("RESEND_API_KEY");
+  const from = env("CMV_EMAIL_FROM") || env("RESEND_FROM");
+  if (!apiKey || !from) return { ok: false, error: "email_not_configured" };
+
+  const first = firstWord(String(args.firstName ?? "")) || "Olá";
+  const plan = String(args.planLabel ?? "").trim();
+  const groupUrl = "https://chat.whatsapp.com/GKDXZb8Usai7jL8mKK96bA";
+  const subject = "Bem-vindo ao seu plano CMV Fácil";
+  const planText = plan ? ` Seu plano ${plan} já está ativo.` : " Sua assinatura já está ativa.";
+  const html = `
+    <div style="font-family: Arial, Helvetica, sans-serif; line-height: 1.5; color: #111827;">
+      <h2 style="margin: 0 0 12px;">${first}, seja bem-vindo ao CMV Fácil!</h2>
+      <p style="margin: 0 0 12px;">Pagamento confirmado.${planText}</p>
+      <p style="margin: 0 0 16px;">Entre no grupo exclusivo de clientes para receber avisos, novidades e orientações da equipe:</p>
+      <p style="margin: 0 0 16px;">
+        <a href="${groupUrl}" style="display:inline-block;background:#16a34a;color:#fff;padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:700;">Entrar no grupo do WhatsApp</a>
+      </p>
+      <p style="margin:0;color:#6b7280;font-size:12px;">Se o botão não abrir, copie este link: ${groupUrl}</p>
+    </div>
+  `.trim();
+  const text = `${first}, seja bem-vindo ao CMV Fácil!\n\nPagamento confirmado.${planText}\n\nEntre no grupo exclusivo de clientes:\n${groupUrl}`;
+
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json",
+      "Idempotency-Key": String(args.idempotencyKey).slice(0, 256),
+    },
+    body: JSON.stringify({ from, to, subject, html, text }),
+  });
+  const j = (await res.json().catch(() => null)) as any;
+  if (!res.ok) return { ok: false, error: `email_send_failed:${String(j?.message ?? j?.error ?? "send_failed").trim()}` };
+  const id = String(j?.id ?? "").trim();
+  return { ok: true, ...(id ? { id } : {}) };
+}
+
 export async function sendCompanyInviteEmail(args: {
   to: string;
   companyName: string;

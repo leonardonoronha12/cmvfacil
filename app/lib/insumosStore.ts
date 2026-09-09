@@ -8,6 +8,7 @@ export type InsumoStoreItem = {
   categoria?: string;
   especificacao?: string;
   ocultar?: boolean;
+  operationalImageUrl?: string;
 };
 
 const EVENT_NAME = "cmvfacil:insumos";
@@ -26,6 +27,7 @@ function normalizeRows(input: unknown): InsumoStoreItem[] {
     const especificacao = String(row.especificacao ?? "").trim();
     const ocultarRaw = row.ocultar;
     const ocultar = typeof ocultarRaw === "boolean" ? ocultarRaw : undefined;
+    const operationalImageUrl = String(row.operationalImageUrl ?? "").trim();
     out.push({
       id: String(row.id ?? out.length + 1),
       item,
@@ -34,6 +36,7 @@ function normalizeRows(input: unknown): InsumoStoreItem[] {
       categoria: categoria || undefined,
       especificacao: especificacao || undefined,
       ocultar,
+      operationalImageUrl: operationalImageUrl || undefined,
     });
   }
   return out;

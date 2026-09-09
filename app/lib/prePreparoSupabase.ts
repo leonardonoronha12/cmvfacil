@@ -91,3 +91,23 @@ export async function savePrePreparoToSupabase(rows: PrePreparoStoreRow[]) {
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
   if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_save_${res.status}`);
 }
+
+export async function loadLivePrePreparoDetails(itemId: string) {
+  const res = await fetch("/api/bubble-live/pre-preparo-ingredients", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ itemId }),
+    cache: "no-store",
+  });
+  const json = (await res.json().catch(() => null)) as {
+    ok?: boolean;
+    modoPreparo?: string | null;
+    ingredientes?: Array<{ id: string; item: string; quantidade: string; unidade: string; custoCents: number }>;
+    error?: string;
+  } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || `failed_to_load_live_details_${res.status}`);
+  return {
+    modoPreparo: String(json.modoPreparo ?? "").trim(),
+    ingredientes: Array.isArray(json.ingredientes) ? json.ingredientes : [],
+  };
+}

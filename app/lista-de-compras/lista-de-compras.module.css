@@ -624,8 +624,22 @@
 }
 
 .itemNameLink {
+  display: inline-block;
+  color: #007f5f;
   text-decoration: none;
   cursor: pointer;
+}
+
+.itemNameLink:hover,
+.itemNameLink:focus-visible {
+  color: #005c47;
+  text-decoration: underline;
+}
+
+.itemNameLink:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid rgba(0, 127, 95, 0.3);
+  outline-offset: 2px;
 }
 
 .itemMeta {

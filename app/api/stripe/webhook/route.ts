@@ -4,6 +4,7 @@ import { getSupabaseAdmin } from "../../../lib/supabaseAdmin";
 import { planKeyFromPriceId, updateCompanyFromSubscription } from "../../../lib/billing";
 import { getStripe } from "../../../lib/stripeServer";
 import { getSupabaseAuthConfig } from "../../../lib/supabaseAuthConfig";
+import { sendSubscriptionWelcomeEmail } from "../../../lib/email";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -502,6 +503,17 @@ export async function POST(req: NextRequest) {
         planKey,
         origin,
       });
+      const subscriptionEmail = asString(session?.customer_details?.email) || asString(session?.customer_email);
+      if (subscriptionEmail) {
+        const customerName = asString(session?.customer_details?.name) || "";
+        const welcome = await sendSubscriptionWelcomeEmail({
+          to: subscriptionEmail,
+          firstName: customerName,
+          planLabel: planKey === "pro_yearly" ? "PRO Anual" : planKey === "pro_monthly" ? "PRO Mensal" : null,
+          idempotencyKey: `cmv-subscription-welcome-${subscriptionId || sessionId || event.id}`,
+        });
+        if (!welcome.ok) console.error("subscription_welcome_email_failed", welcome.error);
+      }
       await bumpEventMarker({ supabase, companyId: company.id, event });
       await updateWebhookEvent({ supabase, eventId: event.id, patch: { status: "processed" } });
       return json({ ok: true }, { status: 200 });

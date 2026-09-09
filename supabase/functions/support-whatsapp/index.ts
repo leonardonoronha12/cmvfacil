@@ -17,18 +17,27 @@ function whatsapp(value: string) {
   return normalized.toLowerCase().startsWith("whatsapp:") ? normalized : `whatsapp:${normalized}`;
 }
 
+function xml(message = "") {
+  const escaped = message.replace(/[<>&'\"]/g, (char) => ({
+    "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '\"': "&quot;",
+  })[char]!);
+  return new Response(`<?xml version="1.0" encoding="UTF-8"?><Response>${escaped ? `<Message>${escaped}</Message>` : ""}</Response>`, {
+    status: 200,
+    headers: { "content-type": "text/xml; charset=utf-8", "cache-control": "no-store" },
+  });
+}
+
+function actionFrom(value: string) {
+  const normalized = value.toLocaleLowerCase("pt-BR");
+  if (normalized.includes("support_resolved") || normalized.includes("chamado solucionado")) return "resolved";
+  if (normalized.includes("support_developer") || normalized.includes("enviar desenvolvedor")) return "developer";
+  return "";
+}
+
 serve(async (req) => {
   if (req.method !== "POST") return json({ ok: false, error: "method_not_allowed" }, 405);
 
-  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   const supabaseUrl = (Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "");
-  if (!supabaseUrl || !bearer) return json({ ok: false, error: "unauthorized" }, 401);
-
-  const authCheck = await fetch(`${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1`, {
-    headers: { authorization: `Bearer ${bearer}`, apikey: bearer },
-  }).catch(() => null);
-  if (!authCheck?.ok) return json({ ok: false, error: "unauthorized" }, 401);
-
   const accountSid = (Deno.env.get("TWILIO_ACCOUNT_SID") ?? "").trim();
   const authToken = (Deno.env.get("TWILIO_AUTH_TOKEN") ?? "").trim();
   const from = (Deno.env.get("TWILIO_WHATSAPP_FROM") ?? "").trim();
@@ -36,6 +45,96 @@ serve(async (req) => {
   if (!accountSid || !authToken || !from || !to) {
     return json({ ok: false, error: "twilio_not_configured" }, 500);
   }
+
+  // Twilio posts quick-reply clicks as form data. This branch is public because
+  // Twilio cannot send a Supabase JWT, so every event is independently verified
+  // against Twilio's REST API before any database change or outbound message.
+  const contentType = req.headers.get("content-type") ?? "";
+  if (contentType.includes("application/x-www-form-urlencoded")) {
+    const form = new URLSearchParams(await req.text());
+    const messageSid = String(form.get("MessageSid") || form.get("SmsSid") || "").trim();
+    const originalSid = String(form.get("OriginalRepliedMessageSid") || "").trim();
+    const body = String(form.get("ButtonPayload") || form.get("Body") || "").trim();
+    const action = actionFrom(body);
+    if (!/^SM[a-f0-9]{32}$/i.test(messageSid) || !action) return xml();
+
+    const verifiedResponse = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages/${encodeURIComponent(messageSid)}.json`,
+      { headers: { authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`, accept: "application/json" } },
+    ).catch(() => null);
+    const verified = verifiedResponse ? await verifiedResponse.json().catch(() => ({})) : {};
+    if (!verifiedResponse?.ok || String(verified?.direction ?? "") !== "inbound" ||
+        String(verified?.from ?? "") !== whatsapp(to) || String(verified?.to ?? "") !== whatsapp(from)) {
+      return xml();
+    }
+
+    const serviceRole = (Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "").trim();
+    if (!supabaseUrl || !serviceRole || !originalSid) {
+      return xml("Não foi possível identificar o chamado deste botão. Abra a mensagem original e tente novamente.");
+    }
+    const dbHeaders = { authorization: `Bearer ${serviceRole}`, apikey: serviceRole, "content-type": "application/json" };
+    const receiptsResponse = await fetch(
+      `${supabaseUrl}/rest/v1/support_delivery_receipts?provider=eq.twilio&provider_message_id=eq.${encodeURIComponent(originalSid)}&select=ticket_id&limit=1`,
+      { headers: dbHeaders },
+    );
+    const receipts = await receiptsResponse.json().catch(() => []);
+    const ticketId = String(receipts?.[0]?.ticket_id ?? "");
+    if (!receiptsResponse.ok || !ticketId) return xml("Chamado não encontrado para esta mensagem.");
+
+    const ticketResponse = await fetch(
+      `${supabaseUrl}/rest/v1/support_tickets?id=eq.${encodeURIComponent(ticketId)}&select=id,protocol,company_id,status,message,page,raw_metadata&limit=1`,
+      { headers: dbHeaders },
+    );
+    const tickets = await ticketResponse.json().catch(() => []);
+    const ticket = tickets?.[0];
+    if (!ticketResponse.ok || !ticket) return xml("Chamado não encontrado.");
+    const protocol = String(ticket.protocol ?? "").trim();
+
+    if (action === "resolved") {
+      if (String(ticket.status ?? "").toLowerCase() !== "resolved") {
+        const metadata = ticket.raw_metadata && typeof ticket.raw_metadata === "object" ? ticket.raw_metadata : {};
+        const updated = await fetch(`${supabaseUrl}/rest/v1/support_tickets?id=eq.${encodeURIComponent(ticketId)}`, {
+          method: "PATCH",
+          headers: { ...dbHeaders, prefer: "return=minimal" },
+          body: JSON.stringify({ status: "resolved", raw_metadata: { ...metadata, resolvedAt: new Date().toISOString(), resolvedBy: verified.from, resolvedVia: "twilio_button" } }),
+        });
+        if (!updated.ok) return xml("Não foi possível atualizar o chamado agora. Tente novamente.");
+      }
+      return xml(`Chamado ${protocol} marcado como solucionado.`);
+    }
+
+    const variables = {
+      "1": protocol,
+      "2": String(ticket.raw_metadata?.email ?? "Não identificado"),
+      "3": String(ticket.company_id ?? "Não identificada"),
+      "4": String(ticket.page ?? "/"),
+      "5": `ENCAMINHADO AO DESENVOLVEDOR — ${String(ticket.message ?? "")}`,
+    };
+    const outbound = new URLSearchParams({
+      From: whatsapp(from), To: whatsapp("+5521988945647"), ContentSid: SUPPORT_CONTENT_SID,
+      ContentVariables: JSON.stringify(variables),
+    });
+    const sentResponse = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages.json`, {
+      method: "POST",
+      headers: { authorization: `Basic ${btoa(`${accountSid}:${authToken}`)}`, "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
+      body: outbound.toString(),
+    });
+    const sent = await sentResponse.json().catch(() => ({}));
+    if (!sentResponse.ok || !sent?.sid) return xml("Não foi possível encaminhar ao desenvolvedor agora. Tente novamente.");
+    await fetch(`${supabaseUrl}/rest/v1/support_delivery_receipts?on_conflict=provider,provider_message_id`, {
+      method: "POST",
+      headers: { ...dbHeaders, prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ ticket_id: ticketId, provider: "twilio-developer", provider_message_id: sent.sid, status: sent.status || "accepted", evidence: { sourceMessageSid: messageSid, originalMessageSid: originalSid, forwardedAt: new Date().toISOString() } }),
+    });
+    return xml(`Chamado ${protocol} encaminhado ao desenvolvedor.`);
+  }
+
+  const bearer = (req.headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
+  if (!supabaseUrl || !bearer) return json({ ok: false, error: "unauthorized" }, 401);
+  const authCheck = await fetch(`${supabaseUrl}/auth/v1/admin/users?page=1&per_page=1`, {
+    headers: { authorization: `Bearer ${bearer}`, apikey: bearer },
+  }).catch(() => null);
+  if (!authCheck?.ok) return json({ ok: false, error: "unauthorized" }, 401);
 
   const payload = await req.json().catch(() => null) as {
     action?: unknown;

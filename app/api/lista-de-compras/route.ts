@@ -707,6 +707,40 @@ export async function GET(req: NextRequest) {
         if (subtotal) entradasSubtotalByItemId.set(itemId, (entradasSubtotalByItemId.get(itemId) ?? 0) + subtotal);
       }
 
+      const [{ data: internalRows, error: internalErr }, { data: wasteRows, error: wasteErr }] =
+        startDate && endDate
+          ? await Promise.all([
+              supabaseServer
+                .from("internal_consumptions")
+                .select("item_id,quantity")
+                .eq("company_id", companyId)
+                .gte("occurred_on", startDate)
+                .lte("occurred_on", endDate)
+                .limit(50_000),
+              supabaseServer
+                .from("wastes")
+                .select("item_id,quantidade")
+                .eq("company_id", companyId)
+                .gte("lancamento", startDate)
+                .lte("lancamento", endDate)
+                .limit(50_000),
+            ])
+          : [{ data: [], error: null as any }, { data: [], error: null as any }];
+      if (internalErr) return json({ ok: false, error: internalErr.message, source: "compat", readOnly: true }, { status: 500 });
+      if (wasteErr) return json({ ok: false, error: wasteErr.message, source: "compat", readOnly: true }, { status: 500 });
+      const internalByItemId = new Map<string, number>();
+      const wasteByItemId = new Map<string, number>();
+      for (const row of (internalRows ?? []) as any[]) {
+        const itemId = String(row?.item_id ?? "").trim();
+        if (!itemId) continue;
+        internalByItemId.set(itemId, (internalByItemId.get(itemId) ?? 0) + parseNumber(row?.quantity));
+      }
+      for (const row of (wasteRows ?? []) as any[]) {
+        const itemId = String(row?.item_id ?? "").trim();
+        if (!itemId) continue;
+        wasteByItemId.set(itemId, (wasteByItemId.get(itemId) ?? 0) + parseNumber(row?.quantidade));
+      }
+
       const { data: itemsRows, error: itemsErr } = await supabaseServer
         .from("items")
         .select("id,bubble_id,name,unidade_medida,custo_medio,category_id,item_receita")
@@ -923,6 +957,8 @@ export async function GET(req: NextRequest) {
           const legacyEstoqueAtual = nameKey ? legacyEndQtyByNameKey.get(nameKey) ?? 0 : 0;
           const estoqueAtualResolved = estoqueAtual !== 0 ? estoqueAtual : legacyEstoqueAtual;
           const entradas = entradasByItemId.get(itemId) ?? 0;
+          const consumoInterno = internalByItemId.get(itemId) ?? 0;
+          const desperdicios = wasteByItemId.get(itemId) ?? 0;
 
           const saidas = estoqueInicialResolved + (entradas - estoqueAtualResolved);
           const consumoDiario = diasCorridosBubble > 0 ? saidas / diasCorridosBubble : 0;
@@ -977,6 +1013,8 @@ export async function GET(req: NextRequest) {
               estoqueAtual: estoqueAtualResolved,
               entradas,
               saidas,
+              consumoInterno,
+              desperdicios,
               consumoDiario,
               consumoDiasManter,
               consumoPrazoFornecedor,

@@ -480,7 +480,7 @@ export async function GET(req: NextRequest) {
 
       const { data: itemsDbRaw, error: itemsErr } = await db
         .from("items")
-        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio")
+        .select("id,bubble_id,name,unidade_medida,custo_medio,descricao,ocultar_cmv,category_id,item_receita,item_do_cardapio,operational_image_url")
         .eq("company_id", companyId)
         .or("item_receita.is.null,item_receita.eq.false")
         .order("name", { ascending: true });
@@ -526,6 +526,7 @@ export async function GET(req: NextRequest) {
             custoMedio: custoLabel || undefined,
             categoria: categoria || undefined,
             especificacao: String(r?.descricao ?? "").trim() || undefined,
+            operationalImageUrl: String(r?.operational_image_url ?? "").trim() || undefined,
             ocultar: typeof r?.ocultar_cmv === "boolean" ? Boolean(r.ocultar_cmv) : undefined,
             flags: { item_receita: Boolean(r?.item_receita), item_do_cardapio: Boolean(r?.item_do_cardapio) },
             bubble: { bubble_id: bubbleId || undefined },

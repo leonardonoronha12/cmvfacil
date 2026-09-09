@@ -2263,26 +2263,6 @@ export default function FichasTecnicasClient({
         <main className={dash.content}>
           <div className={styles.pageFrameWide}>
             <QaModePanel screen="fichas-tecnicas" ui={qaUi} />
-              <div
-                style={{
-                  marginTop: 10,
-                  marginBottom: 14,
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  background: "#eef6ff",
-                  border: "1px solid #cfe6ff",
-                  color: "#1b3a57",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  display: "flex",
-                  justifyContent: "flex-end",
-                  gap: 12,
-                  flexWrap: "wrap",
-                }}
-              >
-                <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-              </div>
-
               <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 14, alignItems: "start" }}>
                 <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 900, color: "#01040e", marginBottom: 10 }}>{`Fichas (${compatRecipes.length})`}</div>
@@ -2798,27 +2778,6 @@ export default function FichasTecnicasClient({
             </section>
           ) : (
             <>
-          {isCompatSource ? (
-            <div
-              style={{
-                marginTop: 10,
-                marginBottom: 14,
-                padding: "10px 12px",
-                borderRadius: 12,
-                background: "#eef6ff",
-                border: "1px solid #cfe6ff",
-                color: "#1b3a57",
-                fontSize: 13,
-                fontWeight: 700,
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-            </div>
-          ) : null}
           <section className={styles.headerRow}>
             <div className={styles.titleWrap}>
               <span className={styles.titleIcon}>

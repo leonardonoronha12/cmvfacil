@@ -13,3 +13,11 @@
 @media(max-width:900px){.coach{top:10px!important;bottom:auto!important;max-height:calc(100vh - 20px)!important}}
 .coachHeader{cursor:grab;touch-action:none;user-select:none}.coachHeader:active{cursor:grabbing}
 
+.hideWelcome{display:inline-flex;align-items:center;gap:8px;color:#315b5b;font-size:14px;font-weight:700;cursor:pointer}.hideWelcome input{width:18px;height:18px;accent-color:#00b978;cursor:pointer}
+/* Preserve a clear bottom lane for table pagination and sticky footers. */
+@media (min-width: 761px) {
+  .chat {
+    bottom: 82px;
+    max-height: calc(100vh - 110px);
+  }
+}

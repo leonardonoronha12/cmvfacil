@@ -35,6 +35,7 @@ function normalizeItem(input: unknown): InsumoStoreItem | null {
     categoria: String(r.categoria ?? "").trim() || undefined,
     especificacao: String(r.especificacao ?? "").trim() || undefined,
     ocultar: typeof r.ocultar === "boolean" ? (r.ocultar as boolean) : undefined,
+    operationalImageUrl: String(r.operationalImageUrl ?? "").trim() || undefined,
   };
 }
 

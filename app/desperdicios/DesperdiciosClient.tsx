@@ -274,7 +274,7 @@ function formatDateNumericPT(d: Date) {
 
 function supabaseErrorMessage(err: unknown, action: "salvar" | "carregar" | "excluir") {
   const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
-  const base = action === "carregar" ? "Não foi possível carregar do Supabase." : action === "excluir" ? "Não foi possível excluir no Supabase." : "Não foi possível salvar no Supabase.";
+  const base = action === "carregar" ? "Não foi possível carregar os dados." : action === "excluir" ? "Não foi possível excluir o registro." : "Não foi possível salvar os dados.";
   if (!msg) return base;
   if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
   if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
@@ -1823,26 +1823,6 @@ export default function DesperdiciosClient({
 
         {isCompatSource ? (
           <>
-            <div
-              style={{
-                marginTop: 10,
-                marginBottom: 14,
-                padding: "10px 12px",
-                borderRadius: 12,
-                background: "#eef6ff",
-                border: "1px solid #cfe6ff",
-                color: "#1b3a57",
-                fontSize: 13,
-                fontWeight: 700,
-                display: "flex",
-                justifyContent: "flex-end",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-            </div>
-
             <section className={styles.tableCard} style={{ position: "relative" }} data-qa-grid="desperdicios">
               {isLoadingTable ? (
                 <div className={dash.loadingOverlay}>

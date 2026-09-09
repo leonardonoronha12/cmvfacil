@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import dash from "../dashboard/dashboard.module.css";
 import LoadingSpinner from "../components/LoadingSpinner";
 import SystemToast from "../components/SystemToast";
+import InvoiceLocalReader from "../components/InvoiceLocalReader";
 import useCappedLoading from "../components/useCappedLoading";
 import usePagination from "../components/usePagination";
 import {
@@ -692,6 +693,8 @@ export default function EntradasClient() {
   const [isBulkDeleteOpen, setIsBulkDeleteOpen] = useState(false);
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
+  const [isInvoiceReaderOpen, setIsInvoiceReaderOpen] = useState(false);
+  const [pendingInvoiceItems, setPendingInvoiceItems] = useState<Array<{ description: string; quantity: string; unit: string; value: string }>>([]);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState<{ current: number; total: number; stage: string } | null>(null);
@@ -1560,6 +1563,7 @@ export default function EntradasClient() {
       return;
     }
     setNewFornecedor("");
+    setPendingInvoiceItems([]);
     setNewDataReceb(formatDateLabelPT(new Date()));
     setIsRecebCalendarOpen(false);
     setRecebMonth(startOfMonth(new Date()));
@@ -1598,6 +1602,23 @@ export default function EntradasClient() {
       try {
         const id = await buildUserScopedId(String(Date.now()));
         const fornecedorKey = resolveFornecedorKey(fornecedor, fornecedorInfoMap);
+        const recognizedItems: NotaItem[] = pendingInvoiceItems
+          .map((item, index) => {
+            const quantity = parsePtNumber(item.quantity);
+            const subtotalCents = parseBrlToCents(item.value);
+            const unit = item.unit.trim() || "Und";
+            if (!item.description.trim() || quantity <= 0 || subtotalCents <= 0) return null;
+            const unitCost = subtotalCents / 100 / quantity;
+            return {
+              id: `${Date.now()}-${index}`,
+              nome: normalizeNotaItemName(item.description),
+              quantidadeLabel: `${item.quantity}${unit}`,
+              subtotalLabel: formatBrlFromCents(subtotalCents),
+              custoUnitarioLabel: `R$${formatPtNumber(unitCost, 3)}/${unit}`,
+            } satisfies NotaItem;
+          })
+          .filter((item): item is NotaItem => Boolean(item));
+        const recognizedTotal = recognizedItems.reduce((sum, item) => sum + parseBrlToCents(item.subtotalLabel), 0);
         __dbgSend(
           "h3",
           "app/entradas/EntradasClient.tsx:confirmNew",
@@ -1618,13 +1639,14 @@ export default function EntradasClient() {
           numero,
           dataLancamento: dataReceb,
           fornecedor: fornecedorKey || fornecedor.toUpperCase(),
-          valorNota: "R$0,00",
-          itens: "0 Itens",
+          valorNota: formatBrlFromCents(recognizedTotal),
+          itens: `${recognizedItems.length} ${recognizedItems.length === 1 ? "Item" : "Itens"}`,
           responsavel: "",
           dataCriacao: formatDateLabelPT(now),
-          itensNota: [],
+          itensNota: recognizedItems,
         };
         setRows((prev) => [newRow, ...prev]);
+        setPendingInvoiceItems([]);
         setIsNewOpen(false);
         openDetailsModal(newRow);
         setIsCreatingNota(true);
@@ -1738,7 +1760,7 @@ export default function EntradasClient() {
       } catch {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
-          showToast("Não foi possível carregar fornecedores do Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+          showToast("Não foi possível carregar os fornecedores. Atualize a página e tente novamente.", "error", 9000);
         }
       }
 
@@ -1769,7 +1791,7 @@ export default function EntradasClient() {
       void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar fornecedores no Supabase. Verifique login e se a tabela fornecedores_state existe (/setup-supabase).", "error", 9000);
+        showToast("Não foi possível salvar os fornecedores. Tente novamente.", "error", 9000);
       });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
@@ -2165,6 +2187,29 @@ export default function EntradasClient() {
           )
         : null}
 
+      {isMounted && isInvoiceReaderOpen
+        ? createPortal(
+            <InvoiceLocalReader
+              onClose={() => setIsInvoiceReaderOpen(false)}
+              onUse={(invoice) => {
+                setNewFornecedor(invoice.supplier);
+                if (invoice.date) setNewDataReceb(invoice.date);
+                setPendingInvoiceItems(invoice.items);
+                window.sessionStorage.setItem("cmvfacil:invoice-reader:last", JSON.stringify(invoice));
+                setIsInvoiceReaderOpen(false);
+                setIsNewOpen(true);
+                showToast(
+                  invoice.items.length
+                    ? `${invoice.items.length} item(ns) reconhecido(s). Confira os dados antes de salvar.`
+                    : "Fornecedor e data preenchidos. Inclua e confira os itens antes de salvar.",
+                  "success",
+                );
+              }}
+            />,
+            document.body,
+          )
+        : null}
+
       <main className={dash.content}>
         <div className={dash.pageFrame}>
           {!canRender ? (
@@ -2191,28 +2236,6 @@ export default function EntradasClient() {
                   </p>
                 </div>
               </section>
-
-              {isCompatSource ? (
-                <div
-                  style={{
-                    marginTop: 10,
-                    marginBottom: 14,
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    background: "#eef6ff",
-                    border: "1px solid #cfe6ff",
-                    color: "#1b3a57",
-                    fontSize: 13,
-                    fontWeight: 700,
-                    display: "flex",
-                    justifyContent: "flex-end",
-                    gap: 12,
-                    flexWrap: "wrap",
-                  }}
-                >
-                  <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-                </div>
-              ) : null}
 
         <section className={styles.toolbar}>
           <div className={styles.search}>
@@ -2471,6 +2494,14 @@ export default function EntradasClient() {
               </>
             ) : (
               <>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  disabled={isReadOnly}
+                  onClick={() => setIsInvoiceReaderOpen(true)}
+                >
+                  Ler foto/PDF
+                </button>
                 <button
                   type="button"
                   className={styles.secondaryBtn}
@@ -2738,6 +2769,12 @@ export default function EntradasClient() {
                   </div>
                   <div className={styles.noticeText}>Crie uma nota para adicionar a lista de itens adquiridos.</div>
                 </div>
+                {pendingInvoiceItems.length ? (
+                  <div className={styles.notice} role="status">
+                    <div className={styles.noticeIcon} aria-hidden>✓</div>
+                    <div className={styles.noticeText}>{pendingInvoiceItems.length} item(ns) revisado(s) serão incluídos na nota. Você poderá editar ou remover cada item antes de finalizar.</div>
+                  </div>
+                ) : null}
 
                 <div className={styles.formField}>
                   <div className={styles.formLabel}>Fornecedor</div>

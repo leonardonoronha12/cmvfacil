@@ -411,6 +411,7 @@ export default function FornecedoresClient() {
   const [isDeleteOpen, setIsDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleteName, setDeleteName] = useState("");
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
 
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [dragOver, setDragOver] = useState(false);
@@ -509,7 +510,7 @@ export default function FornecedoresClient() {
         if (!fornecedoresLoadErrorShownRef.current) {
           fornecedoresLoadErrorShownRef.current = true;
           const msg = err instanceof Error ? err.message : String(err ?? "");
-          showToast(`Não foi possível carregar fornecedores do Supabase. ${msg || ""}`.trim(), "error", 9000);
+          showToast(`Não foi possível carregar os fornecedores. ${msg || ""}`.trim(), "error", 9000);
         }
       }
 
@@ -542,7 +543,7 @@ export default function FornecedoresClient() {
         if (fornecedoresSaveErrorShownRef.current) return;
         fornecedoresSaveErrorShownRef.current = true;
         const msg = err instanceof Error ? err.message : String(err ?? "");
-        showToast(`Não foi possível salvar fornecedores no Supabase. ${msg || ""}`.trim(), "error", 9000);
+        showToast(`Não foi possível salvar os fornecedores. ${msg || ""}`.trim(), "error", 9000);
       });
     }, 450);
   }, [equivalenciasMap, infoMap, isReadOnly, produtosMap]);
@@ -666,8 +667,7 @@ export default function FornecedoresClient() {
   const suggestions = useMemo(() => {
     const list = insumosStore.map((i) => i.item);
     const q = produtoQuery.trim().toLowerCase();
-    const filtered = q ? list.filter((n) => n.toLowerCase().includes(q)) : list;
-    return filtered.slice(0, 8);
+    return q ? list.filter((n) => n.toLowerCase().includes(q)) : list;
   }, [insumosStore, produtoQuery]);
 
   function openVinculacao(name: string) {
@@ -1035,6 +1035,47 @@ export default function FornecedoresClient() {
     void saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq }).catch(() => showToast("Erro ao salvar no banco de dados.", "error"));
   }
 
+  async function deleteVisibleSuppliers() {
+    if (isReadOnly || isBulkDeleting || !visibleRows.length) return;
+    const total = visibleRows.length;
+    const scope = query.trim() ? "encontrados nesta pesquisa" : "cadastrados";
+    if (!window.confirm(`Excluir os ${total} fornecedores ${scope}? Esta ação não poderá ser desfeita.`)) return;
+
+    setIsBulkDeleting(true);
+    markDirty(15000);
+    try {
+      const keys = new Set(visibleRows.map((row) => String(row.id ?? "").trim()).filter(Boolean));
+      const tombstones = new Set(getTombstones(produtosMap).map((value) => value.toUpperCase()));
+      for (const key of keys) tombstones.add(key.toUpperCase());
+
+      const nextInfo = { ...infoMap };
+      const nextProdutosBase = { ...produtosMap };
+      const nextEq = { ...equivalenciasMap };
+      for (const key of keys) {
+        delete nextInfo[key];
+        delete (nextProdutosBase as any)[key];
+        delete (nextEq as any)[key];
+      }
+      const nextProdutos = withTombstones(nextProdutosBase, Array.from(tombstones));
+
+      if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
+      fornecedoresSyncTimeoutRef.current = null;
+      await saveFornecedoresStateToSupabase({ info: nextInfo, produtos: nextProdutos, equivalencias: nextEq });
+      writeFornecedorInfoMap(nextInfo);
+      writeFornecedorProdutosMap(nextProdutos);
+      writeFornecedorEquivalenciasMap(nextEq);
+      setInfoMap(nextInfo);
+      setProdutosMap(nextProdutos);
+      setEquivalenciasMap(nextEq);
+      pagination.setPage(1);
+      showToast(`${total} fornecedores excluídos.`, "success");
+    } catch (error) {
+      showToast(`Não foi possível excluir os fornecedores. ${error instanceof Error ? error.message : ""}`.trim(), "error", 9000);
+    } finally {
+      setIsBulkDeleting(false);
+    }
+  }
+
   const resultsText = `${pagination.totalItems} resultado(s) encontrado(s)`;
 
   async function importFile(file: File) {
@@ -1145,28 +1186,6 @@ export default function FornecedoresClient() {
           </div>
         </section>
 
-        {isCompatSource ? (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "#eef6ff",
-              border: "1px solid #cfe6ff",
-              color: "#1b3a57",
-              fontSize: 13,
-              fontWeight: 700,
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-          </div>
-        ) : null}
-
         <section className={styles.toolbar}>
           <div className={styles.search}>
             <span className={styles.searchIcon}>
@@ -1200,6 +1219,16 @@ export default function FornecedoresClient() {
             <button type="button" className={styles.newBtn} onClick={openNew} disabled={isReadOnly}>
               <IconPlus />
               Novo Fornecedor
+            </button>
+            <button
+              type="button"
+              className={styles.newBtn}
+              style={{ background: "#dc3545" }}
+              disabled={isReadOnly || isBulkDeleting || !visibleRows.length}
+              onClick={() => void deleteVisibleSuppliers()}
+            >
+              <IconTrash />
+              {isBulkDeleting ? "Excluindo..." : "Excluir vários"}
             </button>
           </div>
         </section>

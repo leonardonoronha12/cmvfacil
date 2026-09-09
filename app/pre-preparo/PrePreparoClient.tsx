@@ -13,7 +13,7 @@ import { subscribeFornecedorEquivalencias, writeFornecedorEquivalenciasMap, type
 import { readInsumosFromStore, subscribeInsumos, type InsumoStoreItem, writeInsumosToStore } from "../lib/insumosStore";
 import { loadInsumosStateFromSupabase, saveInsumosStateToSupabase } from "../lib/insumosSupabase";
 import { readInsumoCategoriasFromStore, subscribeInsumoCategorias, writeInsumoCategoriasToStore } from "../lib/insumoCategoriasStore";
-import { loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
+import { loadLivePrePreparoDetails, loadPrePreparoFromSupabase, loadPrePreparoStateFromSupabase, savePrePreparoToSupabase, type PrePreparoCompatRow } from "../lib/prePreparoSupabase";
 import { loadPrePreparoEtiquetasFromSupabase, savePrePreparoEtiquetasToSupabase } from "../lib/prePreparoEtiquetasSupabase";
 import type { PrePreparoEtiquetaRow } from "../lib/prePreparoEtiquetasStore";
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
@@ -702,18 +702,18 @@ export default function PrePreparoClient() {
 
   function supabaseSaveErrorMessage(err: unknown) {
     const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
-    if (!msg) return "Não foi possível salvar no Supabase.";
+    if (!msg) return "Não foi possível salvar os dados.";
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
-    return `Não foi possível salvar no Supabase (${msg}).`;
+    return `Não foi possível salvar os dados (${msg}).`;
   }
 
   function supabaseLoadErrorMessage(err: unknown) {
     const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
-    if (!msg) return "Não foi possível carregar do Supabase.";
+    if (!msg) return "Não foi possível carregar os dados.";
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.toLowerCase().includes("does not exist")) return "Tabela do Supabase não existe (execute o setup do Supabase).";
-    return `Não foi possível carregar do Supabase (${msg}).`;
+    return `Não foi possível carregar os dados (${msg}).`;
   }
 
   function buildDetailsUrl(recipeId: string, tab: "ingredientes" | "preparo" | "etiquetas") {
@@ -744,10 +744,20 @@ export default function PrePreparoClient() {
     setIsSyncingDetails(true);
     try {
       const dbRows = await loadPrePreparoFromSupabase();
-      setRows(dbRows as any);
+      const current = (dbRows as PrePreparoRow[]).find((row) => String(row.id) === String(detailsRecipeId));
+      let nextRows = dbRows as PrePreparoRow[];
+      if (current && (!Array.isArray(current.ingredientes) || current.ingredientes.length === 0)) {
+        const live = await loadLivePrePreparoDetails(String(detailsRecipeId));
+        if (live.ingredientes.length || (live.modoPreparo && live.modoPreparo !== "-")) {
+          nextRows = nextRows.map((row) => String(row.id) === String(detailsRecipeId)
+            ? { ...row, ingredientes: live.ingredientes.length ? live.ingredientes : row.ingredientes, modoPreparo: live.modoPreparo && live.modoPreparo !== "-" ? live.modoPreparo : row.modoPreparo }
+            : row);
+        }
+      }
+      setRows(nextRows as any);
       prePreparoLoadErrorShownRef.current = false;
       prePreparoLoadedRef.current = true;
-      if (!silent) showToast("Atualizado do Supabase.", "success");
+      if (!silent) showToast("Dados atualizados.", "success");
     } catch (err) {
       if (!silent) showToast(supabaseLoadErrorMessage(err), "error", 9000);
     } finally {
@@ -2564,26 +2574,6 @@ export default function PrePreparoClient() {
         {isCompatSource ? (
           <div className={ft.pageFrameWide}>
             <QaModePanel screen="pre-preparo" ui={qaUi} />
-            <div
-              style={{
-                marginTop: 10,
-                marginBottom: 14,
-                padding: "10px 12px",
-                borderRadius: 12,
-                background: "#eef6ff",
-                border: "1px solid #cfe6ff",
-                color: "#1b3a57",
-                fontSize: 13,
-                fontWeight: 700,
-                display: "flex",
-              justifyContent: "flex-end",
-                gap: 12,
-                flexWrap: "wrap",
-              }}
-            >
-              <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-            </div>
-
             <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 14, alignItems: "start" }}>
               <section style={{ border: "1px solid #eef1f1", background: "#ffffff", borderRadius: 14, padding: 12, minWidth: 0 }}>
                 <div style={{ fontSize: 12, fontWeight: 900, color: "#01040e", marginBottom: 10 }}>{`Pré-preparos (${compatRows.length})`}</div>

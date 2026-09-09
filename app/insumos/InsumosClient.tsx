@@ -32,6 +32,7 @@ type InsumoRow = {
   custoMedio: string;
   categoria: string;
   especificacao: string;
+  operationalImageUrl?: string;
 };
 
 function isUuidValue(value: string) {
@@ -417,6 +418,9 @@ export default function InsumosClient() {
   const [newSpec, setNewSpec] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newInitialCost, setNewInitialCost] = useState("");
+  const [editOperationalImageUrl, setEditOperationalImageUrl] = useState("");
+  const [isUploadingOperationalImage, setIsUploadingOperationalImage] = useState(false);
+  const operationalImageInputRef = useRef<HTMLInputElement | null>(null);
   const [categories, setCategories] = useState<string[]>([]);
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
   const [categoryNewDraft, setCategoryNewDraft] = useState("");
@@ -431,17 +435,17 @@ export default function InsumosClient() {
 
   function saveErrorMessage(err: unknown) {
     const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
-    if (!msg) return "Não foi possível salvar no Supabase.";
+    if (!msg) return "Não foi possível salvar os dados.";
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
     if (msg.includes("insumos_state") && msg.toLowerCase().includes("does not exist")) return "Tabela insumos_state não existe no Supabase.";
-    return `Não foi possível salvar no Supabase (${msg}).`;
+    return `Não foi possível salvar os dados (${msg}).`;
   }
 
   function deleteErrorMessage(err: unknown) {
     const msg = (err instanceof Error ? err.message : String(err ?? "")).trim();
     if (!msg) return "Não foi possível excluir o insumo.";
     if (msg === "unauthorized" || msg.includes("401")) return "Sessão expirada. Faça login novamente.";
-    if (msg === "compat_required") return "Sua sessão ainda não está no modo compat. Atualize a página e tente novamente.";
+    if (msg === "compat_required") return "Sua sessão precisa ser atualizada. Recarregue a página e tente novamente.";
     return `Não foi possível excluir o insumo (${msg}).`;
   }
 
@@ -485,6 +489,7 @@ export default function InsumosClient() {
       custoMedio: String(s.custoMedio ?? "").trim() || "-",
       categoria: String(s.categoria ?? "").trim() || "-",
       especificacao: String(s.especificacao ?? "").trim() || "-",
+      operationalImageUrl: String(s.operationalImageUrl ?? "").trim() || undefined,
     }));
     rowsReadyRef.current = true;
     setDataRows(mapped);
@@ -525,7 +530,7 @@ export default function InsumosClient() {
         setCategories([]);
         categoriesReadyRef.current = true;
         const msg = err instanceof Error ? err.message : String(err);
-        const message = `Não foi possível carregar os insumos do Supabase. Detalhes: ${msg}`;
+        const message = `Não foi possível carregar os insumos. Detalhes: ${msg}`;
         setLoadError(message);
         showToast(message, "error", 9000);
       } finally {
@@ -1014,6 +1019,7 @@ export default function InsumosClient() {
     setNewSpec(row.especificacao === "-" ? "" : row.especificacao);
     setNewUnit(row.medida === "-" ? "" : row.medida);
     setNewInitialCost(String(row.custoMedio ?? "").replace(/^R\$\s?/, "").trim().replace(".", ","));
+    setEditOperationalImageUrl(String(row.operationalImageUrl ?? ""));
     setIsEditItemOpen(true);
 
     const categoria = normalizeCategoryName(row.categoria ?? "");
@@ -1023,6 +1029,28 @@ export default function InsumosClient() {
         if (prev.some((c) => c.toLowerCase() === key)) return prev;
         return [...prev, categoria];
       });
+    }
+  }
+
+  async function uploadOperationalImage(file?: File) {
+    const itemId = String(editingItemId ?? "").replace(/^db:/, "");
+    if (!file || !isUuidValue(itemId)) return;
+    setIsUploadingOperationalImage(true);
+    try {
+      const form = new FormData();
+      form.set("itemId", itemId);
+      form.set("file", file);
+      const res = await fetch("/api/insumos/photo", { method: "POST", body: form });
+      const json = (await res.json().catch(() => null)) as { ok?: boolean; publicUrl?: string; error?: string } | null;
+      if (!res.ok || !json?.ok || !json.publicUrl) throw new Error(json?.error || `upload_failed_${res.status}`);
+      setEditOperationalImageUrl(json.publicUrl);
+      setDataRows((prev) => prev.map((row) => row.id === editingItemId ? { ...row, operationalImageUrl: json.publicUrl } : row));
+      showToast("Foto operacional atualizada.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Não foi possível enviar a foto.", "error");
+    } finally {
+      setIsUploadingOperationalImage(false);
+      if (operationalImageInputRef.current) operationalImageInputRef.current.value = "";
     }
   }
 
@@ -1065,6 +1093,7 @@ export default function InsumosClient() {
             custoMedio: String(s.custoMedio ?? "").trim() || "-",
             categoria: String(s.categoria ?? "").trim() || "-",
             especificacao: String(s.especificacao ?? "").trim() || "-",
+            operationalImageUrl: String(s.operationalImageUrl ?? "").trim() || undefined,
           }));
           setDataRows(mapped);
           const fromRows = getUniqueCategoriesFromRows(mapped);
@@ -1335,6 +1364,7 @@ export default function InsumosClient() {
             custoMedio: String(s.custoMedio ?? "").trim() || "-",
             categoria: String(s.categoria ?? "").trim() || "-",
             especificacao: String(s.especificacao ?? "").trim() || "-",
+            operationalImageUrl: String(s.operationalImageUrl ?? "").trim() || undefined,
           }));
           setDataRows(mapped);
           const fromRows = getUniqueCategoriesFromRows(mapped);
@@ -1694,28 +1724,6 @@ export default function InsumosClient() {
         </section>
 
         {loadError ? <div className="cmv-alert cmv-alert-error">{loadError}</div> : null}
-
-        {isCompatSource ? (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "#eef6ff",
-              border: "1px solid #cfe6ff",
-              color: "#1b3a57",
-              fontSize: 13,
-              fontWeight: 700,
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-          </div>
-        ) : null}
 
         <section className={styles.kpis}>
           <div className={styles.kpiCard}>
@@ -2295,6 +2303,7 @@ export default function InsumosClient() {
                     />
                   </div>
                 </div>
+
               </div>
 
               <div className={styles.modalFooter}>
@@ -2400,6 +2409,13 @@ export default function InsumosClient() {
                       }}
                     />
                   </div>
+                </div>
+
+                <div className={styles.formField}>
+                  <div className={styles.formLabel}>Foto para identificação</div>
+                  {editOperationalImageUrl ? <img src={editOperationalImageUrl} alt={`Foto de ${newItemName}`} style={{ width: 96, height: 96, objectFit: "cover", borderRadius: 12, marginBottom: 8 }} /> : null}
+                  <input ref={operationalImageInputRef} type="file" accept="image/png,image/jpeg,image/webp" onChange={(event) => void uploadOperationalImage(event.currentTarget.files?.[0])} disabled={isUploadingOperationalImage || !editingItemId || !isUuidValue(String(editingItemId).replace(/^db:/, ""))} />
+                  <small>{isUploadingOperationalImage ? "Enviando foto…" : "PNG, JPG ou WebP, até 5 MB."}</small>
                 </div>
               </div>
 

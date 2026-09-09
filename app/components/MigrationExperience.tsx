@@ -7,6 +7,7 @@ import styles from "./MigrationExperience.module.css";
 const TOUR_VERSION = "2026-09-academia-v23";
 const ACTIVE_TOUR_KEY = `cmvfacil:onboarding:active:${TOUR_VERSION}`;
 const DONE_TOUR_KEY = `cmvfacil:onboarding:done:${TOUR_VERSION}`;
+const HIDE_WELCOME_KEY = `cmvfacil:onboarding:hide-welcome:${TOUR_VERSION}`;
 const MODULE_PROGRESS_KEY = `cmvfacil:onboarding:modules:${TOUR_VERSION}`;
 const SUPPORT_PHONE = "5513936180830";
 
@@ -204,6 +205,7 @@ export default function MigrationExperience() {
   const router = useRouter();
   const [me, setMe] = useState<Me | null>(null);
   const [tourOpen, setTourOpen] = useState(false);
+  const [hideWelcome, setHideWelcome] = useState(false);
   const [learningOpen, setLearningOpen] = useState(false);
   const [activeModule, setActiveModule] = useState<string | null>(null);
   const [completedModules, setCompletedModules] = useState<string[]>([]);
@@ -232,7 +234,7 @@ export default function MigrationExperience() {
     let active = true;
     Array.from(new Set(steps.map(item => item.path))).forEach(path => router.prefetch(path));
     try { setCompletedModules(JSON.parse(localStorage.getItem(MODULE_PROGRESS_KEY) || "[]")); } catch { setCompletedModules([]); }
-    if (localStorage.getItem(DONE_TOUR_KEY) !== "done") {
+    if (localStorage.getItem(DONE_TOUR_KEY) !== "done" && localStorage.getItem(HIDE_WELCOME_KEY) !== "yes") {
       const savedStep = Number(sessionStorage.getItem(ACTIVE_TOUR_KEY) ?? "0");
       const initialStep = Number.isInteger(savedStep) && savedStep >= 0 && savedStep < steps.length ? savedStep : 0;
       sessionStorage.setItem(ACTIVE_TOUR_KEY, String(initialStep));
@@ -660,6 +662,7 @@ export default function MigrationExperience() {
     return () => window.removeEventListener("resize", keepCoachVisible);
   }, [coachDragPosition]);
   const finishTour = () => {
+    if (hideWelcome) localStorage.setItem(HIDE_WELCOME_KEY, "yes");
     localStorage.setItem(DONE_TOUR_KEY, "done");
     if (me?.userId) localStorage.setItem(`cmvfacil:onboarding:${TOUR_VERSION}:${me.userId}`, "done");
     sessionStorage.removeItem(ACTIVE_TOUR_KEY);
@@ -679,16 +682,38 @@ export default function MigrationExperience() {
     setLines(current => [...current, { from: "user", text: bodyText }]);
     setSending(true); setTicket(null);
     try {
+      const uploadedAttachments: Array<{ name: string; type: string; size: number; path: string }> = [];
+      for (const file of files) {
+        const preparedResponse = await fetch("/api/support/attachment-upload", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ name: file.name, type: file.type, size: file.size }),
+        });
+        const prepared = await preparedResponse.json().catch(() => null);
+        if (!preparedResponse.ok || !prepared?.ok || !prepared?.signedUrl || !prepared?.path) {
+          throw new Error(prepared?.error || "Não foi possível preparar o envio do anexo.");
+        }
+        const uploadBody = new FormData();
+        uploadBody.append("cacheControl", "3600");
+        uploadBody.append("", file);
+        const uploadResponse = await fetch(prepared.signedUrl, {
+          method: "PUT",
+          headers: { "x-upsert": "false" },
+          body: uploadBody,
+        });
+        if (!uploadResponse.ok) throw new Error("Não foi possível enviar o anexo. Tente novamente.");
+        uploadedAttachments.push({ name: file.name, type: file.type, size: file.size, path: prepared.path });
+      }
       const body = new FormData(); body.set("message", bodyText); body.set("page", String(pathname || "/"));
-      files.forEach(file => body.append("attachments", file));
+      if (uploadedAttachments.length) body.set("uploadedAttachments", JSON.stringify(uploadedAttachments));
       const response = await fetch("/api/support/ticket", { method: "POST", body });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) throw new Error(data?.error || "Não foi possível registrar o chamado.");
       const twilioStatus = String(data.twilioStatus || "").toLowerCase();
       setTicket({ protocol: data.protocol, whatsappUrl: data.whatsappUrl, forwarded: data.forwarded === true, twilioStatus });
       setLines(current => [...current, { from: "bot", text: data.forwarded === true
-        ? `Chamado ${data.protocol} registrado e encaminhado ao WhatsApp do suporte${twilioStatus ? ` (status: ${twilioStatus})` : ""}. Você receberá o retorno após a confirmação da entrega.`
-        : `Chamado ${data.protocol} registrado. O envio automático está temporariamente indisponível; use o link abaixo somente se precisar falar com o suporte agora.` }]);
+        ? `Chamado ${data.protocol} enviado com sucesso. A equipe de suporte técnico vai analisar, solucionar o problema e entrar em contato com você.`
+        : `Chamado ${data.protocol} registrado com sucesso. A equipe de suporte técnico vai analisar, solucionar o problema e entrar em contato com você.` }]);
       setMessage(""); setFiles([]); if (inputRef.current) inputRef.current.value = "";
     } catch (error) {
       const fallback = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(`Olá, preciso de suporte no CMV Fácil.\nUsuário: ${me?.email || "não identificado"}\nEmpresa: ${me?.companyName || "não identificada"}\nPágina: ${pathname}\nProblema: ${bodyText}`)}`;
@@ -732,7 +757,8 @@ export default function MigrationExperience() {
           </div>
         </div>
         <div className={styles.tourActions}>
-          <button className={styles.skip} onClick={() => { setTourOpen(false); setLearningOpen(true); }}>Escolher um módulo</button>
+          <label className={styles.hideWelcome}><input type="checkbox" checked={hideWelcome} onChange={(event) => { const checked = event.target.checked; setHideWelcome(checked); if (checked) localStorage.setItem(HIDE_WELCOME_KEY, "yes"); else localStorage.removeItem(HIDE_WELCOME_KEY); }} /> <span>Não exibir mais</span></label>
+          <button className={styles.skip} onClick={() => { if (hideWelcome) localStorage.setItem(HIDE_WELCOME_KEY, "yes"); setTourOpen(false); setLearningOpen(true); }}>Escolher um módulo</button>
           <div><button className={styles.ghost} disabled={step === 0} onClick={() => goToStep(step - 1)}>Voltar</button>
           <button className={styles.primary} onClick={startFullTour}>Aprender o sistema completo <span>→</span></button></div>
         </div>
@@ -781,9 +807,7 @@ export default function MigrationExperience() {
         <button className={styles.attach} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
         <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Enviando ao suporte…" : "Enviar chamado"}</button>
-        {ticket ? <a className={styles.whatsapp} href={ticket.whatsappUrl} target="_blank" rel="noreferrer">{ticket.forwarded ? "Abrir conversa no WhatsApp" : "WhatsApp não abriu? Clique aqui"}</a> : null}
       </div>
     </aside> : null}
   </>;
 }
-

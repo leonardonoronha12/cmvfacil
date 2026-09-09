@@ -611,6 +611,13 @@ export default function InventarioClient() {
         const allIds = new Set<string>();
         for (const id of existingById.keys()) allIds.add(id);
 
+        // Contagens em andamento devem acompanhar novos insumos e pré-preparos cadastrados.
+        // Inventários totalmente concluídos permanecem como retratos históricos.
+        const inventoryIsOpen = prevCats.some((cat) => cat.status !== "concluida");
+        if (inventoryIsOpen) {
+          for (const id of sourceById.keys()) allIds.add(id);
+        }
+
 
         const itemsByCat = new Map<string, InventarioItemRow[]>();
         for (const id of allIds) {
@@ -1145,27 +1152,6 @@ export default function InventarioClient() {
       <main className={dash.content}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="inventario" ui={qaUi} />
-        {isCompatSource ? (
-          <div
-            style={{
-              marginTop: 10,
-              marginBottom: 14,
-              padding: "10px 12px",
-              borderRadius: 12,
-              background: "#eef6ff",
-              border: "1px solid #cfe6ff",
-              color: "#1b3a57",
-              fontSize: 13,
-              fontWeight: 700,
-              display: "flex",
-              justifyContent: "flex-end",
-              gap: 12,
-              flexWrap: "wrap",
-            }}
-          >
-            <span>{isReadOnly ? "Somente leitura" : "Editável"}</span>
-          </div>
-        ) : null}
         <section className={styles.layout}>
           <div className={styles.left}>
             <button

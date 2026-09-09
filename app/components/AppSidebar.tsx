@@ -78,6 +78,7 @@ type SidebarKey =
   | "entradas"
   | "inventario"
   | "desperdicios"
+  | "consumo-interno"
   | "ajustes"
   | "suporte";
 
@@ -1311,6 +1312,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
             <span className={dash.navIcon}><IconCookie /></span>
             <span className={dash.navLabel}>Desperdícios</span>
             {etiquetasVencidasPendentes > 0 ? <span className={dash.navBadge}>{etiquetasVencidasPendentes}</span> : null}
+          </Link>
+          <Link
+            className={navClass(active, "consumo-interno")}
+            href="/consumo-interno"
+            data-sidebar-nav="1"
+            onClick={handleSidebarNavClick}
+          >
+            <span className={dash.navIcon}><IconCookie /></span>
+            <span className={dash.navLabel}>Consumo interno</span>
           </Link>
         </div>
 

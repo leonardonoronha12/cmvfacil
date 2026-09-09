@@ -20,12 +20,14 @@ type SidebarKey =
   | "entradas"
   | "inventario"
   | "desperdicios"
+  | "consumo-interno"
   | "ajustes"
   | "suporte";
 
 function shouldHideSidebar(pathname: string) {
   const p = pathname.trim() || "/";
   if (p === "/" || p.startsWith("/login") || p.startsWith("/cadastro") || p.startsWith("/resetar-senha") || p.startsWith("/restaurar-senha")) return true;
+  if (p.startsWith("/termos-de-uso")) return true;
   if (p.startsWith("/setup-supabase") || p.startsWith("/debug-supabase") || p.startsWith("/debug")) return true;
   return false;
 }
@@ -40,6 +42,7 @@ function activeKeyFromPathname(pathname: string): SidebarKey {
   if (p.startsWith("/entradas")) return "entradas";
   if (p.startsWith("/inventario")) return "inventario";
   if (p.startsWith("/desperdicios")) return "desperdicios";
+  if (p.startsWith("/consumo-interno")) return "consumo-interno";
   if (p.startsWith("/ajustes")) return "ajustes";
   if (p.startsWith("/suporte")) return "suporte";
   return "dashboard";

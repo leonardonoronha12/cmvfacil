@@ -44,6 +44,8 @@ type CompraRow = {
   fornecedorMedida: string;
   fornecedorFator: number;
   consumoDiario: number;
+  consumoInterno: number;
+  desperdicios: number;
   estoqueFinal: number;
   comprar: number;
 };
@@ -94,6 +96,8 @@ type CompatListaComprasRow = {
     estoqueAtual: number;
     entradas: number;
     saidas: number;
+    consumoInterno?: number;
+    desperdicios?: number;
     consumoDiario: number;
     consumoDiasManter: number;
     consumoPrazoFornecedor: number;
@@ -664,6 +668,8 @@ export default function ListaDeComprasClient() {
           fornecedorMedida: medida,
           fornecedorFator: 1,
           consumoDiario: Number(r.calc?.consumoDiario ?? 0) || 0,
+          consumoInterno: Number(r.calc?.consumoInterno ?? 0) || 0,
+          desperdicios: Number(r.calc?.desperdicios ?? 0) || 0,
           estoqueFinal: Number(r.calc?.estoqueAtual ?? 0) || 0,
           comprar: Number(r.quantidadeCompra ?? 0) || 0,
         } satisfies CompraRow;
@@ -783,6 +789,8 @@ export default function ListaDeComprasClient() {
         fornecedorMedida: medida,
         fornecedorFator: 1,
         consumoDiario,
+        consumoInterno: 0,
+        desperdicios: 0,
         estoqueFinal,
         comprar: 0,
       });
@@ -1488,18 +1496,16 @@ export default function ListaDeComprasClient() {
 
           <QaModePanel screen="lista-de-compras" ui={qaUi} />
 
-          <section className={styles.infoBanner}>
+          {!isCompatMode ? <section className={styles.infoBanner}>
             <span className={styles.infoIcon}>
               <InfoIcon />
             </span>
             <span>
-              {isCompatMode
-                ? compat?.banner || "Modo somente leitura."
-                : inventoryOptions.length
+              {inventoryOptions.length
                   ? "Selecione um período com inventários cadastrados e desbloqueie a seleção dos itens para montar sua lista."
                   : "Cadastre inventários para liberar o período e montar sua lista."}
             </span>
-          </section>
+          </section> : null}
 
           <section className={styles.filtersPanel}>
             <div className={styles.filterField}>
@@ -1673,13 +1679,13 @@ export default function ListaDeComprasClient() {
                         if (column === "item") {
                           return (
                             <div key={column} className={styles.itemCell}>
-                              {isCompatMode ? (
-                                <div className={styles.itemName}>{row.displayItem}</div>
-                              ) : (
-                                <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                  {row.displayItem}
-                                </Link>
-                              )}
+                              <Link
+                                className={`${styles.itemName} ${styles.itemNameLink}`}
+                                href={`/dashboard?itemId=${encodeURIComponent(row.id)}&item=${encodeURIComponent(row.item)}&tab=entradas`}
+                                aria-label={`Abrir histórico de ${row.displayItem}`}
+                              >
+                                {row.displayItem}
+                              </Link>
                               <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                             </div>
                           );
@@ -1703,7 +1709,12 @@ export default function ListaDeComprasClient() {
                               {mode === "fornecedor" ? (
                                 <div className={styles.measureSub}>{`${formatDecimalUpTo3(row.consumoDiario)} ${row.medida}`}</div>
                               ) : (
-                                <div className={styles.measureSub}>{`${formatDecimalUpTo3(consumoDiasManter)} ${row.medida} (${diasEstoqueNum}D)`}</div>
+                                <>
+                                  <div className={styles.measureSub}>{`${formatDecimalUpTo3(consumoDiasManter)} ${row.medida} (${diasEstoqueNum}D)`}</div>
+                                  {row.consumoInterno > 0 || row.desperdicios > 0 ? (
+                                    <div className={styles.measureSub}>{`Uso interno ${formatDecimalUpTo3(row.consumoInterno)} • desperdício ${formatDecimalUpTo3(row.desperdicios)} ${row.medida}`}</div>
+                                  ) : null}
+                                </>
                               )}
                             </div>
                           );

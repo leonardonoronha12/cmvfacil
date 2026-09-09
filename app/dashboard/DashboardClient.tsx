@@ -23,6 +23,7 @@ import { loadPrePreparoEtiquetasFromSupabase } from "../lib/prePreparoEtiquetasS
 import { readFichasTecnicasFromStore, subscribeFichasTecnicas, type FichaTecnicaRow, writeFichasTecnicasToStore } from "../lib/fichasTecnicasStore";
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readDashboardCmvPrefsFromStore, writeDashboardCmvPrefsToStore } from "../lib/dashboardCmvPrefsStore";
+import { loadRevenueSuggestion, saveRevenuePeriod } from "../lib/revenuesSupabase";
 import { requireUserScopePrefix } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import {
@@ -652,6 +653,10 @@ function normalizeKey(value: string) {
     .replace(/\s+/g, " ");
 }
 
+function normalizeInventoryAlias(value: string) {
+  return normalizeKey(value).replace(/\b(original|tradicional)\b/g, "linha").replace(/\s+/g, " ").trim();
+}
+
 function safeArray<T>(value: unknown): T[] {
   return Array.isArray(value) ? (value as T[]) : [];
 }
@@ -733,15 +738,6 @@ function formatPercentInput(input: string) {
   if (!Number.isFinite(value) || value <= 0) return "";
   const clamped = Math.min(99, value);
   return `${clamped.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function placeCaretBeforeCurrencyDecimals(input: HTMLInputElement | null) {
-  if (!input) return;
-  window.requestAnimationFrame(() => {
-    const commaIndex = input.value.lastIndexOf(",");
-    const pos = commaIndex >= 0 ? commaIndex : input.value.length;
-    input.setSelectionRange(pos, pos);
-  });
 }
 
 function placeCaretBeforePercentDecimals(input: HTMLInputElement | null) {
@@ -983,6 +979,8 @@ export default function DashboardClient() {
   const [startDate, setStartDate] = useState(() => readDashboardCmvPrefsFromStore().startDate);
   const [endDate, setEndDate] = useState(() => readDashboardCmvPrefsFromStore().endDate);
   const [revenue, setRevenue] = useState(() => readDashboardCmvPrefsFromStore().revenue);
+  const [revenueLoading, setRevenueLoading] = useState(false);
+  const [revenuePeriods, setRevenuePeriods] = useState(0);
   const [targetCmv, setTargetCmv] = useState(() => readDashboardCmvPrefsFromStore().targetCmv);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
   const [contagens, setContagens] = useState<InventarioContagem[]>([]);
@@ -1038,7 +1036,6 @@ export default function DashboardClient() {
   const fornecedoresSaveErrorShownRef = useRef(false);
   const historyRef = useRef<HTMLDivElement | null>(null);
   const itemMenuRef = useRef<HTMLDivElement | null>(null);
-  const revenueInputRef = useRef<HTMLInputElement | null>(null);
   const targetCmvInputRef = useRef<HTMLInputElement | null>(null);
   const tableHeaderDidDragRef = useRef(false);
   const [calcComputedAt, setCalcComputedAt] = useState<number>(() => readCmvRealSnapshot()?.computedAt ?? 0);
@@ -1596,13 +1593,38 @@ export default function DashboardClient() {
     const insumoIdByKey = new Map<string, string>();
     const ocultarByInsumoId = new Map<string, boolean>();
     const insumoNameById = new Map<string, string>();
+    const currentInsumoIds = new Set<string>();
     for (const i of insumos) {
       ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
+      currentInsumoIds.add(String(i.id ?? "").trim());
       const key = normalizeKey(i.item);
       if (!key) continue;
       if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
       const id = String(i.id ?? "").trim();
       if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+    }
+
+    // Inventories imported from the legacy database may still carry the old
+    // item id. Resolve those rows by their stable item name so a saved count
+    // does not disappear from CMV after an item migration/recreation.
+    for (const [contagem, target, unitTarget] of [
+      [contagemStart, initialById, unitStartById],
+      [contagemEnd, finalById, unitEndById],
+    ] as const) {
+      for (const cat of safeArray<any>((contagem as any).categorias)) {
+        for (const item of safeArray<any>((cat as any).itens)) {
+          if (Boolean(item?.removido)) continue;
+          const rawId = String(item?.id ?? "").trim();
+          const resolvedId = (rawId && currentInsumoIds.has(rawId) ? rawId : "") || insumoIdByKey.get(normalizeKey(String(item?.item ?? ""))) || "";
+          if (!resolvedId) continue;
+          target.set(resolvedId, parsePtNumber(String(item?.estoqueFinal ?? "0")));
+          const unit = String(item?.unidade ?? "").trim();
+          if (unit) {
+            unitTarget.set(resolvedId, unit);
+            unitById.set(resolvedId, unit);
+          }
+        }
+      }
     }
 
     const entradasQtyById = new Map<string, number>();
@@ -1626,7 +1648,8 @@ export default function DashboardClient() {
             const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
             if (Number.isFinite(f) && f > 0) fator = f;
           }
-          const id = insumoIdByKey.get(mappedKey);
+          const explicitId = String((it as any)?.itemId ?? "").trim();
+          const id = (explicitId && currentInsumoIds.has(explicitId) ? explicitId : "") || insumoIdByKey.get(mappedKey);
           const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
           const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
           const qtyEq = qty * fator;
@@ -1739,6 +1762,22 @@ export default function DashboardClient() {
   }, [endDate, revenue, startDate, targetCmv]);
 
   useEffect(() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || readOnly) return;
+    let active = true;
+    setRevenueLoading(true);
+    setRevenuePeriods(0);
+    void loadRevenueSuggestion(startDate, endDate)
+      .then((suggestion) => {
+        if (!active) return;
+        setRevenue(suggestion.value > 0 ? formatBrlFromCents(Math.round(suggestion.value * 100)) : "");
+        setRevenuePeriods(suggestion.periods);
+      })
+      .catch(() => { if (active) setRevenuePeriods(0); })
+      .finally(() => { if (active) setRevenueLoading(false); });
+    return () => { active = false; };
+  }, [endDate, readOnly, startDate]);
+
+  useEffect(() => {
     writeCmvRealSnapshot({
       startDate,
       endDate,
@@ -1779,7 +1818,7 @@ export default function DashboardClient() {
     parseBrlToCents(revenue) > 0 &&
     targetCmvIsValid;
 
-  function handleCalculate() {
+  async function handleCalculate() {
     try {
       if (inventoryOptions.length <= 0 || !startDate.trim() || !endDate.trim() || parseBrlToCents(revenue) <= 0) {
         setCalcError("Preencha datas e faturamento para calcular.");
@@ -1841,15 +1880,42 @@ export default function DashboardClient() {
       for (const [id, u] of unitStartById.entries()) if (!unitById.has(id)) unitById.set(id, u);
 
       const insumoIdByKey = new Map<string, string>();
+      const insumoIdsByAlias = new Map<string, string[]>();
       const ocultarByInsumoId = new Map<string, boolean>();
       const insumoNameById = new Map<string, string>();
+      const currentInsumoIds = new Set<string>();
       for (const i of insumos) {
         ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
+        currentInsumoIds.add(String(i.id ?? "").trim());
         const key = normalizeKey(i.item);
         if (!key) continue;
         if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
+        const alias = normalizeInventoryAlias(i.item);
+        if (alias) insumoIdsByAlias.set(alias, [...(insumoIdsByAlias.get(alias) ?? []), i.id]);
         const id = String(i.id ?? "").trim();
         if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+      }
+
+      for (const [contagem, target, unitTarget] of [
+        [contagemStart, initialById, unitStartById],
+        [contagemEnd, finalById, unitEndById],
+      ] as const) {
+        for (const cat of safeArray<any>((contagem as any).categorias)) {
+          for (const item of safeArray<any>((cat as any).itens)) {
+            if (Boolean(item?.removido)) continue;
+            const rawId = String(item?.id ?? "").trim();
+            const itemName = String(item?.item ?? "");
+            const aliasCandidates = insumoIdsByAlias.get(normalizeInventoryAlias(itemName)) ?? [];
+            const resolvedId = (rawId && currentInsumoIds.has(rawId) ? rawId : "") || insumoIdByKey.get(normalizeKey(itemName)) || (aliasCandidates.length === 1 ? aliasCandidates[0] : "") || "";
+            if (!resolvedId) continue;
+            target.set(resolvedId, parsePtNumber(String(item?.estoqueFinal ?? "0")));
+            const unit = String(item?.unidade ?? "").trim();
+            if (unit) {
+              unitTarget.set(resolvedId, unit);
+              unitById.set(resolvedId, unit);
+            }
+          }
+        }
       }
 
       const entradasQtyById = new Map<string, number>();
@@ -1876,7 +1942,8 @@ export default function DashboardClient() {
               const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
               if (Number.isFinite(f) && f > 0) fator = f;
             }
-            const id = insumoIdByKey.get(mappedKey);
+            const explicitId = String((it as any)?.itemId ?? "").trim();
+            const id = (explicitId && currentInsumoIds.has(explicitId) ? explicitId : "") || insumoIdByKey.get(mappedKey);
             const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
             const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
             const qtyEq = qty * fator;
@@ -2005,6 +2072,7 @@ export default function DashboardClient() {
       const computedAt = Date.now();
       setCalcComputedAt(computedAt);
       writeLastCalc({ startIso: startOpt.iso, endIso: endOpt.iso, cmvPercent, revenueCents, computedAt });
+      if (!readOnly) await saveRevenuePeriod(startOpt.iso, endOpt.iso, revenueCents / 100);
       showToast("Cálculo feito.", "success");
       if (!searchParams.get("itemId") && !searchParams.get("item")) {
         setHistoryItem(null);
@@ -3165,11 +3233,11 @@ export default function DashboardClient() {
           <div className={styles.topBar}>
             <div className={styles.topField}>
               <span className={styles.topLabel}>Data Inicial:</span>
-              <span className={styles.topFieldIcon}>
-                <IconCalendarSmall />
+              <span className={styles.topFieldIcon} aria-hidden="true">
+                {isLoadingTables ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
               </span>
-              <select className={styles.topInput} value={startDate} onChange={(e) => setStartDate(e.target.value)}>
-                {periodOptions.map((o) => (
+              <select className={`${styles.topInput} ${isLoadingTables ? styles.topInputLoading : ""}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={isLoadingTables} aria-busy={isLoadingTables}>
+                {isLoadingTables ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
@@ -3179,11 +3247,11 @@ export default function DashboardClient() {
 
             <div className={styles.topField}>
               <span className={styles.topLabel}>Data Final:</span>
-              <span className={styles.topFieldIcon}>
-                <IconCalendarSmall />
+              <span className={styles.topFieldIcon} aria-hidden="true">
+                {isLoadingTables ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
               </span>
-              <select className={styles.topInput} value={endDate} onChange={(e) => setEndDate(e.target.value)}>
-                {periodOptions.map((o) => (
+              <select className={`${styles.topInput} ${isLoadingTables ? styles.topInputLoading : ""}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={isLoadingTables} aria-busy={isLoadingTables}>
+                {isLoadingTables ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
@@ -3194,20 +3262,18 @@ export default function DashboardClient() {
             <div className={styles.topField}>
               <span className={styles.topLabel}>Faturamento:</span>
               <span className={styles.topFieldIcon}>
-                <IconMoneySmall />
+                {revenueLoading ? <span className={styles.topFieldSpinner} /> : <IconMoneySmall />}
               </span>
               <input
-                ref={revenueInputRef}
-                className={styles.topInput}
+                className={`${styles.topInput} ${revenueLoading ? styles.topInputLoading : ""}`}
                 inputMode="decimal"
                 placeholder="R$0,00"
                 value={revenue}
-                onFocus={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
-                onClick={() => placeCaretBeforeCurrencyDecimals(revenueInputRef.current)}
-                onChange={(e) => {
-                  setRevenue(formatBrlInput(e.target.value));
-                  placeCaretBeforeCurrencyDecimals(revenueInputRef.current);
-                }}
+                disabled={revenueLoading}
+                aria-busy={revenueLoading}
+                onFocus={(e) => e.currentTarget.select()}
+                onChange={(e) => { setRevenuePeriods(0); setRevenue(e.target.value.replace(/[^\d,.-]/g, "")); }}
+                onBlur={(e) => setRevenue(formatBrlInput(e.currentTarget.value))}
               />
             </div>
 
@@ -3244,6 +3310,8 @@ export default function DashboardClient() {
           </div>
 
           {calcError ? <div className={styles.calcError}>{calcError}</div> : null}
+
+          {revenuePeriods > 1 ? <div className={styles.revenueAggregate}>Faturamento somado automaticamente de {revenuePeriods} períodos salvos.</div> : null}
 
           <div className={styles.topHint}>
             <span className={styles.topHintIcon}>
