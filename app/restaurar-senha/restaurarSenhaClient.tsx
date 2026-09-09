@@ -83,6 +83,10 @@ export default function RestaurarSenhaClient() {
       setError("Digite a nova senha.");
       return;
     }
+    if (password.length < 8 || !/[A-Za-zÀ-ÿ]/.test(password) || !/\d/.test(password)) {
+      setError("Use pelo menos 8 caracteres, incluindo letras e números.");
+      return;
+    }
     if (password !== password2) {
       setError("As senhas não conferem.");
       return;
@@ -136,8 +140,14 @@ export default function RestaurarSenhaClient() {
               </p>
             </div>
 
-            {error ? <div className="cmv-alert cmv-alert-error">{error}</div> : null}
-            {ok ? <div className="cmv-alert cmv-alert-ok">Senha atualizada com sucesso.</div> : null}
+            {error ? <div className="cmv-alert cmv-alert-error cmv-reset-alert" role="alert">
+              <span className="cmv-reset-alert-icon" aria-hidden>!</span>
+              <span><strong>Não foi possível trocar a senha</strong><small>{error}</small></span>
+            </div> : null}
+            {ok ? <div className="cmv-alert cmv-alert-ok cmv-reset-alert" role="status">
+              <span className="cmv-reset-alert-icon" aria-hidden>✓</span>
+              <span><strong>Senha atualizada</strong><small>Sua senha foi alterada com sucesso. Entrando no sistema…</small></span>
+            </div> : null}
 
             {sent ? (
               <div className="cmv-reset-form">

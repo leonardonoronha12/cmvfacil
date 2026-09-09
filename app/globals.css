@@ -244,6 +244,58 @@ a {
   color: rgb(0, 80, 40);
 }
 
+.cmv-reset-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 0;
+  padding: 13px 14px;
+  border-radius: 10px;
+  line-height: 1.4;
+  box-shadow: 0 4px 16px rgba(2, 54, 60, 0.06);
+}
+
+.cmv-reset-alert > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cmv-reset-alert strong {
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.cmv-reset-alert small {
+  font-size: 12px;
+  line-height: 1.45;
+  color: inherit;
+  opacity: 0.88;
+}
+
+.cmv-reset-alert-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: currentColor;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.cmv-alert-error .cmv-reset-alert-icon {
+  background: #dc2626;
+}
+
+.cmv-alert-ok .cmv-reset-alert-icon {
+  background: #059669;
+}
+
 .cmv-grid {
   display: grid;
   grid-template-columns: 420px 1fr;
