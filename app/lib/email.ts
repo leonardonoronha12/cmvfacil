@@ -120,6 +120,30 @@ export async function sendSubscriptionWelcomeEmail(args: {
   return { ok: true, ...(id ? { id } : {}) };
 }
 
+export async function sendSupportResolvedEmail(args: {
+  to: string;
+  protocol: string;
+  idempotencyKey: string;
+}): Promise<SendEmailResult> {
+  const to = safeEmail(args.to);
+  if (!to) return { ok: false, error: "invalid_to_email" };
+  const apiKey = env("RESEND_API_KEY");
+  const from = env("CMV_EMAIL_FROM") || env("RESEND_FROM") || env("EMAIL_FROM");
+  if (!apiKey || !from) return { ok: false, error: "email_not_configured" };
+  const protocol = String(args.protocol || "").trim();
+  const subject = `Seu chamado ${protocol} foi solucionado`;
+  const text = `Olá! O chamado ${protocol} foi marcado como solucionado pela equipe de suporte técnico do CMV Fácil.\n\nPor favor, acesse o sistema e teste novamente. Se o problema continuar, responda pelo Assistente CMV Fácil.`;
+  const html = `<div style="font-family:Arial,Helvetica,sans-serif;line-height:1.5;color:#111827"><h2 style="margin:0 0 12px">Chamado solucionado</h2><p>O chamado <strong>${protocol}</strong> foi marcado como solucionado pela equipe de suporte técnico do CMV Fácil.</p><p>Por favor, acesse o sistema e teste novamente. Se o problema continuar, responda pelo Assistente CMV Fácil.</p><p><a href="https://cmvfacil.app/dashboard" style="display:inline-block;background:#0ab86d;color:#fff;padding:11px 16px;border-radius:8px;text-decoration:none;font-weight:700">Acessar o CMV Fácil</a></p></div>`;
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "content-type": "application/json", "Idempotency-Key": args.idempotencyKey.slice(0, 256) },
+    body: JSON.stringify({ from, to, subject, html, text }),
+  });
+  const data = await res.json().catch(() => ({})) as { id?: string; message?: string; error?: string };
+  if (!res.ok) return { ok: false, error: `email_send_failed:${String(data.message || data.error || res.status)}` };
+  return { ok: true, ...(data.id ? { id: data.id } : {}) };
+}
+
 export async function sendCompanyInviteEmail(args: {
   to: string;
   companyName: string;

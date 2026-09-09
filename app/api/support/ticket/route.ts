@@ -13,6 +13,20 @@ const clean = (value: unknown) => String(value ?? "").trim();
 const isUuid = (value: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const attachmentToken = (secret: string, protocol: string, index: number) => crypto.createHmac("sha256", secret).update(`${protocol}:${index}`).digest("base64url").slice(0, 32);
 
+export async function GET(req: NextRequest) {
+  const { userId } = getUserIdFromRequest(req);
+  if (!userId) return NextResponse.json({ ok: false, error: "Sua sessão expirou." }, { status: 401 });
+  const db = getSupabaseAdmin();
+  const result = await db.from("support_tickets").select("protocol,status,raw_metadata").eq("user_id", userId).eq("status", "resolved").order("opened_at", { ascending: false }).limit(20);
+  if (result.error) return NextResponse.json({ ok: false, error: "Não foi possível consultar os chamados." }, { status: 500 });
+  const resolutions = (result.data || []).map((row: any) => ({
+    protocol: clean(row.protocol),
+    resolvedAt: clean(row.raw_metadata?.resolvedAt),
+    notifiedAt: clean(row.raw_metadata?.resolutionNotification?.createdAt),
+  })).filter((row: any) => row.protocol && row.resolvedAt);
+  return NextResponse.json({ ok: true, resolutions });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -86,7 +100,9 @@ export async function POST(req: NextRequest) {
     const saved = await db.storage.from(SUPPORT_BUCKET).upload(`${root}/ticket.json`, JSON.stringify(payload, null, 2), { contentType: "application/json", upsert: false });
     if (saved.error) throw saved.error;
 
-    const ticket = await db.from("support_tickets").upsert({ protocol, user_id: userId, company_id: companyId, status: "open", message, page, storage_root: root, opened_at: openedAt, source: "assistant", raw_metadata: { email } }, { onConflict: "protocol" }).select("id").single();
+    const company = companyId ? await db.from("companies").select("phone_e164").eq("id", companyId).maybeSingle() : null;
+    const phone = clean((company?.data as any)?.phone_e164 || auth.data.user?.user_metadata?.whatsapp || auth.data.user?.phone);
+    const ticket = await db.from("support_tickets").upsert({ protocol, user_id: userId, company_id: companyId, status: "open", message, page, storage_root: root, opened_at: openedAt, source: "assistant", raw_metadata: { email, phone } }, { onConflict: "protocol" }).select("id").single();
     if (ticket.error) throw ticket.error;
 
     if (attachments.length) {

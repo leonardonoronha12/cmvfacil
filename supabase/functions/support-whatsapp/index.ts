@@ -100,7 +100,16 @@ serve(async (req) => {
         });
         if (!updated.ok) return xml("Não foi possível atualizar o chamado agora. Tente novamente.");
       }
-      return xml(`Chamado ${protocol} marcado como solucionado.`);
+      const notifyResponse = await fetch("https://cmvfacil.app/api/support/resolution-notify", {
+        method: "POST",
+        headers: { authorization: `Bearer ${serviceRole}`, "content-type": "application/json" },
+        body: JSON.stringify({ ticketId }),
+      }).catch(() => null);
+      const notification = notifyResponse ? await notifyResponse.json().catch(() => ({})) : {};
+      if (!notifyResponse?.ok || notification?.ok !== true) {
+        return xml(`Chamado ${protocol} marcado como solucionado. O aviso ao usuário ficou pendente e será processado novamente.`);
+      }
+      return xml(`Chamado ${protocol} marcado como solucionado. O usuário foi avisado no sistema e os canais de contato foram processados.`);
     }
 
     const variables = {

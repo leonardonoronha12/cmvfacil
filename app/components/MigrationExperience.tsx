@@ -212,6 +212,7 @@ export default function MigrationExperience() {
   const [step, setStep] = useState(0);
   const [pendingStep, setPendingStep] = useState<number | null>(null);
   const [chatOpen, setChatOpen] = useState(false);
+  const [unreadSupportCount, setUnreadSupportCount] = useState(0);
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
@@ -229,6 +230,7 @@ export default function MigrationExperience() {
   const inputRef = useRef<HTMLInputElement>(null);
   const coachRef = useRef<HTMLElement>(null);
   const coachDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
+  const seenResolutionsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let active = true;
@@ -251,6 +253,34 @@ export default function MigrationExperience() {
       .catch(() => {});
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshResolutions = async () => {
+      try {
+        const response = await fetch(`/api/support/ticket?ts=${Date.now()}`, { cache: "no-store" });
+        const data = await response.json().catch(() => null) as { ok?: boolean; resolutions?: Array<{ protocol: string; resolvedAt: string }> } | null;
+        if (!active || !response.ok || !data?.ok) return;
+        const resolutions = Array.isArray(data.resolutions) ? data.resolutions : [];
+        const acknowledged = new Set<string>(JSON.parse(localStorage.getItem("cmvfacil:support-resolutions-read") || "[]"));
+        const fresh = resolutions.filter(item => item.protocol && !seenResolutionsRef.current.has(item.protocol));
+        if (fresh.length) {
+          fresh.forEach(item => seenResolutionsRef.current.add(item.protocol));
+          setLines(current => [...current, ...fresh.map(item => ({ from: "bot" as const, text: `O chamado ${item.protocol} foi solucionado pela equipe de suporte técnico. Por favor, teste novamente. Se o problema continuar, envie uma nova mensagem por aqui.` }))]);
+        }
+        setUnreadSupportCount(resolutions.filter(item => !acknowledged.has(item.protocol)).length);
+      } catch {}
+    };
+    void refreshResolutions();
+    const timer = window.setInterval(refreshResolutions, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, []);
+
+  useEffect(() => {
+    if (!chatOpen || seenResolutionsRef.current.size === 0) return;
+    localStorage.setItem("cmvfacil:support-resolutions-read", JSON.stringify(Array.from(seenResolutionsRef.current)));
+    setUnreadSupportCount(0);
+  }, [chatOpen]);
 
   useEffect(() => {
     if (pendingStep === null || pathname !== steps[pendingStep]?.path) return;
@@ -796,7 +826,7 @@ export default function MigrationExperience() {
 
     <div className={styles.helpActions}>
       <button className={styles.tourButton} onClick={restartTour}>🎓 Tutorial do sistema</button>
-      <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda</button>
+      <button data-tour="support" className={styles.chatButton} onClick={() => setChatOpen(value => !value)} aria-expanded={chatOpen}>💬 Ajuda{unreadSupportCount > 0 ? <span aria-label={`${unreadSupportCount} nova(s) atualização(ões)`} style={{ marginLeft: 6, minWidth: 18, height: 18, padding: "0 5px", borderRadius: 999, background: "#ef4444", color: "white", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 800 }}>{unreadSupportCount}</span> : null}</button>
     </div>
     {chatOpen ? <aside data-cmv-tour-ui="true" className={styles.chat} aria-label="Assistente de suporte">
       <header><div><strong>Assistente CMV Fácil</strong><small>Suporte e dúvidas</small></div><button onClick={() => setChatOpen(false)} aria-label="Fechar">×</button></header>

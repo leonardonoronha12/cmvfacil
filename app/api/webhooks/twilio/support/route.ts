@@ -70,7 +70,14 @@ export async function POST(req: NextRequest) {
         }).eq("id", ticket.id);
         if (updated.error) throw updated.error;
       }
-      return xml(`Chamado ${protocol} marcado como solucionado. O usuário será avisado para testar a correção.`);
+      const notify = await fetch(new URL("/api/support/resolution-notify", req.url), {
+        method: "POST",
+        headers: { authorization: `Bearer ${clean(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_ROLE || process.env.SERVICE_ROLE_KEY)}`, "content-type": "application/json" },
+        body: JSON.stringify({ ticketId: ticket.id }),
+      });
+      const notification = await notify.json().catch(() => ({}));
+      if (!notify.ok || notification?.ok !== true) return xml(`Chamado ${protocol} marcado como solucionado. O aviso ao usuário ficou pendente.`);
+      return xml(`Chamado ${protocol} marcado como solucionado. O usuário foi avisado no sistema e os canais de contato foram processados.`);
     }
 
     const variables = {
