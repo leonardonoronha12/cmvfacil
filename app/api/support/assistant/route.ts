@@ -3,7 +3,7 @@ import { getUserIdFromRequest } from "../../../lib/requestUserId";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 45;
+export const maxDuration = 25;
 
 type ConversationLine = { from?: unknown; text?: unknown };
 
@@ -53,16 +53,16 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: clean(process.env.SUPPORT_AI_MODEL, 120) || "openai/gpt-5.6-sol",
+        model: clean(process.env.SUPPORT_AI_MODEL, 120) || "openai/gpt-5-mini",
         temperature: 0.25,
-        max_tokens: 550,
+        max_tokens: 400,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "system", content: `Contexto automático: página atual ${page}; anexos selecionados: ${Number.isFinite(attachments) ? attachments : 0}.` },
           ...conversation,
         ],
       }),
-      signal: AbortSignal.timeout(35000),
+      signal: AbortSignal.timeout(18000),
     });
     const result = await response.json().catch(() => null) as any;
     if (!response.ok) throw new Error(clean(result?.error?.message || result?.error || `gateway_http_${response.status}`));

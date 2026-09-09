@@ -221,6 +221,7 @@ const fullCourseSteps = [
 
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
 type ChatLine = { from: "bot" | "user"; text: string };
+type SupportIntent = "support" | "question";
 
 export default function MigrationExperience() {
   const pathname = usePathname();
@@ -238,6 +239,7 @@ export default function MigrationExperience() {
   const [message, setMessage] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
+  const [supportIntent, setSupportIntent] = useState<SupportIntent | null>(null);
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean; twilioStatus?: string } | null>(null);
   const [typedText, setTypedText] = useState("");
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
@@ -248,8 +250,9 @@ export default function MigrationExperience() {
   const [continueNotice, setContinueNotice] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [coachDragPosition, setCoachDragPosition] = useState<{ left: number; top: number } | null>(null);
-  const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Sou o assistente do CMV Fácil. Conte sua dúvida ou o que não está funcionando." }]);
+  const [lines, setLines] = useState<ChatLine[]>([{ from: "bot", text: "Olá! Como posso ajudar você hoje? Escolha uma opção abaixo para começar." }]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const messagesRef = useRef<HTMLDivElement>(null);
   const coachRef = useRef<HTMLElement>(null);
   const coachDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const seenResolutionsRef = useRef<Set<string>>(new Set());
@@ -310,6 +313,11 @@ export default function MigrationExperience() {
     localStorage.setItem("cmvfacil:support-resolutions-read", JSON.stringify(Array.from(seenResolutionsRef.current)));
     setUnreadSupportCount(0);
   }, [chatOpen]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+    messagesRef.current?.scrollTo({ top: messagesRef.current.scrollHeight, behavior: "smooth" });
+  }, [chatOpen, lines, sending]);
 
   useEffect(() => {
     if (pendingStep === null || pathname !== steps[pendingStep]?.path) return;
@@ -735,6 +743,17 @@ export default function MigrationExperience() {
     const selected = Array.from(event.target.files ?? []).filter(file => /^(image|video)\//.test(file.type)).slice(0, 3);
     setFiles(selected);
   };
+  const chooseSupportIntent = (intent: SupportIntent) => {
+    if (sending) return;
+    setSupportIntent(intent);
+    setTicket(null);
+    setLines(current => [...current,
+      { from: "user", text: intent === "support" ? "Preciso de suporte" : "Tenho uma dúvida" },
+      { from: "bot", text: intent === "support"
+        ? "Oi, eu sou a Lia. Vou entender o que aconteceu e tentar resolver com você antes de envolver a equipe técnica. Conte o que não está funcionando e em qual tela você está."
+        : "Oi, eu sou a Lia. Pode me contar sua dúvida? Vou explicar de forma simples e acompanhar você passo a passo." },
+    ]);
+  };
   const submit = async () => {
     const bodyText = message.trim();
     if (!bodyText || sending) return;
@@ -754,13 +773,17 @@ export default function MigrationExperience() {
         return;
       }
 
+      if (!assistantResponse.ok || !assistant?.ok) {
+        setLines(current => [...current, { from: "bot", text: "Estou com uma instabilidade momentânea e não consegui analisar sua mensagem. Nada foi encaminhado ao suporte. Aguarde alguns segundos e tente novamente." }]);
+        setMessage("");
+        return;
+      }
+
       const transcript = conversation
         .filter(line => line.text.trim())
         .map(line => `${line.from === "user" ? "Usuário" : "Lia"}: ${line.text.trim()}`)
         .join("\n");
-      const escalationMessage = assistant?.action === "escalate"
-        ? [assistant.summary || bodyText, "", "Histórico da triagem:", transcript].filter(Boolean).join("\n")
-        : [bodyText, "", "Observação: a atendente virtual ficou temporariamente indisponível; encaminhamento de segurança."].join("\n");
+      const escalationMessage = [assistant.summary || bodyText, "", "Histórico da triagem:", transcript].filter(Boolean).join("\n");
       const uploadedAttachments: Array<{ name: string; type: string; size: number; path: string }> = [];
       for (const file of files) {
         const preparedResponse = await fetch("/api/support/attachment-upload", {
@@ -882,13 +905,20 @@ export default function MigrationExperience() {
     </div>
     {chatOpen ? <aside data-cmv-tour-ui="true" className={styles.chat} aria-label="Assistente de suporte">
       <header><div><strong>Assistente CMV Fácil</strong><small>Suporte e dúvidas</small></div><button onClick={() => setChatOpen(false)} aria-label="Fechar">×</button></header>
-      <div className={styles.messages}>{lines.map((line, index) => <div key={index} className={line.from === "bot" ? styles.bot : styles.user}>{line.text}</div>)}</div>
+      <div ref={messagesRef} className={styles.messages}>
+        {lines.map((line, index) => <div key={index} className={line.from === "bot" ? styles.bot : styles.user}>{line.text}</div>)}
+        {!supportIntent ? <div className={styles.chatChoices}>
+          <button onClick={() => chooseSupportIntent("support")}>🛠️ Preciso de suporte</button>
+          <button onClick={() => chooseSupportIntent("question")}>💬 Tenho uma dúvida</button>
+        </div> : null}
+        {sending ? <div className={`${styles.bot} ${styles.typingBubble}`} aria-label="Lia está digitando"><span /><span /><span /></div> : null}
+      </div>
       <div className={styles.composer}>
-        <textarea value={message} onChange={event => setMessage(event.target.value)} placeholder="Descreva sua dúvida ou problema…" rows={3} />
+        <textarea disabled={!supportIntent || sending} value={message} onChange={event => setMessage(event.target.value)} placeholder={supportIntent ? "Escreva sua mensagem para a Lia…" : "Escolha uma opção acima para começar"} rows={3} />
         <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onFiles} />
-        <button className={styles.attach} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
+        <button className={styles.attach} disabled={!supportIntent || sending} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
-        <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Lia está analisando…" : "Enviar mensagem"}</button>
+        <button className={styles.primary} disabled={!supportIntent || !message.trim() || sending} onClick={submit}>Enviar mensagem</button>
       </div>
     </aside> : null}
   </>;

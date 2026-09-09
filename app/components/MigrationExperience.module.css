@@ -14,6 +14,7 @@
 .coachHeader{cursor:grab;touch-action:none;user-select:none}.coachHeader:active{cursor:grabbing}
 
 .hideWelcome{display:inline-flex;align-items:center;gap:8px;color:#315b5b;font-size:14px;font-weight:700;cursor:pointer}.hideWelcome input{width:18px;height:18px;accent-color:#00b978;cursor:pointer}
+.chatChoices{display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:2px}.chatChoices button{border:1px solid #b9ddd3;border-radius:12px;background:#fff;color:#075e52;padding:10px 8px;font:800 12px/1.25 Inter,sans-serif;cursor:pointer}.chatChoices button:hover{background:#e8faf4;border-color:#66c9aa}.typingBubble{display:flex;align-items:center;gap:5px;min-width:58px;min-height:38px}.typingBubble span{width:7px;height:7px;border-radius:50%;background:#72a59b;animation:liaTyping 1.15s infinite ease-in-out}.typingBubble span:nth-child(2){animation-delay:.16s}.typingBubble span:nth-child(3){animation-delay:.32s}@keyframes liaTyping{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-5px);opacity:1}}.composer textarea:disabled,.attach:disabled{opacity:.58;cursor:not-allowed}
 /* Preserve a clear bottom lane for table pagination and sticky footers. */
 @media (min-width: 761px) {
   .chat {
