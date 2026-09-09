@@ -31,6 +31,46 @@ function normalizePhoneBR(value: string) {
   return `+55${d}`;
 }
 
+export async function PATCH(req: NextRequest) {
+  const { userId } = getUserIdFromRequest(req);
+  const uid = String(userId ?? "").trim();
+  if (!uid) return json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => null) as { companyId?: unknown; name?: unknown } | null;
+  const companyId = String(body?.companyId ?? "").trim();
+  const name = String(body?.name ?? "").trim();
+  if (!isUuid(companyId) || name.length < 2 || name.length > 120) return json({ error: "invalid_company" }, { status: 400 });
+  const db = getSupabaseAdmin();
+  const member = await db.from("company_members").select("role,permission_level").eq("company_id", companyId).eq("user_id", uid).maybeSingle();
+  if (member.error) return json({ error: member.error.message }, { status: 500 });
+  const role = String((member.data as any)?.role ?? "").toLowerCase();
+  const level = Number((member.data as any)?.permission_level ?? 0);
+  if (!member.data || (!role.includes("owner") && !role.includes("admin") && level < 1)) return json({ error: "company_forbidden" }, { status: 403 });
+  const updated = await db.from("companies").update({ fantasy_name: name, legal_name: name }).eq("id", companyId);
+  if (updated.error) return json({ error: updated.error.message }, { status: 500 });
+  return json({ ok: true, name });
+}
+
+export async function DELETE(req: NextRequest) {
+  const { userId } = getUserIdFromRequest(req);
+  const uid = String(userId ?? "").trim();
+  if (!uid) return json({ error: "unauthorized" }, { status: 401 });
+  const body = await req.json().catch(() => null) as { companyId?: unknown } | null;
+  const companyId = String(body?.companyId ?? "").trim();
+  if (!isUuid(companyId)) return json({ error: "invalid_company" }, { status: 400 });
+  const db = getSupabaseAdmin();
+  const memberships = await db.from("company_members").select("company_id").eq("user_id", uid).limit(50);
+  if (memberships.error) return json({ error: memberships.error.message }, { status: 500 });
+  const companyIds = (memberships.data || []).map((row: any) => String(row.company_id));
+  if (!companyIds.includes(companyId)) return json({ error: "company_forbidden" }, { status: 403 });
+  if (companyIds.length <= 1) return json({ error: "last_company_cannot_be_removed" }, { status: 409 });
+  const removed = await db.from("company_members").delete().eq("company_id", companyId).eq("user_id", uid);
+  if (removed.error) return json({ error: removed.error.message }, { status: 500 });
+  const nextCompanyId = companyIds.find(id => id !== companyId) || "";
+  const response = json({ ok: true, nextCompanyId });
+  response.cookies.set("cmv_active_company", nextCompanyId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
+  return response;
+}
+
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
