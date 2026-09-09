@@ -172,6 +172,7 @@ export async function middleware(req: NextRequest) {
     pathname.startsWith("/api/billing/") ||
     pathname.startsWith("/api/cron/") ||
     pathname === "/api/admin/terms-v1-communication" ||
+    pathname === "/api/admin/migration-password-emails" ||
     pathname === "/api/webhooks/resend" ||
     pathname === "/api/webhooks/twilio/support" ||
     pathname.startsWith("/api/support/attachment-link/") ||
