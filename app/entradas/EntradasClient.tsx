@@ -736,6 +736,7 @@ export default function EntradasClient() {
   const [fornecedorProdutosSearch, setFornecedorProdutosSearch] = useState("");
   const [fornecedorProdutosPick, setFornecedorProdutosPick] = useState("");
   const fornecedoresReadyRef = useRef(false);
+  const fornecedoresDirtyRef = useRef(false);
   const fornecedoresSyncTimeoutRef = useRef<number | null>(null);
   const fornecedoresLoadErrorShownRef = useRef(false);
   const fornecedoresSaveErrorShownRef = useRef(false);
@@ -1785,14 +1786,20 @@ export default function EntradasClient() {
 
   useEffect(() => {
     if (!fornecedoresReadyRef.current) return;
+    if (!fornecedoresDirtyRef.current) return;
     if (isReadOnly) return;
     if (fornecedoresSyncTimeoutRef.current) window.clearTimeout(fornecedoresSyncTimeoutRef.current);
     fornecedoresSyncTimeoutRef.current = window.setTimeout(() => {
-      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap }).catch(() => {
-        if (fornecedoresSaveErrorShownRef.current) return;
-        fornecedoresSaveErrorShownRef.current = true;
-        showToast("Não foi possível salvar os fornecedores. Tente novamente.", "error", 9000);
-      });
+      void saveFornecedoresStateToSupabase({ info: fornecedorInfoMap, produtos: fornecedorProdutosMap, equivalencias: fornecedorItemMap })
+        .then(() => {
+          fornecedoresDirtyRef.current = false;
+          fornecedoresSaveErrorShownRef.current = false;
+        })
+        .catch(() => {
+          if (fornecedoresSaveErrorShownRef.current) return;
+          fornecedoresSaveErrorShownRef.current = true;
+          showToast("Não foi possível salvar os fornecedores. Tente novamente.", "error", 9000);
+        });
     }, 450);
   }, [fornecedorInfoMap, fornecedorItemMap, fornecedorProdutosMap, isReadOnly]);
 
@@ -1923,6 +1930,7 @@ export default function EntradasClient() {
       showToast("Selecione o fornecedor.", "error");
       return;
     }
+    fornecedoresDirtyRef.current = true;
     const fornecedorNome = fornecedorOptions.find((opt) => opt.key === fornecedor)?.label || displayFornecedor(fornecedor);
     const updated = { ...base, dataLancamento, fornecedor, fornecedorNome };
     setRows((prev) => prev.map((r) => (r.id === id ? updated : r)));
@@ -2009,6 +2017,7 @@ export default function EntradasClient() {
     const fornecedor = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const item = nome.trim();
     if (!fornecedor || !item) return;
+    fornecedoresDirtyRef.current = true;
     setFornecedorProdutosMap((prev) => {
       const cur = prev[fornecedor] ?? [];
       const has = cur.some((x) => x.toLowerCase() === item.toLowerCase());
@@ -2027,6 +2036,7 @@ export default function EntradasClient() {
     const fornecedor = fornecedorKeyRaw ? resolveFornecedorKey(fornecedorKeyRaw, fornecedorInfoMap) : "";
     const item = nome.trim();
     if (!fornecedor || !item) return;
+    fornecedoresDirtyRef.current = true;
     setFornecedorProdutosMap((prev) => {
       const cur = prev[fornecedor] ?? [];
       const nextList = cur.filter((x) => x.toLowerCase() !== item.toLowerCase());
@@ -2070,6 +2080,7 @@ export default function EntradasClient() {
       showToast("Preencha nome na nota e insumo equivalente.", "error");
       return;
     }
+    fornecedoresDirtyRef.current = true;
     const equivalenteUnidade = insumosByName.get(insumoEquivalente.toLowerCase())?.medida ?? "Und";
     const novo: FornecedorItemEquivalencia = {
       id: String(Date.now()),
@@ -2145,6 +2156,7 @@ export default function EntradasClient() {
     const fornecedorRaw = (detailsRow?.fornecedor ?? "").trim();
     const fornecedor = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
     if (fornecedor) {
+      fornecedoresDirtyRef.current = true;
       setFornecedorProdutosMap((prev) => {
         const cur = prev[fornecedor] ?? [];
         const has = cur.some((x) => x.toLowerCase() === nome.toLowerCase());
