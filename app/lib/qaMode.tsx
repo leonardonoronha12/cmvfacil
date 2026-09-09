@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 
 type QaFetchEntry = {
   ts: string;
@@ -173,22 +173,7 @@ function collectTablesFromDom(): QaReport["dom"] {
   return out;
 }
 
-function downloadJson(filename: string, data: unknown) {
-  const blob = new Blob([JSON.stringify(data, null, 2) + "\n"], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.rel = "noopener";
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 5000);
-}
-
 export function QaModePanel(props: { screen: string; ui?: unknown }) {
-  const [copied, setCopied] = useState(false);
-
   useEffect(() => {
     installQaFetchLogger();
   }, []);
@@ -214,34 +199,7 @@ export function QaModePanel(props: { screen: string; ui?: unknown }) {
     (window as any).__CMV_QA_LAST_REPORT__ = report;
   }, [enabled, report]);
 
-  const doDownload = useCallback(() => {
-    if (!report) return;
-    const stamp = report.ts.replace(/[:.]/g, "-");
-    const safeScreen = report.screen.replace(/[^a-z0-9_-]+/gi, "_");
-    downloadJson(`qa_${safeScreen}_${stamp}.json`, report);
-  }, [report]);
-
-  const doCopy = useCallback(async () => {
-    if (!report) return;
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(report, null, 2));
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setCopied(false);
-    }
-  }, [report]);
-
-  if (!enabled) return null;
-
-  return (
-    <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-      <button type="button" onClick={doDownload} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd" }}>
-        Baixar QA JSON
-      </button>
-      <button type="button" onClick={doCopy} style={{ padding: "8px 10px", borderRadius: 8, border: "1px solid #ddd" }}>
-        {copied ? "Copiado" : "Copiar QA JSON"}
-      </button>
-    </div>
-  );
+  // O relatório continua disponível para a automação de QA, mas controles
+  // técnicos não devem aparecer na interface usada pelo cliente.
+  return null;
 }
