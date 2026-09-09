@@ -3708,8 +3708,9 @@ export default function EntradasClient() {
           </div>
         ) : null}
 
-        {isAddFornecedorItemOpen ? (
-          <div className={styles.modalOverlay} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
+        {isMounted && isAddFornecedorItemOpen
+          ? createPortal(
+          <div className={`${styles.modalOverlay} ${styles.nestedModalOverlay}`} role="presentation" onClick={() => setIsAddFornecedorItemOpen(false)}>
             <div className={`${styles.modal} ${styles.mapItemModal}`} role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
               <div className={styles.modalHeader}>
                 <div className={styles.modalTitle}>Configurar Vinculação</div>
@@ -3769,8 +3770,10 @@ export default function EntradasClient() {
                 </button>
               </div>
             </div>
-          </div>
-        ) : null}
+          </div>,
+          document.body,
+        )
+          : null}
 
         {isMounted && isFornecedorProdutosOpen && fornecedorModalKey
           ? createPortal(
