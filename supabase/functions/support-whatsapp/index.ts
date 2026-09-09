@@ -4,6 +4,7 @@ import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 // Keep this explicit so a generic environment variable cannot silently point
 // support tickets at an unrelated marketing template.
 const SUPPORT_CONTENT_SID = "HXae8d2920b28447773bd94a093e0ec614";
+const SUPPORT_MENU_CONTENT_SID = "HX8297b00787c7e8465898cd821e5db22e";
 
 function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -56,7 +57,25 @@ serve(async (req) => {
     const originalSid = String(form.get("OriginalRepliedMessageSid") || "").trim();
     const body = String(form.get("ButtonPayload") || form.get("Body") || "").trim();
     const action = actionFrom(body);
-    if (!/^SM[a-f0-9]{32}$/i.test(messageSid) || !action) return xml();
+    if (!/^SM[a-f0-9]{32}$/i.test(messageSid)) return xml();
+
+    // The Twilio number is configured to enter through this Edge Function.
+    // Ordinary messages must continue to the conversational support webhook;
+    // only the legacy ticket buttons are handled locally below.
+    if (!action) {
+      const conversationalResponse = await fetch("https://cmvfacil.app/api/webhooks/twilio/support", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: form.toString(),
+      }).catch(() => null);
+      if (!conversationalResponse?.ok) {
+        return xml("Não consegui iniciar o atendimento agora. Aguarde alguns segundos e envie sua mensagem novamente.");
+      }
+      return new Response(await conversationalResponse.text(), {
+        status: 200,
+        headers: { "content-type": "text/xml; charset=utf-8", "cache-control": "no-store" },
+      });
+    }
 
     const verifiedResponse = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages/${encodeURIComponent(messageSid)}.json`,
@@ -150,8 +169,10 @@ serve(async (req) => {
     message?: unknown;
     protocol?: unknown;
     messageSid?: unknown;
+    allowAnySender?: unknown;
     to?: unknown;
     contentVariables?: Record<string, unknown>;
+    contentSid?: unknown;
   } | null;
   const action = String(payload?.action ?? "send_ticket").trim();
   const message = String(payload?.message ?? "").trim();
@@ -162,6 +183,7 @@ serve(async (req) => {
   );
   if (action === "verify_incoming") {
     const messageSid = String(payload?.messageSid ?? "").trim();
+    const allowAnySender = payload?.allowAnySender === true;
     if (!/^SM[a-f0-9]{32}$/i.test(messageSid)) return json({ ok: false, error: "invalid_message_sid" }, 400);
     const response = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(accountSid)}/Messages/${encodeURIComponent(messageSid)}.json`,
@@ -171,7 +193,7 @@ serve(async (req) => {
     if (!response?.ok) return json({ ok: false, error: "twilio_verification_failed" }, 502);
     const expectedFrom = whatsapp(to);
     const expectedTo = whatsapp(from);
-    if (String(result?.direction ?? "") !== "inbound" || String(result?.from ?? "") !== expectedFrom || String(result?.to ?? "") !== expectedTo) {
+    if (String(result?.direction ?? "") !== "inbound" || String(result?.to ?? "") !== expectedTo || (!allowAnySender && String(result?.from ?? "") !== expectedFrom)) {
       return json({ ok: false, error: "untrusted_incoming_message" }, 403);
     }
     return json({ ok: true, body: result?.body ?? "", from: result?.from ?? "", to: result?.to ?? "" });
@@ -184,6 +206,10 @@ serve(async (req) => {
   if (action === "send_text") {
     if (message.length < 1 || message.length > 1600) return json({ ok: false, error: "invalid_message" }, 400);
     form.set("Body", message);
+  } else if (action === "send_content") {
+    const requestedContentSid = String(payload?.contentSid ?? SUPPORT_MENU_CONTENT_SID).trim();
+    if (!/^HX[a-f0-9]{32}$/i.test(requestedContentSid)) return json({ ok: false, error: "invalid_content_sid" }, 400);
+    form.set("ContentSid", requestedContentSid);
   } else {
     if (message.length < 3 || message.length > 6000) return json({ ok: false, error: "invalid_message" }, 400);
     if (!contentSid || Object.keys(contentVariables).length !== 5) {

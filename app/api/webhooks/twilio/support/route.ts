@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getVercelOidcToken } from "@vercel/oidc";
 import { getSupabaseAdmin } from "../../../../lib/supabaseAdmin";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const DEVELOPER_PHONE = "+5521988945647";
-const clean = (value: unknown) => String(value ?? "").trim();
+const SUPPORT_MENU_CONTENT_SID = "HX8297b00787c7e8465898cd821e5db22e";
+const AGENTS = ["Lia", "Ana", "Camila", "Juliana", "Mariana", "Rafael", "Bruno"] as const;
+const clean = (value: unknown, max = 6000) => String(value ?? "").trim().slice(0, max);
 const xml = (message = "") => new NextResponse(
   `<?xml version="1.0" encoding="UTF-8"?><Response>${message ? `<Message>${message.replace(/[<>&'\"]/g, (char) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", "'": "&apos;", '\"': "&quot;" })[char]!)}</Message>` : ""}</Response>`,
   { status: 200, headers: { "content-type": "text/xml; charset=utf-8", "cache-control": "no-store" } },
@@ -33,6 +36,100 @@ function normalizeAction(payload: string, body: string) {
   return "";
 }
 
+type ChatMessage = { role: "user" | "assistant"; content: string };
+
+function agentFor(phone: string) {
+  let hash = 0;
+  for (const char of phone) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return AGENTS[hash % AGENTS.length];
+}
+
+function parseIntent(body: string) {
+  const value = body.toLocaleLowerCase("pt-BR");
+  if (/^(1|suporte)$/i.test(value.trim()) || value.includes("preciso de suporte") || value.includes("problema")) return "support";
+  if (/^(2|d[uú]vida)$/i.test(value.trim()) || value.includes("tenho uma dúvida") || value.includes("tenho uma duvida")) return "question";
+  return "";
+}
+
+async function askAssistant(agentName: string, intent: string, messages: ChatMessage[]) {
+  const token = clean(process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || (await getVercelOidcToken()), 12000);
+  if (!token) throw new Error("whatsapp_assistant_not_configured");
+  const system = `Você é ${agentName}, atendente virtual do CMV Fácil no WhatsApp. Converse em português brasileiro de forma humana, acolhedora, objetiva e profissional. Faça uma pergunta por vez, não repita o que já foi respondido e tente diagnosticar e solucionar antes de encaminhar. Colete tela, ação, resultado esperado, resultado ocorrido, erro, data/item afetado e impacto quando forem relevantes. Não peça senha, código, cartão ou dados sensíveis. Use action=resolved somente após o usuário confirmar que resolveu. Use action=escalate quando depender da equipe técnica, após tentativas sem sucesso, ou quando o usuário pedir uma pessoa. Responda somente JSON: {"reply":"texto","action":"continue|resolved|escalate","summary":"resumo técnico ao escalar"}. Contexto: tipo de atendimento ${intent}.`;
+  const requestBody = JSON.stringify({ model: clean(process.env.SUPPORT_AI_MODEL, 120) || "openai/gpt-4o-mini", max_tokens: 450, response_format: { type: "json_object" }, messages: [{ role: "system", content: system }, ...messages.slice(-18)] });
+  let result: any = null;
+  let response: Response | null = null;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: requestBody, signal: AbortSignal.timeout(10000) });
+    result = await response.json().catch(() => null);
+    if (response.ok) break;
+    if (attempt === 0 && (response.status === 429 || response.status >= 500)) await new Promise(resolve => setTimeout(resolve, 350));
+  }
+  if (!response?.ok) throw new Error(clean(result?.error?.message || `gateway_${response?.status || 0}`));
+  const raw = clean(result?.choices?.[0]?.message?.content, 8000).replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
+  const parsed = JSON.parse(raw);
+  const action = ["continue", "resolved", "escalate"].includes(clean(parsed?.action)) ? clean(parsed.action) : "continue";
+  return { reply: clean(parsed?.reply, 1300), action, summary: clean(parsed?.summary, 4000) };
+}
+
+async function handleConversation(args: { db: ReturnType<typeof getSupabaseAdmin>; phone: string; body: string; messageSid: string }) {
+  const { db, phone, body, messageSid } = args;
+  const loaded = await db.from("whatsapp_support_conversations").select("*").eq("phone", phone).maybeSingle();
+  if (loaded.error) throw loaded.error;
+  const existing = loaded.data as any;
+  if (clean(existing?.last_message_sid) === messageSid) return xml();
+  const agentName = clean(existing?.agent_name) || agentFor(phone);
+  let intent = clean(existing?.intent);
+  let status = clean(existing?.status) || "choosing";
+  let messages = (Array.isArray(existing?.messages) ? existing.messages : []) as ChatMessage[];
+
+  if (status === "escalated") return xml(`Seu atendimento já foi encaminhado à equipe técnica. Aguarde, pois uma pessoa da equipe continuará o contato por aqui.`);
+  if (status === "resolved" || /^(menu|iniciar|oi|ol[aá])$/i.test(body)) {
+    status = "choosing";
+    intent = "";
+    messages = [];
+  }
+  if (status === "choosing") {
+    const selected = parseIntent(body);
+    if (!selected) {
+      await db.from("whatsapp_support_conversations").upsert({ phone, agent_name: agentName, intent: null, status: "choosing", messages: [], last_message_sid: messageSid, updated_at: new Date().toISOString() }, { onConflict: "phone" });
+      try {
+        await callTwilioFunction({
+          action: "send_content",
+          to: phone,
+          protocol: `support-menu-${messageSid}`,
+          contentSid: SUPPORT_MENU_CONTENT_SID,
+        });
+        return xml();
+      } catch (error) {
+        console.error("whatsapp_support_menu_failed", error instanceof Error ? error.message : String(error));
+        return xml("Olá! Bem-vindo ao atendimento do CMV Fácil. Responda com “Preciso de suporte” ou “Tenho uma dúvida”.");
+      }
+    }
+    intent = selected;
+    status = "active";
+    messages = [];
+  }
+
+  messages.push({ role: "user", content: body });
+  let answer: { reply: string; action: string; summary: string };
+  try {
+    answer = await askAssistant(agentName, intent, messages);
+  } catch (error) {
+    console.error("whatsapp_assistant_failed", error instanceof Error ? error.message : String(error));
+    answer = { reply: "Entendi. Para eu investigar melhor, diga em qual tela isso acontece e o que aparece diferente ou errado.", action: "continue", summary: "" };
+  }
+  const introduction = messages.length === 1 ? `${agentName} entrou no atendimento.\n\n${agentName}: ` : `${agentName}: `;
+  const reply = `${introduction}${answer.reply}`.trim();
+  messages.push({ role: "assistant", content: answer.reply });
+  status = answer.action === "escalate" ? "escalated" : answer.action === "resolved" ? "resolved" : "active";
+  await db.from("whatsapp_support_conversations").upsert({ phone, agent_name: agentName, intent, status, messages: messages.slice(-20), last_message_sid: messageSid, updated_at: new Date().toISOString() }, { onConflict: "phone" });
+  if (answer.action === "escalate") {
+    await callTwilioFunction({ action: "send_text", to: DEVELOPER_PHONE, protocol: `whatsapp-${messageSid}`, message: `Novo atendimento encaminhado por ${agentName}.\nCliente: ${phone}\n\n${answer.summary || body}` }).catch(error => console.error("whatsapp_escalation_failed", error instanceof Error ? error.message : String(error)));
+    return xml(`${reply}\n\nReuni as informações e encaminhei para a equipe de suporte técnico. Uma pessoa continuará o atendimento por aqui.`);
+  }
+  return xml(reply);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const form = await req.formData();
@@ -41,12 +138,13 @@ export async function POST(req: NextRequest) {
     const buttonPayload = clean(form.get("ButtonPayload"));
     const originalSid = clean(form.get("OriginalRepliedMessageSid"));
     const action = normalizeAction(buttonPayload, body);
-    if (!messageSid || !action) return xml();
+    if (!messageSid) return xml();
 
-    const verified = await callTwilioFunction({ action: "verify_incoming", messageSid });
+    const verified = await callTwilioFunction({ action: "verify_incoming", messageSid, allowAnySender: true });
     if (clean(verified.body) !== body) throw new Error("incoming_body_mismatch");
 
     const db = getSupabaseAdmin();
+    if (!action) return handleConversation({ db, phone: clean(verified.from), body: buttonPayload || body || "Enviei um anexo e preciso de ajuda.", messageSid });
     let receiptQuery = db.from("support_delivery_receipts").select("ticket_id,provider_message_id").eq("provider", "twilio");
     if (originalSid) receiptQuery = receiptQuery.eq("provider_message_id", originalSid);
     else receiptQuery = receiptQuery.order("created_at", { ascending: false }).limit(1);
