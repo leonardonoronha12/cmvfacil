@@ -18,6 +18,7 @@ export default function CadastroEmpresaClient() {
   const [checkoutPending, setCheckoutPending] = useState(false);
   const [createdCompanyId, setCreatedCompanyId] = useState<string | null>(null);
   const [onboardingMode, setOnboardingMode] = useState(false);
+  const [additionalProfileMode, setAdditionalProfileMode] = useState(false);
   const didRedirectRef = useRef(false);
   const didAutoOpenCheckoutRef = useRef(false);
 
@@ -25,6 +26,7 @@ export default function CadastroEmpresaClient() {
     try {
       const params = new URLSearchParams(window.location.search);
       setOnboardingMode(params.get("onboarding") === "1");
+      setAdditionalProfileMode(params.get("profile") === "1");
     } catch {
       setOnboardingMode(false);
     }
@@ -57,6 +59,17 @@ export default function CadastroEmpresaClient() {
       return false;
     }
     try {
+      if (additionalProfileMode) {
+        const active = await fetch("/api/companies/active", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ companyId: companyIdTrim }),
+        });
+        const activePayload = await active.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+        if (!active.ok || !activePayload?.ok) {
+          throw new Error(activePayload?.error || "Não foi possível selecionar o novo perfil para a assinatura.");
+        }
+      }
       try {
         sessionStorage.setItem("cmv_onboarding_checkout_pending", "1");
         sessionStorage.setItem("cmv_onboarding_company_id", companyIdTrim);
@@ -65,7 +78,7 @@ export default function CadastroEmpresaClient() {
       const checkout = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ plan_key: "pro_monthly", origin: "signup", company_id: companyIdTrim }),
+        body: JSON.stringify({ plan_key: "pro_monthly", origin: additionalProfileMode ? "settings" : "signup", company_id: companyIdTrim }),
       });
       const cj = (await checkout.json().catch(() => null)) as { ok?: boolean; url?: string; error?: string } | null;
       if (checkout.ok && cj?.ok && cj?.url) {
@@ -88,6 +101,29 @@ export default function CadastroEmpresaClient() {
     }
   }
 
+  async function continueWithTrial() {
+    if (!createdCompanyId) return;
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/companies/active", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ companyId: createdCompanyId }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !payload?.ok) throw new Error(payload?.error || "Não foi possível abrir o novo perfil.");
+      try {
+        sessionStorage.removeItem("cmv_onboarding_checkout_pending");
+        sessionStorage.removeItem("cmv_onboarding_company_id");
+      } catch {}
+      window.location.replace("/dashboard?trial=started");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Não foi possível iniciar o período de teste.");
+      setIsSubmitting(false);
+    }
+  }
+
   if (checkoutPending) {
     return (
       <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -95,9 +131,9 @@ export default function CadastroEmpresaClient() {
           <div style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
             <LoadingSpinner size={18} />
             <span>
-              Cadastro concluído.
+              {additionalProfileMode ? "Novo perfil criado." : "Cadastro concluído."}
               <br />
-              Preparando sua assinatura…
+              {additionalProfileMode ? "Este perfil precisa de uma assinatura própria ou usará o teste grátis de 7 dias." : "Preparando sua assinatura…"}
             </span>
           </div>
           {error ? <div style={{ marginTop: 14, color: "#b42318", fontSize: 13, fontWeight: 700 }}>{error}</div> : null}
@@ -109,13 +145,24 @@ export default function CadastroEmpresaClient() {
                 style={{ width: "fit-content" }}
                 onClick={() => void openCheckout(createdCompanyId)}
               >
-                Tentar abrir Checkout
+                {additionalProfileMode ? "Assinar este perfil" : "Tentar abrir Checkout"}
+              </button>
+            ) : null}
+            {additionalProfileMode && createdCompanyId ? (
+              <button
+                type="button"
+                className="cmv-company-submit"
+                style={{ width: "fit-content", marginLeft: 10 }}
+                disabled={isSubmitting}
+                onClick={() => void continueWithTrial()}
+              >
+                {isSubmitting ? "Abrindo…" : "Usar teste grátis de 7 dias"}
               </button>
             ) : null}
             <a
               className="cmv-company-submit"
               href="/ajustes?tab=planos"
-              style={{ display: "inline-block", textDecoration: "none", marginLeft: createdCompanyId ? 10 : 0 }}
+              style={{ display: additionalProfileMode ? "none" : "inline-block", textDecoration: "none", marginLeft: createdCompanyId ? 10 : 0 }}
               onClick={() => {
                 try {
                   sessionStorage.removeItem("cmv_onboarding_checkout_pending");
@@ -151,6 +198,7 @@ export default function CadastroEmpresaClient() {
               headers: { "content-type": "application/json" },
               body: JSON.stringify({
                 company_id: onboardingMode ? createdCompanyId : undefined,
+                additionalProfile: additionalProfileMode,
                 fantasyName,
                 legalName,
                 cnpj,
@@ -174,6 +222,13 @@ export default function CadastroEmpresaClient() {
                 sessionStorage.removeItem("cmv_onboarding_company_id");
               } catch {}
               window.location.replace("/dashboard");
+              return;
+            }
+            if (additionalProfileMode) {
+              try {
+                sessionStorage.setItem("cmv_onboarding_company_id", newCompanyId);
+              } catch {}
+              setCheckoutPending(true);
               return;
             }
             const ok = await openCheckout(newCompanyId);

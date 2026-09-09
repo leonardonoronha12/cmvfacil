@@ -93,6 +93,7 @@ export async function POST(req: NextRequest) {
   const desiredStore = String(data.desiredStore ?? "").trim();
   const logoUrl = String(data.logoUrl ?? "").trim();
   const companyIdOverride = String((data as any).company_id ?? (data as any).companyId ?? "").trim();
+  const additionalProfile = (data as any).additionalProfile === true;
 
   if (!fantasyName) return json({ error: "fantasy_name_required" }, { status: 400 });
   if (!legalName) return json({ error: "legal_name_required" }, { status: 400 });
@@ -153,17 +154,42 @@ export async function POST(req: NextRequest) {
     return json({ ok: true, company_id: companyIdOverride }, { status: 200 });
   }
 
-  const { data: companyId, error } = await supabase.rpc("upsert_company", {
-    p_fantasy_name: fantasyName,
-    p_legal_name: legalName,
-    p_cnpj: cnpj,
-    p_email: email,
-    p_phone_e164: phoneE164,
-    p_industry: industry || null,
-    p_logo_url: logoUrl || null,
-    p_desired_store: desiredStore || null,
-    p_raw: { source: "cadastro-empresa" },
-  });
+  // Um perfil adicional precisa ter ciclo de cobrança próprio. Não usamos o
+  // upsert por e-mail/CNPJ aqui, pois isso poderia anexá-lo a uma assinatura
+  // já existente em vez de criar a empresa com seu próprio trial.
+  const created = additionalProfile
+    ? await (supabase.from("companies") as any)
+        .insert({
+          fantasy_name: fantasyName,
+          legal_name: legalName,
+          cnpj,
+          email,
+          phone_e164: phoneE164,
+          industry: industry || null,
+          logo_url: logoUrl || null,
+          desired_store: desiredStore || null,
+          raw: { source: "cadastro-perfil-adicional" },
+        })
+        .select("id,trial_started_at,trial_ends_at,subscription_status")
+        .single()
+    : null;
+
+  const rpcResult = additionalProfile
+    ? null
+    : await supabase.rpc("upsert_company", {
+        p_fantasy_name: fantasyName,
+        p_legal_name: legalName,
+        p_cnpj: cnpj,
+        p_email: email,
+        p_phone_e164: phoneE164,
+        p_industry: industry || null,
+        p_logo_url: logoUrl || null,
+        p_desired_store: desiredStore || null,
+        p_raw: { source: "cadastro-empresa" },
+      });
+
+  const companyId = additionalProfile ? String(created?.data?.id ?? "") : rpcResult?.data;
+  const error = additionalProfile ? created?.error : rpcResult?.error;
 
   if (error) {
     return json({ error: "supabase_error", details: error.message }, { status: 500 });
@@ -182,5 +208,10 @@ export async function POST(req: NextRequest) {
     return json({ error: "company_member_failed", details: up.error.message }, { status: 500 });
   }
 
-  return json({ ok: true, company_id: companyId }, { status: 200 });
+  return json({
+    ok: true,
+    company_id: companyId,
+    billing_required: additionalProfile,
+    trial_ends_at: additionalProfile ? created?.data?.trial_ends_at ?? null : null,
+  }, { status: 200 });
 }
