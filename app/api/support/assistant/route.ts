@@ -54,8 +54,7 @@ export async function POST(req: NextRequest) {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
       body: JSON.stringify({
-        model: clean(process.env.SUPPORT_AI_MODEL, 120) || "openai/gpt-5-mini",
-        temperature: 0.25,
+        model: clean(process.env.SUPPORT_AI_MODEL, 120) || "openai/gpt-4o-mini",
         max_tokens: 400,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },

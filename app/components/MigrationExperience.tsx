@@ -934,7 +934,18 @@ export default function MigrationExperience() {
         {sending ? <div className={`${styles.bot} ${styles.typingBubble}`} aria-label={`${supportAgent || "Atendente"} está digitando`}><span /><span /><span /></div> : null}
       </div>
       <div className={styles.composer}>
-        <textarea disabled={!supportIntent || sending} value={message} onChange={event => setMessage(event.target.value)} placeholder={supportIntent ? `Escreva sua mensagem para ${supportAgent || "o atendente"}…` : "Escolha uma opção acima para começar"} rows={3} />
+        <textarea
+          disabled={!supportIntent || sending}
+          value={message}
+          onChange={event => setMessage(event.target.value)}
+          onKeyDown={event => {
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+            event.preventDefault();
+            if (message.trim() && !sending) void submit();
+          }}
+          placeholder={supportIntent ? `Escreva sua mensagem para ${supportAgent || "o atendente"}…` : "Escolha uma opção acima para começar"}
+          rows={3}
+        />
         <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onFiles} />
         <button className={styles.attach} disabled={!supportIntent || sending} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
