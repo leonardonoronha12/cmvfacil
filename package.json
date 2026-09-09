@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "2.49.1",
+    "@vercel/oidc": "^3.8.7",
     "next": "14.2.35",
     "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.3.289",
