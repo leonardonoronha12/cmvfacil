@@ -738,9 +738,29 @@ export default function MigrationExperience() {
   const submit = async () => {
     const bodyText = message.trim();
     if (!bodyText || sending) return;
-    setLines(current => [...current, { from: "user", text: bodyText }]);
+    const conversation: ChatLine[] = [...lines, { from: "user", text: bodyText }];
+    setLines(conversation);
     setSending(true); setTicket(null);
     try {
+      const assistantResponse = await fetch("/api/support/assistant", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversation, page: String(pathname || "/"), attachments: files.length }),
+      });
+      const assistant = await assistantResponse.json().catch(() => null) as { ok?: boolean; reply?: string; action?: "continue" | "resolved" | "escalate"; summary?: string } | null;
+      if (assistantResponse.ok && assistant?.ok && assistant.reply && assistant.action !== "escalate") {
+        setLines(current => [...current, { from: "bot", text: assistant.reply! }]);
+        setMessage("");
+        return;
+      }
+
+      const transcript = conversation
+        .filter(line => line.text.trim())
+        .map(line => `${line.from === "user" ? "Usuário" : "Lia"}: ${line.text.trim()}`)
+        .join("\n");
+      const escalationMessage = assistant?.action === "escalate"
+        ? [assistant.summary || bodyText, "", "Histórico da triagem:", transcript].filter(Boolean).join("\n")
+        : [bodyText, "", "Observação: a atendente virtual ficou temporariamente indisponível; encaminhamento de segurança."].join("\n");
       const uploadedAttachments: Array<{ name: string; type: string; size: number; path: string }> = [];
       for (const file of files) {
         const preparedResponse = await fetch("/api/support/attachment-upload", {
@@ -763,16 +783,19 @@ export default function MigrationExperience() {
         if (!uploadResponse.ok) throw new Error("Não foi possível enviar o anexo. Tente novamente.");
         uploadedAttachments.push({ name: file.name, type: file.type, size: file.size, path: prepared.path });
       }
-      const body = new FormData(); body.set("message", bodyText); body.set("page", String(pathname || "/"));
+      const body = new FormData(); body.set("message", escalationMessage); body.set("page", String(pathname || "/"));
       if (uploadedAttachments.length) body.set("uploadedAttachments", JSON.stringify(uploadedAttachments));
       const response = await fetch("/api/support/ticket", { method: "POST", body });
       const data = await response.json().catch(() => null);
       if (!response.ok || !data?.ok) throw new Error(data?.error || "Não foi possível registrar o chamado.");
       const twilioStatus = String(data.twilioStatus || "").toLowerCase();
       setTicket({ protocol: data.protocol, whatsappUrl: data.whatsappUrl, forwarded: data.forwarded === true, twilioStatus });
-      setLines(current => [...current, { from: "bot", text: data.forwarded === true
-        ? `Chamado ${data.protocol} enviado com sucesso. A equipe de suporte técnico vai analisar, solucionar o problema e entrar em contato com você.`
-        : `Chamado ${data.protocol} registrado com sucesso. A equipe de suporte técnico vai analisar, solucionar o problema e entrar em contato com você.` }]);
+      setLines(current => [...current,
+        ...(assistant?.reply ? [{ from: "bot" as const, text: assistant.reply }] : []),
+        { from: "bot", text: data.forwarded === true
+          ? `Chamado ${data.protocol} enviado com sucesso. Reuni as informações da nossa conversa e encaminhei à equipe de suporte técnico, que vai analisar e entrar em contato com você.`
+          : `Chamado ${data.protocol} registrado com sucesso com o histórico da nossa conversa. A equipe de suporte técnico vai analisar e entrar em contato com você.` },
+      ]);
       setMessage(""); setFiles([]); if (inputRef.current) inputRef.current.value = "";
     } catch (error) {
       const fallback = `https://wa.me/${SUPPORT_PHONE}?text=${encodeURIComponent(`Olá, preciso de suporte no CMV Fácil.\nUsuário: ${me?.email || "não identificado"}\nEmpresa: ${me?.companyName || "não identificada"}\nPágina: ${pathname}\nProblema: ${bodyText}`)}`;
@@ -865,7 +888,7 @@ export default function MigrationExperience() {
         <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onFiles} />
         <button className={styles.attach} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
-        <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Enviando ao suporte…" : "Enviar chamado"}</button>
+        <button className={styles.primary} disabled={!message.trim() || sending} onClick={submit}>{sending ? "Lia está analisando…" : "Enviar mensagem"}</button>
       </div>
     </aside> : null}
   </>;
