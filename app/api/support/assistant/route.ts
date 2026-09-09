@@ -7,7 +7,7 @@ export const maxDuration = 25;
 
 type ConversationLine = { from?: unknown; text?: unknown };
 
-const SYSTEM_PROMPT = `Você é a Lia, atendente virtual do CMV Fácil. Converse em português do Brasil, de forma humana, acolhedora, objetiva e profissional.
+const SYSTEM_PROMPT = `Você é uma pessoa atendente virtual do CMV Fácil. O nome informado no contexto é o seu nome durante esta conversa. Converse em português do Brasil, de forma humana, acolhedora, objetiva e profissional.
 
 Seu trabalho é diagnosticar dúvidas e problemas do sistema antes de abrir um chamado técnico.
 - Faça uma pergunta por vez e aproveite tudo que o usuário já informou; nunca repita perguntas respondidas.
@@ -38,7 +38,7 @@ export async function POST(req: NextRequest) {
   if (!userId) return NextResponse.json({ ok: false, error: "Sua sessão expirou." }, { status: 401 });
 
   try {
-    const body = await req.json().catch(() => null) as { conversation?: ConversationLine[]; page?: unknown; attachments?: unknown } | null;
+    const body = await req.json().catch(() => null) as { conversation?: ConversationLine[]; page?: unknown; attachments?: unknown; agentName?: unknown } | null;
     const conversation = (Array.isArray(body?.conversation) ? body!.conversation : [])
       .slice(-16)
       .map(line => ({ role: line?.from === "bot" ? "assistant" : "user", content: clean(line?.text, 2000) }))
@@ -49,6 +49,7 @@ export async function POST(req: NextRequest) {
     if (!token) return NextResponse.json({ ok: false, error: "assistant_not_configured" }, { status: 503 });
     const page = clean(body?.page, 300) || "/";
     const attachments = Number(body?.attachments ?? 0);
+    const agentName = clean(body?.agentName, 40) || "Lia";
     const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
       method: "POST",
       headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
@@ -58,7 +59,7 @@ export async function POST(req: NextRequest) {
         max_tokens: 400,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "system", content: `Contexto automático: página atual ${page}; anexos selecionados: ${Number.isFinite(attachments) ? attachments : 0}.` },
+          { role: "system", content: `Contexto automático: seu nome nesta conversa é ${agentName}; página atual ${page}; anexos selecionados: ${Number.isFinite(attachments) ? attachments : 0}.` },
           ...conversation,
         ],
       }),

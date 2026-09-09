@@ -222,6 +222,8 @@ const fullCourseSteps = [
 type Me = { userId?: string; email?: string; nomeCompleto?: string; companyName?: string; source?: { hasBubbleMatch?: boolean; userBubbleId?: string | null } };
 type ChatLine = { from: "bot" | "user"; text: string };
 type SupportIntent = "support" | "question";
+const SUPPORT_AGENTS = ["Lia", "Ana", "Camila", "Juliana", "Mariana", "Rafael", "Bruno"] as const;
+type SupportAgent = (typeof SUPPORT_AGENTS)[number];
 
 export default function MigrationExperience() {
   const pathname = usePathname();
@@ -240,6 +242,7 @@ export default function MigrationExperience() {
   const [files, setFiles] = useState<File[]>([]);
   const [sending, setSending] = useState(false);
   const [supportIntent, setSupportIntent] = useState<SupportIntent | null>(null);
+  const [supportAgent, setSupportAgent] = useState<SupportAgent | null>(null);
   const [ticket, setTicket] = useState<{ protocol: string; whatsappUrl: string; forwarded: boolean; twilioStatus?: string } | null>(null);
   const [typedText, setTypedText] = useState("");
   const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
@@ -256,6 +259,7 @@ export default function MigrationExperience() {
   const coachRef = useRef<HTMLElement>(null);
   const coachDragRef = useRef<{ pointerId: number; offsetX: number; offsetY: number } | null>(null);
   const seenResolutionsRef = useRef<Set<string>>(new Set());
+  const supportEntryRef = useRef(0);
 
   useEffect(() => {
     let active = true;
@@ -743,16 +747,32 @@ export default function MigrationExperience() {
     const selected = Array.from(event.target.files ?? []).filter(file => /^(image|video)\//.test(file.type)).slice(0, 3);
     setFiles(selected);
   };
-  const chooseSupportIntent = (intent: SupportIntent) => {
+  const chooseSupportIntent = async (intent: SupportIntent) => {
     if (sending) return;
+    const entryId = supportEntryRef.current + 1;
+    supportEntryRef.current = entryId;
+    const agent = SUPPORT_AGENTS[Math.floor(Math.random() * SUPPORT_AGENTS.length)];
     setSupportIntent(intent);
+    setSupportAgent(agent);
     setTicket(null);
-    setLines(current => [...current,
-      { from: "user", text: intent === "support" ? "Preciso de suporte" : "Tenho uma dúvida" },
-      { from: "bot", text: intent === "support"
-        ? "Oi, eu sou a Lia. Vou entender o que aconteceu e tentar resolver com você antes de envolver a equipe técnica. Conte o que não está funcionando e em qual tela você está."
-        : "Oi, eu sou a Lia. Pode me contar sua dúvida? Vou explicar de forma simples e acompanhar você passo a passo." },
-    ]);
+    setSending(true);
+    setLines(current => [...current, { from: "user", text: intent === "support" ? "Preciso de suporte" : "Tenho uma dúvida" }]);
+    const addIfCurrent = (text: string) => {
+      if (supportEntryRef.current !== entryId) return false;
+      setLines(current => [...current, { from: "bot", text }]);
+      return true;
+    };
+    await new Promise(resolve => window.setTimeout(resolve, 650));
+    if (!addIfCurrent(intent === "support" ? "Estamos encaminhando você para o atendimento de suporte…" : "Estamos procurando um atendente para tirar sua dúvida…")) return;
+    await new Promise(resolve => window.setTimeout(resolve, 850));
+    if (!addIfCurrent(`${agent} está entrando no chat…`)) return;
+    await new Promise(resolve => window.setTimeout(resolve, 900));
+    if (!addIfCurrent(`${agent} entrou no chat.`)) return;
+    await new Promise(resolve => window.setTimeout(resolve, 550));
+    if (!addIfCurrent(intent === "support"
+      ? `${agent}: Oi, boa noite! Meu nome é ${agent}. Como posso ajudar? Conte com calma o que aconteceu e em qual tela você está.`
+      : `${agent}: Oi, boa noite! Meu nome é ${agent}. Qual é a sua dúvida? Vou explicar de forma simples e acompanhar você por aqui.`)) return;
+    setSending(false);
   };
   const submit = async () => {
     const bodyText = message.trim();
@@ -764,7 +784,7 @@ export default function MigrationExperience() {
       const assistantResponse = await fetch("/api/support/assistant", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ conversation, page: String(pathname || "/"), attachments: files.length }),
+        body: JSON.stringify({ conversation, page: String(pathname || "/"), attachments: files.length, agentName: supportAgent || "Lia" }),
       });
       const assistant = await assistantResponse.json().catch(() => null) as { ok?: boolean; reply?: string; action?: "continue" | "resolved" | "escalate"; summary?: string } | null;
       if (assistantResponse.ok && assistant?.ok && assistant.reply && assistant.action !== "escalate") {
@@ -911,10 +931,10 @@ export default function MigrationExperience() {
           <button onClick={() => chooseSupportIntent("support")}>🛠️ Preciso de suporte</button>
           <button onClick={() => chooseSupportIntent("question")}>💬 Tenho uma dúvida</button>
         </div> : null}
-        {sending ? <div className={`${styles.bot} ${styles.typingBubble}`} aria-label="Lia está digitando"><span /><span /><span /></div> : null}
+        {sending ? <div className={`${styles.bot} ${styles.typingBubble}`} aria-label={`${supportAgent || "Atendente"} está digitando`}><span /><span /><span /></div> : null}
       </div>
       <div className={styles.composer}>
-        <textarea disabled={!supportIntent || sending} value={message} onChange={event => setMessage(event.target.value)} placeholder={supportIntent ? "Escreva sua mensagem para a Lia…" : "Escolha uma opção acima para começar"} rows={3} />
+        <textarea disabled={!supportIntent || sending} value={message} onChange={event => setMessage(event.target.value)} placeholder={supportIntent ? `Escreva sua mensagem para ${supportAgent || "o atendente"}…` : "Escolha uma opção acima para começar"} rows={3} />
         <input ref={inputRef} type="file" accept="image/*,video/*" multiple onChange={onFiles} />
         <button className={styles.attach} disabled={!supportIntent || sending} onClick={() => inputRef.current?.click()}>📎 Enviar imagem ou vídeo</button>
         {fileLabel ? <small className={styles.files}>{fileLabel}</small> : null}
