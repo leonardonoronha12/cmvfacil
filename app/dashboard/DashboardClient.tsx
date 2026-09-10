@@ -983,7 +983,7 @@ export default function DashboardClient() {
   const [revenuePeriods, setRevenuePeriods] = useState(0);
   const [targetCmv, setTargetCmv] = useState(() => readDashboardCmvPrefsFromStore().targetCmv);
   const [insumos, setInsumos] = useState<InsumoStoreItem[]>([]);
-  const [contagens, setContagens] = useState<InventarioContagem[]>([]);
+  const [contagens, setContagens] = useState<InventarioContagem[]>(() => readInventarioFromStore());
   const [entradas, setEntradas] = useState<EntradaStoreRow[]>([]);
   const [desperdicios, setDesperdicios] = useState<DesperdicioRow[]>([]);
   const [prePreparo, setPrePreparo] = useState<PrePreparoStoreRow[]>([]);
@@ -1227,6 +1227,16 @@ export default function DashboardClient() {
   }, [debugMode]);
 
   useEffect(() => {
+    let disposed = false;
+    // Inventory dates drive the period selectors, so load them independently
+    // instead of waiting for every CMV data source to finish sequentially.
+    void loadInventarioFromSupabase(userIdOverride || undefined)
+      .then((rows) => {
+        if (disposed) return;
+        writeInventarioToStore(rows);
+        setContagens(rows);
+      })
+      .catch(() => {});
     (async () => {
       let insumosRows: InsumoStoreItem[] = [];
       try {
@@ -1256,11 +1266,6 @@ export default function DashboardClient() {
       writeFornecedorProdutosMap(produtosRows);
       writeFornecedorEquivalenciasMap(equivalenciasRows);
 
-      let contagensRows: InventarioContagem[] = [];
-      try {
-      contagensRows = await loadInventarioFromSupabase(userIdOverride || undefined);
-      } catch {}
-      writeInventarioToStore(contagensRows);
       let entradasRows: EntradaStoreRow[] = [];
       try {
         const dbEntradas = await loadEntradasFromSupabase(userIdOverride || undefined);
@@ -1291,7 +1296,6 @@ export default function DashboardClient() {
       if (!fichasRows.length) fichasRows = readFichasTecnicasFromStore([]);
 
       setInsumos(insumosRows);
-      setContagens(contagensRows);
       setEntradas(entradasRows);
       setDesperdicios(desperdiciosRows);
       setPrePreparo(prePreparoRows);
@@ -1324,6 +1328,7 @@ export default function DashboardClient() {
     const unsubFornecedorProdutos = subscribeFornecedorProdutos((rows) => setFornecedorProdutosMap(rows));
     const unsubFornecedorEquivalencias = subscribeFornecedorEquivalencias((rows) => setFornecedorEquivalenciasMap(rows));
     return () => {
+      disposed = true;
       window.clearTimeout(refreshTimeout);
       unsubInsumos();
       unsubInv();
