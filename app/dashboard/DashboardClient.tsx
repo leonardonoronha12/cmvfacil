@@ -1535,11 +1535,18 @@ export default function DashboardClient() {
   }, [contagens]);
 
   const periodOptions = useMemo(() => [...inventoryOptions].sort((a, b) => b.t - a.t), [inventoryOptions]);
+  const datesLoading = isLoadingTables && periodOptions.length === 0;
 
   useEffect(() => {
     if (!periodOptions.length) return;
-    setStartDate((prev) => (prev ? prev : periodOptions[periodOptions.length - 1]!.iso));
-    setEndDate((prev) => (prev ? prev : periodOptions[0]!.iso));
+    setStartDate((prev) => {
+      const current = periodOptions.find((option) => option.iso === prev || option.label === prev);
+      return current?.iso ?? periodOptions[periodOptions.length - 1]!.iso;
+    });
+    setEndDate((prev) => {
+      const current = periodOptions.find((option) => option.iso === prev || option.label === prev);
+      return current?.iso ?? periodOptions[0]!.iso;
+    });
   }, [periodOptions]);
 
   useEffect(() => {
@@ -3239,10 +3246,10 @@ export default function DashboardClient() {
             <div className={styles.topField}>
               <span className={styles.topLabel}>Data Inicial:</span>
               <span className={styles.topFieldIcon} aria-hidden="true">
-                {isLoadingTables ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
+                {datesLoading ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
               </span>
-              <select className={`${styles.topInput} ${isLoadingTables ? styles.topInputLoading : ""}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={isLoadingTables} aria-busy={isLoadingTables}>
-                {isLoadingTables ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
+              <select className={`${styles.topInput} ${datesLoading ? styles.topInputLoading : ""}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} disabled={datesLoading} aria-busy={datesLoading}>
+                {datesLoading ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
@@ -3253,10 +3260,10 @@ export default function DashboardClient() {
             <div className={styles.topField}>
               <span className={styles.topLabel}>Data Final:</span>
               <span className={styles.topFieldIcon} aria-hidden="true">
-                {isLoadingTables ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
+                {datesLoading ? <span className={styles.topFieldSpinner} /> : <IconCalendarSmall />}
               </span>
-              <select className={`${styles.topInput} ${isLoadingTables ? styles.topInputLoading : ""}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={isLoadingTables} aria-busy={isLoadingTables}>
-                {isLoadingTables ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
+              <select className={`${styles.topInput} ${datesLoading ? styles.topInputLoading : ""}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} disabled={datesLoading} aria-busy={datesLoading}>
+                {datesLoading ? <option value="">Carregando datas...</option> : periodOptions.map((o) => (
                   <option key={o.iso} value={o.iso}>
                     {o.label}
                   </option>
