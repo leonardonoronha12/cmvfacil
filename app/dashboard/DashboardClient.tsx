@@ -1482,7 +1482,8 @@ export default function DashboardClient() {
           const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
           if (Number.isFinite(f) && f > 0) fator = f;
         }
-        const id = insumoIdByKey.get(mappedKey);
+        const explicitId = String((it as any)?.itemId ?? "").trim();
+        const id = (explicitId && baseUnitById.has(explicitId) ? explicitId : "") || insumoIdByKey.get(mappedKey);
         if (!id) continue;
         const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
         const qtyForSubtotal = qty * fator;
@@ -1843,6 +1844,7 @@ export default function DashboardClient() {
       const insumoIdByKey = new Map<string, string>();
       const ocultarByInsumoId = new Map<string, boolean>();
       const insumoNameById = new Map<string, string>();
+      const baseUnitById = new Map<string, string>();
       for (const i of insumos) {
         ocultarByInsumoId.set(i.id, Boolean(i.ocultar));
         const key = normalizeKey(i.item);
@@ -1850,6 +1852,7 @@ export default function DashboardClient() {
         if (!insumoIdByKey.has(key)) insumoIdByKey.set(key, i.id);
         const id = String(i.id ?? "").trim();
         if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
+        if (id && !baseUnitById.has(id)) baseUnitById.set(id, String(i.medida ?? "").trim() || "Und");
       }
 
       const entradasQtyById = new Map<string, number>();
@@ -1876,10 +1879,17 @@ export default function DashboardClient() {
               const f = parsePtNumber(String(eq.equivalenteQuantidade ?? ""));
               if (Number.isFinite(f) && f > 0) fator = f;
             }
-            const id = insumoIdByKey.get(mappedKey);
+            const explicitId = String((it as any)?.itemId ?? "").trim();
+            const id = (explicitId && baseUnitById.has(explicitId) ? explicitId : "") || insumoIdByKey.get(mappedKey);
             const isHidden = id ? Boolean(ocultarByInsumoId.get(id)) : false;
-            const { qty } = parseQtyLabel(it.quantidadeLabel ?? "");
-            const qtyEq = qty * fator;
+            const { qty, unit } = parseQtyLabel(it.quantidadeLabel ?? "");
+            let qtyEq = qty * fator;
+            if (id && fator === 1) {
+              const baseUnit = baseUnitById.get(id) ?? "Und";
+              const fromUnit = String(unit || baseUnit).trim() || baseUnit;
+              const converted = convertQty(qty, fromUnit, baseUnit);
+              if (Number.isFinite(converted) && converted > 0) qtyEq = converted;
+            }
             if (id && !isHidden) entradasQtyById.set(id, (entradasQtyById.get(id) ?? 0) + qtyEq);
 
             let sub = parseBrlToCents(it.subtotalLabel ?? "");
@@ -2111,16 +2121,17 @@ export default function DashboardClient() {
     const rows = periodFlow?.rows?.length ? periodFlow.rows : calc?.rows?.length ? calc.rows : null;
     if (!rows) return base;
     const calcMap = new Map(rows.map((r) => [r.insumoId, r] as const));
-    const baseIds = new Set(base.map((r) => r.insumoId));
+    const calcByName = new Map(rows.map((r) => [normalizeKey(r.item), r] as const));
     const merged = base.map((r) => {
-      const c = calcMap.get(r.insumoId);
+      const c = calcMap.get(r.insumoId) ?? calcByName.get(normalizeKey(r.item));
       if (!c) return r;
       return { ...r, initial: c.initial, entradas: c.entradas, final: c.final, saidas: c.saidas, custo: c.custo, cmv: c.cmv, cmvTone: c.cmvTone };
     });
-    const extras = rows.filter((r) => !baseIds.has(r.insumoId));
-    if (!extras.length) return merged;
-    const start = merged.length;
-    return [...merged, ...extras.map((r, idx) => ({ ...r, index: start + idx + 1 }))];
+    // `rows` may come from a persisted calculation made before an item was
+    // deleted. The current catalog (`base`) is authoritative; appending rows
+    // that no longer exist made deleted items reappear in CMV until the next
+    // full calculation.
+    return merged;
   }, [calc?.rows, cmvItems, periodFlow?.rows]);
 
   const visibleRows = useMemo(() => {
@@ -2381,6 +2392,7 @@ export default function DashboardClient() {
     const maxT = Math.max(startT, endT);
 
     const insumoByKey = new Map<string, { id: string; baseUnit: string; custoMedioCents: number }>();
+    const insumoById = new Map<string, { id: string; baseUnit: string; custoMedioCents: number }>();
     const insumoNameById = new Map<string, string>();
     for (const i of insumos) {
       const key = normalizeKey(i.item);
@@ -2388,11 +2400,13 @@ export default function DashboardClient() {
       if (insumoByKey.has(key)) continue;
       const id = String(i.id ?? "").trim();
       if (id && !insumoNameById.has(id)) insumoNameById.set(id, String(i.item ?? ""));
-      insumoByKey.set(key, {
+      const mapped = {
         id: i.id,
         baseUnit: String(i.medida ?? "Und").trim() || "Und",
         custoMedioCents: parseBrlToCents(String(i.custoMedio ?? "")) ?? 0,
-      });
+      };
+      insumoByKey.set(key, mapped);
+      if (id) insumoById.set(id, mapped);
     }
 
     const lastBeforeStart = new Map<string, { t: number; cents: number }>();
@@ -2412,7 +2426,8 @@ export default function DashboardClient() {
         if (!rawKey) continue;
         const eq = equivalencias.find((m) => normalizeKey(m.nomeNaNota) === rawKey) ?? null;
         const mappedKey = eq ? normalizeKey(eq.insumoEquivalente) : rawKey;
-        const ins = insumoByKey.get(mappedKey) ?? null;
+        const explicitId = String((it as any)?.itemId ?? "").trim();
+        const ins = (explicitId ? insumoById.get(explicitId) : null) ?? insumoByKey.get(mappedKey) ?? null;
         if (!ins) continue;
 
         const parsed = parseQtyLabel(it.quantidadeLabel ?? "");

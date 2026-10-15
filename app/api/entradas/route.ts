@@ -407,7 +407,12 @@ export async function GET(req: NextRequest) {
             const custoUnitario = Number.isFinite(custoUnitNum) ? custoUnitNum : parsePtNumber(String(it?.custo_unitario ?? ""));
             const custoUnitarioLabel = custoUnitario ? formatMoneyBRL(custoUnitario) : "R$0,00";
             const subtotalLabel = subtotal ? formatMoneyBRL(subtotal) : "R$0,00";
-            const itemId = String(it?.item?.bubble_id ?? "").trim();
+            const itemBubbleId = String(it?.item?.bubble_id ?? "").trim();
+            const itemDbId = String(it?.item?.id ?? "").trim();
+            // Keep the entry item identifier in the same format returned by
+            // /api/insumos. New items do not have a Bubble id, so returning an
+            // empty itemId prevented their purchases from updating average cost.
+            const itemId = itemBubbleId || (itemDbId ? `db:${itemDbId}` : "");
             const ocultarCmv = Boolean(it?.ocultar_cmv);
             return {
               id: itemKey,
