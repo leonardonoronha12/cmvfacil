@@ -1101,7 +1101,7 @@ export default function InventarioClient() {
 
   return (
     <>
-      <main className={dash.content}>
+      <main className={`${dash.content} ${styles.pageContent}`}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="inventario" ui={qaUi} />
         {isCompatSource ? (

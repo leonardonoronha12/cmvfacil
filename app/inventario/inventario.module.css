@@ -1,3 +1,11 @@
+.pageContent {
+  height: 100dvh;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -335,6 +343,10 @@
 }
 
 @media (max-width: 720px) {
+  .pageContent {
+    height: calc(100dvh - 69px);
+  }
+
   .layout {
     gap: 12px;
   }
