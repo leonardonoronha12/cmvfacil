@@ -924,7 +924,11 @@ export async function GET(req: NextRequest) {
           const estoqueAtualResolved = estoqueAtualCompat ?? legacyEstoqueAtual;
           const entradas = entradasByItemId.get(itemId) ?? 0;
 
-          const saidas = estoqueInicialResolved + (entradas - estoqueAtualResolved);
+          // Um aumento de estoque sem uma entrada vinculada representa uma
+          // divergencia de dados, nao um consumo negativo. A lista de compras
+          // deve considerar zero ate que a entrada correspondente seja
+          // registrada, evitando sugestoes e valores negativos na interface.
+          const saidas = Math.max(estoqueInicialResolved + (entradas - estoqueAtualResolved), 0);
           const consumoDiario = diasCorridosBubble > 0 ? saidas / diasCorridosBubble : 0;
           const consumoDiasManter = consumoDiario * diasEstoque;
           const consumoPrazoFornecedor = consumoDiario * prazoFornecedor;
