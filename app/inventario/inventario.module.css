@@ -1,9 +1,10 @@
 .pageContent {
   height: 100dvh;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  align-items: stretch;
+  row-gap: 0;
+  overflow: hidden;
 }
 
 .header {
@@ -16,6 +17,7 @@
   border: 1px solid #eef1f1;
   border-radius: 14px;
   width: 100%;
+  flex: 0 0 auto;
 }
 
 .headerLeft {
@@ -60,7 +62,10 @@
   grid-template-columns: 240px 1fr;
   gap: 14px;
   width: 100%;
-  min-height: 100dvh;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
 
 .left {
@@ -71,6 +76,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .leftTop {
@@ -107,6 +114,8 @@
   gap: 8px;
   overflow: auto;
   padding-right: 4px;
+  min-height: 0;
+  flex: 1 1 auto;
 }
 
 .newCountBtn {
@@ -207,9 +216,11 @@
 
 .right {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   position: relative;
+  overflow: hidden;
 }
 
 .rightHeader {
@@ -282,6 +293,13 @@
   background: #ffffff;
   border-radius: 14px;
   padding: 12px;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .compatTableTitle {
@@ -292,7 +310,12 @@
 }
 
 .compatTableScroll {
-  overflow-x: auto;
+  min-width: 0;
+  min-height: 0;
+  max-width: 100%;
+  flex: 1 1 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -1181,8 +1204,28 @@
 }
 
 @media (max-width: 1100px) {
+  .pageContent {
+    height: auto;
+    min-height: 100dvh;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
   .layout {
     grid-template-columns: 1fr;
+    flex: none;
+    overflow: visible;
+  }
+
+  .left,
+  .right,
+  .compatTableWrap {
+    overflow: visible;
+  }
+
+  .compatTableScroll {
+    max-height: min(62dvh, 680px);
+    overflow: auto;
   }
 
   .cols {
