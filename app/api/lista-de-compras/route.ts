@@ -626,21 +626,14 @@ export async function GET(req: NextRequest) {
       const legacyRows = ((legacyInventarios as any)?.data ?? []) as any[];
       const findLegacyInventoryRow = (targetDate: string | null) => {
         if (!targetDate) return null;
-        const targetT = Date.parse(targetDate);
-        let bestRow: any = null;
-        let bestT = Number.NEGATIVE_INFINITY;
         for (const r of legacyRows) {
           const d = parseDateOnlyLoose(r?.data);
           if (!d) continue;
           if (d === targetDate) return r;
-          const t = Date.parse(d);
-          if (!Number.isFinite(targetT) || !Number.isFinite(t)) continue;
-          if (t <= targetT && t > bestT) {
-            bestT = t;
-            bestRow = r;
-          }
         }
-        return bestRow;
+        // Older inventories must never supply the final stock for a newer
+        // count. If today's count omits an item, its final stock is zero.
+        return null;
       };
       const legacyStartRow = findLegacyInventoryRow(startDate);
       const legacyEndRow = findLegacyInventoryRow(endDate);
@@ -914,23 +907,21 @@ export async function GET(req: NextRequest) {
 
           const nameKey = normalizeNameKey(String(item?.name ?? ""));
 
-          const estoqueInicial =
+          const estoqueInicialCompat =
             estoqueInicialByItemId.get(itemId) ??
             (bubbleItemId ? estoqueInicialByItemId.get(bubbleItemId) : undefined) ??
             (bubbleItemId ? estoqueInicialByBubbleId.get(bubbleItemId) : undefined) ??
-            (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined) ??
-            0;
+            (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined);
           const legacyEstoqueInicial = nameKey ? legacyStartQtyByNameKey.get(nameKey) ?? 0 : 0;
-          const estoqueInicialResolved = estoqueInicial !== 0 ? estoqueInicial : legacyEstoqueInicial;
+          const estoqueInicialResolved = estoqueInicialCompat ?? legacyEstoqueInicial;
 
-          const estoqueAtual =
+          const estoqueAtualCompat =
             estoqueFinalByItemId.get(itemId) ??
             (bubbleItemId ? estoqueFinalByItemId.get(bubbleItemId) : undefined) ??
             (bubbleItemId ? estoqueFinalByBubbleId.get(bubbleItemId) : undefined) ??
-            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined) ??
-            0;
+            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined);
           const legacyEstoqueAtual = nameKey ? legacyEndQtyByNameKey.get(nameKey) ?? 0 : 0;
-          const estoqueAtualResolved = estoqueAtual !== 0 ? estoqueAtual : legacyEstoqueAtual;
+          const estoqueAtualResolved = estoqueAtualCompat ?? legacyEstoqueAtual;
           const entradas = entradasByItemId.get(itemId) ?? 0;
 
           const saidas = estoqueInicialResolved + (entradas - estoqueAtualResolved);
