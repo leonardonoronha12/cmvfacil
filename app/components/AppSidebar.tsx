@@ -1053,6 +1053,15 @@ export default function AppSidebar({ active }: { active: SidebarKey }) {
   const handleSidebarNavClick = (e: any) => {
     closeDrawer();
     if (e?.metaKey || e?.ctrlKey || e?.shiftKey || e?.altKey) return;
+
+    // Keep the sidebar usable even when a page-level client error leaves the
+    // Next.js router unable to finish a soft navigation. A regular document
+    // navigation also guarantees that account-scoped state is reloaded when
+    // an administrator switches between companies.
+    const href = String(e?.currentTarget?.href ?? "").trim();
+    if (!href || typeof window === "undefined") return;
+    e.preventDefault();
+    window.location.assign(href);
   };
 
   const companyName = String(me?.companyName ?? "").trim() || "—";
