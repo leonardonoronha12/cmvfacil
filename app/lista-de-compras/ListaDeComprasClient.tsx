@@ -1691,13 +1691,20 @@ export default function ListaDeComprasClient() {
                           return (
                             <div key={column} className={styles.itemCell}>
                               {isCompatMode ? (
-                                <div className={styles.itemName}>{row.displayItem}</div>
+                                <>
+                                  <div className={styles.itemName}>{row.displayItem}</div>
+                                  <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                                </>
                               ) : (
-                                <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                  {row.displayItem}
+                                <Link
+                                  className={styles.itemNameLink}
+                                  href={`/dashboard?itemId=${encodeURIComponent(row.id)}&item=${encodeURIComponent(row.item)}&tab=entradas`}
+                                  title="Ver histórico de entradas"
+                                >
+                                  <div className={styles.itemName}>{row.displayItem}</div>
+                                  <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                                 </Link>
                               )}
-                              <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                             </div>
                           );
                         }
