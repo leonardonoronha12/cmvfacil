@@ -134,6 +134,7 @@ export default function AjustesClient() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [inviteError, setInviteError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [removingMemberEmail, setRemovingMemberEmail] = useState("");
 
   const [loggingOut, setLoggingOut] = useState(false);
   const [savingAccount, setSavingAccount] = useState(false);
@@ -1024,7 +1025,39 @@ export default function AjustesClient() {
                           </div>
                         </div>
                         <div>{m.joinedAt || "—"}</div>
-                        <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                          <div className={m.role === "Administrador" ? styles.badgeAdmin : styles.badgeCollab}>{m.role}</div>
+                          {permissao === "Administrador" && String(m.email ?? "").trim().toLowerCase() !== email.trim().toLowerCase() ? (
+                            <button
+                              type="button"
+                              className={styles.btnGhost}
+                              disabled={Boolean(removingMemberEmail)}
+                              onClick={async () => {
+                                const memberEmail = String(m.email ?? "").trim().toLowerCase();
+                                if (!memberEmail || removingMemberEmail) return;
+                                if (!window.confirm(`Remover o acesso de ${memberEmail} desta empresa?`)) return;
+                                setRemovingMemberEmail(memberEmail);
+                                setInviteError("");
+                                try {
+                                  const res = await fetch("/api/company-members/invite", {
+                                    method: "DELETE",
+                                    headers: { "content-type": "application/json" },
+                                    body: JSON.stringify({ email: memberEmail }),
+                                  });
+                                  const j = (await res.json().catch(() => null)) as any;
+                                  if (!res.ok || !j?.ok) throw new Error(String(j?.error ?? "remove_member_failed"));
+                                  await loadMeFromApi();
+                                } catch (err) {
+                                  setInviteError(err instanceof Error ? err.message : String(err));
+                                } finally {
+                                  setRemovingMemberEmail("");
+                                }
+                              }}
+                            >
+                              {removingMemberEmail === String(m.email ?? "").trim().toLowerCase() ? "Removendo…" : "Remover"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
                     ))}
                   </div>

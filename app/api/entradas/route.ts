@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { performance } from "node:perf_hooks";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { formatMoneyBRL, parsePtNumber } from "../../lib/bubbleCsv";
 
@@ -195,6 +195,51 @@ function pickBestCompanyId(memberRows: unknown[]) {
     }
   }
   return bestCompanyId;
+}
+
+async function resolveCompanyScopeUserIds(supabase: ReturnType<typeof getSupabaseServerClient>, userId: string) {
+  const { data: memberRows, error: memberErr } = await supabase
+    .from("company_members")
+    .select("company_id,role,permission_level")
+    .eq("user_id", userId)
+    .limit(50);
+  if (memberErr) return { companyId: "", userIds: [userId] };
+  const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+  if (!companyId) return { companyId: "", userIds: [userId] };
+
+  const admin = getSupabaseAdmin();
+  const { data: companyMembers, error: companyMembersErr } = await admin
+    .from("company_members")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .limit(500);
+  if (companyMembersErr) return { companyId, userIds: [userId] };
+  const userIds = Array.from(
+    new Set([userId, ...(companyMembers ?? []).map((row: any) => String(row?.user_id ?? "").trim()).filter(isUuid)]),
+  );
+  return { companyId, userIds };
+}
+
+async function loadCompanyEntries(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  userId: string;
+  companyId: string;
+  companyUserIds: string[];
+}) {
+  const client = args.companyId && args.companyUserIds.length > 1 ? getSupabaseAdmin() : args.supabase;
+  const rows: any[] = [];
+  for (const scopedUserId of args.companyUserIds) {
+    const prefix = `user:${scopedUserId}:`;
+    const { data, error } = await client.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as any[]));
+  }
+  const unique = new Map<string, any>();
+  for (const row of rows) {
+    const key = String(row?.id ?? "").trim();
+    if (key && !unique.has(key)) unique.set(key, row);
+  }
+  return Array.from(unique.values()).sort((a, b) => String(b?.created_at ?? "").localeCompare(String(a?.created_at ?? "")));
 }
 
 function isAdminUserId(userId: string) {
@@ -470,21 +515,9 @@ export async function GET(req: NextRequest) {
       return json({ source: "compat", readOnly: true, rows }, { status: 200 });
     }
 
-    const prefix = `${id}:`;
-    const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-    if (error) return json({ error: error.message }, { status: 500 });
-
-    let companyId = "";
-    try {
-      const { data: memberRows, error: memberErr } = await supabase
-        .from("company_members")
-        .select("company_id,role,permission_level")
-        .eq("user_id", userId)
-        .limit(50);
-      if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-    } catch {}
-
-    const rowsDb = (data ?? []) as any[];
+    const scope = await resolveCompanyScopeUserIds(supabase, userId);
+    const companyId = scope.companyId;
+    const rowsDb = await loadCompanyEntries({ supabase, userId, companyId, companyUserIds: scope.userIds });
     const supplierIds = Array.from(
       new Set(
         rowsDb
