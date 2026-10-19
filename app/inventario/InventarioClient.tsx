@@ -67,6 +67,15 @@ function IconTrash() {
   );
 }
 
+function IconRecount() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 10a8 8 0 1 1 2.3 7.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M4 4v6h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function startOfMonth(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), 1);
 }
@@ -912,6 +921,10 @@ export default function InventarioClient() {
       return;
     }
 
+    const removedMatch = (current.categorias ?? [])
+      .flatMap((cat, categoryIndex) => (cat.itens ?? []).map((item, itemIndex) => ({ item, categoryIndex, itemIndex })))
+      .find(({ item }) => item.removido && normalizeNameKey(item.item) === normalizeNameKey(name));
+
     const newItem: InventarioItemRow = {
       id: `historico-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       item: name,
@@ -919,8 +932,20 @@ export default function InventarioClient() {
       estoqueFinal: addItemQuantity.trim(),
     };
     const categoryIndex = (current.categorias ?? []).findIndex((cat) => normalizeNameKey(cat.nome) === normalizeNameKey(categoryName));
-    const categorias =
-      categoryIndex >= 0
+    const categorias = removedMatch
+      ? (current.categorias ?? []).map((cat, currentCategoryIndex) =>
+          currentCategoryIndex === removedMatch.categoryIndex
+            ? {
+                ...cat,
+                itens: (cat.itens ?? []).map((item, currentItemIndex) =>
+                  currentItemIndex === removedMatch.itemIndex
+                    ? { ...item, removido: false, estoqueFinal: addItemQuantity.trim() }
+                    : item,
+                ),
+              }
+            : cat,
+        )
+      : categoryIndex >= 0
         ? (current.categorias ?? []).map((cat, index) => (index === categoryIndex ? { ...cat, itens: [...(cat.itens ?? []), newItem] } : cat))
         : [
             ...(current.categorias ?? []),
@@ -1506,13 +1531,14 @@ export default function InventarioClient() {
                           <button
                             type="button"
                             className={styles.iconBtn}
-                            aria-label="Excluir"
+                            aria-label="Refazer contagem"
+                            title="Refazer contagem"
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
-                            onClick={() => removeItem(r.id)}
+                            onClick={() => uncountItem(r.id)}
                           >
-                            <IconTrash />
+                            <IconRecount />
                           </button>
                         </div>
                       </div>
