@@ -499,10 +499,12 @@ export default function ListaDeComprasClient() {
       setEntradas(readEntradasFromStore([]));
       setContagens(readInventarioFromStore([]));
       let doneInsumos = false;
+      let doneEntradas = false;
+      let doneInventarios = false;
       let doneFornecedores = false;
       const doneLista = true;
       const finalize = () => {
-        if (doneInsumos && doneFornecedores && doneLista) setIsLoadingTable(false);
+        if (doneInsumos && doneEntradas && doneInventarios && doneFornecedores && doneLista) setIsLoadingTable(false);
       };
 
       void (async () => {
@@ -519,14 +521,23 @@ export default function ListaDeComprasClient() {
         try {
           const db = await loadEntradasFromSupabase(userIdOverride || undefined);
           if (db.length) writeEntradasToStore(db);
-        } catch {}
+          setEntradas(db);
+        } catch (error) {
+          setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível carregar as entradas."));
+        }
+        doneEntradas = true;
+        finalize();
       })();
 
       void (async () => {
         try {
           const db = await loadInventarioFromSupabase(userIdOverride || undefined);
           if (db.length) { writeInventarioToStore(db); setContagens(db); }
-        } catch {}
+        } catch (error) {
+          setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível carregar os inventários."));
+        }
+        doneInventarios = true;
+        finalize();
       })();
 
       void (async () => {
@@ -565,6 +576,31 @@ export default function ListaDeComprasClient() {
     return () => {
       cancelled = true;
       for (const u of unsubs) u();
+    };
+  }, [userIdOverride]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshInventories = async () => {
+      try {
+        const db = await loadInventarioFromSupabase(userIdOverride || undefined);
+        if (cancelled) return;
+        if (db.length) writeInventarioToStore(db);
+        setContagens(db);
+      } catch (error) {
+        if (!cancelled) setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível atualizar os inventários."));
+      }
+    };
+    const onFocus = () => void refreshInventories();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshInventories();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [userIdOverride]);
 
