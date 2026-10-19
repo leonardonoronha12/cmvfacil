@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -448,6 +447,7 @@ export default function ListaDeComprasClient() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const [historyRow, setHistoryRow] = useState<CompraRow | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -1084,6 +1084,55 @@ export default function ListaDeComprasClient() {
     setPageIndex(0);
   }, [mode, categoriaFilter, fornecedorFilter, query, startDate, endDate]);
 
+  const historyEntries = useMemo(() => {
+    if (!historyRow) return [];
+    const targetKey = normalizeText(historyRow.item);
+    const aliases = new Map<string, string>();
+    for (const mappings of Object.values(fornecedorEquivalenciasMap)) {
+      for (const mapping of mappings) {
+        const noteKey = normalizeText(mapping.nomeNaNota);
+        const itemKey = normalizeText(mapping.insumoEquivalente);
+        if (noteKey && itemKey) aliases.set(noteKey, itemKey);
+      }
+    }
+    const matches: Array<{
+      key: string;
+      timestamp: number;
+      data: string;
+      fornecedor: string;
+      quantidade: string;
+      custoUnitario: string;
+      subtotal: string;
+    }> = [];
+    for (const entrada of entradas) {
+      for (const item of entrada.itensNota ?? []) {
+        const noteKey = normalizeText(item.nome);
+        const resolvedKey = aliases.get(noteKey) ?? noteKey;
+        const sameId = Boolean(item.itemId && String(item.itemId) === String(historyRow.id));
+        if (!sameId && resolvedKey !== targetKey && noteKey !== targetKey) continue;
+        matches.push({
+          key: `${entrada.id}:${item.id}`,
+          timestamp: parseDateLoose(entrada.dataLancamento),
+          data: entrada.dataLancamento,
+          fornecedor: entrada.fornecedorNome?.trim() || entrada.fornecedor.trim() || "-",
+          quantidade: item.quantidadeLabel || "-",
+          custoUnitario: item.custoUnitarioLabel || "-",
+          subtotal: item.subtotalLabel || "-",
+        });
+      }
+    }
+    return matches.sort((a, b) => b.timestamp - a.timestamp);
+  }, [entradas, fornecedorEquivalenciasMap, historyRow]);
+
+  useEffect(() => {
+    if (!historyRow) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHistoryRow(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [historyRow]);
+
   useEffect(() => {
     if (pageIndex !== safePageIndex) setPageIndex(safePageIndex);
   }, [pageIndex, safePageIndex]);
@@ -1468,6 +1517,29 @@ export default function ListaDeComprasClient() {
   return (
     <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {historyRow ? (
+        <div className={styles.historyOverlay} role="dialog" aria-modal="true" aria-label={`Histórico de entradas de ${historyRow.item}`} onMouseDown={() => setHistoryRow(null)}>
+          <div className={styles.historyModal} onMouseDown={(event) => event.stopPropagation()}>
+            <div className={styles.historyModalHeader}>
+              <div>
+                <div className={styles.historyModalTitle}>Histórico de Entradas</div>
+                <div className={styles.historyModalSubtitle}>{historyRow.displayItem}</div>
+              </div>
+              <button type="button" className={styles.historyClose} onClick={() => setHistoryRow(null)} aria-label="Fechar histórico">×</button>
+            </div>
+            <div className={styles.historyTableWrap}>
+              <div className={styles.historyTableHead}>
+                <span>Data</span><span>Fornecedor</span><span>Quantidade</span><span>Custo unitário</span><span>Subtotal</span>
+              </div>
+              {historyEntries.length ? historyEntries.map((entry) => (
+                <div key={entry.key} className={styles.historyTableRow}>
+                  <span>{entry.data}</span><span>{entry.fornecedor}</span><span>{entry.quantidade}</span><span>{entry.custoUnitario}</span><span>{entry.subtotal}</span>
+                </div>
+              )) : <div className={styles.historyEmpty}>Nenhuma entrada encontrada para este produto.</div>}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <main className={dash.content}>
         <div className={styles.pageFrameWide}>
           <section className={styles.headerRow}>
@@ -1696,14 +1768,15 @@ export default function ListaDeComprasClient() {
                                   <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
                                 </>
                               ) : (
-                                <Link
+                                <button
+                                  type="button"
                                   className={styles.itemNameLink}
-                                  href={`/dashboard?itemId=${encodeURIComponent(row.id)}&item=${encodeURIComponent(row.item)}&tab=entradas`}
+                                  onClick={() => setHistoryRow(row)}
                                   title="Ver histórico de entradas"
                                 >
                                   <div className={styles.itemName}>{row.displayItem}</div>
                                   <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
-                                </Link>
+                                </button>
                               )}
                             </div>
                           );

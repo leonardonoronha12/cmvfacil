@@ -625,12 +625,56 @@
 
 .itemNameLink {
   display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  font: inherit;
   border-radius: 6px;
   padding: 3px 4px;
   margin: -3px -4px;
   text-decoration: none;
   cursor: pointer;
 }
+
+.historyOverlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(1, 4, 14, 0.48);
+}
+
+.historyModal {
+  width: min(900px, 100%);
+  max-height: min(760px, calc(100dvh - 48px));
+  overflow: hidden;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(1, 4, 14, 0.24);
+}
+
+.historyModalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e4e8e7;
+}
+
+.historyModalTitle { color: #101214; font-size: 16px; font-weight: 800; }
+.historyModalSubtitle { margin-top: 3px; color: #6d7f7d; font-size: 12px; }
+.historyClose { width: 34px; height: 34px; border: 0; border-radius: 10px; background: #f0f2f1; color: #20312f; font-size: 22px; cursor: pointer; }
+.historyTableWrap { max-height: min(640px, calc(100dvh - 150px)); overflow: auto; padding: 0 20px 20px; }
+.historyTableHead,
+.historyTableRow { display: grid; grid-template-columns: 110px minmax(180px, 1.4fr) minmax(100px, .8fr) minmax(110px, .8fr) minmax(110px, .8fr); gap: 12px; align-items: center; }
+.historyTableHead { position: sticky; top: 0; z-index: 1; padding: 12px 10px; background: #00282d; color: #ffffff; font-size: 10px; font-weight: 800; }
+.historyTableRow { padding: 12px 10px; border-bottom: 1px solid #eef1f1; color: #293936; font-size: 11px; }
+.historyEmpty { padding: 28px 12px; text-align: center; color: #7f8f8d; font-size: 12px; }
 
 .itemNameLink:hover,
 .itemNameLink:focus-visible {
