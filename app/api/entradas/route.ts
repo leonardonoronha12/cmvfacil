@@ -635,7 +635,7 @@ export async function GET(req: NextRequest) {
     if (fornecedoresStateProdutos && fornecedoresStateInfo && supplierIds.length) {
       const produtosMap = fornecedoresStateProdutos as Record<string, unknown>;
       const infoMap = fornecedoresStateInfo as Record<string, unknown>;
-      const wanted = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
+      const wanted = supplierIds.filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
       for (const sid of wanted) {
         try {
           const keyDb = `db:${sid}`;
@@ -650,20 +650,22 @@ export async function GET(req: NextRequest) {
           );
           if (!names.length) continue;
           const wantedSet = new Set(names);
-          let bestKey = "";
-          let bestScore = 0;
+          const scored: Array<{ key: string; score: number }> = [];
           for (const k of Object.keys(produtosMap)) {
             const arr = safeArr((produtosMap as any)[k]).map((x) => normalizeLookupKey(x)).filter(Boolean);
             if (!arr.length) continue;
             let score = 0;
             for (const n of arr) if (wantedSet.has(n)) score += 1;
-            if (score > bestScore) {
-              bestScore = score;
-              bestKey = k;
-            }
+            if (score > 0) scored.push({ key: k, score });
           }
+          scored.sort((a, b) => b.score - a.score);
+          const bestKey = scored[0]?.key ?? "";
+          const bestScore = scored[0]?.score ?? 0;
+          const secondScore = scored[1]?.score ?? 0;
           const threshold = Math.min(2, names.length);
-          if (!bestKey || bestScore < threshold) continue;
+          // Never guess when two suppliers match equally well. In that case
+          // the UI uses a neutral label instead of exposing an internal id.
+          if (!bestKey || bestScore < threshold || bestScore <= secondScore) continue;
           const infoRow = (infoMap as any)[bestKey] ?? (infoMap as any)[String(bestKey).toUpperCase()] ?? null;
           const label = infoRow && typeof infoRow === "object" ? String((infoRow as any)?.fornecedor ?? "").trim() : "";
           if (isGoodSupplierLabel(label)) inferredNameById.set(sid, label);
@@ -685,7 +687,10 @@ export async function GET(req: NextRequest) {
       const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback || inferred;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
-      return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
+      return {
+        ...r,
+        fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : dbId ? "Fornecedor não identificado" : null,
+      };
     });
 
     return json(

@@ -273,8 +273,8 @@
 .tableBody {
   display: flex;
   flex-direction: column;
-  overflow: auto;
-  max-height: calc(100vh - 360px);
+  overflow: visible;
+  max-height: none;
 }
 
 .emptyState {
