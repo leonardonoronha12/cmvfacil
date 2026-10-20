@@ -1762,22 +1762,15 @@ export default function ListaDeComprasClient() {
                         if (column === "item") {
                           return (
                             <div key={column} className={styles.itemCell}>
-                              {isCompatMode ? (
-                                <>
-                                  <div className={styles.itemName}>{row.displayItem}</div>
-                                  <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  className={styles.itemNameLink}
-                                  onClick={() => setHistoryRow(row)}
-                                  title="Ver histórico de entradas"
-                                >
-                                  <div className={styles.itemName}>{row.displayItem}</div>
-                                  <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                className={styles.itemNameLink}
+                                onClick={() => setHistoryRow(row)}
+                                title="Ver histórico de entradas"
+                              >
+                                <div className={styles.itemName}>{row.displayItem}</div>
+                                <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                              </button>
                             </div>
                           );
                         }
