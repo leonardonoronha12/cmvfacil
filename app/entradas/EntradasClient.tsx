@@ -3087,7 +3087,8 @@ export default function EntradasClient() {
                                       const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
                                       const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
                                       const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
-                                      setDetailUnit(existing?.unidadeNaNota || "Und");
+                                      const itemUnit = insumosByName.get(name.toLowerCase())?.medida;
+                                      setDetailUnit(existing?.unidadeNaNota || itemUnit || "Und");
                                       setIsItemMenuOpen(false);
                                     }}
                                   >
