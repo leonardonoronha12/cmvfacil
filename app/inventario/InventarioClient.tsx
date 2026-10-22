@@ -12,7 +12,7 @@ import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, t
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnicasToStore, type FichaTecnicaRow } from "../lib/fichasTecnicasStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
-import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
+import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, updateInventarioDateInSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
@@ -202,6 +202,7 @@ export default function InventarioClient() {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [newData, setNewData] = useState(() => formatDateNumericPT(new Date()));
   const [newError, setNewError] = useState("");
+  const [isSavingDate, setIsSavingDate] = useState(false);
   const [editingContagemId, setEditingContagemId] = useState<string | null>(null);
   const [isNewCalOpen, setIsNewCalOpen] = useState(false);
   const [newCalMonth, setNewCalMonth] = useState(() => startOfMonth(new Date()));
@@ -716,7 +717,7 @@ export default function InventarioClient() {
     setMenuRect(null);
   }
 
-  function confirmNew() {
+  async function confirmNew() {
     const data = newData.trim();
     if (!data) return;
     const exists = contagens.some((c) => c.data.trim() === data && c.id !== editingContagemId);
@@ -726,16 +727,20 @@ export default function InventarioClient() {
     }
     if (editingContagemId) {
       const id = editingContagemId;
-      setContagens((prev) => {
-        const next = prev.map((c) => (c.id === id ? { ...c, data } : c));
-        const updated = next.find((x) => x.id === id);
-        if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-        return sortContagensDesc(next);
-      });
-      setSelectedContagemId(id);
-      setQuery("");
-      setIsNewOpen(false);
-      setEditingContagemId(null);
+      setIsSavingDate(true);
+      setNewError("");
+      try {
+        await updateInventarioDateInSupabase(id, data);
+        setContagens((prev) => sortContagensDesc(prev.map((c) => (c.id === id ? { ...c, data } : c))));
+        setSelectedContagemId(id);
+        setQuery("");
+        setIsNewOpen(false);
+        setEditingContagemId(null);
+      } catch {
+        setNewError("Não foi possível salvar a nova data. Atualize a página e tente novamente.");
+      } finally {
+        setIsSavingDate(false);
+      }
       return;
     }
     void (async () => {
@@ -1661,8 +1666,8 @@ export default function InventarioClient() {
                 {newError ? <div className={styles.formError}>{newError}</div> : null}
               </div>
               <div className={styles.modalFooter}>
-                <button type="button" className={`${styles.primaryBtn} ${styles.primaryBtnWide}`} onClick={confirmNew} disabled={!newData.trim()}>
-                  {editingContagemId ? "Salvar" : "Começar"}
+                <button type="button" className={`${styles.primaryBtn} ${styles.primaryBtnWide}`} onClick={() => void confirmNew()} disabled={!newData.trim() || isSavingDate}>
+                  {editingContagemId ? (isSavingDate ? "Salvando..." : "Salvar") : "Começar"}
                 </button>
               </div>
             </div>

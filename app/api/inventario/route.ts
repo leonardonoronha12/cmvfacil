@@ -370,6 +370,28 @@ export async function POST(req: NextRequest) {
   }
 }
 
+export async function PATCH(req: NextRequest) {
+  try {
+    const body = (await req.json().catch(() => null)) as unknown;
+    if (!body || typeof body !== "object") return json({ error: "invalid_body" }, { status: 400 });
+    const { accessToken, id } = resolveUserScopedId(req);
+    const prefix = id ? `${id}:` : "";
+    if (!prefix) return json({ error: "unauthorized" }, { status: 401 });
+    const invId = String((body as any).id ?? "").trim();
+    const data = String((body as any).data ?? "").trim();
+    if (!invId || !invId.startsWith(prefix)) return json({ error: "invalid_id_scope" }, { status: 400 });
+    if (!/^\d{2}\/\d{2}\/\d{4}$/.test(data)) return json({ error: "invalid_date" }, { status: 400 });
+
+    const supabase = getSupabaseServerClient(accessToken);
+    const { data: updated, error } = await supabase.from("inventario").update({ data }).eq("id", invId).select("id").maybeSingle();
+    if (error) return json({ error: error.message }, { status: 500 });
+    if (!updated) return json({ error: "not_found" }, { status: 404 });
+    return json({ ok: true }, { status: 200 });
+  } catch (err) {
+    return json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
 export async function DELETE(req: NextRequest) {
   try {
     const url = new URL(req.url);
