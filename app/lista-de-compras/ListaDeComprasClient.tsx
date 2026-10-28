@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import LoadingSpinner from "../components/LoadingSpinner";
@@ -128,8 +127,8 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 20_000);
 }
 
-function normalizeText(value: string) {
-  return value
+function normalizeText(value: unknown) {
+  return String(value ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, " ")
@@ -448,6 +447,7 @@ export default function ListaDeComprasClient() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [isExportingXlsx, setIsExportingXlsx] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
+  const [historyRow, setHistoryRow] = useState<CompraRow | null>(null);
 
   function showToast(message: string, type: "success" | "error", durationMs = 4500) {
     setToast({ title: type === "success" ? "Sucesso" : "Erro", message, tone: type });
@@ -499,10 +499,12 @@ export default function ListaDeComprasClient() {
       setEntradas(readEntradasFromStore([]));
       setContagens(readInventarioFromStore([]));
       let doneInsumos = false;
+      let doneEntradas = false;
+      let doneInventarios = false;
       let doneFornecedores = false;
       const doneLista = true;
       const finalize = () => {
-        if (doneInsumos && doneFornecedores && doneLista) setIsLoadingTable(false);
+        if (doneInsumos && doneEntradas && doneInventarios && doneFornecedores && doneLista) setIsLoadingTable(false);
       };
 
       void (async () => {
@@ -519,14 +521,23 @@ export default function ListaDeComprasClient() {
         try {
           const db = await loadEntradasFromSupabase(userIdOverride || undefined);
           if (db.length) writeEntradasToStore(db);
-        } catch {}
+          setEntradas(db);
+        } catch (error) {
+          setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível carregar as entradas."));
+        }
+        doneEntradas = true;
+        finalize();
       })();
 
       void (async () => {
         try {
           const db = await loadInventarioFromSupabase(userIdOverride || undefined);
           if (db.length) { writeInventarioToStore(db); setContagens(db); }
-        } catch {}
+        } catch (error) {
+          setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível carregar os inventários."));
+        }
+        doneInventarios = true;
+        finalize();
       })();
 
       void (async () => {
@@ -565,6 +576,31 @@ export default function ListaDeComprasClient() {
     return () => {
       cancelled = true;
       for (const u of unsubs) u();
+    };
+  }, [userIdOverride]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refreshInventories = async () => {
+      try {
+        const db = await loadInventarioFromSupabase(userIdOverride || undefined);
+        if (cancelled) return;
+        if (db.length) writeInventarioToStore(db);
+        setContagens(db);
+      } catch (error) {
+        if (!cancelled) setLoadError((current) => current || (error instanceof Error ? error.message : "Não foi possível atualizar os inventários."));
+      }
+    };
+    const onFocus = () => void refreshInventories();
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") void refreshInventories();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [userIdOverride]);
 
@@ -1048,6 +1084,55 @@ export default function ListaDeComprasClient() {
     setPageIndex(0);
   }, [mode, categoriaFilter, fornecedorFilter, query, startDate, endDate]);
 
+  const historyEntries = useMemo(() => {
+    if (!historyRow) return [];
+    const targetKey = normalizeText(historyRow.item);
+    const aliases = new Map<string, string>();
+    for (const mappings of Object.values(fornecedorEquivalenciasMap)) {
+      for (const mapping of mappings) {
+        const noteKey = normalizeText(mapping.nomeNaNota);
+        const itemKey = normalizeText(mapping.insumoEquivalente);
+        if (noteKey && itemKey) aliases.set(noteKey, itemKey);
+      }
+    }
+    const matches: Array<{
+      key: string;
+      timestamp: number;
+      data: string;
+      fornecedor: string;
+      quantidade: string;
+      custoUnitario: string;
+      subtotal: string;
+    }> = [];
+    for (const entrada of entradas) {
+      for (const item of entrada.itensNota ?? []) {
+        const noteKey = normalizeText(item.nome);
+        const resolvedKey = aliases.get(noteKey) ?? noteKey;
+        const sameId = Boolean(item.itemId && String(item.itemId) === String(historyRow.id));
+        if (!sameId && resolvedKey !== targetKey && noteKey !== targetKey) continue;
+        matches.push({
+          key: `${entrada.id}:${item.id}`,
+          timestamp: parseDateLoose(entrada.dataLancamento),
+          data: entrada.dataLancamento,
+          fornecedor: entrada.fornecedorNome?.trim() || entrada.fornecedor.trim() || "-",
+          quantidade: item.quantidadeLabel || "-",
+          custoUnitario: item.custoUnitarioLabel || "-",
+          subtotal: item.subtotalLabel || "-",
+        });
+      }
+    }
+    return matches.sort((a, b) => b.timestamp - a.timestamp);
+  }, [entradas, fornecedorEquivalenciasMap, historyRow]);
+
+  useEffect(() => {
+    if (!historyRow) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setHistoryRow(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [historyRow]);
+
   useEffect(() => {
     if (pageIndex !== safePageIndex) setPageIndex(safePageIndex);
   }, [pageIndex, safePageIndex]);
@@ -1432,6 +1517,29 @@ export default function ListaDeComprasClient() {
   return (
     <>
       {toast ? <SystemToast title={toast.title} message={toast.message} tone={toast.tone} onClose={() => setToast(null)} /> : null}
+      {historyRow ? (
+        <div className={styles.historyOverlay} role="dialog" aria-modal="true" aria-label={`Histórico de entradas de ${historyRow.item}`} onMouseDown={() => setHistoryRow(null)}>
+          <div className={styles.historyModal} onMouseDown={(event) => event.stopPropagation()}>
+            <div className={styles.historyModalHeader}>
+              <div>
+                <div className={styles.historyModalTitle}>Histórico de Entradas</div>
+                <div className={styles.historyModalSubtitle}>{historyRow.displayItem}</div>
+              </div>
+              <button type="button" className={styles.historyClose} onClick={() => setHistoryRow(null)} aria-label="Fechar histórico">×</button>
+            </div>
+            <div className={styles.historyTableWrap}>
+              <div className={styles.historyTableHead}>
+                <span>Data</span><span>Fornecedor</span><span>Quantidade</span><span>Custo unitário</span><span>Subtotal</span>
+              </div>
+              {historyEntries.length ? historyEntries.map((entry) => (
+                <div key={entry.key} className={styles.historyTableRow}>
+                  <span>{entry.data}</span><span>{entry.fornecedor}</span><span>{entry.quantidade}</span><span>{entry.custoUnitario}</span><span>{entry.subtotal}</span>
+                </div>
+              )) : <div className={styles.historyEmpty}>Nenhuma entrada encontrada para este produto.</div>}
+            </div>
+          </div>
+        </div>
+      ) : null}
       <main className={dash.content}>
         <div className={styles.pageFrameWide}>
           <section className={styles.headerRow}>
@@ -1654,14 +1762,15 @@ export default function ListaDeComprasClient() {
                         if (column === "item") {
                           return (
                             <div key={column} className={styles.itemCell}>
-                              {isCompatMode ? (
+                              <button
+                                type="button"
+                                className={styles.itemNameLink}
+                                onClick={() => setHistoryRow(row)}
+                                title="Ver histórico de entradas"
+                              >
                                 <div className={styles.itemName}>{row.displayItem}</div>
-                              ) : (
-                                <Link className={`${styles.itemName} ${styles.itemNameLink}`} href={`/dashboard?itemId=${encodeURIComponent(row.id)}&tab=entradas`}>
-                                  {row.displayItem}
-                                </Link>
-                              )}
-                              <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                                <div className={styles.itemMeta}>{row.itemMetaLabel}</div>
+                              </button>
                             </div>
                           );
                         }

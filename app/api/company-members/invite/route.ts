@@ -55,6 +55,19 @@ function randomPassword() {
   return out;
 }
 
+async function findAuthUserIdByEmail(supabase: ReturnType<typeof getSupabaseAdmin>, email: string) {
+  const target = safeEmail(email);
+  for (let page = 1; page <= 2000; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 });
+    if (error) throw new Error(error.message);
+    const users = data?.users ?? [];
+    const found = users.find((user) => safeEmail(user.email) === target);
+    if (found?.id) return String(found.id);
+    if (users.length < 1000) break;
+  }
+  return "";
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { userId } = getUserIdFromRequest(req);
@@ -123,6 +136,56 @@ export async function POST(req: NextRequest) {
       { ok: true, email, role, actionLink, emailSent: emailRes.ok, ...(emailRes.ok ? {} : { emailError: emailRes.error }) },
       { status: 200 },
     );
+  } catch (err) {
+    return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { userId } = getUserIdFromRequest(req);
+    const uid = String(userId ?? "").trim();
+    if (!uid) return json({ ok: false, error: "unauthorized" }, { status: 401 });
+    if (!isUuid(uid)) return json({ ok: false, error: "forbidden" }, { status: 403 });
+
+    const body = (await req.json().catch(() => null)) as any;
+    const email = safeEmail(body?.email);
+    if (!email) return json({ ok: false, error: "missing_email" }, { status: 400 });
+
+    const supabase = getSupabaseAdmin();
+    const { companyId } = await resolveCurrentCompanyForUser(supabase, uid);
+    if (!companyId) return json({ ok: false, error: "company_not_found" }, { status: 400 });
+
+    const membership = await supabase
+      .from("company_members")
+      .select("company_id,role,permission_level")
+      .eq("company_id", companyId)
+      .eq("user_id", uid)
+      .limit(1)
+      .maybeSingle();
+    if (membership.error) throw new Error(membership.error.message);
+    if (!membership.data || !isCompanyAdminMember(membership.data)) return json({ ok: false, error: "forbidden" }, { status: 403 });
+
+    const targetUserId = await findAuthUserIdByEmail(supabase, email);
+    if (!targetUserId) return json({ ok: true, removed: false }, { status: 200 });
+    if (targetUserId === uid) return json({ ok: false, error: "cannot_remove_self" }, { status: 400 });
+
+    const targetMembership = await supabase
+      .from("company_members")
+      .select("role")
+      .eq("company_id", companyId)
+      .eq("user_id", targetUserId)
+      .limit(1)
+      .maybeSingle();
+    if (targetMembership.error) throw new Error(targetMembership.error.message);
+    const targetRole = String((targetMembership.data as any)?.role ?? "").trim().toLowerCase();
+    if (targetRole.includes("owner") || targetRole.includes("propriet")) {
+      return json({ ok: false, error: "cannot_remove_owner" }, { status: 400 });
+    }
+
+    const removed = await supabase.from("company_members").delete().eq("company_id", companyId).eq("user_id", targetUserId);
+    if (removed.error) throw new Error(removed.error.message);
+    return json({ ok: true, removed: true }, { status: 200 });
   } catch (err) {
     return json({ ok: false, error: err instanceof Error ? err.message : String(err) }, { status: 500 });
   }

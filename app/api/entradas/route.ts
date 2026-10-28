@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { performance } from "node:perf_hooks";
-import { getSupabaseServerClient } from "../../lib/supabaseAdmin";
+import { getSupabaseAdmin, getSupabaseServerClient } from "../../lib/supabaseAdmin";
 import { getUserIdFromRequest } from "../../lib/requestUserId";
 import { formatMoneyBRL, parsePtNumber } from "../../lib/bubbleCsv";
 
@@ -195,6 +195,51 @@ function pickBestCompanyId(memberRows: unknown[]) {
     }
   }
   return bestCompanyId;
+}
+
+async function resolveCompanyScopeUserIds(supabase: ReturnType<typeof getSupabaseServerClient>, userId: string) {
+  const { data: memberRows, error: memberErr } = await supabase
+    .from("company_members")
+    .select("company_id,role,permission_level")
+    .eq("user_id", userId)
+    .limit(50);
+  if (memberErr) return { companyId: "", userIds: [userId] };
+  const companyId = pickBestCompanyId((memberRows ?? []) as any[]);
+  if (!companyId) return { companyId: "", userIds: [userId] };
+
+  const admin = getSupabaseAdmin();
+  const { data: companyMembers, error: companyMembersErr } = await admin
+    .from("company_members")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .limit(500);
+  if (companyMembersErr) return { companyId, userIds: [userId] };
+  const userIds = Array.from(
+    new Set([userId, ...(companyMembers ?? []).map((row: any) => String(row?.user_id ?? "").trim()).filter(isUuid)]),
+  );
+  return { companyId, userIds };
+}
+
+async function loadCompanyEntries(args: {
+  supabase: ReturnType<typeof getSupabaseServerClient>;
+  userId: string;
+  companyId: string;
+  companyUserIds: string[];
+}) {
+  const client = args.companyId && args.companyUserIds.length > 1 ? getSupabaseAdmin() : args.supabase;
+  const rows: any[] = [];
+  for (const scopedUserId of args.companyUserIds) {
+    const prefix = `user:${scopedUserId}:`;
+    const { data, error } = await client.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
+    if (error) throw new Error(error.message);
+    rows.push(...((data ?? []) as any[]));
+  }
+  const unique = new Map<string, any>();
+  for (const row of rows) {
+    const key = String(row?.id ?? "").trim();
+    if (key && !unique.has(key)) unique.set(key, row);
+  }
+  return Array.from(unique.values()).sort((a, b) => String(b?.created_at ?? "").localeCompare(String(a?.created_at ?? "")));
 }
 
 function isAdminUserId(userId: string) {
@@ -407,7 +452,12 @@ export async function GET(req: NextRequest) {
             const custoUnitario = Number.isFinite(custoUnitNum) ? custoUnitNum : parsePtNumber(String(it?.custo_unitario ?? ""));
             const custoUnitarioLabel = custoUnitario ? formatMoneyBRL(custoUnitario) : "R$0,00";
             const subtotalLabel = subtotal ? formatMoneyBRL(subtotal) : "R$0,00";
-            const itemId = String(it?.item?.bubble_id ?? "").trim();
+            const itemBubbleId = String(it?.item?.bubble_id ?? "").trim();
+            const itemDbId = String(it?.item?.id ?? "").trim();
+            // Keep the entry item identifier in the same format returned by
+            // /api/insumos. New items do not have a Bubble id, so returning an
+            // empty itemId prevented their purchases from updating average cost.
+            const itemId = itemBubbleId || (itemDbId ? `db:${itemDbId}` : "");
             const ocultarCmv = Boolean(it?.ocultar_cmv);
             return {
               id: itemKey,
@@ -465,21 +515,9 @@ export async function GET(req: NextRequest) {
       return json({ source: "compat", readOnly: true, rows }, { status: 200 });
     }
 
-    const prefix = `${id}:`;
-    const { data, error } = await supabase.from("entradas").select("*").like("id", `${prefix}%`).order("created_at", { ascending: false });
-    if (error) return json({ error: error.message }, { status: 500 });
-
-    let companyId = "";
-    try {
-      const { data: memberRows, error: memberErr } = await supabase
-        .from("company_members")
-        .select("company_id,role,permission_level")
-        .eq("user_id", userId)
-        .limit(50);
-      if (!memberErr) companyId = pickBestCompanyId((memberRows ?? []) as any[]);
-    } catch {}
-
-    const rowsDb = (data ?? []) as any[];
+    const scope = await resolveCompanyScopeUserIds(supabase, userId);
+    const companyId = scope.companyId;
+    const rowsDb = await loadCompanyEntries({ supabase, userId, companyId, companyUserIds: scope.userIds });
     const supplierIds = Array.from(
       new Set(
         rowsDb
@@ -630,7 +668,7 @@ export async function GET(req: NextRequest) {
     if (fornecedoresStateProdutos && fornecedoresStateInfo && supplierIds.length) {
       const produtosMap = fornecedoresStateProdutos as Record<string, unknown>;
       const infoMap = fornecedoresStateInfo as Record<string, unknown>;
-      const wanted = supplierIds.slice(0, 5).filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
+      const wanted = supplierIds.filter((sid) => !supplierNameById.get(sid) && !fallbackNameById.get(sid) && !inferredNameById.get(sid));
       for (const sid of wanted) {
         try {
           const keyDb = `db:${sid}`;
@@ -645,20 +683,22 @@ export async function GET(req: NextRequest) {
           );
           if (!names.length) continue;
           const wantedSet = new Set(names);
-          let bestKey = "";
-          let bestScore = 0;
+          const scored: Array<{ key: string; score: number }> = [];
           for (const k of Object.keys(produtosMap)) {
             const arr = safeArr((produtosMap as any)[k]).map((x) => normalizeLookupKey(x)).filter(Boolean);
             if (!arr.length) continue;
             let score = 0;
             for (const n of arr) if (wantedSet.has(n)) score += 1;
-            if (score > bestScore) {
-              bestScore = score;
-              bestKey = k;
-            }
+            if (score > 0) scored.push({ key: k, score });
           }
+          scored.sort((a, b) => b.score - a.score);
+          const bestKey = scored[0]?.key ?? "";
+          const bestScore = scored[0]?.score ?? 0;
+          const secondScore = scored[1]?.score ?? 0;
           const threshold = Math.min(2, names.length);
-          if (!bestKey || bestScore < threshold) continue;
+          // Never guess when two suppliers match equally well. In that case
+          // the UI uses a neutral label instead of exposing an internal id.
+          if (!bestKey || bestScore < threshold || bestScore <= secondScore) continue;
           const infoRow = (infoMap as any)[bestKey] ?? (infoMap as any)[String(bestKey).toUpperCase()] ?? null;
           const label = infoRow && typeof infoRow === "object" ? String((infoRow as any)?.fornecedor ?? "").trim() : "";
           if (isGoodSupplierLabel(label)) inferredNameById.set(sid, label);
@@ -680,7 +720,10 @@ export async function GET(req: NextRequest) {
       const nome = (isGoodSupplierLabel(storedNome) ? storedNome : "") || primary || fallback || inferred;
       if (dbId && rawNome && isBadSupplierLabel(rawNome) && invalidSupplierNames.length < 12) invalidSupplierNames.push({ id: dbId, nome: rawNome });
       if (dbId && !nome && missingSupplierIds.length < 12) missingSupplierIds.push(dbId);
-      return { ...r, fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : null };
+      return {
+        ...r,
+        fornecedor_nome: nome && !isBadSupplierLabel(nome) ? nome : dbId ? "Fornecedor não identificado" : null,
+      };
     });
 
     return json(

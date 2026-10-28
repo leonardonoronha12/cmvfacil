@@ -3087,7 +3087,12 @@ export default function EntradasClient() {
                                       const fornecedorKey = fornecedorRaw ? resolveFornecedorKey(fornecedorRaw, fornecedorInfoMap) : "";
                                       const map = fornecedorKey ? (fornecedorItemMap[fornecedorKey] ?? []) : [];
                                       const existing = map.find((m) => m.nomeNaNota.toLowerCase() === name.toLowerCase()) ?? null;
-                                      setDetailUnit(existing?.unidadeNaNota || "Und");
+                                      const linkedInsumoName = existing?.insumoEquivalente || name;
+                                      const itemUnit = insumosByName.get(linkedInsumoName.toLowerCase())?.medida;
+                                      const mappedUnit = String(existing?.unidadeNaNota ?? "").trim();
+                                      const hasExplicitConversion = Boolean(String(existing?.equivalenteQuantidade ?? "").trim());
+                                      const shouldUseMappedUnit = Boolean(mappedUnit && (mappedUnit.toLowerCase() !== "und" || hasExplicitConversion));
+                                      setDetailUnit((shouldUseMappedUnit ? mappedUnit : itemUnit) || mappedUnit || "Und");
                                       setIsItemMenuOpen(false);
                                     }}
                                   >

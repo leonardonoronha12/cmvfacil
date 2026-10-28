@@ -12,7 +12,7 @@ import { readPrePreparoFromStore, subscribePrePreparo, writePrePreparoToStore, t
 import { loadFichasTecnicasFromSupabase } from "../lib/fichasTecnicasSupabase";
 import { readFichasTecnicasFromStore, subscribeFichasTecnicas, writeFichasTecnicasToStore, type FichaTecnicaRow } from "../lib/fichasTecnicasStore";
 import { readInventarioFromStore, writeInventarioToStore, type InventarioCategoria, type InventarioContagem, type InventarioItemRow } from "../lib/inventarioStore";
-import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
+import { deleteInventarioFromSupabase, loadInventarioStateFromSupabase, loadInventarioFromSupabase, updateInventarioDateInSupabase, upsertInventarioToSupabase, type InventarioCompatInventory } from "../lib/inventarioSupabase";
 import { buildUserScopedId } from "../lib/userScope";
 import { QaModePanel } from "../lib/qaMode";
 import styles from "./inventario.module.css";
@@ -63,6 +63,15 @@ function IconTrash() {
       <path d="M9 3h6l1 2h4v2H4V5h4l1-2Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       <path d="M6 8h12l-1 13H7L6 8Z" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
       <path d="M10 11v7M14 11v7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function IconRecount() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 10a8 8 0 1 1 2.3 7.7" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M4 4v6h6" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
@@ -193,6 +202,7 @@ export default function InventarioClient() {
   const [isNewOpen, setIsNewOpen] = useState(false);
   const [newData, setNewData] = useState(() => formatDateNumericPT(new Date()));
   const [newError, setNewError] = useState("");
+  const [isSavingDate, setIsSavingDate] = useState(false);
   const [editingContagemId, setEditingContagemId] = useState<string | null>(null);
   const [isNewCalOpen, setIsNewCalOpen] = useState(false);
   const [newCalMonth, setNewCalMonth] = useState(() => startOfMonth(new Date()));
@@ -707,7 +717,7 @@ export default function InventarioClient() {
     setMenuRect(null);
   }
 
-  function confirmNew() {
+  async function confirmNew() {
     const data = newData.trim();
     if (!data) return;
     const exists = contagens.some((c) => c.data.trim() === data && c.id !== editingContagemId);
@@ -717,16 +727,20 @@ export default function InventarioClient() {
     }
     if (editingContagemId) {
       const id = editingContagemId;
-      setContagens((prev) => {
-        const next = prev.map((c) => (c.id === id ? { ...c, data } : c));
-        const updated = next.find((x) => x.id === id);
-        if (updated) void upsertInventarioToSupabase(updated).catch(() => {});
-        return sortContagensDesc(next);
-      });
-      setSelectedContagemId(id);
-      setQuery("");
-      setIsNewOpen(false);
-      setEditingContagemId(null);
+      setIsSavingDate(true);
+      setNewError("");
+      try {
+        await updateInventarioDateInSupabase(id, data);
+        setContagens((prev) => sortContagensDesc(prev.map((c) => (c.id === id ? { ...c, data } : c))));
+        setSelectedContagemId(id);
+        setQuery("");
+        setIsNewOpen(false);
+        setEditingContagemId(null);
+      } catch {
+        setNewError("Não foi possível salvar a nova data. Atualize a página e tente novamente.");
+      } finally {
+        setIsSavingDate(false);
+      }
       return;
     }
     void (async () => {
@@ -912,6 +926,10 @@ export default function InventarioClient() {
       return;
     }
 
+    const removedMatch = (current.categorias ?? [])
+      .flatMap((cat, categoryIndex) => (cat.itens ?? []).map((item, itemIndex) => ({ item, categoryIndex, itemIndex })))
+      .find(({ item }) => item.removido && normalizeNameKey(item.item) === normalizeNameKey(name));
+
     const newItem: InventarioItemRow = {
       id: `historico-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       item: name,
@@ -919,8 +937,20 @@ export default function InventarioClient() {
       estoqueFinal: addItemQuantity.trim(),
     };
     const categoryIndex = (current.categorias ?? []).findIndex((cat) => normalizeNameKey(cat.nome) === normalizeNameKey(categoryName));
-    const categorias =
-      categoryIndex >= 0
+    const categorias = removedMatch
+      ? (current.categorias ?? []).map((cat, currentCategoryIndex) =>
+          currentCategoryIndex === removedMatch.categoryIndex
+            ? {
+                ...cat,
+                itens: (cat.itens ?? []).map((item, currentItemIndex) =>
+                  currentItemIndex === removedMatch.itemIndex
+                    ? { ...item, removido: false, estoqueFinal: addItemQuantity.trim() }
+                    : item,
+                ),
+              }
+            : cat,
+        )
+      : categoryIndex >= 0
         ? (current.categorias ?? []).map((cat, index) => (index === categoryIndex ? { ...cat, itens: [...(cat.itens ?? []), newItem] } : cat))
         : [
             ...(current.categorias ?? []),
@@ -1101,7 +1131,7 @@ export default function InventarioClient() {
 
   return (
     <>
-      <main className={dash.content}>
+      <main className={`${dash.content} ${styles.pageContent}`}>
         <div className={dash.pageFrame}>
         <QaModePanel screen="inventario" ui={qaUi} />
         {isCompatSource ? (
@@ -1506,13 +1536,14 @@ export default function InventarioClient() {
                           <button
                             type="button"
                             className={styles.iconBtn}
-                            aria-label="Excluir"
+                            aria-label="Refazer contagem"
+                            title="Refazer contagem"
                             onMouseDown={(e) => {
                               if (editingItemId === r.id) e.preventDefault();
                             }}
-                            onClick={() => removeItem(r.id)}
+                            onClick={() => uncountItem(r.id)}
                           >
-                            <IconTrash />
+                            <IconRecount />
                           </button>
                         </div>
                       </div>
@@ -1635,8 +1666,8 @@ export default function InventarioClient() {
                 {newError ? <div className={styles.formError}>{newError}</div> : null}
               </div>
               <div className={styles.modalFooter}>
-                <button type="button" className={`${styles.primaryBtn} ${styles.primaryBtnWide}`} onClick={confirmNew} disabled={!newData.trim()}>
-                  {editingContagemId ? "Salvar" : "Começar"}
+                <button type="button" className={`${styles.primaryBtn} ${styles.primaryBtnWide}`} onClick={() => void confirmNew()} disabled={!newData.trim() || isSavingDate}>
+                  {editingContagemId ? (isSavingDate ? "Salvando..." : "Salvar") : "Começar"}
                 </button>
               </div>
             </div>

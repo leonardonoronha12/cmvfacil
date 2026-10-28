@@ -626,21 +626,14 @@ export async function GET(req: NextRequest) {
       const legacyRows = ((legacyInventarios as any)?.data ?? []) as any[];
       const findLegacyInventoryRow = (targetDate: string | null) => {
         if (!targetDate) return null;
-        const targetT = Date.parse(targetDate);
-        let bestRow: any = null;
-        let bestT = Number.NEGATIVE_INFINITY;
         for (const r of legacyRows) {
           const d = parseDateOnlyLoose(r?.data);
           if (!d) continue;
           if (d === targetDate) return r;
-          const t = Date.parse(d);
-          if (!Number.isFinite(targetT) || !Number.isFinite(t)) continue;
-          if (t <= targetT && t > bestT) {
-            bestT = t;
-            bestRow = r;
-          }
         }
-        return bestRow;
+        // Older inventories must never supply the final stock for a newer
+        // count. If today's count omits an item, its final stock is zero.
+        return null;
       };
       const legacyStartRow = findLegacyInventoryRow(startDate);
       const legacyEndRow = findLegacyInventoryRow(endDate);
@@ -697,6 +690,20 @@ export async function GET(req: NextRequest) {
               .limit(50_000)
           : { data: [], error: null as any };
       if (entradaErr) return json({ ok: false, error: entradaErr.message, source: "compat", readOnly: true }, { status: 500 });
+      let legacyEntradaRows: any[] = [];
+      if (startDate && endDate && !(entradaRows ?? []).length) {
+        const legacyEntradaPrefix = `${id}:`;
+        const { data: legacyEntries, error: legacyEntriesErr } = await supabaseServer
+          .from("entradas")
+          .select("id,data_lancamento,itens_nota")
+          .like("id", `${legacyEntradaPrefix}%`)
+          .limit(50_000);
+        if (legacyEntriesErr) return json({ ok: false, error: legacyEntriesErr.message, source: "compat", readOnly: true }, { status: 500 });
+        legacyEntradaRows = ((legacyEntries ?? []) as any[]).filter((row) => {
+          const date = parseDateOnlyLoose(row?.data_lancamento);
+          return Boolean(date && date >= startDate && date <= endDate);
+        });
+      }
       const entradasByItemId = new Map<string, number>();
       const entradasSubtotalByItemId = new Map<string, number>();
       for (const r of (entradaRows ?? []) as any[]) {
@@ -744,6 +751,28 @@ export async function GET(req: NextRequest) {
         const nameKey = normalizeNameKey(String(it?.name ?? ""));
         if (b && !itemUuidByBubbleId.has(b)) itemUuidByBubbleId.set(b, id);
         if (nameKey && !itemUuidByNameKey.has(nameKey)) itemUuidByNameKey.set(nameKey, id);
+      }
+
+      // Recent entries can still live in the legacy table while the company's
+      // migrated invoice_items history is incomplete. When the selected period
+      // has no compatible invoice items, resolve those entries against the
+      // canonical item ids so consumption is calculated from the real inputs.
+      for (const entry of legacyEntradaRows) {
+        const noteItems = Array.isArray(entry?.itens_nota) ? (entry.itens_nota as any[]) : [];
+        for (const noteItem of noteItems) {
+          const rawItemId = String(noteItem?.itemId ?? noteItem?.item_id ?? "").trim();
+          const bubbleItemId = extractBubbleId(rawItemId);
+          const dbItemId = rawItemId.startsWith("db:") ? rawItemId.slice(3) : isUuid(rawItemId) ? rawItemId : "";
+          const nameKey = normalizeNameKey(noteItem?.nome ?? noteItem?.item_nome ?? noteItem?.name ?? "");
+          const resolvedItemId =
+            (dbItemId && itemsRowsSafe.some((item: any) => String(item?.id ?? "").trim() === dbItemId) ? dbItemId : "") ||
+            (bubbleItemId ? itemUuidByBubbleId.get(bubbleItemId) ?? "" : "") ||
+            (nameKey ? itemUuidByNameKey.get(nameKey) ?? "" : "");
+          if (!resolvedItemId) continue;
+          const qty = parseNumber(noteItem?.quantidadeLabel ?? noteItem?.quantidade_label ?? noteItem?.quantidade ?? 0);
+          if (!qty) continue;
+          entradasByItemId.set(resolvedItemId, (entradasByItemId.get(resolvedItemId) ?? 0) + qty);
+        }
       }
 
       const categoryIds = Array.from(new Set(itemsRowsSafe.map((r: any) => String(r?.category_id ?? "").trim()).filter(Boolean)));
@@ -914,26 +943,28 @@ export async function GET(req: NextRequest) {
 
           const nameKey = normalizeNameKey(String(item?.name ?? ""));
 
-          const estoqueInicial =
+          const estoqueInicialCompat =
             estoqueInicialByItemId.get(itemId) ??
             (bubbleItemId ? estoqueInicialByItemId.get(bubbleItemId) : undefined) ??
             (bubbleItemId ? estoqueInicialByBubbleId.get(bubbleItemId) : undefined) ??
-            (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined) ??
-            0;
+            (nameKey ? estoqueInicialByNameKey.get(nameKey) : undefined);
           const legacyEstoqueInicial = nameKey ? legacyStartQtyByNameKey.get(nameKey) ?? 0 : 0;
-          const estoqueInicialResolved = estoqueInicial !== 0 ? estoqueInicial : legacyEstoqueInicial;
+          const estoqueInicialResolved = estoqueInicialCompat ?? legacyEstoqueInicial;
 
-          const estoqueAtual =
+          const estoqueAtualCompat =
             estoqueFinalByItemId.get(itemId) ??
             (bubbleItemId ? estoqueFinalByItemId.get(bubbleItemId) : undefined) ??
             (bubbleItemId ? estoqueFinalByBubbleId.get(bubbleItemId) : undefined) ??
-            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined) ??
-            0;
+            (nameKey ? estoqueFinalByNameKey.get(nameKey) : undefined);
           const legacyEstoqueAtual = nameKey ? legacyEndQtyByNameKey.get(nameKey) ?? 0 : 0;
-          const estoqueAtualResolved = estoqueAtual !== 0 ? estoqueAtual : legacyEstoqueAtual;
+          const estoqueAtualResolved = estoqueAtualCompat ?? legacyEstoqueAtual;
           const entradas = entradasByItemId.get(itemId) ?? 0;
 
-          const saidas = estoqueInicialResolved + (entradas - estoqueAtualResolved);
+          // Um aumento de estoque sem uma entrada vinculada representa uma
+          // divergencia de dados, nao um consumo negativo. A lista de compras
+          // deve considerar zero ate que a entrada correspondente seja
+          // registrada, evitando sugestoes e valores negativos na interface.
+          const saidas = Math.max(estoqueInicialResolved + (entradas - estoqueAtualResolved), 0);
           const consumoDiario = diasCorridosBubble > 0 ? saidas / diasCorridosBubble : 0;
           const consumoDiasManter = consumoDiario * diasEstoque;
           const consumoPrazoFornecedor = consumoDiario * prazoFornecedor;

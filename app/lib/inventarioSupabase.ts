@@ -99,6 +99,16 @@ export async function upsertInventarioToSupabase(row: InventarioContagem) {
   if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_save");
 }
 
+export async function updateInventarioDateInSupabase(id: string, data: string) {
+  const res = await fetch("/api/inventario", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, data }),
+  });
+  const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+  if (!res.ok || !json?.ok) throw new Error(json?.error || "failed_to_update_date");
+}
+
 export async function deleteInventarioFromSupabase(id: string) {
   const res = await fetch(`/api/inventario?id=${encodeURIComponent(id)}`, { method: "DELETE" });
   const json = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
